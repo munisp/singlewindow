@@ -8,6 +8,9 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import OGAIntegrationMap from "@/components/OGAIntegrationMap";
+import CostCalculator from "@/components/CostCalculator";
+import GovernanceFramework from "@/components/GovernanceFramework";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -436,6 +439,34 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-navy text-white font-body">
 
+      {/* ── STICKY NAV ───────────────────────────────────────────────── */}
+      <nav className="sticky top-0 z-50 bg-navy-950/95 backdrop-blur border-b border-white/10">
+        <div className="container max-w-6xl mx-auto px-6">
+          <div className="flex items-center justify-between h-14">
+            <div className="font-display text-sm font-bold text-gold">TradeGateway™ NGSWTP</div>
+            <div className="hidden md:flex items-center gap-1 text-xs">
+              {[
+                { label: "Research", href: "#research" },
+                { label: "Architecture", href: "#architecture" },
+                { label: "Process Flow", href: "#process" },
+                { label: "OGA Map", href: "#oga-map" },
+                { label: "Cost Calculator", href: "#cost" },
+                { label: "Governance", href: "#governance" },
+                { label: "Security", href: "#security" },
+              ].map((item) => (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  className="px-3 py-1.5 rounded text-slate-400 hover:text-gold hover:bg-white/5 transition-colors"
+                >
+                  {item.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </nav>
+
       {/* ── HERO ─────────────────────────────────────────────────────────── */}
       <section className="relative min-h-[92vh] flex flex-col justify-end pb-20 overflow-hidden">
         <div
@@ -492,7 +523,7 @@ export default function Home() {
       </section>
 
       {/* ── REFERENCE PLATFORMS ──────────────────────────────────────────── */}
-      <section className="py-20 bg-navy-950">
+      <section id="research" className="py-20 bg-navy-950">
         <div className="container max-w-6xl mx-auto px-6">
           <SectionLabel>Research Foundation</SectionLabel>
           <h2 className="font-display text-4xl font-bold mb-4">
@@ -546,8 +577,8 @@ export default function Home() {
           </div>
         </div>
       </section>
-
-      {/* ── ARCHITECTURE ─────────────────────────────────────────────────── */}
+      {/* ── ARCHITECTURE ──────────────────────────────────────────────────── */}
+      <span id="architecture" />
       <section className="py-20 bg-navy">
         <div className="container max-w-6xl mx-auto px-6">
           <SectionLabel>Technical Architecture</SectionLabel>
@@ -922,9 +953,8 @@ export default function Home() {
           </div>
         </div>
       </section>
-
-      {/* ── SECURITY ARCHITECTURE ────────────────────────────────────────── */}
-      <section className="py-20 bg-navy">
+      {/* ── SECURITY ARCHITECTURE ──────────────────────────────────────────── */}
+      <section id="security" className="py-20 bg-navy">
         <div className="container max-w-6xl mx-auto px-6">
           <SectionLabel>Zero-Trust Security</SectionLabel>
           <h2 className="font-display text-4xl font-bold mb-4">
@@ -995,6 +1025,48 @@ export default function Home() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ── OGA INTEGRATION MAP ──────────────────────────────────────── */}
+      <section id="oga-map" className="py-20 bg-navy-950">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Ecosystem Integration</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            OGA Integration Map
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            An interactive force-directed graph showing all 37+ government agencies, international systems, and financial institutions connected to the NGSWTP hub. Each node reveals the integration protocol, data exchange scope, and response SLA. Drag nodes to explore, scroll to zoom, and click for details.
+          </p>
+          <OGAIntegrationMap />
+        </div>
+      </section>
+
+      {/* ── COST ESTIMATION CALCULATOR ───────────────────────────────── */}
+      <section id="cost" className="py-20 bg-navy">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Financial Planning</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Cost Estimation Calculator
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            Adjust the parameters below to generate indicative CAPEX and OPEX estimates for your deployment scenario. Benchmarked against Ghana ICUMS (~$45M), Rwanda ReSW (~$12M), and Singapore NTP (~$250M+) actual implementation costs.
+          </p>
+          <CostCalculator />
+        </div>
+      </section>
+
+      {/* ── GOVERNANCE & LEGAL FRAMEWORK ─────────────────────────────── */}
+      <section id="governance" className="py-20 bg-navy-950">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Governance & Legal</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Governance & Legal Framework
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            Rwanda's critical lesson: legislation on e-signatures and e-transactions must be enacted before launch. Use this interactive checklist to track legal prerequisites, governance structure, agency MoU completion, and change management readiness across all four dimensions.
+          </p>
+          <GovernanceFramework />
         </div>
       </section>
 
