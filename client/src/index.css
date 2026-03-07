@@ -239,6 +239,16 @@
   animation: fadeInLeft 0.6s ease-out forwards;
 }
 
+/* Navy background utility classes */
+.bg-navy { background-color: oklch(0.18 0.04 240); }
+.bg-navy-950 { background-color: oklch(0.14 0.04 240); }
+.bg-navy-900 { background-color: oklch(0.16 0.04 240); }
+.bg-navy-800 { background-color: oklch(0.20 0.04 240); }
+.text-gold { color: oklch(0.72 0.14 75); }
+.border-gold { border-color: oklch(0.72 0.14 75); }
+.text-navy { color: oklch(0.18 0.04 240); }
+.bg-gold { background-color: oklch(0.72 0.14 75); }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: oklch(0.94 0.01 240); }

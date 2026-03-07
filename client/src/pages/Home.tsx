@@ -1,462 +1,874 @@
-/*
- * DESIGN PHILOSOPHY: Sovereign Blueprint
- * Deep navy authority (#0A1628) with gold accents (#D4A017)
- * Playfair Display headings, DM Sans body
- * Asymmetric layouts, diagonal dividers, large typographic numbers
+/**
+ * TradeGateway™ NGSWTP — End-to-End Implementation Specification
+ * Design: Sovereign Blueprint — Deep Navy (#0A1628) + Gold (#D4A017)
+ * Typography: Playfair Display (headings) + DM Sans (body)
+ * Layout: Asymmetric full-width sections, diagonal dividers, large typographic anchors
+ * Research sources: Singapore NTP, Ghana ICUMS, Rwanda ReSW
  */
 
-import { useState, useEffect, useRef } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  Radar,
-  Legend,
+  BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, Legend, PolarRadiusAxis, Cell
 } from "recharts";
 import {
-  Shield,
-  Database,
-  Cpu,
-  Globe,
-  Layers,
-  GitBranch,
-  Lock,
-  Zap,
-  BarChart2,
-  Map,
-  ChevronDown,
-  ExternalLink,
-  CheckCircle2,
-  ArrowRight,
+  Shield, Zap, Globe, Database, Server, Lock,
+  ChevronDown, ChevronRight, ExternalLink, ArrowRight,
+  CheckCircle, AlertTriangle, Clock, TrendingUp, Layers,
+  Network, Cpu, BarChart2, Map, FileText, DollarSign
 } from "lucide-react";
 
-// ─── Data ────────────────────────────────────────────────────────────────────
+// ─── DATA ────────────────────────────────────────────────────────────────────
 
-const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA/hero_bg-GREBXbsHFNEh7iC9jMfapA.webp";
-const ARCH_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA/architecture_bg-nPK7UTPPBuxoJKx4H7HM6Z.webp";
-const LAKE_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA/lakehouse_bg-h3xiPrFSwHxL8XDAC9Zh3w.webp";
-const SEC_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA/security_bg-5cNnNsjL9WwvpXwSEt9Mxm.webp";
-
-const kpiData = [
-  { name: "Clearance Time", original: 72, revised: 4, unit: "hrs" },
-  { name: "Physical Inspections", original: 50, revised: 5, unit: "%" },
-  { name: "Paperless Rate", original: 60, revised: 100, unit: "%" },
-  { name: "Revenue Uplift", original: 0, revised: 25, unit: "%" },
+const clearanceTimeData = [
+  { platform: "Pre-TradeNet SG", days: 5.5, fill: "#6B7280" },
+  { platform: "Singapore NTP", days: 0.007, fill: "#10B981" },
+  { platform: "Ghana Pre-ICUMS", days: 4.2, fill: "#6B7280" },
+  { platform: "Ghana ICUMS", days: 1.1, fill: "#10B981" },
+  { platform: "Rwanda Pre-ReSW", days: 6.0, fill: "#6B7280" },
+  { platform: "Rwanda ReSW", days: 1.8, fill: "#10B981" },
+  { platform: "NGSWTP Target", days: 0.17, fill: "#D4A017" },
 ];
 
-const radarData = [
-  { subject: "Performance", original: 55, revised: 95 },
-  { subject: "Security", original: 60, revised: 98 },
-  { subject: "Scalability", original: 50, revised: 95 },
-  { subject: "Interoperability", original: 45, revised: 92 },
-  { subject: "Observability", original: 40, revised: 90 },
-  { subject: "Cost Efficiency", original: 50, revised: 88 },
+const techComparisonData = [
+  { category: "Throughput", original: 60, revised: 95 },
+  { category: "Latency", original: 55, revised: 92 },
+  { category: "Security", original: 65, revised: 98 },
+  { category: "Scalability", original: 70, revised: 96 },
+  { category: "Observability", original: 60, revised: 94 },
+  { category: "Cost Efficiency", original: 50, revised: 88 },
+  { category: "Open Source", original: 30, revised: 97 },
 ];
 
-const techLayers = [
+const roadmapData = [
+  {
+    phase: "Phase 1",
+    title: "Foundation",
+    months: "Months 1–6",
+    color: "#1E3A5F",
+    items: [
+      "Kubernetes cluster deployment",
+      "Keycloak IAM configuration",
+      "APISIX API Gateway",
+      "PostgreSQL + Redis clusters",
+      "Kafka event bus",
+      "Declaration Engine (basic)",
+      "Legal & governance framework",
+    ],
+    metric: "100 test declarations processed",
+  },
+  {
+    phase: "Phase 2",
+    title: "Core Customs",
+    months: "Months 7–12",
+    color: "#D4A017",
+    items: [
+      "Risk AI Engine (ML scoring)",
+      "Temporal workflow engine",
+      "TigerBeetle financial ledger",
+      "Mojaloop payment integration",
+      "Cargo tracking service",
+      "5 OGA integrations",
+      "Green-lane clearance < 4 hours",
+    ],
+    metric: "Green-lane < 4 hours",
+  },
+  {
+    phase: "Phase 3",
+    title: "Full Single Window",
+    months: "Months 13–18",
+    color: "#0E6655",
+    items: [
+      "All 37+ OGA integrations",
+      "AEO programme",
+      "Bonded warehouse management",
+      "Free zone operations",
+      "Post-clearance audit",
+      "ASEAN Single Window connectivity",
+      "WCO CEN Network integration",
+    ],
+    metric: "100% OGA coverage",
+  },
+  {
+    phase: "Phase 4",
+    title: "Intelligence & Analytics",
+    months: "Months 19–24",
+    color: "#6B21A8",
+    items: [
+      "Delta Lake + Parquet lakehouse",
+      "Apache Flink real-time streams",
+      "Apache Sedona geospatial",
+      "Ray distributed ML",
+      "OpenCTI threat intelligence",
+      "Wazuh SIEM/XDR",
+      "Open API ecosystem launch",
+    ],
+    metric: "10+ third-party integrations",
+  },
+];
+
+const techStack = [
+  { layer: "Language", original: "Java / Spring Boot", revised: "Go + Python", icon: <Cpu size={16} /> },
+  { layer: "API Gateway", original: "Kong API Gateway", revised: "Apache APISIX", icon: <Network size={16} /> },
+  { layer: "WAF / Security", original: "Not specified", revised: "OpenAppSec (AI WAF)", icon: <Shield size={16} /> },
+  { layer: "Identity & Access", original: "Not specified", revised: "Keycloak (OIDC/SAML)", icon: <Lock size={16} /> },
+  { layer: "Event Bus", original: "Apache Kafka", revised: "Kafka + Fluvio", icon: <Zap size={16} /> },
+  { layer: "Workflow Engine", original: "Not specified", revised: "Temporal", icon: <Server size={16} /> },
+  { layer: "Service Mesh", original: "Not specified", revised: "Dapr", icon: <Layers size={16} /> },
+  { layer: "Financial Ledger", original: "Generic Payment GW", revised: "Mojaloop + TigerBeetle", icon: <DollarSign size={16} /> },
+  { layer: "Primary DB", original: "PostgreSQL + MongoDB", revised: "PostgreSQL only", icon: <Database size={16} /> },
+  { layer: "Cache", original: "Redis", revised: "Redis", icon: <Database size={16} /> },
+  { layer: "Search / Logs", original: "Elasticsearch", revised: "OpenSearch", icon: <BarChart2 size={16} /> },
+  { layer: "Threat Intel", original: "Not specified", revised: "OpenCTI", icon: <Shield size={16} /> },
+  { layer: "SIEM / XDR", original: "Not specified", revised: "Wazuh", icon: <Shield size={16} /> },
+  { layer: "Analytics Engine", original: "Snowflake", revised: "Delta Lake + Spark + Flink", icon: <BarChart2 size={16} /> },
+  { layer: "Geospatial", original: "Not specified", revised: "Apache Sedona", icon: <Map size={16} /> },
+  { layer: "ML Platform", original: "Not specified", revised: "Ray + DataFusion", icon: <Cpu size={16} /> },
+  { layer: "FinOps", original: "Not specified", revised: "Kubecost", icon: <DollarSign size={16} /> },
+  { layer: "Container Orch.", original: "Kubernetes", revised: "Kubernetes", icon: <Server size={16} /> },
+];
+
+const platforms = [
+  {
+    id: "singapore",
+    name: "Singapore NTP",
+    subtitle: "Networked Trade Platform",
+    year: "1989 / 2018",
+    flag: "🇸🇬",
+    color: "#DC2626",
+    accentColor: "#FCA5A5",
+    stats: [
+      { label: "Clearance Time", value: "< 10 min", icon: <Clock size={14} /> },
+      { label: "Annual Permits", value: "10M+", icon: <FileText size={14} /> },
+      { label: "Competent Authorities", value: "35+", icon: <Globe size={14} /> },
+      { label: "G2G Connections", value: "7+ countries", icon: <Network size={14} /> },
+    ],
+    lessons: [
+      "International trade involves 25 parties, 30–40 documents, 60–70% manual re-entry — the core problem statement",
+      "Open, not-for-profit government platform maximizes ecosystem participation",
+      "Pre-population of data fields across services eliminates redundancy and errors",
+      "B2G + B2B on a single platform creates network effects that drive adoption",
+      "API-first design enables third-party value-added service ecosystem",
+      "G2G digital connectivity with trading partners reduces documentary fraud",
+    ],
+    requirements: [
+      "Single submission point for all trade documents",
+      "Sub-10-second response time for permit processing",
+      "Enterprise SSO (CorpPass) with verified digital identity",
+      "Document repository with selective sharing to business partners",
+      "Open API ecosystem for third-party developers",
+      "Government-to-government digital document exchange",
+    ],
+  },
+  {
+    id: "ghana",
+    name: "Ghana ICUMS",
+    subtitle: "Integrated Customs Management System",
+    year: "2020",
+    flag: "🇬🇭",
+    color: "#D97706",
+    accentColor: "#FCD34D",
+    stats: [
+      { label: "Deployment", value: "Nationwide 2020", icon: <Globe size={14} /> },
+      { label: "Technology", value: "UNIPASS (Korea)", icon: <Cpu size={14} /> },
+      { label: "Replaced", value: "GCNet + West Blue", icon: <CheckCircle size={14} /> },
+      { label: "UCR Tracking", value: "End-to-end", icon: <TrendingUp size={14} /> },
+    ],
+    lessons: [
+      "Fragmented dual-vendor system created revenue leakage — consolidation is essential",
+      "Unique Consignment Reference (UCR) must follow cargo through entire lifecycle",
+      "Human resource management model (officer assignment tracking) prevents corruption",
+      "End-to-end tamper-proof tracking eliminates manipulation of figures",
+      "Phase 1 core modules must be solid before Phase 2 advanced features",
+      "AEO programme and post-clearance audit are critical for trade facilitation",
+    ],
+    requirements: [
+      "Unique Consignment Reference (UCR) generated at first submission",
+      "Import, export, transit, and cargo tracking on single platform",
+      "MDA/OGA integration for all LPCOs (Licences, Permits, Certificates)",
+      "Tax bill creation, payment, securities/bonds, and penalties",
+      "Officer assignment tracking with activity period recording",
+      "AEO programme and post-clearance audit with duty drawback",
+    ],
+  },
+  {
+    id: "rwanda",
+    name: "Rwanda ReSW",
+    subtitle: "Rwanda Electronic Single Window",
+    year: "2012",
+    flag: "🇷🇼",
+    color: "#059669",
+    accentColor: "#6EE7B7",
+    stats: [
+      { label: "Agencies Connected", value: "28", icon: <Network size={14} /> },
+      { label: "Clearing Firms", value: "520", icon: <Globe size={14} /> },
+      { label: "System Users", value: "2,369", icon: <CheckCircle size={14} /> },
+      { label: "Transaction Types", value: "12", icon: <FileText size={14} /> },
+    ],
+    lessons: [
+      "Fully public ownership (not PPP) is more sustainable for national infrastructure",
+      "Joint inspection model — no release without ALL agencies finalizing — eliminates bottlenecks",
+      "Legal framework (e-signatures, e-transactions) must be in place before launch",
+      "All stakeholders must be on Steering Committee for buy-in and accountability",
+      "Hybrid access model (direct API + web + USSD) ensures no trader is excluded",
+      "Internet connectivity challenges require offline/low-bandwidth fallback modes",
+    ],
+    requirements: [
+      "Simultaneous risk selectivity across all agencies (joint inspection model)",
+      "e-Payment via multi-bank and mobile money (internet + USSD)",
+      "e-Exemption with multi-ministry workflow management",
+      "Electronic phytosanitary and agriculture certificates",
+      "COMESA transit guarantee and INTERPOL blacklist integration",
+      "Hybrid access: direct API for computerized, integrated for legacy systems",
+    ],
+  },
+];
+
+const architectureLayers = [
   {
     id: "presentation",
-    label: "01 — Presentation Layer",
-    color: "oklch(0.55 0.15 200)",
-    colorClass: "bg-teal-600",
-    icon: <Globe size={18} />,
-    description: "Multi-channel access for every trader, officer, and system integrator.",
-    techs: [
-      { name: "Web Portal", detail: "React.js — responsive, WCAG 2.1 AA compliant" },
-      { name: "Mobile Apps", detail: "React Native — iOS & Android" },
-      { name: "REST/GraphQL API", detail: "OpenAPI 3.1 documented endpoints" },
-      { name: "WhatsApp Bot", detail: "Status queries & simple declarations" },
-      { name: "USSD *123#", detail: "Feature-phone access for rural traders" },
-    ],
+    label: "PRESENTATION LAYER",
+    color: "#1E3A5F",
+    components: ["Web Portal", "Mobile App iOS/Android", "REST/GraphQL API", "WhatsApp Bot", "USSD *123#"],
+  },
+  {
+    id: "gateway",
+    label: "API GATEWAY LAYER",
+    color: "#1A4A3A",
+    components: ["Apache APISIX (API Gateway)", "OpenAppSec (AI WAF)", "Keycloak (IAM/OIDC)"],
   },
   {
     id: "microservices",
-    label: "02 — Microservices Layer",
-    color: "oklch(0.65 0.12 150)",
-    colorClass: "bg-emerald-600",
-    icon: <Cpu size={18} />,
-    description: "18 core services written in Go (high-performance) and Python (AI/ML), orchestrated via Dapr sidecars.",
-    techs: [
-      { name: "Go (Golang)", detail: "Core services: Declaration Engine, Payment Gateway, Cargo Tracking" },
-      { name: "Python", detail: "AI/ML services: Risk Engine, OCR, HS Code NLP, Valuation Analytics" },
-      { name: "Dapr", detail: "Sidecar runtime for state, pub/sub, service invocation & bindings" },
-      { name: "Temporal", detail: "Durable execution engine for long-running workflows (approvals, audits)" },
+    label: "MICROSERVICES LAYER (Go)",
+    color: "#2D1B69",
+    components: [
+      "Declaration Engine",
+      "Risk AI Engine (Python)",
+      "Payment Gateway (Mojaloop)",
+      "Document Management",
+      "Cargo Tracking",
+      "Multi-Agency Workflow",
+      "AEO Management",
+      "Post-Clearance Audit",
+      "OGA Integration Hub",
     ],
+  },
+  {
+    id: "workflow",
+    label: "WORKFLOW ORCHESTRATION",
+    color: "#1E3A5F",
+    components: ["Temporal (Durable Workflows)", "Dapr (Service Mesh + Bindings)"],
   },
   {
     id: "integration",
-    label: "03 — Integration Layer",
-    color: "oklch(0.72 0.14 75)",
-    colorClass: "bg-amber-500",
-    icon: <GitBranch size={18} />,
-    description: "Event-driven backbone connecting 37+ agencies, banks, and international systems.",
-    techs: [
-      { name: "Apache Kafka", detail: "High-throughput event bus for inter-service messaging" },
-      { name: "Fluvio", detail: "Rust-powered real-time streaming for IoT cargo & AIS vessel feeds" },
-      { name: "Apache APISIX", detail: "Cloud-native API gateway — routing, rate limiting, auth" },
-      { name: "Mojaloop", detail: "Open-source payment interoperability hub connecting DFSPs & banks" },
-      { name: "WCO Data Model v3.10", detail: "Canonical data model for all trade messages" },
-      { name: "EDI Translation Engine", detail: "EDIFACT / X12 adapter for legacy OGA systems" },
-    ],
+    label: "INTEGRATION LAYER",
+    color: "#1A4A3A",
+    components: ["Apache Kafka (Event Bus)", "Fluvio (Real-time Streams)", "EDI Translation Engine", "WCO Data Model v3.10"],
   },
   {
     id: "data",
-    label: "04 — Data Persistence Layer",
-    color: "oklch(0.6 0.18 280)",
-    colorClass: "bg-violet-600",
-    icon: <Database size={18} />,
-    description: "Purpose-built data stores for every workload type — transactional, financial, search, and cache.",
-    techs: [
-      { name: "PostgreSQL", detail: "Primary OLTP database for declarations, permits, and audit trails" },
-      { name: "TigerBeetle", detail: "Mission-critical double-entry financial ledger — 10,000+ TPS" },
-      { name: "Redis", detail: "High-speed caching, session management, and rate-limit counters" },
-      { name: "OpenSearch", detail: "Full-text search across declarations, documents, and system logs" },
-    ],
-  },
-  {
-    id: "intelligence",
-    label: "05 — Intelligence Layer",
-    color: "oklch(0.7 0.16 30)",
-    colorClass: "bg-orange-500",
-    icon: <BarChart2 size={18} />,
-    description: "AI-first risk management and advanced geospatial analytics powered by the Lakehouse architecture.",
-    techs: [
-      { name: "Delta Lake + Parquet", detail: "ACID-compliant lakehouse storage layer" },
-      { name: "Apache Flink", detail: "Real-time stream processing for IoT & AIS geospatial data" },
-      { name: "Apache Spark", detail: "Large-scale batch processing and ML model training" },
-      { name: "Apache DataFusion", detail: "High-performance analytical query engine" },
-      { name: "Ray", detail: "Distributed ML training and hyperparameter tuning" },
-      { name: "Apache Sedona", detail: "Geospatial engine — geofencing, route deviation, spatial clustering" },
+    label: "DATA LAYER",
+    color: "#3B1F2B",
+    components: [
+      "TigerBeetle (Financial Ledger)",
+      "PostgreSQL",
+      "Redis",
+      "OpenSearch",
+      "Delta Lake + Parquet",
+      "Apache Flink",
+      "Apache Spark",
+      "Apache DataFusion",
+      "Ray (ML)",
+      "Apache Sedona (Geospatial)",
     ],
   },
   {
     id: "security",
-    label: "06 — Security Layer",
-    color: "oklch(0.55 0.2 15)",
-    colorClass: "bg-rose-600",
-    icon: <Shield size={18} />,
-    description: "Zero-trust, defense-in-depth security architecture with ML-based threat detection.",
-    techs: [
-      { name: "Keycloak", detail: "Centralized IAM — SSO, OIDC/OAuth2, MFA, Identity Brokering" },
-      { name: "OpenAppSec", detail: "ML-based WAF — OWASP Top 10 & zero-day API protection" },
-      { name: "Wazuh", detail: "SIEM — security monitoring, threat detection, compliance" },
-      { name: "OpenCTI", detail: "Cyber threat intelligence platform integrated with Wazuh" },
-    ],
+    label: "SECURITY LAYER",
+    color: "#1A1A2E",
+    components: ["OpenCTI (Threat Intel)", "Wazuh (SIEM/XDR)", "OpenSearch (Log Analytics)", "mTLS Everywhere"],
   },
   {
-    id: "infrastructure",
-    label: "07 — Infrastructure Layer",
-    color: "oklch(0.5 0.02 240)",
-    colorClass: "bg-slate-600",
-    icon: <Layers size={18} />,
-    description: "Cloud-native Kubernetes infrastructure with full cost visibility and GitOps delivery.",
-    techs: [
-      { name: "Kubernetes", detail: "Container orchestration — multi-region, active-active" },
-      { name: "Kubecost", detail: "Real-time K8s cost allocation, visibility, and optimization" },
-      { name: "Terraform IaC", detail: "Reproducible infrastructure provisioning" },
-      { name: "GitOps CI/CD", detail: "ArgoCD / Flux for automated, auditable deployments" },
-    ],
+    id: "infra",
+    label: "INFRASTRUCTURE LAYER",
+    color: "#0A1628",
+    components: ["Kubernetes", "Kubecost (FinOps)", "Prometheus + Grafana", "CI/CD Pipelines"],
   },
 ];
 
-const paymentStack = [
-  { name: "Mojaloop", role: "Interoperability Hub", detail: "Connects all DFSPs, mobile money operators, and commercial banks via FSPIOP API. Enables inclusive real-time payments for SMEs and informal traders.", url: "https://mojaloop.io" },
-  { name: "TigerBeetle", role: "Financial Ledger", detail: "Double-entry accounting database for mission-critical safety. Records every duty payment, drawback, and reconciliation with 10,000+ TPS throughput.", url: "https://tigerbeetle.com" },
+const processLanes = [
+  {
+    lane: "LANE 1",
+    actor: "TRADER",
+    color: "#1E3A5F",
+    steps: ["Submit Declaration + Upload Invoice/BL/Docs", "Receive URN Reference", "Pay Duties via Mojaloop/Mobile", "Receive Clearance Permit"],
+  },
+  {
+    lane: "LANE 2",
+    actor: "AI ENGINE",
+    color: "#D4A017",
+    steps: ["OCR Extract Document Data (Python)", "Validate HS Code via BERT NLP", "Calculate Risk Score < 5 sec", "Assign Lane: GREEN/YELLOW/RED", "Auto-Route to Agencies via Temporal"],
+  },
+  {
+    lane: "LANE 3",
+    actor: "CUSTOMS AUTHORITY",
+    color: "#0E6655",
+    steps: ["Receive Declaration", "Green: Auto-Approve | Yellow: Doc Review | Red: Physical Inspection", "Issue Clearance"],
+  },
+  {
+    lane: "LANE 4",
+    actor: "OTHER GOVT AGENCIES",
+    color: "#6B21A8",
+    steps: ["Receive Simultaneous Notification (Dapr)", "Review & Approve/Reject (Joint Inspection Model)", "Confirm to Workflow Engine"],
+  },
+  {
+    lane: "LANE 5",
+    actor: "PORT OPERATOR",
+    color: "#B45309",
+    steps: ["Receive Real-time Updates (Fluvio)", "Schedule Inspection / Berth", "Issue Release Authorization"],
+  },
 ];
 
-const lakehouseComponents = [
-  { name: "Delta Lake", role: "Storage Layer", color: "bg-blue-100 text-blue-800 border-blue-200", detail: "ACID transactions, schema evolution, time travel on Parquet files." },
-  { name: "Apache Flink", role: "Stream Processing", color: "bg-orange-100 text-orange-800 border-orange-200", detail: "Real-time processing of IoT e-seal events and AIS vessel position streams." },
-  { name: "Apache Spark", role: "Batch & ML", color: "bg-yellow-100 text-yellow-800 border-yellow-200", detail: "Large-scale data transformations and distributed ML model training." },
-  { name: "Apache DataFusion", role: "Query Engine", color: "bg-green-100 text-green-800 border-green-200", detail: "High-performance Rust-based analytical query engine for ad-hoc analytics." },
-  { name: "Ray", role: "Distributed ML", color: "bg-purple-100 text-purple-800 border-purple-200", detail: "Distributed hyperparameter tuning and model serving for risk scoring." },
-  { name: "Apache Sedona", role: "Geospatial Engine", color: "bg-teal-100 text-teal-800 border-teal-200", detail: "Geofencing, route deviation detection, and spatial clustering of risk entities." },
-];
+// ─── COMPONENTS ──────────────────────────────────────────────────────────────
 
-const securityStack = [
-  { name: "Keycloak", icon: <Lock size={20} />, role: "Identity & Access Management", detail: "Centralized SSO, OIDC/OAuth2, MFA, and Identity Brokering for all 37+ agencies and external partners." },
-  { name: "OpenAppSec", icon: <Shield size={20} />, role: "ML-Based WAF & API Security", detail: "Machine learning engine providing preemptive protection against OWASP Top 10 and zero-day attacks on all APIs." },
-  { name: "Wazuh", icon: <Zap size={20} />, role: "SIEM & Threat Detection", detail: "Comprehensive security monitoring, log analysis, intrusion detection, and compliance management (ISO 27001)." },
-  { name: "OpenCTI", icon: <Globe size={20} />, role: "Cyber Threat Intelligence", detail: "Structured threat intelligence platform integrated with Wazuh to enable proactive defense against emerging threats." },
-];
-
-const processFlow = [
-  { lane: "Trader", color: "bg-sky-600", steps: ["Submit Declaration + Upload Docs", "Receive URN Reference", "Pay Duties via Mojaloop", "Receive Clearance Permit"] },
-  { lane: "AI Engine (Go/Python)", color: "bg-emerald-700", steps: ["OCR Extract Document Data", "Validate HS Code via BERT NLP", "Calculate Risk Score < 5 sec", "Assign Lane: GREEN / YELLOW / RED", "Auto-Route to Agencies via Temporal"] },
-  { lane: "Customs Authority", color: "bg-navy", steps: ["Receive Declaration", "Green: Auto-Approve", "Yellow: Doc Review", "Red: Physical Inspection", "Issue Clearance"] },
-  { lane: "37+ OGAs (via APISIX)", color: "bg-violet-700", steps: ["Parallel permit processing", "SLA-tracked approvals", "Digital certificate issuance"] },
-  { lane: "Port Operator (via Kafka/Fluvio)", color: "bg-amber-600", steps: ["Real-time cargo tracking", "Gate pass generation", "AIS vessel feed integration"] },
-];
-
-const comparisonData = [
-  { dimension: "Backend Language", original: "Java / Spring Boot", revised: "Go + Python" },
-  { dimension: "API Gateway", original: "Kong", revised: "Apache APISIX" },
-  { dimension: "Workflow Engine", original: "None specified", revised: "Temporal (Durable Execution)" },
-  { dimension: "Service Mesh / Runtime", original: "None specified", revised: "Dapr (Sidecar Runtime)" },
-  { dimension: "Payment Hub", original: "Custom integration", revised: "Mojaloop (Open-Source IIPS)" },
-  { dimension: "Financial Ledger", original: "PostgreSQL only", revised: "TigerBeetle (10,000+ TPS)" },
-  { dimension: "Event Streaming", original: "Apache Kafka / RabbitMQ", revised: "Kafka + Fluvio (IoT/real-time)" },
-  { dimension: "Search", original: "Elasticsearch", revised: "OpenSearch" },
-  { dimension: "Identity & Access", original: "Keycloak / Okta", revised: "Keycloak (open-source)" },
-  { dimension: "WAF / API Security", original: "None specified", revised: "OpenAppSec (ML-based)" },
-  { dimension: "SIEM", original: "Splunk / ELK Stack", revised: "Wazuh + OpenCTI" },
-  { dimension: "Data Warehouse", original: "Snowflake / BigQuery", revised: "Lakehouse (Delta Lake + Parquet)" },
-  { dimension: "Geospatial Analytics", original: "None specified", revised: "Apache Sedona + Flink + Spark" },
-  { dimension: "Cost Management", original: "None specified", revised: "Kubecost (K8s cost visibility)" },
-  { dimension: "Document Store", original: "MongoDB", revised: "PostgreSQL JSONB (unified)" },
-];
-
-// ─── Animated Counter ─────────────────────────────────────────────────────────
-function AnimatedNumber({ target, suffix = "" }: { target: number; suffix?: string }) {
-  const [count, setCount] = useState(0);
-  const ref = useRef<HTMLSpanElement>(null);
-  const started = useRef(false);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !started.current) {
-          started.current = true;
-          const duration = 1500;
-          const steps = 60;
-          const increment = target / steps;
-          let current = 0;
-          const timer = setInterval(() => {
-            current += increment;
-            if (current >= target) {
-              setCount(target);
-              clearInterval(timer);
-            } else {
-              setCount(Math.floor(current));
-            }
-          }, duration / steps);
-        }
-      },
-      { threshold: 0.3 }
-    );
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [target]);
-
-  return <span ref={ref}>{count}{suffix}</span>;
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 mb-4">
+      <div className="h-px flex-1 bg-gold/30" />
+      <span className="text-xs font-mono tracking-[0.25em] text-gold uppercase">{children}</span>
+      <div className="h-px flex-1 bg-gold/30" />
+    </div>
+  );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+function StatCard({ value, label, icon }: { value: string; label: string; icon: React.ReactNode }) {
+  return (
+    <div className="bg-navy-800/60 border border-gold/20 rounded-lg p-4 text-center">
+      <div className="text-gold mb-1 flex justify-center">{icon}</div>
+      <div className="text-2xl font-bold text-white font-display">{value}</div>
+      <div className="text-xs text-slate-400 mt-1">{label}</div>
+    </div>
+  );
+}
+
+function PlatformCard({ platform, isOpen, onToggle }: { platform: typeof platforms[0]; isOpen: boolean; onToggle: () => void }) {
+  return (
+    <div className="border border-white/10 rounded-xl overflow-hidden bg-navy-900/50 backdrop-blur-sm">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between p-5 text-left hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-4">
+          <span className="text-3xl">{platform.flag}</span>
+          <div>
+            <div className="text-lg font-bold text-white font-display">{platform.name}</div>
+            <div className="text-sm text-slate-400">{platform.subtitle} · Est. {platform.year}</div>
+          </div>
+        </div>
+        <ChevronDown
+          size={20}
+          className={`text-gold transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="overflow-hidden"
+          >
+            <div className="px-5 pb-5 space-y-5">
+              {/* Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {platform.stats.map((s) => (
+                  <StatCard key={s.label} value={s.value} label={s.label} icon={s.icon} />
+                ))}
+              </div>
+
+              {/* Lessons + Requirements */}
+              <div className="grid md:grid-cols-2 gap-5">
+                <div>
+                  <div className="text-xs font-mono tracking-widest text-gold uppercase mb-3">Key Lessons Learned</div>
+                  <ul className="space-y-2">
+                    {platform.lessons.map((l, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-slate-300">
+                        <CheckCircle size={14} className="text-emerald-400 mt-0.5 shrink-0" />
+                        <span>{l}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-xs font-mono tracking-widest text-gold uppercase mb-3">Derived Requirements</div>
+                  <ul className="space-y-2">
+                    {platform.requirements.map((r, i) => (
+                      <li key={i} className="flex gap-2 text-sm text-slate-300">
+                        <ArrowRight size={14} className="text-gold mt-0.5 shrink-0" />
+                        <span>{r}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── MAIN PAGE ────────────────────────────────────────────────────────────────
+
 export default function Home() {
-  const [activeLayer, setActiveLayer] = useState<string | null>(null);
-  const [navScrolled, setNavScrolled] = useState(false);
+  const [openPlatform, setOpenPlatform] = useState<string | null>("singapore");
+  const [openLayer, setOpenLayer] = useState<string | null>("microservices");
+  const [activeTab, setActiveTab] = useState<"layers" | "flow" | "data">("layers");
 
-  useEffect(() => {
-    const handleScroll = () => setNavScrolled(window.scrollY > 60);
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const scrollTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-  };
+  const togglePlatform = (id: string) => setOpenPlatform(openPlatform === id ? null : id);
+  const toggleLayer = (id: string) => setOpenLayer(openLayer === id ? null : id);
 
   return (
-    <div className="min-h-screen" style={{ fontFamily: "var(--font-body)" }}>
+    <div className="min-h-screen bg-navy text-white font-body">
 
-      {/* ── Navigation ── */}
-      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${navScrolled ? "bg-[oklch(0.18_0.04_240)] shadow-lg" : "bg-transparent"}`}>
-        <div className="container flex items-center justify-between py-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded bg-[oklch(0.72_0.14_75)] flex items-center justify-center">
-              <span className="text-[oklch(0.18_0.04_240)] font-bold text-sm" style={{ fontFamily: "var(--font-display)" }}>TG</span>
-            </div>
-            <span className="text-white font-semibold text-sm tracking-wide">TradeGateway™ NGSWTP</span>
-          </div>
-          <div className="hidden md:flex items-center gap-6">
-            {["overview", "architecture", "payment", "lakehouse", "security", "comparison"].map(id => (
-              <button key={id} onClick={() => scrollTo(id)} className="text-white/70 hover:text-[oklch(0.72_0.14_75)] text-sm capitalize transition-colors">
-                {id === "lakehouse" ? "Lakehouse" : id.charAt(0).toUpperCase() + id.slice(1)}
-              </button>
-            ))}
-          </div>
-          <a href="https://github.com/mojaloop" target="_blank" rel="noopener noreferrer"
-            className="hidden md:flex items-center gap-2 text-[oklch(0.72_0.14_75)] border border-[oklch(0.72_0.14_75)] px-4 py-1.5 rounded text-sm hover:bg-[oklch(0.72_0.14_75)] hover:text-[oklch(0.18_0.04_240)] transition-all">
-            <ExternalLink size={14} /> GitHub
-          </a>
-        </div>
-      </nav>
+      {/* ── HERO ─────────────────────────────────────────────────────────── */}
+      <section className="relative min-h-[92vh] flex flex-col justify-end pb-20 overflow-hidden">
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage: `url(https://images.unsplash.com/photo-1578575437130-527eed3abbec?w=1800&q=80)`,
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-navy/80 via-navy/70 to-navy" />
 
-      {/* ── Hero ── */}
-      <section className="relative min-h-screen flex items-center overflow-hidden" style={{ background: "oklch(0.18 0.04 240)" }}>
-        <div className="absolute inset-0">
-          <img src={HERO_BG} alt="" className="w-full h-full object-cover opacity-30" />
-          <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, oklch(0.18 0.04 240 / 0.95) 40%, oklch(0.18 0.04 240 / 0.6) 100%)" }} />
-        </div>
-        <div className="relative container py-32">
-          <div className="max-w-3xl">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-              <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>
-                Revised Specification v2.0 — March 2026
-              </span>
+        {/* Decorative grid */}
+        <div className="absolute inset-0 opacity-10"
+          style={{
+            backgroundImage: "linear-gradient(rgba(212,160,23,0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(212,160,23,0.3) 1px, transparent 1px)",
+            backgroundSize: "80px 80px"
+          }}
+        />
+
+        <div className="relative container max-w-6xl mx-auto px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            <div className="text-xs font-mono tracking-[0.3em] text-gold uppercase mb-6">
+              Revised Technical Specification · Version 2.0 · March 2026
             </div>
-            <h1 className="text-5xl md:text-7xl font-black text-white mb-6 leading-tight" style={{ fontFamily: "var(--font-display)" }}>
+            <h1 className="font-display text-5xl md:text-7xl font-bold leading-tight mb-6">
               TradeGateway™
-              <span className="block text-[oklch(0.72_0.14_75)]">NGSWTP</span>
+              <span className="block text-gold">NGSWTP</span>
             </h1>
-            <p className="text-xl text-white/80 mb-4 leading-relaxed max-w-2xl" style={{ fontFamily: "var(--font-body)" }}>
-              Next Generation Single Window Trade Platform — Revised Technical Specification replacing Java/Spring with a modern open-source stack built on Go, Python, Mojaloop, TigerBeetle, Temporal, Dapr, and a comprehensive Lakehouse architecture.
+            <p className="text-xl md:text-2xl text-slate-300 max-w-3xl mb-4 leading-relaxed">
+              Next Generation Single Window Trade Platform
             </p>
-            <div className="flex flex-wrap gap-3 mb-10">
-              {["Go", "Python", "Mojaloop", "TigerBeetle", "Temporal", "Dapr", "APISIX", "Kubernetes"].map(t => (
-                <span key={t} className="tech-badge text-[oklch(0.72_0.14_75)] border-[oklch(0.72_0.14_75)/40] bg-[oklch(0.72_0.14_75)/10]">
-                  {t}
-                </span>
+            <p className="text-slate-400 max-w-2xl mb-10 leading-relaxed">
+              End-to-end implementation specification synthesized from Singapore NTP, Ghana ICUMS, and Rwanda ReSW — rebuilt on Go, Python, Mojaloop, TigerBeetle, and a comprehensive open-source cloud-native stack.
+            </p>
+
+            <div className="flex flex-wrap gap-4">
+              {[
+                { label: "< 4 Hours", sub: "Green-lane clearance" },
+                { label: "37+ OGAs", sub: "Connected agencies" },
+                { label: "99.99%", sub: "Uptime SLA" },
+                { label: "5M+", sub: "Annual declarations" },
+              ].map((s) => (
+                <div key={s.label} className="bg-white/5 border border-gold/30 rounded-lg px-5 py-3 backdrop-blur-sm">
+                  <div className="text-2xl font-bold text-gold font-display">{s.label}</div>
+                  <div className="text-xs text-slate-400">{s.sub}</div>
+                </div>
               ))}
             </div>
-            <div className="flex gap-4">
-              <button onClick={() => scrollTo("architecture")}
-                className="flex items-center gap-2 bg-[oklch(0.72_0.14_75)] text-[oklch(0.18_0.04_240)] px-6 py-3 rounded font-semibold hover:bg-[oklch(0.82_0.12_75)] transition-all">
-                Explore Architecture <ArrowRight size={16} />
-              </button>
-              <button onClick={() => scrollTo("comparison")}
-                className="flex items-center gap-2 border border-white/30 text-white px-6 py-3 rounded font-semibold hover:border-white/60 transition-all">
-                View Stack Comparison
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white/40 animate-bounce">
-          <ChevronDown size={24} />
+          </motion.div>
         </div>
       </section>
 
-      {/* ── KPI Stats ── */}
-      <section id="overview" className="py-20 bg-white">
-        <div className="container">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-16">
-            {[
-              { value: 4, suffix: " hrs", label: "Target Clearance Time", sub: "Down from 72 hours" },
-              { value: 5, suffix: "%", label: "Physical Inspections", sub: "Down from 50%+ manual" },
-              { value: 100, suffix: "%", label: "Paperless Operations", sub: "Full digital ecosystem" },
-              { value: 25, suffix: "%", label: "Revenue Uplift Target", sub: "Via automated controls" },
-            ].map((stat, i) => (
-              <div key={i} className="text-center">
-                <div className="stat-number text-5xl md:text-6xl mb-2">
-                  <AnimatedNumber target={stat.value} suffix={stat.suffix} />
-                </div>
-                <div className="font-semibold text-[oklch(0.18_0.04_240)] mb-1">{stat.label}</div>
-                <div className="text-sm text-[oklch(0.5_0.02_240)]">{stat.sub}</div>
-              </div>
+      {/* ── REFERENCE PLATFORMS ──────────────────────────────────────────── */}
+      <section className="py-20 bg-navy-950">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Research Foundation</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Three Platforms, One Specification
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-12 leading-relaxed">
+            This specification synthesizes proven design patterns, lessons learned, and business requirements from the world's most instructive single window implementations. Each platform contributed distinct insights that are directly reflected in the NGSWTP architecture.
+          </p>
+
+          {/* Clearance Time Chart */}
+          <div className="bg-navy-800/40 border border-white/10 rounded-xl p-6 mb-10">
+            <div className="text-sm font-mono tracking-widest text-gold uppercase mb-6">
+              Clearance Time Comparison (Days)
+            </div>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={clearanceTimeData} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis
+                  dataKey="platform"
+                  tick={{ fill: "#94A3B8", fontSize: 11 }}
+                  angle={-35}
+                  textAnchor="end"
+                  interval={0}
+                />
+                <YAxis tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#0A1628", border: "1px solid rgba(212,160,23,0.3)", borderRadius: 8 }}
+                  labelStyle={{ color: "#D4A017" }}
+                  itemStyle={{ color: "#E2E8F0" }}
+                  formatter={(v: number) => [`${v} days`, "Clearance Time"]}
+                />
+                <Bar dataKey="days" radius={[4, 4, 0, 0]}>
+                  {clearanceTimeData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Platform Cards */}
+          <div className="space-y-4">
+            {platforms.map((p) => (
+              <PlatformCard
+                key={p.id}
+                platform={p}
+                isOpen={openPlatform === p.id}
+                onToggle={() => togglePlatform(p.id)}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── ARCHITECTURE ─────────────────────────────────────────────────── */}
+      <section className="py-20 bg-navy">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Technical Architecture</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Seven-Layer Cloud-Native Architecture
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-8 leading-relaxed">
+            The platform replaces all Java/Spring components with Go (high-performance services) and Python (AI/ML workloads), organized into seven distinct layers deployed on Kubernetes.
+          </p>
+
+          {/* Tab selector */}
+          <div className="flex gap-2 mb-8 border-b border-white/10 pb-4">
+            {(["layers", "flow", "data"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-5 py-2 rounded-lg text-sm font-medium transition-all capitalize ${
+                  activeTab === tab
+                    ? "bg-gold text-navy font-bold"
+                    : "text-slate-400 hover:text-white hover:bg-white/5"
+                }`}
+              >
+                {tab === "layers" ? "Architecture Layers" : tab === "flow" ? "Process Flow" : "Data Platform"}
+              </button>
             ))}
           </div>
 
-          {/* Charts */}
-          <div className="grid md:grid-cols-2 gap-8">
-            <div className="layer-card p-6 rounded-lg">
-              <h3 className="font-display text-xl font-bold text-[oklch(0.18_0.04_240)] mb-4" style={{ fontFamily: "var(--font-display)" }}>
-                Performance Comparison: Original vs. Revised Stack
-              </h3>
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={kpiData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.88 0.01 240)" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fontFamily: "var(--font-body)" }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v, n) => [`${v}`, n === "original" ? "Original Stack" : "Revised Stack"]} />
-                  <Legend formatter={(v) => v === "original" ? "Original Stack" : "Revised Stack"} />
-                  <Bar dataKey="original" fill="oklch(0.7 0.05 240)" radius={[4, 4, 0, 0]} name="original" />
-                  <Bar dataKey="revised" fill="oklch(0.72 0.14 75)" radius={[4, 4, 0, 0]} name="revised" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="layer-card p-6 rounded-lg">
-              <h3 className="font-display text-xl font-bold text-[oklch(0.18_0.04_240)] mb-4" style={{ fontFamily: "var(--font-display)" }}>
-                Architecture Quality Dimensions
-              </h3>
-              <ResponsiveContainer width="100%" height={280}>
-                <RadarChart data={radarData}>
-                  <PolarGrid stroke="oklch(0.88 0.01 240)" />
-                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fontFamily: "var(--font-body)" }} />
-                  <Radar name="Original" dataKey="original" stroke="oklch(0.7 0.05 240)" fill="oklch(0.7 0.05 240)" fillOpacity={0.3} />
-                  <Radar name="Revised" dataKey="revised" stroke="oklch(0.72 0.14 75)" fill="oklch(0.72 0.14 75)" fillOpacity={0.35} />
-                  <Legend />
-                  <Tooltip />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Architecture Layers ── */}
-      <section id="architecture" className="py-20 relative overflow-hidden" style={{ background: "oklch(0.18 0.04 240)" }}>
-        <div className="absolute inset-0">
-          <img src={ARCH_BG} alt="" className="w-full h-full object-cover opacity-15" />
-        </div>
-        <div className="relative container">
-          <div className="mb-12">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-              <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Technical Architecture</span>
-            </div>
-            <h2 className="text-4xl md:text-5xl font-black text-white" style={{ fontFamily: "var(--font-display)" }}>
-              7-Layer Cloud-Native Architecture
-            </h2>
-            <p className="text-white/60 mt-3 max-w-2xl">Click any layer to explore the technology choices and their rationale.</p>
-          </div>
-
-          <div className="space-y-3">
-            {techLayers.map((layer, idx) => (
-              <div key={layer.id}
-                className={`rounded-lg border transition-all duration-300 cursor-pointer overflow-hidden ${activeLayer === layer.id ? "border-[oklch(0.72_0.14_75)]" : "border-white/10 hover:border-white/30"}`}
-                style={{ background: activeLayer === layer.id ? "oklch(0.24 0.04 240)" : "oklch(0.22 0.04 240 / 0.6)" }}
-                onClick={() => setActiveLayer(activeLayer === layer.id ? null : layer.id)}>
-                <div className="flex items-center gap-4 p-4">
-                  <div className="w-8 h-8 rounded flex items-center justify-center text-white flex-shrink-0"
-                    style={{ background: layer.color }}>
-                    {layer.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3">
-                      <span className="text-white font-semibold">{layer.label}</span>
-                      <div className="flex flex-wrap gap-1.5 hidden md:flex">
-                        {layer.techs.slice(0, 3).map(t => (
-                          <span key={t.name} className="tech-badge text-white/60 border-white/20 text-xs">{t.name}</span>
-                        ))}
-                        {layer.techs.length > 3 && (
-                          <span className="tech-badge text-white/40 border-white/10 text-xs">+{layer.techs.length - 3} more</span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-white/50 text-sm mt-0.5 truncate">{layer.description}</p>
-                  </div>
-                  <ChevronDown size={16} className={`text-white/40 transition-transform flex-shrink-0 ${activeLayer === layer.id ? "rotate-180" : ""}`} />
-                </div>
-                {activeLayer === layer.id && (
-                  <div className="px-4 pb-4 border-t border-white/10 pt-4">
-                    <div className="grid md:grid-cols-2 gap-3">
-                      {layer.techs.map(tech => (
-                        <div key={tech.name} className="flex gap-3 p-3 rounded" style={{ background: "oklch(0.18 0.04 240 / 0.6)" }}>
-                          <CheckCircle2 size={16} className="text-[oklch(0.72_0.14_75)] mt-0.5 flex-shrink-0" />
-                          <div>
-                            <div className="text-white font-medium text-sm">{tech.name}</div>
-                            <div className="text-white/50 text-xs mt-0.5">{tech.detail}</div>
+          <AnimatePresence mode="wait">
+            {activeTab === "layers" && (
+              <motion.div
+                key="layers"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-2"
+              >
+                {architectureLayers.map((layer) => (
+                  <div key={layer.id} className="rounded-xl overflow-hidden border border-white/10">
+                    <button
+                      onClick={() => toggleLayer(layer.id)}
+                      className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/5 transition-colors"
+                      style={{ backgroundColor: layer.color + "40" }}
+                    >
+                      <span className="text-xs font-mono tracking-widest text-gold uppercase">{layer.label}</span>
+                      <ChevronRight
+                        size={16}
+                        className={`text-gold transition-transform duration-200 ${openLayer === layer.id ? "rotate-90" : ""}`}
+                      />
+                    </button>
+                    <AnimatePresence>
+                      {openLayer === layer.id && (
+                        <motion.div
+                          initial={{ height: 0 }}
+                          animate={{ height: "auto" }}
+                          exit={{ height: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-5 py-4 flex flex-wrap gap-2" style={{ backgroundColor: layer.color + "20" }}>
+                            {layer.components.map((c) => (
+                              <span
+                                key={c}
+                                className="px-3 py-1.5 rounded-md text-sm font-medium text-white border border-white/20"
+                                style={{ backgroundColor: layer.color + "60" }}
+                              >
+                                {c}
+                              </span>
+                            ))}
                           </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ))}
+              </motion.div>
+            )}
+
+            {activeTab === "flow" && (
+              <motion.div
+                key="flow"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-3"
+              >
+                <p className="text-slate-400 text-sm mb-4">
+                  End-to-end declaration process from submission to clearance, implementing the joint inspection model from Rwanda ReSW and the simultaneous OGA notification pattern.
+                </p>
+                {processLanes.map((lane) => (
+                  <div
+                    key={lane.lane}
+                    className="rounded-xl border border-white/10 overflow-hidden"
+                    style={{ borderLeftColor: lane.color, borderLeftWidth: 4 }}
+                  >
+                    <div className="px-5 py-3 flex items-center gap-3" style={{ backgroundColor: lane.color + "30" }}>
+                      <span className="text-xs font-mono tracking-widest text-white/60">{lane.lane}</span>
+                      <span className="text-sm font-bold text-white">{lane.actor}</span>
+                    </div>
+                    <div className="px-5 py-4 flex flex-wrap gap-2 items-center">
+                      {lane.steps.map((step, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="px-3 py-1.5 rounded-lg text-xs text-slate-300 bg-white/5 border border-white/10">
+                            {step}
+                          </span>
+                          {i < lane.steps.length - 1 && (
+                            <ArrowRight size={12} className="text-slate-600 shrink-0" />
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
+                ))}
+              </motion.div>
+            )}
+
+            {activeTab === "data" && (
+              <motion.div
+                key="data"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <div className="grid md:grid-cols-2 gap-6">
+                  {[
+                    {
+                      title: "Bronze Layer",
+                      subtitle: "Raw Data Ingestion",
+                      color: "#92400E",
+                      desc: "All raw events from Kafka, TigerBeetle transactions, cargo tracking events, and OGA records stored as Parquet in Delta Lake. Append-only, immutable system of record.",
+                      tools: ["Delta Lake", "Apache Parquet", "Apache Kafka", "Fluvio"],
+                    },
+                    {
+                      title: "Silver Layer",
+                      subtitle: "Cleansed & Enriched",
+                      color: "#374151",
+                      desc: "Apache Flink continuously processes Bronze data: deduplication, schema validation, entity resolution, and enrichment with tariff schedules and country codes.",
+                      tools: ["Apache Flink", "Delta Lake", "OpenSearch"],
+                    },
+                    {
+                      title: "Gold Layer",
+                      subtitle: "Business-Ready Analytics",
+                      color: "#92400E",
+                      desc: "Apache Spark batch processes Silver data into revenue analytics, trade flow datasets, risk model training data, compliance reports, and geospatial analytics.",
+                      tools: ["Apache Spark", "Apache DataFusion", "Ray", "Apache Sedona"],
+                    },
+                    {
+                      title: "Geospatial Intelligence",
+                      subtitle: "Apache Sedona",
+                      color: "#1E3A5F",
+                      desc: "Port congestion heatmaps, trade flow visualization, border crossing pattern analysis, geofenced monitoring for controlled goods, and supply chain route optimization.",
+                      tools: ["Apache Sedona", "Apache Spark", "Ray", "Delta Lake"],
+                    },
+                  ].map((layer) => (
+                    <div
+                      key={layer.title}
+                      className="rounded-xl border border-white/10 p-5"
+                      style={{ backgroundColor: layer.color + "20" }}
+                    >
+                      <div className="text-xs font-mono tracking-widest text-gold uppercase mb-1">{layer.subtitle}</div>
+                      <div className="text-lg font-bold text-white font-display mb-3">{layer.title}</div>
+                      <p className="text-sm text-slate-400 leading-relaxed mb-4">{layer.desc}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {layer.tools.map((t) => (
+                          <span key={t} className="px-2 py-1 rounded text-xs text-slate-300 bg-white/10 border border-white/10">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </section>
+
+      {/* ── TECH COMPARISON ──────────────────────────────────────────────── */}
+      <section className="py-20 bg-navy-950">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Technology Stack</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Original vs. Revised Stack
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            Every Java/Spring, Kong, Snowflake, MongoDB, and proprietary component has been replaced with open-source, cloud-native alternatives optimized for performance, security, and total cost of ownership.
+          </p>
+
+          <div className="grid lg:grid-cols-2 gap-8">
+            {/* Radar Chart */}
+            <div className="bg-navy-800/40 border border-white/10 rounded-xl p-6">
+              <div className="text-sm font-mono tracking-widest text-gold uppercase mb-4">Performance Profile</div>
+              <ResponsiveContainer width="100%" height={300}>
+                <RadarChart data={techComparisonData}>
+                  <PolarGrid stroke="rgba(255,255,255,0.1)" />
+                  <PolarAngleAxis dataKey="category" tick={{ fill: "#94A3B8", fontSize: 11 }} />
+                  <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: "#64748B", fontSize: 9 }} />
+                  <Radar name="Original Stack" dataKey="original" stroke="#6B7280" fill="#6B7280" fillOpacity={0.2} />
+                  <Radar name="Revised Stack" dataKey="revised" stroke="#D4A017" fill="#D4A017" fillOpacity={0.3} />
+                  <Legend wrapperStyle={{ color: "#94A3B8", fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#0A1628", border: "1px solid rgba(212,160,23,0.3)", borderRadius: 8 }}
+                    labelStyle={{ color: "#D4A017" }}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Stack Table */}
+            <div className="bg-navy-800/40 border border-white/10 rounded-xl overflow-hidden">
+              <div className="text-sm font-mono tracking-widest text-gold uppercase p-4 border-b border-white/10">
+                Component Mapping
+              </div>
+              <div className="overflow-y-auto max-h-[300px]">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-navy-900">
+                    <tr>
+                      <th className="text-left px-4 py-2 text-slate-400 font-normal text-xs">Layer</th>
+                      <th className="text-left px-4 py-2 text-slate-400 font-normal text-xs">Original</th>
+                      <th className="text-left px-4 py-2 text-gold font-normal text-xs">Revised</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {techStack.map((row, i) => (
+                      <tr key={row.layer} className={i % 2 === 0 ? "bg-white/2" : ""}>
+                        <td className="px-4 py-2 text-slate-400 text-xs flex items-center gap-1.5">
+                          <span className="text-gold">{row.icon}</span>
+                          {row.layer}
+                        </td>
+                        <td className="px-4 py-2 text-slate-500 text-xs line-through">{row.original}</td>
+                        <td className="px-4 py-2 text-emerald-400 text-xs font-medium">{row.revised}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── PAYMENT ARCHITECTURE ─────────────────────────────────────────── */}
+      <section className="py-20 bg-navy">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Financial Infrastructure</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Mojaloop + TigerBeetle
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            The payment subsystem replaces a generic payment gateway with purpose-built financial infrastructure: Mojaloop for interoperable payment switching across banks and mobile money operators, and TigerBeetle as the high-performance double-entry financial ledger.
+          </p>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {[
+              {
+                title: "Mojaloop",
+                subtitle: "Interoperable Payment Switch",
+                icon: <Globe size={24} />,
+                color: "#1E3A5F",
+                points: [
+                  "ISO 20022 / Mojaloop API standard",
+                  "Connects central bank, commercial banks, mobile money",
+                  "Real-time settlement confirmation",
+                  "Open-source, Mojaloop Foundation governed",
+                  "Used in 10+ African countries",
+                ],
+                link: "https://mojaloop.io/",
+              },
+              {
+                title: "TigerBeetle",
+                subtitle: "Financial Accounting Database",
+                icon: <Database size={24} />,
+                color: "#3B1F2B",
+                points: [
+                  "Double-entry bookkeeping with ACID guarantees",
+                  "1 million transactions per second",
+                  "Linearizable consistency (no race conditions)",
+                  "Immutable audit log (tamper-proof)",
+                  "Duty, bond, drawback, and penalty accounts",
+                ],
+                link: "https://tigerbeetle.com/",
+              },
+              {
+                title: "Payment Flow",
+                subtitle: "End-to-End Settlement",
+                icon: <DollarSign size={24} />,
+                color: "#1A4A3A",
+                points: [
+                  "Assessment → TigerBeetle debit liability account",
+                  "Trader pays via Mojaloop (bank/mobile)",
+                  "Mojaloop confirms settlement in real-time",
+                  "TigerBeetle credits confirmed revenue account",
+                  "Kafka event triggers clearance workflow",
+                ],
+                link: null,
+              },
+            ].map((card) => (
+              <div
+                key={card.title}
+                className="rounded-xl border border-white/10 p-6"
+                style={{ backgroundColor: card.color + "40" }}
+              >
+                <div className="text-gold mb-3">{card.icon}</div>
+                <div className="text-lg font-bold text-white font-display mb-1">{card.title}</div>
+                <div className="text-xs text-slate-400 mb-4">{card.subtitle}</div>
+                <ul className="space-y-2 mb-4">
+                  {card.points.map((p, i) => (
+                    <li key={i} className="flex gap-2 text-sm text-slate-300">
+                      <CheckCircle size={13} className="text-gold mt-0.5 shrink-0" />
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                </ul>
+                {card.link && (
+                  <a
+                    href={card.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-xs text-gold hover:text-gold/70 transition-colors"
+                  >
+                    <ExternalLink size={12} /> {card.link}
+                  </a>
                 )}
               </div>
             ))}
@@ -464,373 +876,166 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Process Flow ── */}
-      <section className="py-20 bg-white">
-        <div className="container">
-          <div className="mb-12">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-              <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Declaration Process</span>
-            </div>
-            <h2 className="text-4xl font-black text-[oklch(0.18_0.04_240)]" style={{ fontFamily: "var(--font-display)" }}>
-              End-to-End Flow: Submission to Clearance in Under 4 Hours
-            </h2>
-          </div>
-          <div className="space-y-4">
-            {processFlow.map((lane, i) => (
-              <div key={i} className="flex gap-4 items-start">
-                <div className={`${lane.color} text-white text-xs font-bold px-3 py-2 rounded flex-shrink-0 w-44 text-center leading-tight`}>
-                  {lane.lane}
-                </div>
-                <div className="flex-1 flex flex-wrap gap-2 items-center">
-                  {lane.steps.map((step, j) => (
-                    <div key={j} className="flex items-center gap-2">
-                      <div className="layer-card px-3 py-2 rounded text-sm text-[oklch(0.18_0.04_240)] font-medium bg-white border border-[oklch(0.88_0.01_240)]">
-                        {step}
-                      </div>
-                      {j < lane.steps.length - 1 && <ArrowRight size={14} className="text-[oklch(0.72_0.14_75)] flex-shrink-0" />}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* ── IMPLEMENTATION ROADMAP ───────────────────────────────────────── */}
+      <section className="py-20 bg-navy-950">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Implementation Roadmap</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            24-Month Delivery Plan
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-12 leading-relaxed">
+            A phased implementation approach based on Ghana's milestone-driven rollout and Rwanda's hybrid access model, ensuring each phase delivers measurable value before the next begins.
+          </p>
 
-      {/* ── Payment & Financial ── */}
-      <section id="payment" className="py-20" style={{ background: "oklch(0.96 0.005 240)" }}>
-        <div className="container">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-                <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Financial Stack</span>
-              </div>
-              <h2 className="text-4xl font-black text-[oklch(0.18_0.04_240)] mb-6" style={{ fontFamily: "var(--font-display)" }}>
-                Inclusive Payments via Mojaloop & TigerBeetle
-              </h2>
-              <p className="text-[oklch(0.4_0.02_240)] leading-relaxed mb-8">
-                The original specification relied on custom payment integrations with no standardized interoperability layer. The revised architecture introduces <strong>Mojaloop</strong> — the open-source Inclusive Instant Payment System (IIPS) used by central banks across Africa — as the payment hub, with <strong>TigerBeetle</strong> as the ultra-high-performance double-entry financial ledger recording every transaction with mission-critical safety guarantees.
-              </p>
-              <div className="space-y-4">
-                {paymentStack.map(item => (
-                  <div key={item.name} className="layer-card p-5 rounded-lg">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <span className="font-bold text-[oklch(0.18_0.04_240)]" style={{ fontFamily: "var(--font-display)" }}>{item.name}</span>
-                        <span className="ml-2 text-xs text-[oklch(0.72_0.14_75)] font-medium uppercase tracking-wide" style={{ fontFamily: "var(--font-mono)" }}>{item.role}</span>
-                      </div>
-                      <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-[oklch(0.72_0.14_75)] hover:opacity-70">
-                        <ExternalLink size={14} />
-                      </a>
-                    </div>
-                    <p className="text-sm text-[oklch(0.5_0.02_240)]">{item.detail}</p>
+          <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-5">
+            {roadmapData.map((phase, idx) => (
+              <motion.div
+                key={phase.phase}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: idx * 0.1 }}
+                className="rounded-xl border border-white/10 overflow-hidden"
+                style={{ borderTopColor: phase.color, borderTopWidth: 3 }}
+              >
+                <div className="p-5" style={{ backgroundColor: phase.color + "20" }}>
+                  <div className="text-xs font-mono tracking-widest text-slate-400 mb-1">{phase.months}</div>
+                  <div className="text-lg font-bold text-white font-display">{phase.phase}</div>
+                  <div className="text-sm font-medium mb-4" style={{ color: phase.color === "#D4A017" ? "#D4A017" : "#94A3B8" }}>
+                    {phase.title}
                   </div>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-6">
-              <div className="rounded-xl overflow-hidden shadow-xl">
-                <div className="p-6" style={{ background: "oklch(0.18 0.04 240)" }}>
-                  <h3 className="text-white font-bold mb-4" style={{ fontFamily: "var(--font-display)" }}>Payment Flow Architecture</h3>
-                  <div className="space-y-3">
-                    {[
-                      { label: "Trader / Mobile Money", arrow: "→", target: "Mojaloop FSPIOP API" },
-                      { label: "Mojaloop Hub", arrow: "→", target: "24+ Commercial Banks" },
-                      { label: "Payment Confirmed", arrow: "→", target: "TigerBeetle Ledger" },
-                      { label: "Duty Reconciled", arrow: "→", target: "Clearance Issued" },
-                    ].map((row, i) => (
-                      <div key={i} className="flex items-center gap-3 text-sm">
-                        <span className="text-white/70 flex-1">{row.label}</span>
-                        <span className="text-[oklch(0.72_0.14_75)]">{row.arrow}</span>
-                        <span className="text-white flex-1">{row.target}</span>
-                      </div>
+                  <ul className="space-y-1.5">
+                    {phase.items.map((item, i) => (
+                      <li key={i} className="flex gap-2 text-xs text-slate-400">
+                        <div className="w-1 h-1 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: phase.color }} />
+                        {item}
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 </div>
-                <div className="p-4 bg-[oklch(0.72_0.14_75)]">
-                  <div className="flex items-center justify-between text-[oklch(0.18_0.04_240)]">
-                    <span className="font-bold">TigerBeetle Throughput</span>
-                    <span className="font-mono font-bold text-lg">10,000+ TPS</span>
-                  </div>
+                <div className="px-5 py-3 bg-white/5 border-t border-white/10">
+                  <div className="text-xs text-slate-400">Success Metric</div>
+                  <div className="text-sm font-medium text-white mt-0.5">{phase.metric}</div>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 gap-4 text-center">
-                {[
-                  { v: "24+", l: "Banks Connected" },
-                  { v: "0", l: "Data Loss (RPO)" },
-                  { v: "30s", l: "Failover RTO" },
-                ].map((s, i) => (
-                  <div key={i} className="layer-card p-4 rounded-lg">
-                    <div className="stat-number text-2xl">{s.v}</div>
-                    <div className="text-xs text-[oklch(0.5_0.02_240)] mt-1">{s.l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+              </motion.div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* ── Lakehouse Architecture ── */}
-      <section id="lakehouse" className="py-20 relative overflow-hidden" style={{ background: "oklch(0.18 0.04 240)" }}>
-        <div className="absolute inset-0">
-          <img src={LAKE_BG} alt="" className="w-full h-full object-cover opacity-20" />
-          <div className="absolute inset-0" style={{ background: "oklch(0.18 0.04 240 / 0.85)" }} />
-        </div>
-        <div className="relative container">
-          <div className="mb-12">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-              <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Data Platform</span>
-            </div>
-            <h2 className="text-4xl md:text-5xl font-black text-white mb-4" style={{ fontFamily: "var(--font-display)" }}>
-              Lakehouse Architecture for Geospatial Analytics
-            </h2>
-            <p className="text-white/60 max-w-3xl leading-relaxed">
-              The original specification relied on Snowflake or BigQuery as a data warehouse with no geospatial capabilities. The revised architecture introduces a comprehensive open-source Lakehouse that integrates Delta Lake, Parquet, Apache Flink, Apache Spark, Apache DataFusion, Ray, and Apache Sedona to create a unified data platform for advanced geospatial analytics — enabling real-time cargo tracking, route deviation detection, and spatial risk clustering.
-            </p>
-          </div>
+      {/* ── SECURITY ARCHITECTURE ────────────────────────────────────────── */}
+      <section className="py-20 bg-navy">
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Zero-Trust Security</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            Defence-in-Depth Security Architecture
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            A national trade platform is a high-value target for criminal organizations and state-sponsored actors. The security architecture implements zero-trust principles with AI-powered threat detection.
+          </p>
 
-          {/* Lakehouse diagram */}
-          <div className="mb-10">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="rounded-lg p-5 border border-white/10" style={{ background: "oklch(0.22 0.04 240 / 0.8)" }}>
-                <div className="text-[oklch(0.72_0.14_75)] text-xs font-bold uppercase tracking-widest mb-3" style={{ fontFamily: "var(--font-mono)" }}>Ingestion</div>
-                <div className="space-y-2">
-                  {["Kafka (batch events)", "Fluvio (IoT streams)", "AIS vessel feeds", "OGA API webhooks"].map(s => (
-                    <div key={s} className="flex items-center gap-2 text-white/70 text-sm">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[oklch(0.72_0.14_75)]" />
-                      {s}
-                    </div>
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+            {[
+              {
+                tool: "Keycloak",
+                role: "Identity & Access Management",
+                icon: <Lock size={20} />,
+                color: "#1E3A5F",
+                features: ["OIDC / OAuth 2.0", "SAML 2.0 federation", "MFA (TOTP, WebAuthn)", "RBAC + ABAC", "Enterprise SSO"],
+                link: "https://www.keycloak.org/",
+              },
+              {
+                tool: "OpenAppSec",
+                role: "AI-Powered WAF",
+                icon: <Shield size={20} />,
+                color: "#1A4A3A",
+                features: ["ML-based threat detection", "Zero-day exploit blocking", "API abuse prevention", "No signature updates needed", "APISIX integration"],
+                link: "https://www.openappsec.io/",
+              },
+              {
+                tool: "OpenCTI",
+                role: "Cyber Threat Intelligence",
+                icon: <AlertTriangle size={20} />,
+                color: "#3B1F2B",
+                features: ["Threat actor tracking", "Customs fraud patterns", "INTERPOL integration", "Risk score enrichment", "Partner sharing"],
+                link: "https://www.opencti.io/",
+              },
+              {
+                tool: "Wazuh",
+                role: "SIEM / XDR",
+                icon: <Server size={20} />,
+                color: "#1A1A2E",
+                features: ["Real-time monitoring", "File integrity monitoring", "Vulnerability assessment", "Intrusion detection", "Automated response"],
+                link: "https://wazuh.com/",
+              },
+            ].map((sec) => (
+              <div
+                key={sec.tool}
+                className="rounded-xl border border-white/10 p-5"
+                style={{ backgroundColor: sec.color + "40" }}
+              >
+                <div className="text-gold mb-3">{sec.icon}</div>
+                <div className="text-base font-bold text-white font-display mb-1">{sec.tool}</div>
+                <div className="text-xs text-slate-400 mb-4">{sec.role}</div>
+                <ul className="space-y-1.5 mb-4">
+                  {sec.features.map((f, i) => (
+                    <li key={i} className="text-xs text-slate-300 flex gap-1.5">
+                      <span className="text-gold">›</span> {f}
+                    </li>
                   ))}
-                </div>
-              </div>
-              <div className="rounded-lg p-5 border border-[oklch(0.72_0.14_75)/50]" style={{ background: "oklch(0.22 0.04 240 / 0.8)" }}>
-                <div className="text-[oklch(0.72_0.14_75)] text-xs font-bold uppercase tracking-widest mb-3" style={{ fontFamily: "var(--font-mono)" }}>Storage (Delta Lake)</div>
-                <div className="space-y-2">
-                  {["Bronze: Raw Parquet", "Silver: Cleaned & enriched", "Gold: Aggregated analytics", "ACID transactions + time travel"].map(s => (
-                    <div key={s} className="flex items-center gap-2 text-white/70 text-sm">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[oklch(0.72_0.14_75)]" />
-                      {s}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="rounded-lg p-5 border border-white/10" style={{ background: "oklch(0.22 0.04 240 / 0.8)" }}>
-                <div className="text-[oklch(0.72_0.14_75)] text-xs font-bold uppercase tracking-widest mb-3" style={{ fontFamily: "var(--font-mono)" }}>Serving</div>
-                <div className="space-y-2">
-                  {["DataFusion SQL queries", "Spark ML model serving", "Ray distributed inference", "Sedona geospatial APIs"].map(s => (
-                    <div key={s} className="flex items-center gap-2 text-white/70 text-sm">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[oklch(0.72_0.14_75)]" />
-                      {s}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {lakehouseComponents.map(comp => (
-              <div key={comp.name} className="layer-card p-5 rounded-lg bg-white">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-bold text-[oklch(0.18_0.04_240)]" style={{ fontFamily: "var(--font-display)" }}>{comp.name}</span>
-                  <span className={`tech-badge text-xs ${comp.color}`}>{comp.role}</span>
-                </div>
-                <p className="text-sm text-[oklch(0.5_0.02_240)]">{comp.detail}</p>
+                </ul>
+                <a
+                  href={sec.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-xs text-gold/70 hover:text-gold transition-colors"
+                >
+                  <ExternalLink size={11} /> Documentation
+                </a>
               </div>
             ))}
           </div>
+        </div>
+      </section>
 
-          {/* Geospatial use cases */}
-          <div className="mt-10 rounded-xl p-6 border border-[oklch(0.72_0.14_75)/30]" style={{ background: "oklch(0.22 0.04 240 / 0.6)" }}>
-            <div className="flex items-center gap-3 mb-4">
-              <Map size={20} className="text-[oklch(0.72_0.14_75)]" />
-              <h3 className="text-white font-bold" style={{ fontFamily: "var(--font-display)" }}>Geospatial Analytics Use Cases (Apache Sedona)</h3>
+      {/* ── FOOTER ───────────────────────────────────────────────────────── */}
+      <footer className="py-12 bg-navy-950 border-t border-white/10">
+        <div className="container max-w-6xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row justify-between items-start gap-8">
+            <div>
+              <div className="font-display text-xl font-bold text-gold mb-2">TradeGateway™ NGSWTP</div>
+              <div className="text-sm text-slate-400 max-w-md">
+                Next Generation Single Window Trade Platform — Revised Technical Specification v2.0.
+                Synthesized from Singapore NTP, Ghana ICUMS, and Rwanda ReSW.
+              </div>
             </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm">
               {[
-                { title: "Geofencing", desc: "Real-time alerts when transit cargo deviates from approved geo-corridors." },
-                { title: "Route Deviation", desc: "Flink + Sedona detect unauthorized route changes from GPS e-seal streams." },
-                { title: "Spatial Risk Clustering", desc: "Identify geographic clusters of high-risk importers and suppliers." },
-                { title: "Port Congestion Analytics", desc: "Spatial analysis of cargo dwell times and terminal throughput." },
-              ].map(uc => (
-                <div key={uc.title} className="p-4 rounded-lg" style={{ background: "oklch(0.18 0.04 240 / 0.5)" }}>
-                  <div className="text-[oklch(0.72_0.14_75)] font-semibold text-sm mb-2">{uc.title}</div>
-                  <div className="text-white/60 text-xs">{uc.desc}</div>
-                </div>
+                { label: "Mojaloop", url: "https://mojaloop.io/" },
+                { label: "TigerBeetle", url: "https://tigerbeetle.com/" },
+                { label: "Temporal", url: "https://temporal.io/" },
+                { label: "Apache APISIX", url: "https://apisix.apache.org/" },
+                { label: "OpenAppSec", url: "https://www.openappsec.io/" },
+                { label: "Keycloak", url: "https://www.keycloak.org/" },
+                { label: "OpenCTI", url: "https://www.opencti.io/" },
+                { label: "Wazuh", url: "https://wazuh.com/" },
+                { label: "Apache Sedona", url: "https://sedona.apache.org/" },
+                { label: "Kubecost", url: "https://www.kubecost.com/" },
+              ].map((link) => (
+                <a
+                  key={link.label}
+                  href={link.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-400 hover:text-gold transition-colors flex items-center gap-1"
+                >
+                  <ExternalLink size={10} /> {link.label}
+                </a>
               ))}
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* ── Security Architecture ── */}
-      <section id="security" className="py-20 relative overflow-hidden bg-white">
-        <div className="container">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-                <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Security Architecture</span>
-              </div>
-              <h2 className="text-4xl font-black text-[oklch(0.18_0.04_240)] mb-6" style={{ fontFamily: "var(--font-display)" }}>
-                Zero-Trust Defense-in-Depth
-              </h2>
-              <p className="text-[oklch(0.4_0.02_240)] leading-relaxed mb-8">
-                The revised specification replaces Splunk/ELK with a fully open-source security stack. Keycloak provides centralized identity management, OpenAppSec delivers ML-based WAF protection, Wazuh handles SIEM and compliance, and OpenCTI provides structured threat intelligence — all integrated into a cohesive zero-trust architecture.
-              </p>
-              <div className="space-y-4">
-                {securityStack.map(item => (
-                  <div key={item.name} className="layer-card p-4 rounded-lg flex gap-4">
-                    <div className="w-10 h-10 rounded bg-[oklch(0.18_0.04_240)] flex items-center justify-center text-[oklch(0.72_0.14_75)] flex-shrink-0">
-                      {item.icon}
-                    </div>
-                    <div>
-                      <div className="font-bold text-[oklch(0.18_0.04_240)]">{item.name}
-                        <span className="ml-2 text-xs text-[oklch(0.5_0.02_240)] font-normal">{item.role}</span>
-                      </div>
-                      <p className="text-sm text-[oklch(0.5_0.02_240)] mt-1">{item.detail}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="relative">
-              <img src={SEC_BG} alt="Security Architecture" className="rounded-xl shadow-2xl w-full" />
-              <div className="absolute inset-0 rounded-xl" style={{ background: "linear-gradient(to top, oklch(0.18 0.04 240 / 0.6), transparent)" }} />
-              <div className="absolute bottom-6 left-6 right-6">
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { label: "AES-256", sub: "Data at rest" },
-                    { label: "TLS 1.3", sub: "Data in transit" },
-                    { label: "MFA + OIDC", sub: "All user access" },
-                    { label: "ISO 27001", sub: "Compliance target" },
-                  ].map(s => (
-                    <div key={s.label} className="bg-white/10 backdrop-blur rounded-lg p-3 text-center">
-                      <div className="text-white font-bold text-sm">{s.label}</div>
-                      <div className="text-white/60 text-xs">{s.sub}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Stack Comparison ── */}
-      <section id="comparison" className="py-20" style={{ background: "oklch(0.96 0.005 240)" }}>
-        <div className="container">
-          <div className="mb-12">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-              <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Technology Comparison</span>
-            </div>
-            <h2 className="text-4xl font-black text-[oklch(0.18_0.04_240)]" style={{ fontFamily: "var(--font-display)" }}>
-              Original vs. Revised Technology Stack
-            </h2>
-            <p className="text-[oklch(0.5_0.02_240)] mt-3">A complete mapping of every replaced technology and the rationale for each change.</p>
-          </div>
-
-          <div className="overflow-x-auto rounded-xl shadow-sm border border-[oklch(0.88_0.01_240)]">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ background: "oklch(0.18 0.04 240)" }}>
-                  <th className="text-left px-5 py-4 text-white/60 font-medium" style={{ fontFamily: "var(--font-mono)" }}>Dimension</th>
-                  <th className="text-left px-5 py-4 text-white/60 font-medium" style={{ fontFamily: "var(--font-mono)" }}>Original Specification</th>
-                  <th className="text-left px-5 py-4 text-[oklch(0.72_0.14_75)] font-medium" style={{ fontFamily: "var(--font-mono)" }}>Revised Specification</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparisonData.map((row, i) => (
-                  <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-[oklch(0.97_0.003_240)]"}>
-                    <td className="px-5 py-3 font-medium text-[oklch(0.18_0.04_240)]">{row.dimension}</td>
-                    <td className="px-5 py-3 text-[oklch(0.5_0.02_240)]">
-                      <span className="line-through opacity-60">{row.original}</span>
-                    </td>
-                    <td className="px-5 py-3">
-                      <span className="font-semibold text-[oklch(0.18_0.04_240)]">{row.revised}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Implementation Roadmap ── */}
-      <section className="py-20" style={{ background: "oklch(0.18 0.04 240)" }}>
-        <div className="container">
-          <div className="mb-12">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-px w-12 bg-[oklch(0.72_0.14_75)]" />
-              <span className="text-[oklch(0.72_0.14_75)] text-sm font-medium tracking-widest uppercase" style={{ fontFamily: "var(--font-mono)" }}>Implementation</span>
-            </div>
-            <h2 className="text-4xl font-black text-white" style={{ fontFamily: "var(--font-display)" }}>
-              24-Month Implementation Roadmap
-            </h2>
-          </div>
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              {
-                phase: "Phase 1", period: "Months 1–8", title: "Foundation",
-                items: ["Kubernetes cluster setup + Kubecost", "Go microservices: Declaration Engine", "APISIX API Gateway + Keycloak IAM", "PostgreSQL + Redis + OpenSearch", "Basic Kafka event bus", "Web Portal MVP launch"],
-                color: "oklch(0.55 0.15 200)"
-              },
-              {
-                phase: "Phase 2", period: "Months 9–16", title: "Intelligence",
-                items: ["Python AI Risk Engine (< 5s scoring)", "Mojaloop + TigerBeetle financial stack", "Temporal workflow engine for approvals", "Wazuh SIEM + OpenCTI integration", "Mobile Apps (iOS/Android)", "37+ OGA integrations via Dapr"],
-                color: "oklch(0.72 0.14 75)"
-              },
-              {
-                phase: "Phase 3", period: "Months 17–24", title: "Ecosystem",
-                items: ["Lakehouse: Delta Lake + Flink + Spark", "Apache Sedona geospatial analytics", "Ray distributed ML training", "Fluvio IoT streaming for e-seals", "Cross-border interoperability", "Open API Marketplace"],
-                color: "oklch(0.65 0.12 150)"
-              },
-            ].map(ph => (
-              <div key={ph.phase} className="rounded-xl p-6 border border-white/10" style={{ background: "oklch(0.22 0.04 240 / 0.6)" }}>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <div className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: ph.color, fontFamily: "var(--font-mono)" }}>{ph.phase}</div>
-                    <div className="text-white font-black text-xl" style={{ fontFamily: "var(--font-display)" }}>{ph.title}</div>
-                    <div className="text-white/40 text-xs mt-0.5">{ph.period}</div>
-                  </div>
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-[oklch(0.18_0.04_240)] font-black text-lg" style={{ background: ph.color, fontFamily: "var(--font-display)" }}>
-                    {ph.phase.replace("Phase ", "")}
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {ph.items.map(item => (
-                    <div key={item} className="flex items-start gap-2 text-white/70 text-sm">
-                      <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0" style={{ color: ph.color }} />
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Footer ── */}
-      <footer className="py-10 border-t border-white/10" style={{ background: "oklch(0.14 0.04 240)" }}>
-        <div className="container flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded bg-[oklch(0.72_0.14_75)] flex items-center justify-center">
-              <span className="text-[oklch(0.18_0.04_240)] font-bold text-xs" style={{ fontFamily: "var(--font-display)" }}>TG</span>
-            </div>
-            <span className="text-white/60 text-sm">TradeGateway™ NGSWTP — Revised Specification v2.0</span>
-          </div>
-          <div className="flex items-center gap-6 text-white/40 text-xs">
-            <a href="https://mojaloop.io" target="_blank" rel="noopener noreferrer" className="hover:text-[oklch(0.72_0.14_75)] transition-colors">Mojaloop</a>
-            <a href="https://tigerbeetle.com" target="_blank" rel="noopener noreferrer" className="hover:text-[oklch(0.72_0.14_75)] transition-colors">TigerBeetle</a>
-            <a href="https://github.com/mojaloop" target="_blank" rel="noopener noreferrer" className="hover:text-[oklch(0.72_0.14_75)] transition-colors">GitHub</a>
-            <span>Document ID: NGSW-SPEC-2026-V2.0</span>
+          <div className="mt-8 pt-6 border-t border-white/5 text-xs text-slate-600 text-center">
+            TradeGateway™ NGSWTP Revised Specification · Version 2.0 · March 2026 · Research: Singapore Customs NTP, Ghana GRA ICUMS, Rwanda RRA ReSW
           </div>
         </div>
       </footer>
