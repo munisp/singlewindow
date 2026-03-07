@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import OGAIntegrationMap from "@/components/OGAIntegrationMap";
 import CostCalculator from "@/components/CostCalculator";
 import GovernanceFramework from "@/components/GovernanceFramework";
+import FullImplementation from "@/components/FullImplementation";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -453,6 +454,7 @@ export default function Home() {
                 { label: "Cost Calculator", href: "#cost" },
                 { label: "Governance", href: "#governance" },
                 { label: "Security", href: "#security" },
+                { label: "Implementation", href: "#implementation" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1067,6 +1069,20 @@ export default function Home() {
             Rwanda's critical lesson: legislation on e-signatures and e-transactions must be enacted before launch. Use this interactive checklist to track legal prerequisites, governance structure, agency MoU completion, and change management readiness across all four dimensions.
           </p>
           <GovernanceFramework />
+        </div>
+      </section>
+
+      {/* ── FULL IMPLEMENTATION ─────────────────────────────────────── */}
+      <section id="implementation" className="py-20" style={{ backgroundColor: "#060E1C" }}>
+        <div className="container max-w-6xl mx-auto px-6">
+          <SectionLabel>Full Implementation</SectionLabel>
+          <h2 className="font-display text-4xl font-bold mb-4">
+            End-to-End Implementation
+          </h2>
+          <p className="text-slate-400 max-w-3xl mb-10 leading-relaxed">
+            The platform is built across three language tiers: <strong className="text-emerald-400">Go 1.23+</strong> for all 12 business microservices, <strong className="text-blue-400">Python 3.12</strong> for 6 AI/ML/GNN services, and <strong className="text-orange-400">Rust 1.82+</strong> for 5 performance-critical engines. Each service is independently deployable, communicates via gRPC and Kafka, and is orchestrated by Temporal workflows on Kubernetes with Dapr sidecar injection.
+          </p>
+          <FullImplementation />
         </div>
       </section>
 
