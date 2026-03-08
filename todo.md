@@ -23,43 +23,48 @@
 - [x] Database confirmed as PostgreSQL (pg-core, pg driver, no mysql2)
 
 ## Application Shell
-- [ ] Update DashboardLayout with role-based navigation (trader/customs/oga/admin/security)
-- [ ] Update App.tsx with all portal routes
-- [ ] Update index.css with dark theme for portal views
-- [ ] Create role-based route guards
+- [x] Update DashboardLayout with role-based navigation (trader/customs/oga/admin/security)
+- [x] Update App.tsx with all portal routes
+- [x] Update index.css with dark theme for portal views
+- [x] Create role-based route guards
 
 ## Trader Portal
-- [ ] TraderDashboard page (declaration stats, recent activity)
-- [ ] NewDeclaration page (multi-step form)
-- [ ] DeclarationDetail page (status tracking, documents, payments)
-- [ ] TraderProfile page (onboarding form)
-- [ ] AEO Application page
+- [x] TraderDashboard page (declaration stats, recent activity)
+- [x] NewDeclaration page (multi-step form)
+- [x] DeclarationDetail page (status tracking, documents, payments)
+- [x] TraderProfile page (onboarding form)
+- [x] AEO Application page
 
 ## Customs Officer Portal
-- [ ] CustomsDashboard page (declaration queue with risk lanes)
-- [ ] DeclarationReview page (examination workflow, release/hold)
-- [ ] RiskExplainability panel (AI score breakdown)
+- [x] CustomsDashboard page (declaration queue with risk lanes)
+- [x] DeclarationReview page (examination workflow, release/hold)
+- [x] RiskExplainability panel (AI score breakdown)
 
 ## OGA Portal
-- [ ] OGADashboard page (permit queue)
-- [ ] PermitReview page (approve/reject with notes)
+- [x] OGADashboard page (permit queue)
+- [x] PermitReview page (approve/reject with notes)
 
 ## Admin Console
-- [ ] AdminDashboard page (system stats)
-- [ ] UserManagement page (role assignment, profile approval)
-- [ ] AEOManagement page (application review)
+- [x] AdminDashboard page (system stats)
+- [x] UserManagement page (role assignment, profile approval)
+- [x] AEOManagement page (application review)
 
 ## Security Operations Center
-- [ ] SecurityDashboard page (real alert feed from DB)
-- [ ] SanctionsScreener page (LLM-backed real screening)
-- [ ] WazuhAlertFeed page (real DB-backed alerts)
+- [x] SecurityDashboard page (real alert feed from DB)
+- [x] SanctionsScreener page (LLM-backed real screening)
+- [x] WazuhAlertFeed page (real DB-backed alerts)
 
 ## Landing & Specification
-- [ ] Refactor Home.tsx to clean marketing landing page
-- [ ] Move all 29 spec components to /specification route
-- [ ] Add Risk Explainability Panel feature
-- [ ] Add Cross-Border Corridor Map feature
-- [ ] Add AEO Certification Workflow feature
+- [x] Refactor Home.tsx to clean marketing landing page
+- [x] Move all 29 spec components to /specification route
+- [x] Add Risk Explainability Panel feature
+- [x] Add Cross-Border Corridor Map feature
+- [x] Add AEO Certification Workflow feature
+- [x] gRPC clients wired into tRPC server (grpc-clients.ts)
+- [x] system.serviceHealth procedure with live gRPC health checks
+- [x] DeclarationDetail route added for both trader and customs portals
+- [x] Temporal DeclarationClearanceWorkflow written (Go)
+- [x] Comparative analysis report written (COMPARATIVE_ANALYSIS.md)
 
 ## Testing & Delivery
 - [ ] Write vitest tests for all routers

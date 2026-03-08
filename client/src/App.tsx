@@ -11,6 +11,7 @@ import CustomsDashboard from "./pages/app/CustomsDashboard";
 import OGAPortal from "./pages/app/OGAPortal";
 import AdminConsole from "./pages/app/AdminConsole";
 import SecurityOps from "./pages/app/SecurityOps";
+import DeclarationDetail from "./pages/app/DeclarationDetail";
 
 // Lazy-load the specification page (it's large)
 import { lazy, Suspense } from "react";
@@ -32,9 +33,12 @@ function Router() {
       {/* Trader Portal */}
       <Route path="/app/trader" component={TraderDashboard} />
       <Route path="/app/trader/new" component={NewDeclaration} />
+      <Route path="/app/trader/declarations/new" component={NewDeclaration} />
+      <Route path="/app/trader/declarations/:id" component={DeclarationDetail} />
 
       {/* Customs Officer Portal */}
       <Route path="/app/customs" component={CustomsDashboard} />
+      <Route path="/app/customs/declarations/:id" component={DeclarationDetail} />
 
       {/* OGA Portal */}
       <Route path="/app/oga" component={OGAPortal} />
