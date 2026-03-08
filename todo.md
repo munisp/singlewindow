@@ -608,3 +608,33 @@
 ### Tests & Delivery
 - [x] Run full test suite — 277/277 tests passing
 - [x] Save checkpoint
+
+## Sprint 19 — Notification Preferences, Admin Analytics, Port Live Feed
+
+### Notification Preferences Panel
+- [x] Add notification_preferences table to Drizzle schema (userId, notificationType, enabled)
+- [x] Run pnpm db:push to migrate schema (migration 0008 applied)
+- [x] Add notificationPreferences tRPC router (getPreferences, updatePreference, resetToDefaults)
+- [x] Register router in appRouter
+- [x] Add NotificationPreferences settings page (/app/notification-preferences) — 20 types in 8 categories
+- [x] Add nav link in DashboardLayout sidebar (General group)
+- [x] Add route in App.tsx
+
+### Admin Analytics Dashboard
+- [x] Add adminAnalytics tRPC router (declarationThroughput, clearanceTimeByLane, dutyRevenueTrend, topHSChapters, declarationsByStatus, kpiSummary)
+- [x] Register router in appRouter
+- [x] Rebuild AdminAnalytics page (/app/admin/analytics) with 4 KPI cards + 5 recharts panels
+- [x] Nav link already existed in admin sidebar (Performance Reports)
+- [x] Route already existed in App.tsx
+
+### Port Congestion Live Feed
+- [x] Reduce refetchInterval from 60s to 30s in PortHeatmap page
+- [x] Add live indicator badge (pulsing green dot) showing last-updated timestamp
+- [x] Add auto-refresh toggle button (Live/Paused) with Wifi/WifiOff icons
+- [x] Manual refresh button shows spinner while fetching
+
+### Tests & Delivery
+- [x] Write vitest tests for notificationPreferences router (8 tests)
+- [x] Write vitest tests for adminAnalytics router (5 tests) + port heatmap logic (4 tests)
+- [x] Run full test suite — 292/292 tests passing (15 test files)
+- [x] Save checkpoint

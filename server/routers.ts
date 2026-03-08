@@ -28,6 +28,8 @@ import { officerWorkloadRouter } from "./routers/officerWorkload";
 import { userNotificationsRouter } from "./routers/userNotifications";
 import { slaEscalationRouter } from "./routers/slaEscalation";
 import { bulkExportRouter } from "./routers/bulkExport";
+import { notificationPreferencesRouter } from "./routers/notificationPreferences";
+import { adminAnalyticsRouter } from "./routers/adminAnalytics";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -86,6 +88,8 @@ export const appRouter = router({
   userNotifications: userNotificationsRouter,
   slaEscalation: slaEscalationRouter,
   bulkExport: bulkExportRouter,
+  notificationPreferences: notificationPreferencesRouter,
+  adminAnalytics: adminAnalyticsRouter,
 });
 
 export type AppRouter = typeof appRouter;

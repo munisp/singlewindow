@@ -1,0 +1,175 @@
+/**
+ * Notification Preferences Page — Sprint 19
+ * Allows users to opt in/out of specific notification types, grouped by category.
+ */
+import { useState } from "react";
+import DashboardLayout from "@/components/DashboardLayout";
+import { trpc } from "@/lib/trpc";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Bell, RotateCcw, CheckCircle } from "lucide-react";
+import { toast } from "sonner";
+
+export default function NotificationPreferences() {
+  const utils = trpc.useUtils();
+  const [pendingUpdates, setPendingUpdates] = useState<Set<string>>(new Set());
+
+  const { data: preferences, isLoading } = trpc.notificationPreferences.getPreferences.useQuery();
+
+  const updatePref = trpc.notificationPreferences.updatePreference.useMutation({
+    onMutate: ({ notificationType }) => {
+      setPendingUpdates((prev) => new Set(prev).add(notificationType));
+    },
+    onSuccess: (_, { notificationType }) => {
+      utils.notificationPreferences.getPreferences.invalidate();
+      setPendingUpdates((prev) => {
+        const next = new Set(prev);
+        next.delete(notificationType);
+        return next;
+      });
+    },
+    onError: (err, { notificationType }) => {
+      setPendingUpdates((prev) => {
+        const next = new Set(prev);
+        next.delete(notificationType);
+        return next;
+      });
+      toast.error(`Failed to update preference: ${err.message}`);
+    },
+  });
+
+  const resetPrefs = trpc.notificationPreferences.resetToDefaults.useMutation({
+    onSuccess: (data) => {
+      utils.notificationPreferences.getPreferences.invalidate();
+      toast.success(data.message);
+    },
+    onError: (err) => toast.error(`Failed to reset: ${err.message}`),
+  });
+
+  // Group preferences by category
+  const grouped = preferences
+    ? preferences.reduce(
+        (acc, pref) => {
+          if (!acc[pref.category]) acc[pref.category] = [];
+          acc[pref.category].push(pref);
+          return acc;
+        },
+        {} as Record<string, typeof preferences>
+      )
+    : {};
+
+  const categoryOrder = ["Declarations", "Payments", "Permits", "Documents", "Account", "Compliance", "Security", "System"];
+
+  const disabledCount = preferences?.filter((p) => !p.enabled).length ?? 0;
+
+  return (
+    <DashboardLayout title="Notification Preferences">
+      <div className="space-y-6 max-w-3xl">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+              <Bell className="h-6 w-6 text-primary" />
+              Notification Preferences
+              {disabledCount > 0 && (
+                <Badge variant="secondary" className="ml-1">
+                  {disabledCount} disabled
+                </Badge>
+              )}
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Choose which notifications you receive. Disabled notifications are never sent to your inbox.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => resetPrefs.mutate()}
+            disabled={resetPrefs.isPending}
+            className="gap-1.5"
+          >
+            <RotateCcw className={`h-4 w-4 ${resetPrefs.isPending ? "animate-spin" : ""}`} />
+            Reset to defaults
+          </Button>
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}>
+                <CardHeader><Skeleton className="h-5 w-32" /></CardHeader>
+                <CardContent className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, j) => (
+                    <div key={j} className="flex items-center justify-between">
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-6 w-11 rounded-full" />
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {categoryOrder
+              .filter((cat) => grouped[cat]?.length > 0)
+              .map((category) => (
+                <Card key={category}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">{category}</CardTitle>
+                    <CardDescription className="text-xs">
+                      {grouped[category].filter((p) => p.enabled).length} of {grouped[category].length} enabled
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-1 pt-0">
+                    {grouped[category].map((pref) => {
+                      const isPending = pendingUpdates.has(pref.type);
+                      return (
+                        <div
+                          key={pref.type}
+                          className={`flex items-start justify-between gap-4 rounded-lg px-3 py-2.5 transition-colors ${
+                            pref.enabled ? "hover:bg-muted/40" : "opacity-60 hover:bg-muted/30"
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-medium leading-tight">{pref.label}</p>
+                              {pref.enabled && (
+                                <CheckCircle className="h-3 w-3 text-green-500 shrink-0" />
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                              {pref.description}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={pref.enabled}
+                            disabled={isPending}
+                            onCheckedChange={(enabled) =>
+                              updatePref.mutate({
+                                notificationType: pref.type as any,
+                                enabled,
+                              })
+                            }
+                            aria-label={`Toggle ${pref.label}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+              ))}
+          </div>
+        )}
+
+        {/* Footer info */}
+        <p className="text-xs text-muted-foreground text-center pb-4">
+          Changes take effect immediately. Security alerts cannot be disabled by system policy.
+        </p>
+      </div>
+    </DashboardLayout>
+  );
+}

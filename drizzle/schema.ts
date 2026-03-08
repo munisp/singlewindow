@@ -683,3 +683,16 @@ export const userNotifications = pgTable("user_notifications", {
   index("idx_un_created_at").on(t.createdAt),
 ]);
 export type UserNotification = typeof userNotifications.$inferSelect;
+
+// ─── NOTIFICATION PREFERENCES ─────────────────────────────────────────────────
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  notificationType: notificationTypeEnum("notification_type").notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_np_user_id").on(t.userId),
+  // Each user can have at most one preference row per notification type
+]);
+export type NotificationPreference = typeof notificationPreferences.$inferSelect;

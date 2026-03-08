@@ -3,7 +3,7 @@
  * Interactive Google Maps heatmap showing real-time port congestion data.
  * Wired to real tRPC geospatial.heatmapData and geospatial.listPorts.
  */
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { MapView } from "@/components/Map";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor } from "lucide-react";
+import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor, Wifi, WifiOff } from "lucide-react";
 
 type CongestionStatus = "clear" | "moderate" | "congested" | "critical";
 
@@ -53,9 +53,17 @@ export default function PortHeatmap() {
   const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
-  const { data: heatmapData, isLoading, refetch } = trpc.geospatial.heatmapData.useQuery(undefined, {
-    refetchInterval: 60_000, // refresh every minute
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(() => new Date());
+
+  const { data: heatmapData, isLoading, refetch, isFetching, dataUpdatedAt } = trpc.geospatial.heatmapData.useQuery(undefined, {
+    refetchInterval: autoRefresh ? 30_000 : false, // 30-second polling when auto-refresh is on
   });
+
+  // Update lastRefreshed whenever data changes
+  useEffect(() => {
+    if (dataUpdatedAt) setLastRefreshed(new Date(dataUpdatedAt));
+  }, [dataUpdatedAt]);
 
   const selectedPortData = heatmapData?.find(p => p.portCode === selectedPort);
 
@@ -167,13 +175,42 @@ export default function PortHeatmap() {
               Port Congestion Heatmap
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Real-time congestion status across all connected ports — refreshes every 60 seconds
+              Live congestion status across all connected ports — auto-refreshes every 30 seconds
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => { refetch(); renderHeatmap(); }} className="gap-1.5">
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Live indicator */}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {isFetching ? (
+                <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+              ) : autoRefresh ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                </span>
+              ) : (
+                <span className="h-2 w-2 rounded-full bg-muted-foreground" />
+              )}
+              <span className="hidden sm:inline">
+                {isFetching ? "Updating..." : `Updated ${lastRefreshed.toLocaleTimeString()}`}
+              </span>
+            </div>
+            {/* Auto-refresh toggle */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAutoRefresh((v) => !v)}
+              className={`gap-1.5 ${autoRefresh ? "border-green-500/40 text-green-400" : ""}`}
+            >
+              {autoRefresh ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
+              <span className="hidden sm:inline">{autoRefresh ? "Live" : "Paused"}</span>
+            </Button>
+            {/* Manual refresh */}
+            <Button variant="outline" size="sm" onClick={() => { refetch(); renderHeatmap(); }} className="gap-1.5">
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
         </div>
 
         {/* Stats Row */}

@@ -44,6 +44,7 @@ const MyCertificates = lazy(() => import('./pages/app/MyCertificates'));
 const OfficerWorkload = lazy(() => import('./pages/app/OfficerWorkload'));
 const NotificationCentre = lazy(() => import('./pages/app/NotificationCentre'));
 const SLABreachDashboard = lazy(() => import('./pages/app/SLABreachDashboard'));
+const NotificationPreferences = lazy(() => import('./pages/app/NotificationPreferences'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -175,6 +176,11 @@ function Router() {
       {/* Notification Centre (Sprint 15) */}
       <Route path="/app/notification-centre">
         <Suspense fallback={<LazyFallback />}><NotificationCentre /></Suspense>
+      </Route>
+
+      {/* Notification Preferences (Sprint 19) */}
+      <Route path="/app/notification-preferences">
+        <Suspense fallback={<LazyFallback />}><NotificationPreferences /></Suspense>
       </Route>
 
       {/* SLA Breach Escalation (Sprint 15) */}

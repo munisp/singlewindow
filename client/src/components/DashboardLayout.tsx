@@ -83,6 +83,7 @@ function getNavGroups(role: string): NavGroup[] {
     label: "General",
     items: [
       { icon: Bell, label: "Notification Centre", path: "/app/notification-centre" },
+      { icon: Settings, label: "Notification Preferences", path: "/app/notification-preferences" },
     ],
   };
 
