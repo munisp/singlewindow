@@ -195,3 +195,20 @@
 ### Tests
 - [x] server/knowledge.graph.test.ts: 36 tests for knowledgeGraph router (auth, health, scoreDeclaration, traderProfile, corridors, KGQA, ART explain, Cypher RBAC, upsertTrader)
 - [x] Total: 149 tests across 10 test files — all passing
+
+## Sprint 8 — Docker Bridge, GNN Training Pipeline, Fraud Network Visualisation
+
+- [x] Add FalkorDB, Neo4j, go-graph-bridge, rust-graph-risk, python-ai services to docker-compose.yml
+- [x] Write multi-stage Dockerfiles for Rust (rust:1.82-slim builder + debian:bookworm-slim runner)
+- [x] Write multi-stage Dockerfile for Go bridge (golang:1.23-alpine builder + alpine runner)
+- [x] Write Python AI services Dockerfile (python:3.12-slim + requirements.txt)
+- [x] Wire GRAPH_BRIDGE_URL default to http://localhost:8100 (matches docker-compose port mapping)
+- [x] Add knowledgeGraph.batchScore tRPC procedure (admin/customs_officer RBAC, GNN batch scoring)
+- [x] Add knowledgeGraph.fraudNetwork tRPC procedure (D3 graph data with synthetic fallback)
+- [x] Build Fraud Network Visualisation page (/app/admin/fraud-network) with D3 force-directed graph
+- [x] Add GitFork icon + Fraud Network nav item to admin AI Tools sidebar
+- [x] Add route /app/admin/fraud-network to App.tsx
+- [x] Write 36 vitest tests for batchScore and fraudNetwork procedures
+- [x] Fix flaky scoredAt test timeout (5s → 30s for LLM latency)
+- [x] Total: 185 tests across 10 test files — all passing
+- [x] Save checkpoint

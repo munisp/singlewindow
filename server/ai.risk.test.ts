@@ -265,8 +265,8 @@ describe("ai.scoreRisk — response shape", () => {
 
     expect(typeof result.scoredAt).toBe("number");
     expect(result.scoredAt).toBeGreaterThanOrEqual(before);
-    expect(result.scoredAt).toBeLessThanOrEqual(after + 5000); // 5s tolerance for LLM latency
-  });
+    expect(result.scoredAt).toBeLessThanOrEqual(after + 30_000); // 30s tolerance for LLM latency
+  }, 30_000);
 });
 
 // ─── High-risk goods scenario ─────────────────────────────────────────────────

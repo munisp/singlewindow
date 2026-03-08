@@ -55,6 +55,7 @@ import {
   ClipboardCheck,
   RotateCcw,
   Network,
+  GitFork,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -125,6 +126,7 @@ function getNavGroups(role: string): NavGroup[] {
         items: [
           { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
           { icon: Network, label: "Knowledge Graph", path: "/app/knowledge-graph" },
+          { icon: GitFork, label: "Fraud Network", path: "/app/admin/fraud-network" },
         ],
       },
       {

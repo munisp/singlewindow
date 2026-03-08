@@ -23,6 +23,10 @@ volumes:
   redis-data:
   kafka-data:
   temporal-data:
+  falkordb-data:
+  neo4j-data:
+  neo4j-logs:
+  gnn-models:
 
 # ─── SERVICES ─────────────────────────────────────────────────────────────────
 
@@ -478,3 +482,129 @@ services:
       PORT: "8097"
     networks:
       - ngswtp-net
+
+  # ── FalkorDB (in-memory property graph — real-time risk scoring) ──────────────
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: ngswtp-falkordb
+    restart: unless-stopped
+    ports:
+      - "6380:6379"   # graph queries (Redis protocol, offset to avoid clash with Redis)
+      - "3002:3000"   # FalkorDB Browser UI
+    volumes:
+      - falkordb-data:/data
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Neo4j (persistent graph analytics + GNN training data) ───────────────────
+  neo4j:
+    image: neo4j:5.18-community
+    container_name: ngswtp-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt protocol
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    environment:
+      NEO4J_AUTH: neo4j/ngswtp_neo4j_2026
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache_size: 512m
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7474"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ── Rust Graph-Risk Engine (GNN propagation, high-perf traversal) ─────────────
+  rust-graph-risk:
+    build:
+      context: ../services/rust-graph-risk
+      dockerfile: Dockerfile
+    container_name: ngswtp-rust-graph-risk
+    restart: unless-stopped
+    ports:
+      - "8098:8098"
+    environment:
+      PORT: "8098"
+      RUST_LOG: "info"
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8098/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Python AI Service (GNN trainer, CocoIndex, EPR-KGQA, ART, Ollama bridge) ──
+  python-ai:
+    build:
+      context: ../services/python-ai
+      dockerfile: Dockerfile
+    container_name: ngswtp-python-ai
+    restart: unless-stopped
+    depends_on:
+      falkordb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    ports:
+      - "8099:8099"
+    volumes:
+      - gnn-models:/app/models
+    environment:
+      PORT: "8099"
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ngswtp_neo4j_2026
+      OLLAMA_URL: http://ollama-proxy:8097
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8099/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Go Graph Bridge (orchestrates Rust engine + Python AI) ───────────────────
+  go-graph-bridge:
+    build:
+      context: ../services/go-graph-bridge
+      dockerfile: Dockerfile
+    container_name: ngswtp-go-graph-bridge
+    restart: unless-stopped
+    depends_on:
+      falkordb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    ports:
+      - "8100:8100"
+    environment:
+      PORT: "8100"
+      FALKORDB_URL: redis://falkordb:6379
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ngswtp_neo4j_2026
+      RUST_ENGINE_URL: http://rust-graph-risk:8098
+      PYTHON_AI_URL: http://python-ai:8099
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8100/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5

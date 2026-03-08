@@ -410,3 +410,206 @@ describe("knowledgeGraph.upsertTrader", () => {
     expect(result).toEqual({ success: true });
   });
 });
+
+// ─── BATCH SCORE (GNN) ────────────────────────────────────────────────────────
+
+describe("knowledgeGraph.batchScore", () => {
+  it("rejects non-admin/non-customs_officer users with FORBIDDEN", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "user" })));
+    await expect(
+      caller.knowledgeGraph.batchScore({})
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects finance role with FORBIDDEN", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "finance" })));
+    await expect(
+      caller.knowledgeGraph.batchScore({})
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("allows admin to call batchScore (returns fallback when bridge is down)", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    const result = await caller.knowledgeGraph.batchScore({});
+    expect(result).toMatchObject({
+      status: expect.any(String),
+      scored: expect.any(Number),
+      results: expect.any(Array),
+      modelVersion: expect.any(String),
+    });
+  });
+
+  it("allows customs_officer to call batchScore", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "customs_officer" })));
+    const result = await caller.knowledgeGraph.batchScore({});
+    expect(result.fallback).toBe(true);
+    expect(result.scored).toBe(0);
+  });
+
+  it("returns fallback=true when bridge is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    const result = await caller.knowledgeGraph.batchScore({});
+    expect(result.fallback).toBe(true);
+  });
+
+  it("accepts optional declarationIds array", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    const result = await caller.knowledgeGraph.batchScore({
+      declarationIds: ["d-001", "d-002", "d-003"],
+    });
+    expect(result).toBeDefined();
+  });
+
+  it("accepts optional limit parameter within valid range", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    const result = await caller.knowledgeGraph.batchScore({ limit: 100 });
+    expect(result).toBeDefined();
+  });
+
+  it("rejects limit below minimum (1)", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    await expect(
+      caller.knowledgeGraph.batchScore({ limit: 0 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects limit above maximum (1000)", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    await expect(
+      caller.knowledgeGraph.batchScore({ limit: 1001 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("returns empty results array when bridge is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    const result = await caller.knowledgeGraph.batchScore({});
+    expect(result.results).toEqual([]);
+  });
+
+  it("returns modelVersion string", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "admin" })));
+    const result = await caller.knowledgeGraph.batchScore({});
+    expect(typeof result.modelVersion).toBe("string");
+  });
+});
+
+// ─── FRAUD NETWORK ────────────────────────────────────────────────────────────
+
+describe("knowledgeGraph.fraudNetwork", () => {
+  it("returns synthetic demo data when bridge is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result).toMatchObject({
+      nodes: expect.any(Array),
+      edges: expect.any(Array),
+      stats: expect.objectContaining({
+        totalNodes: expect.any(Number),
+        totalEdges: expect.any(Number),
+        highRiskNodes: expect.any(Number),
+        avgRiskScore: expect.any(Number),
+      }),
+    });
+  });
+
+  it("returns fallback=true when bridge is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result.fallback).toBe(true);
+  });
+
+  it("fallback nodes have required shape", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result.nodes.length).toBeGreaterThan(0);
+    for (const node of result.nodes) {
+      expect(node).toMatchObject({
+        id: expect.any(String),
+        label: expect.any(String),
+        type: expect.stringMatching(/^(trader|hs_code|port|oga|corridor)$/),
+        riskScore: expect.any(Number),
+      });
+      expect(node.riskScore).toBeGreaterThanOrEqual(0);
+      expect(node.riskScore).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("fallback edges have required shape", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result.edges.length).toBeGreaterThan(0);
+    for (const edge of result.edges) {
+      expect(edge).toMatchObject({
+        source: expect.any(String),
+        target: expect.any(String),
+        type: expect.any(String),
+        weight: expect.any(Number),
+      });
+    }
+  });
+
+  it("accepts optional limit parameter within valid range", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({ limit: 50 });
+    expect(result).toBeDefined();
+  });
+
+  it("accepts optional minRisk parameter within valid range", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({ minRisk: 0.7 });
+    expect(result).toBeDefined();
+  });
+
+  it("rejects limit below minimum (10)", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.knowledgeGraph.fraudNetwork({ limit: 5 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects limit above maximum (500)", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.knowledgeGraph.fraudNetwork({ limit: 501 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects minRisk below 0", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.knowledgeGraph.fraudNetwork({ minRisk: -0.1 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects minRisk above 1", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.knowledgeGraph.fraudNetwork({ minRisk: 1.1 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("stats totalNodes equals nodes array length in fallback", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result.stats.totalNodes).toBe(result.nodes.length);
+  });
+
+  it("stats totalEdges equals edges array length in fallback", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result.stats.totalEdges).toBe(result.edges.length);
+  });
+
+  it("avgRiskScore is between 0 and 1", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    const result = await caller.knowledgeGraph.fraudNetwork({});
+    expect(result.stats.avgRiskScore).toBeGreaterThanOrEqual(0);
+    expect(result.stats.avgRiskScore).toBeLessThanOrEqual(1);
+  });
+
+  it("rejects unauthenticated callers", async () => {
+    const caller = appRouter.createCaller(makeCtx(null));
+    await expect(
+      caller.knowledgeGraph.fraudNetwork({})
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+});

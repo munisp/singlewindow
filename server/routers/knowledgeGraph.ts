@@ -24,7 +24,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 
 // ─── CONFIGURATION ────────────────────────────────────────────────────────────
 
-const GRAPH_BRIDGE_URL = process.env.GRAPH_BRIDGE_URL ?? "http://localhost:8080";
+const GRAPH_BRIDGE_URL = process.env.GRAPH_BRIDGE_URL ?? "http://localhost:8100";
 const BRIDGE_TIMEOUT_MS = 10_000;
 
 // ─── HTTP HELPER ──────────────────────────────────────────────────────────────
@@ -426,5 +426,168 @@ export const knowledgeGraphRouter = router({
         declarationCount: 0,
       });
       return { success: true };
+    }),
+
+  /**
+   * GNN batch-score all cleared declarations using the trained GraphSAGE model.
+   * Routes to Python AI service via Go bridge.
+   * Returns GNN-derived risk scores alongside the existing rule-based scores.
+   */
+  batchScore: protectedProcedure
+    .input(
+      z.object({
+        declarationIds: z.array(z.string()).optional(),
+        limit: z.number().min(1).max(1000).optional().default(500),
+      })
+    )
+    .output(
+      z.object({
+        status: z.string(),
+        scored: z.number(),
+        results: z.array(
+          z.object({
+            declarationId: z.string(),
+            gnnRiskScore: z.number(),
+            riskLane: z.enum(["green", "yellow", "red"]),
+            graphFeatures: z.record(z.string(), z.any()),
+          })
+        ),
+        modelVersion: z.string(),
+        fallback: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Batch GNN scoring requires admin or customs officer role",
+        });
+      }
+
+      const result = await bridgePost<{
+        status: string;
+        scored: number;
+        results: Array<{
+          declarationId: string;
+          gnnRiskScore: number;
+          riskLane: "green" | "yellow" | "red";
+          graphFeatures: Record<string, unknown>;
+        }>;
+        modelVersion: string;
+      }>("/gnn/batch-score", {
+        declarationIds: input.declarationIds ?? null,
+        limit: input.limit,
+      });
+
+      if (!result) {
+        return {
+          status: "unavailable",
+          scored: 0,
+          results: [],
+          modelVersion: "unknown",
+          fallback: true,
+        };
+      }
+
+      return { ...result, fallback: false };
+    }),
+
+  /**
+   * Get the fraud network graph for D3 force-directed visualisation.
+   * Returns nodes (traders, HS codes, ports) and edges (risk relationships).
+   */
+  fraudNetwork: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().min(10).max(500).optional().default(200),
+        minRisk: z.number().min(0).max(1).optional().default(0.4),
+      })
+    )
+    .output(
+      z.object({
+        nodes: z.array(
+          z.object({
+            id: z.string(),
+            label: z.string(),
+            type: z.enum(["trader", "hs_code", "port", "oga", "corridor"]),
+            riskScore: z.number(),
+            properties: z.record(z.string(), z.any()),
+          })
+        ),
+        edges: z.array(
+          z.object({
+            source: z.string(),
+            target: z.string(),
+            type: z.string(),
+            weight: z.number(),
+            properties: z.record(z.string(), z.any()),
+          })
+        ),
+        stats: z.object({
+          totalNodes: z.number(),
+          totalEdges: z.number(),
+          highRiskNodes: z.number(),
+          avgRiskScore: z.number(),
+        }),
+        fallback: z.boolean().optional(),
+      })
+    )
+    .query(async ({ input }) => {
+      const result = await bridgeGet<{
+        nodes: Array<{
+          id: string;
+          label: string;
+          type: "trader" | "hs_code" | "port" | "oga" | "corridor";
+          riskScore: number;
+          properties: Record<string, unknown>;
+        }>;
+        edges: Array<{
+          source: string;
+          target: string;
+          type: string;
+          weight: number;
+          properties: Record<string, unknown>;
+        }>;
+        stats: {
+          totalNodes: number;
+          totalEdges: number;
+          highRiskNodes: number;
+          avgRiskScore: number;
+        };
+      }>(`/fraud-network?limit=${input.limit}&minRisk=${input.minRisk}`);
+
+      if (!result) {
+        // Return synthetic demo data when bridge is unavailable
+        return {
+          nodes: [
+            { id: "t1", label: "Acme Trading Ltd", type: "trader" as const, riskScore: 0.82, properties: { declarations: 45, redLane: 12 } },
+            { id: "t2", label: "Global Imports Co", type: "trader" as const, riskScore: 0.71, properties: { declarations: 33, redLane: 8 } },
+            { id: "t3", label: "FastCargo Ltd", type: "trader" as const, riskScore: 0.65, properties: { declarations: 28, redLane: 6 } },
+            { id: "t4", label: "SafeShip Inc", type: "trader" as const, riskScore: 0.21, properties: { declarations: 120, redLane: 2 } },
+            { id: "hs8517", label: "HS 8517 — Phones", type: "hs_code" as const, riskScore: 0.78, properties: { chapter: 85, description: "Telephone sets" } },
+            { id: "hs6403", label: "HS 6403 — Footwear", type: "hs_code" as const, riskScore: 0.55, properties: { chapter: 64, description: "Footwear" } },
+            { id: "p1", label: "Tema Port", type: "port" as const, riskScore: 0.61, properties: { country: "GH", congestion: "high" } },
+            { id: "p2", label: "Mombasa Port", type: "port" as const, riskScore: 0.44, properties: { country: "KE", congestion: "medium" } },
+          ],
+          edges: [
+            { source: "t1", target: "hs8517", type: "TRADES", weight: 0.82, properties: { count: 18 } },
+            { source: "t2", target: "hs8517", type: "TRADES", weight: 0.71, properties: { count: 12 } },
+            { source: "t1", target: "p1", type: "USES_PORT", weight: 0.75, properties: { count: 30 } },
+            { source: "t2", target: "p1", type: "USES_PORT", weight: 0.68, properties: { count: 22 } },
+            { source: "t3", target: "hs6403", type: "TRADES", weight: 0.65, properties: { count: 15 } },
+            { source: "t3", target: "p2", type: "USES_PORT", weight: 0.55, properties: { count: 18 } },
+            { source: "t1", target: "t2", type: "SHARED_AGENT", weight: 0.88, properties: { agent: "Broker X" } },
+          ],
+          stats: {
+            totalNodes: 8,
+            totalEdges: 7,
+            highRiskNodes: 5,
+            avgRiskScore: 0.60,
+          },
+          fallback: true,
+        };
+      }
+
+      return { ...result, fallback: false };
     }),
 });
