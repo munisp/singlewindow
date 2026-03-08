@@ -6,6 +6,7 @@ import {
   declarationDocuments, ogaPermits, payments, auditEvents,
   securityAlerts, sanctionsChecks, aeoApplications, notifications,
   kycDocuments, kycVerifications, visionAnalyses,
+  portLocations, portCongestionEvents, vesselTrackingEvents,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -528,4 +529,114 @@ export async function listVisionAnalysesByUser(userId: number, limit = 20) {
     .where(eq(visionAnalyses.requestedBy, userId))
     .orderBy(desc(visionAnalyses.createdAt))
     .limit(limit);
+}
+
+export async function getAllPayments(limit = 50, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(payments).limit(limit).offset(offset).orderBy(payments.createdAt);
+}
+
+// ─── GEOSPATIAL QUERIES ───────────────────────────────────────────────────────
+export async function listPortLocations(filters?: { country?: string; portType?: string }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: ReturnType<typeof eq>[] = [eq(portLocations.isActive, true)];
+  if (filters?.country) conditions.push(eq(portLocations.country, filters.country));
+  if (filters?.portType) conditions.push(eq(portLocations.portType, filters.portType));
+  return db.select().from(portLocations).where(and(...conditions));
+}
+
+export async function getPortCongestionHistory(portCode: string, since: Date) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(portCongestionEvents)
+    .where(and(
+      eq(portCongestionEvents.portCode, portCode),
+      sql`${portCongestionEvents.recordedAt} >= ${since}`,
+    ))
+    .orderBy(desc(portCongestionEvents.recordedAt))
+    .limit(100);
+}
+
+export async function listVesselTracking(filters?: { destinationPort?: string; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const lim = filters?.limit ?? 50;
+  if (filters?.destinationPort) {
+    return db.select().from(vesselTrackingEvents)
+      .where(eq(vesselTrackingEvents.destinationPort, filters.destinationPort))
+      .orderBy(desc(vesselTrackingEvents.recordedAt))
+      .limit(lim);
+  }
+  return db.select().from(vesselTrackingEvents)
+    .orderBy(desc(vesselTrackingEvents.recordedAt))
+    .limit(lim);
+}
+
+export async function getHeatmapData() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    portCode: portLocations.portCode,
+    portName: portLocations.portName,
+    latitude: portLocations.latitude,
+    longitude: portLocations.longitude,
+    congestionStatus: portCongestionEvents.congestionStatus,
+    vesselCount: portCongestionEvents.vesselCount,
+    waitTimeHours: portCongestionEvents.waitTimeHours,
+    declarationBacklog: portCongestionEvents.declarationBacklog,
+    recordedAt: portCongestionEvents.recordedAt,
+  })
+    .from(portLocations)
+    .leftJoin(portCongestionEvents, eq(portLocations.portCode, portCongestionEvents.portCode))
+    .where(eq(portLocations.isActive, true))
+    .orderBy(desc(portCongestionEvents.recordedAt));
+}
+
+export async function insertPortLocation(data: typeof portLocations.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(portLocations).values(data).onConflictDoNothing().returning();
+  return result[0];
+}
+
+export async function insertCongestionEvent(data: typeof portCongestionEvents.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(portCongestionEvents).values(data).returning();
+  return result[0];
+}
+
+export async function getPortCount() {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.select({ count: sql<number>`count(*)` }).from(portLocations);
+  return Number(result[0]?.count ?? 0);
+}
+
+export async function getCongestionCount() {
+  const db = await getDb();
+  if (!db) return 0;
+  const result = await db.select({ count: sql<number>`count(*)` }).from(portCongestionEvents);
+  return Number(result[0]?.count ?? 0);
+}
+
+export async function seedPortLocations(ports: typeof portLocations.$inferInsert[]) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(portLocations).values(ports).onConflictDoNothing();
+}
+
+export async function seedCongestionEvents(events: typeof portCongestionEvents.$inferInsert[]) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(portCongestionEvents).values(events);
+}
+
+export async function insertVesselPosition(data: typeof vesselTrackingEvents.$inferInsert) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.insert(vesselTrackingEvents).values(data).returning();
+  return result[0] ?? null;
 }

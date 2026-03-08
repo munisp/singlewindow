@@ -1,0 +1,327 @@
+/**
+ * Port Congestion Heatmap — TradeGateway NGSWTP
+ * Interactive Google Maps heatmap showing real-time port congestion data.
+ * Wired to real tRPC geospatial.heatmapData and geospatial.listPorts.
+ */
+import { useState, useCallback, useRef } from "react";
+import DashboardLayout from "@/components/DashboardLayout";
+import { MapView } from "@/components/Map";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor } from "lucide-react";
+
+type CongestionStatus = "clear" | "moderate" | "congested" | "critical";
+
+const STATUS_COLORS: Record<CongestionStatus, string> = {
+  clear: "#22c55e",
+  moderate: "#f59e0b",
+  congested: "#f97316",
+  critical: "#ef4444",
+};
+
+const STATUS_LABELS: Record<CongestionStatus, string> = {
+  clear: "Clear",
+  moderate: "Moderate",
+  congested: "Congested",
+  critical: "Critical",
+};
+
+function CongestionBadge({ status }: { status: CongestionStatus }) {
+  const colorMap: Record<CongestionStatus, string> = {
+    clear: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    moderate: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    congested: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    critical: "bg-red-500/10 text-red-400 border-red-500/20",
+  };
+  return (
+    <Badge variant="outline" className={colorMap[status]}>
+      {STATUS_LABELS[status]}
+    </Badge>
+  );
+}
+
+export default function PortHeatmap() {
+  const [selectedPort, setSelectedPort] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<google.maps.Map | null>(null);
+  const heatmapRef = useRef<google.maps.visualization.HeatmapLayer | null>(null);
+  const markersRef = useRef<google.maps.Marker[]>([]);
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+
+  const { data: heatmapData, isLoading, refetch } = trpc.geospatial.heatmapData.useQuery(undefined, {
+    refetchInterval: 60_000, // refresh every minute
+  });
+
+  const selectedPortData = heatmapData?.find(p => p.portCode === selectedPort);
+
+  const handleMapReady = useCallback((map: google.maps.Map) => {
+    mapRef.current = map;
+    setMapReady(true);
+
+    // Center on Africa/trade routes
+    map.setCenter({ lat: 5.0, lng: 20.0 });
+    map.setZoom(3);
+
+    infoWindowRef.current = new google.maps.InfoWindow();
+  }, []);
+
+  // Render heatmap and markers when data arrives
+  const renderHeatmap = useCallback(() => {
+    if (!mapRef.current || !heatmapData) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(m => m.setMap(null));
+    markersRef.current = [];
+
+    // Clear existing heatmap
+    if (heatmapRef.current) {
+      heatmapRef.current.setMap(null);
+    }
+
+    // Build heatmap data points
+    const heatmapPoints = heatmapData.map(p => ({
+      location: new google.maps.LatLng(p.lat, p.lng),
+      weight: p.weight * 10,
+    }));
+
+    heatmapRef.current = new google.maps.visualization.HeatmapLayer({
+      data: heatmapPoints,
+      map: mapRef.current,
+      radius: 40,
+      opacity: 0.7,
+      gradient: [
+        "rgba(0, 255, 0, 0)",
+        "rgba(0, 255, 0, 1)",
+        "rgba(255, 255, 0, 1)",
+        "rgba(255, 165, 0, 1)",
+        "rgba(255, 0, 0, 1)",
+      ],
+    });
+
+    // Add port markers
+    heatmapData.forEach(port => {
+      const color = STATUS_COLORS[port.congestionStatus as CongestionStatus] ?? "#6b7280";
+      const marker = new google.maps.Marker({
+        position: { lat: port.lat, lng: port.lng },
+        map: mapRef.current!,
+        title: port.portName,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: color,
+          fillOpacity: 0.9,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
+      });
+
+      marker.addListener("click", () => {
+        setSelectedPort(port.portCode);
+        if (infoWindowRef.current) {
+          infoWindowRef.current.setContent(`
+            <div style="padding:8px;min-width:200px;font-family:sans-serif">
+              <div style="font-weight:bold;font-size:14px;margin-bottom:4px">${port.portName}</div>
+              <div style="color:#666;font-size:12px;margin-bottom:6px">${port.country} · ${port.portType}</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px">
+                <div><span style="color:#999">Status:</span> <span style="color:${color};font-weight:bold">${STATUS_LABELS[port.congestionStatus as CongestionStatus]}</span></div>
+                <div><span style="color:#999">Vessels:</span> ${port.vesselCount}</div>
+                <div><span style="color:#999">Wait:</span> ${port.waitTimeHours?.toFixed(1)}h</div>
+                <div><span style="color:#999">Backlog:</span> ${port.declarationBacklog}</div>
+              </div>
+            </div>
+          `);
+          infoWindowRef.current.open(mapRef.current, marker);
+        }
+      });
+
+      markersRef.current.push(marker);
+    });
+  }, [heatmapData]);
+
+  // Trigger render when map and data are both ready
+  if (mapReady && heatmapData && markersRef.current.length === 0) {
+    renderHeatmap();
+  }
+
+  const stats = heatmapData ? {
+    clear: heatmapData.filter(p => p.congestionStatus === "clear").length,
+    moderate: heatmapData.filter(p => p.congestionStatus === "moderate").length,
+    congested: heatmapData.filter(p => p.congestionStatus === "congested").length,
+    critical: heatmapData.filter(p => p.congestionStatus === "critical").length,
+    totalVessels: heatmapData.reduce((s, p) => s + (p.vesselCount ?? 0), 0),
+  } : null;
+
+  return (
+    <DashboardLayout title="Port Heatmap">
+      <div className="space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+              <Anchor className="h-6 w-6 text-primary" />
+              Port Congestion Heatmap
+            </h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Real-time congestion status across all connected ports — refreshes every 60 seconds
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => { refetch(); renderHeatmap(); }} className="gap-1.5">
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-5 gap-3">
+          {[
+            { label: "Clear", count: stats?.clear, icon: <MapPin className="h-4 w-4 text-emerald-400" />, color: "text-emerald-400" },
+            { label: "Moderate", count: stats?.moderate, icon: <MapPin className="h-4 w-4 text-amber-400" />, color: "text-amber-400" },
+            { label: "Congested", count: stats?.congested, icon: <AlertTriangle className="h-4 w-4 text-orange-400" />, color: "text-orange-400" },
+            { label: "Critical", count: stats?.critical, icon: <AlertTriangle className="h-4 w-4 text-red-400" />, color: "text-red-400" },
+            { label: "Total Vessels", count: stats?.totalVessels, icon: <Ship className="h-4 w-4 text-blue-400" />, color: "text-blue-400" },
+          ].map((s) => (
+            <Card key={s.label}>
+              <CardContent className="p-4 flex items-center gap-3">
+                {s.icon}
+                <div>
+                  <p className={`text-xl font-bold ${s.color}`}>{isLoading ? "—" : (s.count ?? 0)}</p>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          {/* Map */}
+          <div className="col-span-2">
+            <Card>
+              <CardContent className="p-0 overflow-hidden rounded-lg">
+                {isLoading ? (
+                  <Skeleton className="h-[500px] w-full" />
+                ) : (
+                  <MapView
+                    className="h-[500px] w-full"
+                    onMapReady={handleMapReady}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Port List */}
+          <div>
+            <Card className="h-[500px] flex flex-col">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Port Status</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-1 overflow-y-auto p-0">
+                {isLoading ? (
+                  <div className="p-4 space-y-2">
+                    {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {(heatmapData ?? []).map((port) => (
+                      <button
+                        key={port.portCode}
+                        className={`w-full text-left p-3 hover:bg-muted/30 transition-colors ${selectedPort === port.portCode ? "bg-muted/50" : ""}`}
+                        onClick={() => {
+                          setSelectedPort(port.portCode);
+                          if (mapRef.current) {
+                            mapRef.current.panTo({ lat: port.lat, lng: port.lng });
+                            mapRef.current.setZoom(8);
+                          }
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium truncate">{port.portName}</span>
+                          <CongestionBadge status={port.congestionStatus as CongestionStatus} />
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          <span>{port.country}</span>
+                          <span>·</span>
+                          <span>{port.vesselCount} vessels</span>
+                          <span>·</span>
+                          <span>{port.waitTimeHours?.toFixed(1)}h wait</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Selected Port Detail */}
+        {selectedPortData && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Anchor className="h-4 w-4" />
+                {selectedPortData.portName} — Detail
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Congestion Status</p>
+                  <CongestionBadge status={(selectedPortData.congestionStatus ?? "clear") as CongestionStatus} />
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Vessels at Anchor</p>
+                  <p className="font-semibold">{selectedPortData.vesselCount ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Average Wait Time</p>
+                  <p className="font-semibold">{selectedPortData.waitTimeHours?.toFixed(1) ?? "0"}h</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Declaration Backlog</p>
+                  <p className="font-semibold">{selectedPortData.declarationBacklog ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Inspection Queue</p>
+                  <p className="font-semibold">{(selectedPortData as any).inspectionQueueSize ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Country</p>
+                  <p className="font-semibold">{selectedPortData.country}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Port Type</p>
+                  <p className="font-semibold capitalize">{selectedPortData.portType?.replace(/_/g, " ")}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs mb-1">Last Updated</p>
+                  <p className="font-semibold">
+                    {selectedPortData.lastUpdated
+                      ? new Date(selectedPortData.lastUpdated).toLocaleString()
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Legend */}
+        <div className="flex items-center gap-6 text-xs text-muted-foreground">
+          <span className="font-medium">Congestion Legend:</span>
+          {Object.entries(STATUS_COLORS).map(([status, color]) => (
+            <span key={status} className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-full inline-block" style={{ backgroundColor: color }} />
+              {STATUS_LABELS[status as CongestionStatus]}
+            </span>
+          ))}
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}

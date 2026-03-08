@@ -3,7 +3,8 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
   createPayment, updatePayment, getPaymentsByDeclaration,
-  getDeclarationById, updateDeclaration, logAuditEvent, createNotification
+  getDeclarationById, updateDeclaration, logAuditEvent, createNotification,
+  getAllPayments
 } from "../db";
 import { nanoid } from "nanoid";
 
@@ -72,6 +73,17 @@ export const paymentsRouter = router({
       });
 
       return updated;
+    }),
+
+  // List all payments (admin)
+  listAll: protectedProcedure
+    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "finance") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const txs = await getAllPayments(input.limit, input.offset);
+      return { transactions: txs, total: txs.length };
     }),
 
   // Get payments for a declaration

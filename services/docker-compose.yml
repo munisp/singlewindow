@@ -327,3 +327,154 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     networks:
       - ngswtp-net
+
+  # ── Go Microservices ──────────────────────────────────────────────────────────
+  declaration-service:
+    build:
+      context: ./go/declaration-service
+      dockerfile: Dockerfile
+    container_name: ngswtp-declaration-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+      - "9081:9081"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      KAFKA_BROKERS: kafka:9092
+      RISK_ENGINE_URL: http://risk-engine:8090
+      RULE_ENGINE_URL: http://rule-engine:8092
+      SANCTIONS_URL: http://sanctions-screener:8091
+      OGA_SERVICE_ADDR: oga-service:9083
+      GRPC_PORT: "9081"
+      HTTP_PORT: "8081"
+    networks:
+      - ngswtp-net
+
+  payment-service:
+    build:
+      context: ./go/payment-service
+      dockerfile: Dockerfile
+    container_name: ngswtp-payment-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+      - "9082:9082"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      KAFKA_BROKERS: kafka:9092
+      TIGERBEETLE_URL: http://tigerbeetle-bridge:8093
+      GRPC_PORT: "9082"
+      HTTP_PORT: "8082"
+    networks:
+      - ngswtp-net
+
+  oga-service:
+    build:
+      context: ./go/oga-service
+      dockerfile: Dockerfile
+    container_name: ngswtp-oga-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+      - "9083:9083"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      KAFKA_BROKERS: kafka:9092
+      GRPC_PORT: "9083"
+      HTTP_PORT: "8083"
+    networks:
+      - ngswtp-net
+
+  profile-service:
+    build:
+      context: ./go/profile-service
+      dockerfile: Dockerfile
+    container_name: ngswtp-profile-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+      - "9084:9084"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      GRPC_PORT: "9084"
+      HTTP_PORT: "8084"
+    networks:
+      - ngswtp-net
+
+  mojaloop-gateway:
+    build:
+      context: ./go/mojaloop-gateway
+      dockerfile: Dockerfile
+    container_name: ngswtp-mojaloop-gateway
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    ports:
+      - "8085:8085"
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      HTTP_PORT: "8085"
+    networks:
+      - ngswtp-net
+
+  # ── Python AI/ML Services ─────────────────────────────────────────────────────
+  kyc-service:
+    build:
+      context: ./python/kyc-service
+      dockerfile: Dockerfile
+    container_name: ngswtp-kyc-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8095:8095"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      PORT: "8095"
+    networks:
+      - ngswtp-net
+
+  vision-service:
+    build:
+      context: ./python/vision-service
+      dockerfile: Dockerfile
+    container_name: ngswtp-vision-service
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    environment:
+      PORT: "8096"
+    networks:
+      - ngswtp-net
+
+  ollama-proxy:
+    build:
+      context: ./python/ollama-proxy
+      dockerfile: Dockerfile
+    container_name: ngswtp-ollama-proxy
+    restart: unless-stopped
+    ports:
+      - "8097:8097"
+    environment:
+      PORT: "8097"
+    networks:
+      - ngswtp-net

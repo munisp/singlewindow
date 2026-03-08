@@ -45,6 +45,13 @@ import {
   Shield,
   ShieldCheck,
   Users,
+  Sparkles,
+  Anchor,
+  Map,
+  CreditCard,
+  Workflow,
+  UserCheck,
+  Package,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -82,6 +89,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Users, label: "User Management", path: "/app/admin/users" },
           { icon: ClipboardList, label: "All Declarations", path: "/app/admin/declarations" },
           { icon: ShieldCheck, label: "AEO Management", path: "/app/admin/aeo" },
+          { icon: UserCheck, label: "KYC Review", path: "/app/admin/kyc-review" },
           { icon: BarChart3, label: "Analytics", path: "/app/admin/analytics" },
         ],
       },
@@ -91,6 +99,14 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: FileText, label: "Declaration Queue", path: "/app/customs" },
           { icon: AlertTriangle, label: "Risk Assessment", path: "/app/customs/risk" },
           { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
+          { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
+          { icon: Workflow, label: "Workflow Traces", path: "/app/customs/workflows" },
+        ],
+      },
+      {
+        label: "Geospatial",
+        items: [
+          { icon: Anchor, label: "Port Heatmap", path: "/app/geo/heatmap" },
         ],
       },
       {
@@ -101,9 +117,74 @@ function getNavGroups(role: string): NavGroup[] {
         ],
       },
       {
+        label: "AI Tools",
+        items: [
+          { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
+        ],
+      },
+      {
         label: "Reference",
         items: [
           { icon: BookOpen, label: "Specification", path: "/specification" },
+        ],
+      },
+      common,
+    ];
+  }
+  if (role === "customs_officer" || role === "inspector") {
+    return [
+      {
+        label: "Customs Operations",
+        items: [
+          { icon: LayoutDashboard, label: "Customs Dashboard", path: "/app/customs" },
+          { icon: FileText, label: "Declaration Queue", path: "/app/customs" },
+          { icon: AlertTriangle, label: "Risk Assessment", path: "/app/customs/risk" },
+          { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
+          { icon: Package, label: "OGA Permits", path: "/app/oga" },
+        ],
+      },
+      {
+        label: "Geospatial",
+        items: [
+          { icon: Anchor, label: "Port Heatmap", path: "/app/geo/heatmap" },
+        ],
+      },
+      {
+        label: "AI Tools",
+        items: [
+          { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
+        ],
+      },
+      common,
+    ];
+  }
+  if (role === "oga_officer") {
+    return [
+      {
+        label: "OGA Operations",
+        items: [
+          { icon: LayoutDashboard, label: "OGA Dashboard", path: "/app/oga" },
+          { icon: Package, label: "Permit Queue", path: "/app/oga" },
+          { icon: FileText, label: "Declarations", path: "/app/customs" },
+        ],
+      },
+      {
+        label: "AI Tools",
+        items: [
+          { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
+        ],
+      },
+      common,
+    ];
+  }
+  if (role === "finance") {
+    return [
+      {
+        label: "Finance Operations",
+        items: [
+          { icon: LayoutDashboard, label: "Finance Dashboard", path: "/app/admin" },
+          { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
+          { icon: BarChart3, label: "Analytics", path: "/app/admin/analytics" },
         ],
       },
       common,

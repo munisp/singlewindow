@@ -1,7 +1,9 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { getAllUsers } from "./db";
 import { declarationsRouter } from "./routers/declarations";
 import { profilesRouter } from "./routers/profiles";
 import { paymentsRouter } from "./routers/payments";
@@ -14,6 +16,8 @@ import { visionRouter } from "./routers/vision";
 import { aiRouter } from "./routers/ai";
 import { mojaloopRouter } from "./routers/mojaloop";
 import { temporalRouter } from "./routers/temporal";
+import { geospatialRouter } from "./routers/geospatial";
+
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
@@ -25,6 +29,10 @@ export const appRouter = router({
       return {
         success: true,
       } as const;
+    }),
+    listUsers: protectedProcedure.query(async ({ ctx }) => {
+      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      return getAllUsers(200, 0);
     }),
   }),
 
@@ -40,6 +48,7 @@ export const appRouter = router({
   ai: aiRouter,
   mojaloop: mojaloopRouter,
   temporal: temporalRouter,
+  geospatial: geospatialRouter,
 });
 
 export type AppRouter = typeof appRouter;

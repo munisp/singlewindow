@@ -5,7 +5,7 @@ import {
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
 
-export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
+export const userRoleEnum = pgEnum("user_role", ["user", "admin", "customs_officer", "oga_officer", "inspector", "finance"]);
 
 export const stakeholderTypeEnum = pgEnum("stakeholder_type", [
   "trader", "customs_officer", "oga_officer", "freight_forwarder",
@@ -424,3 +424,59 @@ export const visionAnalyses = pgTable("vision_analyses", {
   index("idx_va_risk_level").on(t.riskLevel),
   index("idx_va_requested_by").on(t.requestedBy),
 ]);
+
+// ─── GEOSPATIAL DATA ─────────────────────────────────────────────────────────
+
+export const portCongestionStatusEnum = pgEnum("port_congestion_status", [
+  "clear", "moderate", "congested", "critical"
+]);
+
+export const portLocations = pgTable("port_locations", {
+  id: serial("id").primaryKey(),
+  portCode: varchar("port_code", { length: 16 }).notNull().unique(),
+  portName: varchar("port_name", { length: 128 }).notNull(),
+  country: varchar("country", { length: 3 }).notNull(),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  portType: varchar("port_type", { length: 32 }).default("seaport"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const portCongestionEvents = pgTable("port_congestion_events", {
+  id: serial("id").primaryKey(),
+  portCode: varchar("port_code", { length: 16 }).notNull(),
+  congestionStatus: portCongestionStatusEnum("congestion_status").notNull(),
+  vesselCount: integer("vessel_count").default(0),
+  waitTimeHours: real("wait_time_hours").default(0),
+  declarationBacklog: integer("declaration_backlog").default(0),
+  inspectionQueueSize: integer("inspection_queue_size").default(0),
+  metadata: json("metadata"),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pce_port_code").on(t.portCode),
+  index("idx_pce_recorded_at").on(t.recordedAt),
+]);
+
+export const vesselTrackingEvents = pgTable("vessel_tracking_events", {
+  id: serial("id").primaryKey(),
+  mmsi: varchar("mmsi", { length: 16 }).notNull(),
+  vesselName: varchar("vessel_name", { length: 128 }),
+  imoNumber: varchar("imo_number", { length: 16 }),
+  latitude: real("latitude").notNull(),
+  longitude: real("longitude").notNull(),
+  speed: real("speed"),
+  heading: real("heading"),
+  destinationPort: varchar("destination_port", { length: 64 }),
+  eta: timestamp("eta"),
+  cargoType: varchar("cargo_type", { length: 64 }),
+  flagCountry: varchar("flag_country", { length: 3 }),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_vte_mmsi").on(t.mmsi),
+  index("idx_vte_recorded_at").on(t.recordedAt),
+]);
+
+export type PortLocation = typeof portLocations.$inferSelect;
+export type PortCongestionEvent = typeof portCongestionEvents.$inferSelect;
+export type VesselTrackingEvent = typeof vesselTrackingEvents.$inferSelect;
