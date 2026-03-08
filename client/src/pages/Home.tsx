@@ -25,6 +25,9 @@ import KubernetesMap from "@/components/KubernetesMap";
 import LanguageToggle from "@/components/LanguageToggle";
 import MobileDrawer from "@/components/MobileDrawer";
 import TemporalWorkflow from "@/components/TemporalWorkflow";
+import KeycloakLoginFlow from "@/components/KeycloakLoginFlow";
+import ComplianceScorecard from "@/components/ComplianceScorecard";
+import KubecostDrilldown from "@/components/KubecostDrilldown";
 import { I18nProvider } from "@/contexts/I18nContext";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -484,6 +487,9 @@ export default function Home() {
                 { label: "Payment Flow", href: "#mojaloop-demo" },
                 { label: "Workflow", href: "#temporal-workflow" },
                 { label: "K8s Map", href: "#k8s-map" },
+                { label: "Auth Flow", href: "#keycloak-login" },
+                { label: "Compliance", href: "#compliance-scorecard" },
+                { label: "Cost Drill-Down", href: "#kubecost-drilldown" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1140,6 +1146,12 @@ export default function Home() {
       <TemporalWorkflow />
       {/* ── KUBERNETES RESOURCE MAP ──────────────────────────────────────── */}
       <KubernetesMap />
+      {/* ── KEYCLOAK LOGIN FLOW ───────────────────────────────────────── */}
+      <KeycloakLoginFlow />
+      {/* ── COMPLIANCE SCORECARD ─────────────────────────────────────────── */}
+      <ComplianceScorecard />
+      {/* ── KUBECOST DRILL-DOWN ──────────────────────────────────────────── */}
+      <KubecostDrilldown />
       {/* ── PDF EXPORT ───────────────────────────────────────────────────── */}
       <PDFExport />
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
