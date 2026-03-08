@@ -40,6 +40,8 @@ const KnowledgeGraph = lazy(() => import('./pages/app/KnowledgeGraph'));
 const FraudNetwork = lazy(() => import('./pages/app/FraudNetwork'));
 const FraudCases = lazy(() => import('./pages/app/FraudCases'));
 const RiskAlerts = lazy(() => import('./pages/app/RiskAlerts'));
+const MyCertificates = lazy(() => import('./pages/app/MyCertificates'));
+const OfficerWorkload = lazy(() => import('./pages/app/OfficerWorkload'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -156,6 +158,16 @@ function Router() {
       </Route>
       <Route path="/app/admin/risk-alerts">
         <Suspense fallback={<LazyFallback />}><RiskAlerts /></Suspense>
+      </Route>
+
+      {/* Trader Certificate Archive */}
+      <Route path="/app/trader/certificates">
+        <Suspense fallback={<LazyFallback />}><MyCertificates /></Suspense>
+      </Route>
+
+      {/* Officer Workload Dashboard */}
+      <Route path="/app/admin/officer-workload">
+        <Suspense fallback={<LazyFallback />}><OfficerWorkload /></Suspense>
       </Route>
 
       {/* AI Assistant */}

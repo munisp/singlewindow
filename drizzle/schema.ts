@@ -642,3 +642,23 @@ export const riskScanResults = pgTable("risk_scan_results", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_rsr_scan_run_at").on(t.scanRunAt)]);
 export type RiskScanResult = typeof riskScanResults.$inferSelect;
+
+// ─── CLEARANCE CERTIFICATES ───────────────────────────────────────────────────
+export const clearanceCertificates = pgTable("clearance_certificates", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  traderId: integer("trader_id").notNull(),
+  fileKey: varchar("file_key", { length: 512 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  declarationRef: varchar("declaration_ref", { length: 64 }).notNull(),
+  goodsDescription: text("goods_description"),
+  totalDutyPaid: decimal("total_duty_paid", { precision: 18, scale: 2 }),
+  currency: varchar("currency", { length: 8 }).default("USD"),
+  clearedAt: timestamp("cleared_at"),
+  generatedBy: integer("generated_by").notNull(),
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cc_trader_id").on(t.traderId),
+  index("idx_cc_declaration_id").on(t.declarationId),
+]);
+export type ClearanceCertificate = typeof clearanceCertificates.$inferSelect;

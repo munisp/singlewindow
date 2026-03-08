@@ -86,9 +86,66 @@ async function runNightlyRiskScan() {
   }
 }
 
+// Permit expiry check — runs alongside the nightly risk scan
+async function runPermitExpiryCheck() {
+  console.log("[Cron] Permit expiry check starting…");
+  try {
+    const { getDb } = await import("../db");
+    const { ogaPermits } = await import("../../drizzle/schema");
+    const { lte, gte, and, eq, asc } = await import("drizzle-orm");
+    const db = await getDb();
+    if (!db) {
+      console.warn("[Cron] DB unavailable — skipping permit expiry check");
+      return;
+    }
+    const now = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() + 30);
+    const expiringPermits = await db
+      .select()
+      .from(ogaPermits)
+      .where(and(gte(ogaPermits.expiresAt, now), lte(ogaPermits.expiresAt, cutoff), eq(ogaPermits.status, "approved")))
+      .orderBy(asc(ogaPermits.expiresAt))
+      .limit(200);
+    if (expiringPermits.length === 0) {
+      console.log("[Cron] Permit expiry check complete — no permits expiring within 30 days");
+      return;
+    }
+    try {
+      const { notifyOwner } = await import("./notification");
+      const lines = expiringPermits.slice(0, 10).map((p) => {
+        const daysLeft = Math.ceil((new Date(p.expiresAt!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        return `  \u2022 Permit ${p.permitNumber ?? p.id} (${p.permitType ?? "general"}) \u2014 expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} (Declaration ID: ${p.declarationId})`;
+      }).join("\n");
+      await notifyOwner({
+        title: `Permit Expiry Alert: ${expiringPermits.length} permit${expiringPermits.length !== 1 ? "s" : ""} expiring within 30 days`,
+        content: [
+          `Permit expiry check completed at ${now.toUTCString()}.`,
+          `Permits expiring within 30 days: ${expiringPermits.length}`,
+          ``,
+          `Top expiring permits:`,
+          lines,
+          ``,
+          `Action required: Contact affected traders to renew their permits before expiry.`,
+        ].join("\n"),
+      });
+    } catch {
+      // Non-fatal
+    }
+    console.log(`[Cron] Permit expiry check complete — ${expiringPermits.length} permits expiring within 30 days`);
+  } catch (err) {
+    console.error("[Cron] Permit expiry check failed:", err);
+  }
+}
+
+async function runNightlyJobs() {
+  await runNightlyRiskScan();
+  await runPermitExpiryCheck();
+}
+
 // Schedule: second(0) minute(0) hour(2) day(*) month(*) weekday(*) = 02:00 UTC daily
-cron.schedule("0 0 2 * * *", runNightlyRiskScan, { timezone: "UTC" });
-console.log("[Cron] Nightly risk scan scheduled at 02:00 UTC daily");
+cron.schedule("0 0 2 * * *", runNightlyJobs, { timezone: "UTC" });
+console.log("[Cron] Nightly jobs scheduled at 02:00 UTC daily (risk scan + permit expiry check)");
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {

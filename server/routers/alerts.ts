@@ -234,6 +234,148 @@ export const alertsRouter = router({
       };
     }),
 
+  // ── RUN PERMIT EXPIRY CHECK ────────────────────────────────────────────────
+  // Queries OGA permits expiring within `daysAhead` days and notifies the owner.
+  // Called by the nightly cron job alongside the risk scan.
+  runPermitExpiryCheck: protectedProcedure
+    .input(
+      z.object({
+        daysAhead: z.number().int().min(1).max(90).default(30),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Admin role required" });
+      }
+
+      const { getDb } = await import("../db");
+      const { ogaPermits, stakeholderProfiles } = await import("../../drizzle/schema");
+      const { lte, gte, and, eq } = await import("drizzle-orm");
+
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() + input.daysAhead);
+
+      // Find permits expiring within daysAhead days that are still approved
+      const expiringPermits = await db
+        .select({
+          id: ogaPermits.id,
+          permitNumber: ogaPermits.permitNumber,
+          permitType: ogaPermits.permitType,
+          declarationId: ogaPermits.declarationId,
+          expiresAt: ogaPermits.expiresAt,
+          status: ogaPermits.status,
+          agencyCode: ogaPermits.agencyCode,
+        })
+        .from(ogaPermits)
+        .where(
+          and(
+            gte(ogaPermits.expiresAt, now),
+            lte(ogaPermits.expiresAt, cutoff),
+            eq(ogaPermits.status, "approved")
+          )
+        )
+        .limit(200);
+
+      if (expiringPermits.length === 0) {
+        return { checked: true, expiringCount: 0, notificationSent: false };
+      }
+
+      // Build notification content
+      let notificationSent = false;
+      try {
+        const { notifyOwner } = await import("../_core/notification");
+        const lines = expiringPermits.slice(0, 10).map((p) => {
+          const daysLeft = Math.ceil(
+            (new Date(p.expiresAt!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+          );
+          return `  \u2022 Permit ${p.permitNumber ?? p.id} (${p.permitType ?? "general"}) \u2014 expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} (Declaration ID: ${p.declarationId})`;
+        }).join("\n");
+
+        const content = [
+          `Permit expiry check completed at ${now.toUTCString()}.`,
+          ``,
+          `Permits expiring within ${input.daysAhead} days: ${expiringPermits.length}`,
+          ``,
+          `Top expiring permits:`,
+          lines,
+          ``,
+          `Action required: Contact affected traders to renew their permits before expiry to avoid clearance delays.`,
+        ].join("\n");
+
+        notificationSent = await notifyOwner({
+          title: `Permit Expiry Alert: ${expiringPermits.length} permit${expiringPermits.length !== 1 ? "s" : ""} expiring within ${input.daysAhead} days`,
+          content,
+        });
+      } catch {
+        // Non-fatal
+      }
+
+      return {
+        checked: true,
+        expiringCount: expiringPermits.length,
+        notificationSent,
+        expiringPermits: expiringPermits.slice(0, 20).map((p) => ({
+          id: p.id,
+          permitNumber: p.permitNumber ?? String(p.id),
+          permitType: p.permitType ?? "general",
+          declarationId: p.declarationId,
+          agencyCode: p.agencyCode,
+          expiresAt: p.expiresAt?.toISOString() ?? null,
+          daysUntilExpiry: p.expiresAt
+            ? Math.ceil((new Date(p.expiresAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+            : null,
+        })),
+      };
+    }),
+
+  // ── GET EXPIRING PERMITS ─────────────────────────────────────────────────────
+  // Returns permits expiring within daysAhead days for the Risk Alerts page.
+  getExpiringPermits: protectedProcedure
+    .input(z.object({ daysAhead: z.number().int().min(1).max(90).default(30) }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer" && ctx.user.role !== "oga_officer") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const { getDb } = await import("../db");
+      const { ogaPermits } = await import("../../drizzle/schema");
+      const { lte, gte, and, eq, asc } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() + input.daysAhead);
+
+      const permits = await db
+        .select()
+        .from(ogaPermits)
+        .where(
+          and(
+            gte(ogaPermits.expiresAt, now),
+            lte(ogaPermits.expiresAt, cutoff),
+            eq(ogaPermits.status, "approved")
+          )
+        )
+        .orderBy(asc(ogaPermits.expiresAt))
+        .limit(100);
+
+      return permits.map((p) => ({
+        id: p.id,
+        permitNumber: p.permitNumber ?? String(p.id),
+        permitType: p.permitType ?? "general",
+        declarationId: p.declarationId,
+        agencyCode: p.agencyCode,
+        expiresAt: p.expiresAt?.toISOString() ?? null,
+        daysUntilExpiry: p.expiresAt
+          ? Math.ceil((new Date(p.expiresAt).getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          : null,
+      }));
+    }),
+
   // ── CRON STATUS ─────────────────────────────────────────────────────────────
   // Returns the last cron run time and result summary for the RiskAlerts page.
   cronStatus: protectedProcedure.query(async ({ ctx }) => {

@@ -6,6 +6,7 @@ import {
   getAllDeclarations, updateDeclaration, getDeclarationStats,
   logAuditEvent, createNotification, getProfileByUserId
 } from "../db";
+import { clearanceCertificates } from "../../drizzle/schema";
 import { invokeLLM } from "../_core/llm";
 import { nanoid } from "nanoid";
 
@@ -400,6 +401,36 @@ export const declarationsRouter = router({
    * Generate and return a clearance certificate PDF URL.
    * Only available for cleared declarations.
    */
+  listMyCertificates: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(100).default(50),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { desc, eq } = await import("drizzle-orm");
+
+      // Traders can only see their own certificates; admins and officers see all
+      const certs = ctx.user.role === "user"
+        ? await db
+            .select()
+            .from(clearanceCertificates)
+            .where(eq(clearanceCertificates.traderId, ctx.user.id))
+            .orderBy(desc(clearanceCertificates.generatedAt))
+            .limit(input.limit)
+            .offset(input.offset)
+        : await db
+            .select()
+            .from(clearanceCertificates)
+            .orderBy(desc(clearanceCertificates.generatedAt))
+            .limit(input.limit)
+            .offset(input.offset);
+
+      return { certificates: certs, total: certs.length };
+    }),
+
   generateClearanceCertificate: protectedProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
@@ -529,11 +560,51 @@ export const declarationsRouter = router({
           const htmlBuffer = readFileSync(tmpHtml);
           const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.html`;
           const { url } = await storagePut(fileKey, htmlBuffer, "text/html");
+
+          // Persist certificate record to DB (HTML fallback)
+          try {
+            const { getDb } = await import("../db");
+            const db = await getDb();
+            if (!db) throw new Error("no db");
+            await db.insert(clearanceCertificates).values({
+              declarationId: decl.id,
+              traderId: decl.traderId,
+              fileKey,
+              fileUrl: url,
+              declarationRef: decl.declarationNumber,
+              goodsDescription: decl.goodsDescription ?? null,
+              totalDutyPaid: decl.totalDue ? String(decl.totalDue) : null,
+              currency: decl.invoiceCurrency ?? "USD",
+              clearedAt: decl.clearedAt ? new Date(decl.clearedAt) : new Date(),
+              generatedBy: ctx.user.id,
+            });
+          } catch { /* Non-fatal */ }
+
           return { url, format: "html" as const, declarationNumber: decl.declarationNumber };
         }
 
         const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.pdf`;
         const { url } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+
+        // Persist certificate record to DB
+        try {
+          const { getDb } = await import("../db");
+          const db = await getDb();
+          if (!db) throw new Error("no db");
+          await db.insert(clearanceCertificates).values({
+            declarationId: decl.id,
+            traderId: decl.traderId,
+            fileKey,
+            fileUrl: url,
+            declarationRef: decl.declarationNumber,
+            goodsDescription: decl.goodsDescription ?? null,
+            totalDutyPaid: decl.totalDue ? String(decl.totalDue) : null,
+            currency: decl.invoiceCurrency ?? "USD",
+            clearedAt: decl.clearedAt ? new Date(decl.clearedAt) : new Date(),
+            generatedBy: ctx.user.id,
+          });
+        } catch { /* Non-fatal: certificate still returned even if DB write fails */ }
+
         return { url, format: "pdf" as const, declarationNumber: decl.declarationNumber };
       } finally {
         try { unlinkSync(tmpHtml); } catch { /* ignore */ }

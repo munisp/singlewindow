@@ -29,6 +29,8 @@ import {
   AlertTriangle,
   Bell,
   CheckCircle2,
+  Clock,
+  FileText,
   Loader2,
   Play,
   RefreshCw,
@@ -160,6 +162,8 @@ export default function RiskAlerts() {
   const { data: scanHistory, isLoading: historyLoading } = trpc.alerts.getRiskAlerts.useQuery({
     limit: 10,
   });
+
+  const { data: expiringPermits, isLoading: permitsLoading } = trpc.alerts.getExpiringPermits.useQuery({ daysAhead: 30 });
 
   const { data: flaggedData, isLoading: flaggedLoading } = trpc.alerts.getLatestFlaggedDeclarations.useQuery({
     limit: 50,
@@ -347,6 +351,77 @@ export default function RiskAlerts() {
                               >
                                 Open Case
                               </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Expiring permits panel */}
+            <Card className="bg-navy-800/40 border-white/10">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-mono tracking-widest text-gold uppercase flex items-center gap-2">
+                  <Clock size={14} />
+                  Permits Expiring Within 30 Days
+                  {expiringPermits && (
+                    <span className="ml-auto text-xs font-normal normal-case tracking-normal text-slate-400">
+                      {expiringPermits.length} permit{expiringPermits.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {permitsLoading ? (
+                  <div className="flex items-center justify-center h-24">
+                    <Loader2 className="animate-spin text-gold" size={18} />
+                  </div>
+                ) : !expiringPermits?.length ? (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    <CheckCircle2 size={24} className="text-emerald-500 mx-auto mb-2" />
+                    No permits expiring in the next 30 days.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-white/10">
+                          <th className="text-left px-4 py-2 text-slate-400 font-normal">Permit No.</th>
+                          <th className="text-left px-4 py-2 text-slate-400 font-normal">Type</th>
+                          <th className="text-left px-4 py-2 text-slate-400 font-normal">Agency</th>
+                          <th className="text-left px-4 py-2 text-slate-400 font-normal">Declaration</th>
+                          <th className="text-left px-4 py-2 text-slate-400 font-normal">Expires</th>
+                          <th className="text-left px-4 py-2 text-slate-400 font-normal">Days Left</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expiringPermits.map((p) => (
+                          <tr
+                            key={p.id}
+                            className="border-b border-white/5 hover:bg-white/3 transition-colors"
+                          >
+                            <td className="px-4 py-2.5 font-mono text-white">{p.permitNumber}</td>
+                            <td className="px-4 py-2.5 text-slate-300 capitalize">{p.permitType}</td>
+                            <td className="px-4 py-2.5 text-slate-300">{p.agencyCode}</td>
+                            <td className="px-4 py-2.5 font-mono text-slate-400">#{p.declarationId}</td>
+                            <td className="px-4 py-2.5 text-slate-300">
+                              {p.expiresAt ? new Date(p.expiresAt).toLocaleDateString() : "—"}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span
+                                className={`font-semibold ${
+                                  (p.daysUntilExpiry ?? 99) <= 7
+                                    ? "text-red-400"
+                                    : (p.daysUntilExpiry ?? 99) <= 14
+                                    ? "text-orange-400"
+                                    : "text-yellow-400"
+                                }`}
+                              >
+                                {p.daysUntilExpiry ?? "—"} day{p.daysUntilExpiry !== 1 ? "s" : ""}
+                              </span>
                             </td>
                           </tr>
                         ))}

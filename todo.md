@@ -380,3 +380,66 @@
 - [x] Total: 233 tests across 12 files — all passing (0 failures)
 - [x] TypeScript: 0 errors
 - [x] Save checkpoint
+
+## Sprint 14 — Certificate Archive, Permit Expiry Alerts, Officer Workload Dashboard
+
+### Trader Certificate Archive
+- [ ] Add clearanceCertificates table to drizzle/schema.ts (id, declarationId, traderId, fileKey, fileUrl, generatedAt, generatedBy)
+- [ ] Run pnpm db:push to migrate schema
+- [ ] Update declarations.generateClearanceCertificate to persist record to clearanceCertificates table
+- [ ] Add declarations.listMyCertificates tRPC procedure (trader: own certs; admin/customs: all)
+- [ ] Build MyCertificates.tsx page: table of certificates with declaration ref, date, download link
+- [ ] Add "My Certificates" nav item to trader sidebar in DashboardLayout
+- [ ] Add /app/trader/certificates route to App.tsx
+
+### OGA Permit Expiry Alerts
+- [ ] Add alerts.runPermitExpiryCheck tRPC procedure (queries permits expiring within 30 days)
+- [ ] Wire permit expiry check into nightly cron job (alongside risk scan)
+- [ ] Send owner notification listing affected traders and permit numbers
+- [ ] Add permit expiry results to RiskAlerts page (new "Expiring Permits" tab)
+
+### Customs Officer Workload Dashboard
+- [ ] Add declarations.getOfficerWorkload tRPC procedure (queue depth, avg review time, SLA rate per officer)
+- [ ] Build OfficerWorkload.tsx page: table of officers with queue depth, avg review time, SLA %
+- [ ] Add bar chart: declarations reviewed per officer (last 30 days)
+- [ ] Add SLA compliance gauge: % reviewed within target time (configurable, default 4h)
+- [ ] Add "Officer Workload" nav item to admin sidebar in DashboardLayout
+- [ ] Add /app/admin/officer-workload route to App.tsx
+
+### Tests & Delivery
+- [ ] Write vitest tests for listMyCertificates, runPermitExpiryCheck, getOfficerWorkload
+- [ ] Save checkpoint
+
+## Sprint 14 — Certificate Archive, Permit Expiry Alerts, Officer Workload Dashboard (COMPLETED)
+
+### Trader Certificate Archive
+- [x] Add clearanceCertificates table to drizzle/schema.ts
+- [x] Run pnpm db:push to migrate (clearance_certificates table created)
+- [x] Update generateClearanceCertificate to persist record to DB
+- [x] Add declarations.listMyCertificates tRPC procedure (paginated, trader-scoped)
+- [x] Build MyCertificates.tsx page: certificate list with declaration ref, goods, duty paid, download link
+- [x] Add "My Clearance Certificates" nav item to trader sidebar
+- [x] Register /app/trader/certificates route in App.tsx
+
+### OGA Permit Expiry Alerts
+- [x] Add alerts.getExpiringPermits procedure (admin/customs_officer, daysAhead param)
+- [x] Add alerts.runPermitExpiryCheck procedure (admin only, sends owner notification)
+- [x] Wire permit expiry check into nightly cron job in server/_core/index.ts
+- [x] Add expiring permits panel to RiskAlerts page (colour-coded by urgency: 7/14/30 days)
+
+### Officer Workload Dashboard
+- [x] Create server/routers/officerWorkload.ts: getTeamSummary, getMyWorkload procedures
+- [x] Register officerWorkloadRouter in server/routers.ts
+- [x] Build OfficerWorkload.tsx page: team KPI tiles, per-officer table with queue depth, avg review time, SLA bar
+- [x] Add "Officer Workload" nav item to admin and customs_officer Investigations group
+- [x] Register /app/admin/officer-workload route in App.tsx
+
+### Tests & Delivery
+- [x] Write vitest tests for officerWorkload.getTeamSummary: 6 tests
+- [x] Write vitest tests for officerWorkload.getMyWorkload: 4 tests
+- [x] Write vitest tests for declarations.listMyCertificates: 3 tests
+- [x] Write vitest tests for alerts.getExpiringPermits: 4 tests
+- [x] Write vitest tests for alerts.runPermitExpiryCheck: 3 tests
+- [x] Total: 254 tests across 13 files — all passing
+- [x] TypeScript: 0 errors
+- [x] Save checkpoint
