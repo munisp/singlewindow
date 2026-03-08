@@ -228,3 +228,34 @@
 - [x] Drill-down: "Flag for Post-Clearance Audit" button wired to postAudit.create
 - [x] Write vitest tests for getTraderInvestigation procedure (8 tests, all passing)
 - [x] Save checkpoint
+
+## Sprint 10 — Trader Link Analysis, Case Management, Risk Alerts (COMPLETED)
+
+### Trader-to-Trader Link Analysis
+- [x] Add knowledgeGraph.sharedAgentNetwork tRPC procedure (finds traders sharing same broker/corridor)
+- [x] Wire co-network sub-graph into FraudNetwork investigation panel (shared-corridor co-network list)
+- [x] Co-network panel shows related traders with risk scores, click-to-investigate navigation
+
+### Investigation Case Management
+- [x] Add fraudCases, fraudCaseNotes, fraudCaseEvidence, riskScanResults tables to drizzle/schema.ts
+- [x] Run pnpm db:push to migrate schema (5 new tables)
+- [x] Add server/routers/fraudCases.ts: createCase, getCase, listCases, addNote, uploadEvidence, updateStatus, caseStats
+- [x] Register fraudCases router in server/routers.ts
+- [x] Build FraudCases.tsx page: case list with status/priority filters, create modal, detail view with notes/evidence/status timeline
+- [x] Add Fraud Cases nav item to admin/customs_officer sidebar
+- [x] Add routes /app/admin/fraud-cases to App.tsx
+
+### Automated Nightly Risk-Threshold Alerts
+- [x] Add server/routers/alerts.ts: runNightlyRiskScan, getRiskAlerts, getLatestFlaggedDeclarations, scheduleNightlyJob
+- [x] Wire notifyOwner to send summary notification when high-risk declarations found
+- [x] Register alerts router in server/routers.ts
+- [x] Build RiskAlerts.tsx page: scan results table, flagged declarations, manual scan trigger
+- [x] Add Risk Alerts nav item to admin sidebar
+- [x] Add route /app/admin/risk-alerts to App.tsx
+
+### Tests & Delivery
+- [x] Write vitest tests for fraudCases router: 18 tests (auth, RBAC, input validation, happy paths)
+- [x] Write vitest tests for alerts router: 9 tests (auth, RBAC, input validation, happy paths)
+- [x] Write vitest tests for sharedAgentNetwork: 5 tests (auth, RBAC, invalid input, shape)
+- [x] Total: 211 tests across 11 test files — all passing
+- [x] Save checkpoint

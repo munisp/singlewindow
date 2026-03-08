@@ -130,6 +130,13 @@ function getNavGroups(role: string): NavGroup[] {
         ],
       },
       {
+        label: "Investigations",
+        items: [
+          { icon: AlertTriangle, label: "Risk Alerts", path: "/app/admin/risk-alerts" },
+          { icon: Shield, label: "Fraud Cases", path: "/app/admin/fraud-cases" },
+        ],
+      },
+      {
         label: "Reference",
         items: [
           { icon: BookOpen, label: "Specification", path: "/specification" },
@@ -162,6 +169,14 @@ function getNavGroups(role: string): NavGroup[] {
         items: [
           { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
           { icon: Network, label: "Knowledge Graph", path: "/app/knowledge-graph" },
+          { icon: GitFork, label: "Fraud Network", path: "/app/admin/fraud-network" },
+        ],
+      },
+      {
+        label: "Investigations",
+        items: [
+          { icon: AlertTriangle, label: "Risk Alerts", path: "/app/admin/risk-alerts" },
+          { icon: Shield, label: "Fraud Cases", path: "/app/admin/fraud-cases" },
         ],
       },
       common,

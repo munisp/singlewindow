@@ -38,6 +38,8 @@ const PostClearanceAudit = lazy(() => import("./pages/app/PostClearanceAudit"));
 const DutyDrawback = lazy(() => import('./pages/app/DutyDrawback'));
 const KnowledgeGraph = lazy(() => import('./pages/app/KnowledgeGraph'));
 const FraudNetwork = lazy(() => import('./pages/app/FraudNetwork'));
+const FraudCases = lazy(() => import('./pages/app/FraudCases'));
+const RiskAlerts = lazy(() => import('./pages/app/RiskAlerts'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -146,6 +148,14 @@ function Router() {
       {/* Fraud Network Visualisation */}
       <Route path="/app/admin/fraud-network">
         <Suspense fallback={<LazyFallback />}><FraudNetwork /></Suspense>
+      </Route>
+
+      {/* Fraud Cases & Risk Alerts */}
+      <Route path="/app/admin/fraud-cases">
+        <Suspense fallback={<LazyFallback />}><FraudCases /></Suspense>
+      </Route>
+      <Route path="/app/admin/risk-alerts">
+        <Suspense fallback={<LazyFallback />}><RiskAlerts /></Suspense>
       </Route>
 
       {/* AI Assistant */}

@@ -21,6 +21,8 @@ import { financeRouter } from "./routers/finance";
 import { postAuditRouter } from "./routers/postAudit";
 import { drawbackRouter } from "./routers/drawback";
 import { knowledgeGraphRouter } from "./routers/knowledgeGraph";
+import { fraudCasesRouter } from "./routers/fraudCases";
+import { alertsRouter } from "./routers/alerts";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -57,6 +59,8 @@ export const appRouter = router({
   postAudit: postAuditRouter,
   drawback: drawbackRouter,
   knowledgeGraph: knowledgeGraphRouter,
+  fraudCases: fraudCasesRouter,
+  alerts: alertsRouter,
 });
 
 export type AppRouter = typeof appRouter;

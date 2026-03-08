@@ -139,6 +139,12 @@ export default function FraudNetwork() {
     { enabled: !!investigationTraderId, refetchOnWindowFocus: false }
   );
 
+  // Shared-agent co-network data
+  const sharedAgentQuery = trpc.knowledgeGraph.sharedAgentNetwork.useQuery(
+    { traderId: investigationTraderId ?? "", months: 12 },
+    { enabled: !!investigationTraderId, refetchOnWindowFocus: false }
+  );
+
   // Post-clearance audit mutation to flag a trader
   const scheduleAuditMutation = trpc.postAudit.schedule.useMutation({
     onSuccess: () => {
@@ -769,6 +775,59 @@ export default function FraudNetwork() {
                             </div>
                           </div>
                         )}
+
+                        {/* Shared-Agent Co-Network */}
+                        {sharedAgentQuery.isLoading && (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+                            <RefreshCw size={11} className="animate-spin" /> Loading co-network…
+                          </div>
+                        )}
+                        {sharedAgentQuery.data && sharedAgentQuery.data.relatedTraderCount > 0 && (() => {
+                          const relatedNodes = sharedAgentQuery.data.nodes.filter((n) => n.type === "related_trader");
+                          const corridorNodes = sharedAgentQuery.data.nodes.filter((n) => n.type === "corridor_agent");
+                          return (
+                            <div>
+                              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                                <Users size={11} /> Shared-Corridor Co-Network
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 ml-1">
+                                  {relatedNodes.length} traders
+                                </Badge>
+                              </div>
+                              <div className="space-y-1 max-h-32 overflow-y-auto">
+                                {relatedNodes.slice(0, 8).map((ct) => (
+                                  <div
+                                    key={ct.id}
+                                    className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
+                                    onClick={() => setInvestigationTraderId(ct.id)}
+                                  >
+                                    <div
+                                      className="w-2 h-2 rounded-full shrink-0"
+                                      style={{
+                                        backgroundColor:
+                                          ct.riskScore >= 0.65 ? "#ef4444" :
+                                          ct.riskScore >= 0.35 ? "#f59e0b" : "#22c55e",
+                                      }}
+                                    />
+                                    <span className="font-medium truncate flex-1">{ct.label}</span>
+                                    <span className="text-muted-foreground shrink-0">{ct.declarationCount} decls</span>
+                                    <Badge
+                                      variant={ct.riskScore >= 0.65 ? "destructive" : ct.riskScore >= 0.35 ? "outline" : "secondary"}
+                                      className="text-[9px] px-1 py-0 shrink-0"
+                                    >
+                                      {(ct.riskScore * 100).toFixed(0)}%
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
+                              {corridorNodes.length > 0 && (
+                                <div className="mt-2 text-[10px] text-muted-foreground">
+                                  Via corridors: {corridorNodes.slice(0, 3).map((c) => c.label).join(", ")}
+                                  {corridorNodes.length > 3 && ` +${corridorNodes.length - 3} more`}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* Flag for Audit action */}
                         <div className="flex items-center gap-2 pt-1 border-t">

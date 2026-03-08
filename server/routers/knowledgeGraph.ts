@@ -851,4 +851,204 @@ export const knowledgeGraphRouter = router({
         fallback: true,
       };
     }),
+
+  // ── SHARED AGENT NETWORK ──────────────────────────────────────────────────
+  // Finds all traders who share the same customs broker / freight forwarder
+  // as the given trader, returning a D3-compatible node+link graph.
+  // Requires admin or customs_officer role.
+  sharedAgentNetwork: protectedProcedure
+    .input(
+      z.object({
+        traderId: z.string().min(1),
+        months: z.number().int().min(1).max(24).default(12),
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Admin or customs officer role required" });
+      }
+
+      const traderIdNum = parseInt(input.traderId, 10);
+      if (isNaN(traderIdNum)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "traderId must be a numeric string" });
+      }
+
+      // Try Go bridge first
+      const bridgeResult = await bridgePost<{
+        nodes: Array<{ id: string; label: string; type: string; riskScore: number; declarationCount: number }>;
+        links: Array<{ source: string; target: string; weight: number; sharedAgent: string }>;
+        centralTraderId: string;
+        agentCount: number;
+        relatedTraderCount: number;
+      }>("/graph/shared-agents", { traderId: input.traderId, months: input.months });
+
+      if (bridgeResult) {
+        return { ...bridgeResult, fallback: false };
+      }
+
+      // ── Fallback: derive from PostgreSQL declarations ─────────────────────
+      // Two traders are "linked" if they share the same portOfEntry and hsCode
+      // within the same time window (proxy for shared broker/corridor).
+      const { getDb } = await import("../db");
+      const { declarations, stakeholderProfiles } = await import("../../drizzle/schema");
+      const { eq, and, gte, inArray } = await import("drizzle-orm");
+
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const since = new Date();
+      since.setMonth(since.getMonth() - input.months);
+
+      // Verify the focal trader exists
+      const focalProfile = await db
+        .select()
+        .from(stakeholderProfiles)
+        .where(eq(stakeholderProfiles.userId, traderIdNum))
+        .limit(1);
+      if (!focalProfile.length) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `Trader ${input.traderId} not found` });
+      }
+
+      // Get focal trader's declarations
+      const focalDecls = await db
+        .select()
+        .from(declarations)
+        .where(
+          and(
+            eq(declarations.traderId, traderIdNum),
+            gte(declarations.createdAt, since)
+          )
+        )
+        .limit(200);
+
+      type DeclRow2 = typeof focalDecls[number];
+
+      // Build a set of (portOfEntry, hsCode) pairs used by the focal trader
+      const corridorSet = new Set(
+        focalDecls
+          .filter((d: DeclRow2) => d.portOfEntry && d.hsCode)
+          .map((d: DeclRow2) => `${d.portOfEntry}::${d.hsCode?.slice(0, 4)}`)
+      );
+
+      if (corridorSet.size === 0) {
+        // No corridor overlap possible — return minimal graph
+        const focalNode = {
+          id: input.traderId,
+          label: focalProfile[0].organizationName ?? `Trader ${input.traderId}`,
+          type: "focal_trader",
+          riskScore: 0,
+          declarationCount: focalDecls.length,
+        };
+        return {
+          nodes: [focalNode],
+          links: [],
+          centralTraderId: input.traderId,
+          agentCount: 0,
+          relatedTraderCount: 0,
+          fallback: true,
+        };
+      }
+
+      // Find other traders who used the same corridors
+      const allDecls = await db
+        .select()
+        .from(declarations)
+        .where(gte(declarations.createdAt, since))
+        .limit(2000);
+
+      // Group by traderId, find corridor overlap
+      const traderCorridors = new Map<number, Set<string>>();
+      for (const d of allDecls) {
+        if (d.traderId === traderIdNum) continue;
+        if (!d.portOfEntry || !d.hsCode) continue;
+        const key = `${d.portOfEntry}::${d.hsCode.slice(0, 4)}`;
+        if (!corridorSet.has(key)) continue;
+        const s = traderCorridors.get(d.traderId) ?? new Set<string>();
+        s.add(key);
+        traderCorridors.set(d.traderId, s);
+      }
+
+      // Keep top 20 most-connected traders
+      const relatedTraderIds = Array.from(traderCorridors.entries())
+        .sort((a, b) => b[1].size - a[1].size)
+        .slice(0, 20)
+        .map(([id]) => id);
+
+      // Fetch profiles for related traders
+      type ProfileRow = typeof focalProfile[number];
+      let relatedProfiles: ProfileRow[] = [];
+      if (relatedTraderIds.length > 0) {
+        relatedProfiles = await db
+          .select()
+          .from(stakeholderProfiles)
+          .where(inArray(stakeholderProfiles.userId, relatedTraderIds));
+      }
+
+      const profileMap = new Map<number, ProfileRow>();
+      for (const p of relatedProfiles) profileMap.set(p.userId, p);
+
+      // Build D3 nodes and links
+      // Shared corridors become virtual "agent" nodes
+      const corridorAgents = Array.from(
+        new Set(
+          Array.from(traderCorridors.values()).flatMap((s) => Array.from(s))
+        )
+      );
+
+      type AllDeclRow = typeof allDecls[number];
+
+      const nodes: Array<{ id: string; label: string; type: string; riskScore: number; declarationCount: number }> = [
+        {
+          id: input.traderId,
+          label: focalProfile[0].organizationName ?? `Trader ${input.traderId}`,
+          type: "focal_trader",
+          riskScore: focalDecls.length > 0
+            ? focalDecls.reduce((s: number, d: DeclRow2) => s + Number(d.riskScore ?? 0), 0) / focalDecls.length
+            : 0,
+          declarationCount: focalDecls.length,
+        },
+        ...corridorAgents.map((c: string) => ({
+          id: `agent::${c}`,
+          label: c.replace("::", " / "),
+          type: "corridor_agent",
+          riskScore: 0,
+          declarationCount: 0,
+        })),
+        ...relatedTraderIds.map((tid: number) => {
+          const p = profileMap.get(tid);
+          const tDecls = allDecls.filter((d: AllDeclRow) => d.traderId === tid);
+          const avgRisk = tDecls.length > 0
+            ? tDecls.reduce((s: number, d: AllDeclRow) => s + Number(d.riskScore ?? 0), 0) / tDecls.length
+            : 0;
+          return {
+            id: String(tid),
+            label: p?.organizationName ?? `Trader ${tid}`,
+            type: "related_trader",
+            riskScore: Math.round(avgRisk * 100) / 100,
+            declarationCount: tDecls.length,
+          };
+        }),
+      ];
+
+      const links: Array<{ source: string; target: string; weight: number; sharedAgent: string }> = [];
+      // Focal trader → corridor agents
+      for (const c of corridorAgents) {
+        links.push({ source: input.traderId, target: `agent::${c}`, weight: 1, sharedAgent: c as string });
+      }
+      // Related traders → corridor agents
+      for (const entry of Array.from(traderCorridors.entries())) {
+        const [tid, corridors] = entry;
+        for (const c of Array.from(corridors)) {
+          links.push({ source: String(tid), target: `agent::${c}`, weight: corridors.size, sharedAgent: c as string });
+        }
+      }
+
+      return {
+        nodes,
+        links,
+        centralTraderId: input.traderId,
+        agentCount: corridorAgents.length,
+        relatedTraderCount: relatedTraderIds.length,
+        fallback: true,
+      };
+    }),
 });

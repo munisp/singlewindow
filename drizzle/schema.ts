@@ -565,3 +565,80 @@ export const dutyDrawbackClaims = pgTable("duty_drawback_claims", {
 ]);
 export type DutyDrawbackClaim = typeof dutyDrawbackClaims.$inferSelect;
 export type InsertDutyDrawbackClaim = typeof dutyDrawbackClaims.$inferInsert;
+
+// ─── FRAUD CASES ──────────────────────────────────────────────────────────────
+
+export const fraudCaseStatusEnum = pgEnum("fraud_case_status", [
+  "open", "under_review", "escalated", "closed_confirmed", "closed_cleared", "referred_prosecution"
+]);
+
+export const fraudCasePriorityEnum = pgEnum("fraud_case_priority", [
+  "low", "medium", "high", "critical"
+]);
+
+export const fraudCases = pgTable("fraud_cases", {
+  id: serial("id").primaryKey(),
+  caseNumber: varchar("case_number", { length: 32 }).notNull().unique(),
+  traderId: integer("trader_id").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  status: fraudCaseStatusEnum("status").default("open").notNull(),
+  priority: fraudCasePriorityEnum("priority").default("medium").notNull(),
+  assignedTo: integer("assigned_to"),
+  createdBy: integer("created_by").notNull(),
+  linkedDeclarationIds: json("linked_declaration_ids").$type<number[]>().default([]),
+  riskScore: real("risk_score"),
+  closureReason: text("closure_reason"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_fc_trader_id").on(t.traderId),
+  index("idx_fc_status").on(t.status),
+  index("idx_fc_assigned_to").on(t.assignedTo),
+  index("idx_fc_created_by").on(t.createdBy),
+]);
+export type FraudCase = typeof fraudCases.$inferSelect;
+export type InsertFraudCase = typeof fraudCases.$inferInsert;
+
+export const fraudCaseNotes = pgTable("fraud_case_notes", {
+  id: serial("id").primaryKey(),
+  caseId: integer("case_id").notNull().references(() => fraudCases.id),
+  authorId: integer("author_id").notNull(),
+  content: text("content").notNull(),
+  isInternal: boolean("is_internal").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [index("idx_fcn_case_id").on(t.caseId)]);
+export type FraudCaseNote = typeof fraudCaseNotes.$inferSelect;
+
+export const fraudCaseEvidence = pgTable("fraud_case_evidence", {
+  id: serial("id").primaryKey(),
+  caseId: integer("case_id").notNull().references(() => fraudCases.id),
+  uploadedBy: integer("uploaded_by").notNull(),
+  fileKey: varchar("file_key", { length: 512 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  mimeType: varchar("mime_type", { length: 128 }),
+  fileSizeBytes: bigint("file_size_bytes", { mode: "number" }),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_fce_case_id").on(t.caseId)]);
+export type FraudCaseEvidence = typeof fraudCaseEvidence.$inferSelect;
+
+// ─── NIGHTLY RISK SCAN RESULTS ────────────────────────────────────────────────
+
+export const riskScanResults = pgTable("risk_scan_results", {
+  id: serial("id").primaryKey(),
+  scanRunAt: timestamp("scan_run_at").defaultNow().notNull(),
+  totalDeclarationsScanned: integer("total_declarations_scanned").default(0).notNull(),
+  highRiskCount: integer("high_risk_count").default(0).notNull(),
+  newCasesCreated: integer("new_cases_created").default(0).notNull(),
+  thresholdUsed: real("threshold_used").notNull(),
+  scanPeriodHours: integer("scan_period_hours").notNull(),
+  flaggedDeclarationIds: json("flagged_declaration_ids").$type<number[]>().default([]),
+  notificationSent: boolean("notification_sent").default(false).notNull(),
+  runBy: integer("run_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_rsr_scan_run_at").on(t.scanRunAt)]);
+export type RiskScanResult = typeof riskScanResults.$inferSelect;
