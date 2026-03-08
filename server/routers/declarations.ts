@@ -209,6 +209,15 @@ export const declarationsRouter = router({
         entityId: input.id,
       });
 
+      // In-app Notification Centre entry
+      await createUserNotification({
+        userId: ctx.user.id,
+        type: "declaration_submitted",
+        title: "Declaration Submitted ✓",
+        body: `Your declaration ${decl.declarationNumber} has been submitted for assessment. Risk lane assigned: ${risk.lane.toUpperCase()}. Estimated duties: ${total.toFixed(2)} ${decl.invoiceCurrency ?? "USD"}.`,
+        declarationId: input.id,
+      }).catch(() => { /* non-blocking */ });
+
       return updated;
     }),
 

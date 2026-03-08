@@ -12,23 +12,47 @@ import {
   getPortCount, getCongestionCount, seedPortLocations, seedCongestionEvents,
 } from "../db";
 
-// ─── SEED DATA ────────────────────────────────────────────────────────────────
+// ─── SEED DATA (28 African + key global ports, UN LOCODE coordinates) ─────────
 const SEED_PORTS = [
+  // West Africa
   { portCode: "GHTEM", portName: "Tema Port", country: "GHA", latitude: 5.6333, longitude: -0.0167, portType: "seaport" },
-  { portCode: "RWAKG", portName: "Kigali Dry Port", country: "RWA", latitude: -1.9441, longitude: 30.0619, portType: "inland_port" },
-  { portCode: "SGSIN", portName: "Port of Singapore", country: "SGP", latitude: 1.2655, longitude: 103.8198, portType: "seaport" },
-  { portCode: "KENYB", portName: "Port of Mombasa", country: "KEN", latitude: -4.0435, longitude: 39.6682, portType: "seaport" },
+  { portCode: "GHTAI", portName: "Takoradi Port", country: "GHA", latitude: 4.8845, longitude: -1.7554, portType: "seaport" },
+  { portCode: "NGLAG", portName: "Lagos (Apapa) Port", country: "NGA", latitude: 6.4474, longitude: 3.3903, portType: "seaport" },
+  { portCode: "NGTIN", portName: "Tin Can Island Port", country: "NGA", latitude: 6.4352, longitude: 3.3426, portType: "seaport" },
+  { portCode: "NGPHC", portName: "Port Harcourt Port", country: "NGA", latitude: 4.7799, longitude: 7.0134, portType: "seaport" },
+  { portCode: "CIABJ", portName: "Port of Abidjan", country: "CIV", latitude: 5.2773, longitude: -4.0094, portType: "seaport" },
+  { portCode: "SNDKR", portName: "Port of Dakar", country: "SEN", latitude: 14.6928, longitude: -17.4467, portType: "seaport" },
+  { portCode: "BJANL", portName: "Port of Cotonou", country: "BEN", latitude: 6.3536, longitude: 2.4200, portType: "seaport" },
+  { portCode: "TGLFE", portName: "Port of Lomé", country: "TGO", latitude: 6.1375, longitude: 1.2314, portType: "seaport" },
+  { portCode: "CMDLE", portName: "Port of Douala", country: "CMR", latitude: 4.0511, longitude: 9.7085, portType: "seaport" },
+  // East Africa
+  { portCode: "KEMBA", portName: "Port of Mombasa", country: "KEN", latitude: -4.0435, longitude: 39.6682, portType: "seaport" },
   { portCode: "TZDAR", portName: "Port of Dar es Salaam", country: "TZA", latitude: -6.8235, longitude: 39.2895, portType: "seaport" },
-  { portCode: "NGLAG", portName: "Port of Lagos (Apapa)", country: "NGA", latitude: 6.4474, longitude: 3.3903, portType: "seaport" },
+  { portCode: "TZZNS", portName: "Port of Zanzibar", country: "TZA", latitude: -6.1630, longitude: 39.1894, portType: "seaport" },
+  { portCode: "ETADD", portName: "Addis Ababa Dry Port", country: "ETH", latitude: 9.0054, longitude: 38.7636, portType: "inland_port" },
+  { portCode: "DJJIB", portName: "Port of Djibouti", country: "DJI", latitude: 11.5892, longitude: 43.1456, portType: "seaport" },
+  { portCode: "SOMGQ", portName: "Port of Mogadishu", country: "SOM", latitude: 2.0469, longitude: 45.3182, portType: "seaport" },
+  { portCode: "RWAKG", portName: "Kigali Dry Port", country: "RWA", latitude: -1.9441, longitude: 30.0619, portType: "inland_port" },
+  { portCode: "UGKLA", portName: "Kampala Inland Port", country: "UGA", latitude: 0.3476, longitude: 32.5825, portType: "inland_port" },
+  // Southern Africa
   { portCode: "ZADRB", portName: "Port of Durban", country: "ZAF", latitude: -29.8587, longitude: 31.0218, portType: "seaport" },
+  { portCode: "ZACPT", portName: "Port of Cape Town", country: "ZAF", latitude: -33.9072, longitude: 18.4240, portType: "seaport" },
+  { portCode: "ZAELS", portName: "Port Elizabeth (Ngqura)", country: "ZAF", latitude: -33.8442, longitude: 25.6280, portType: "seaport" },
+  { portCode: "MZMPM", portName: "Port of Maputo", country: "MOZ", latitude: -25.9692, longitude: 32.5732, portType: "seaport" },
+  { portCode: "BWFRA", portName: "Francistown Dry Port", country: "BWA", latitude: -21.1661, longitude: 27.5142, portType: "inland_port" },
+  // North Africa
   { portCode: "EGPSD", portName: "Port Said", country: "EGY", latitude: 31.2565, longitude: 32.2841, portType: "seaport" },
+  { portCode: "EGALX", portName: "Port of Alexandria", country: "EGY", latitude: 31.1975, longitude: 29.8925, portType: "seaport" },
   { portCode: "MAPTM", portName: "Tanger Med", country: "MAR", latitude: 35.8847, longitude: -5.5028, portType: "seaport" },
-  { portCode: "CNDAL", portName: "Port of Dalian", country: "CHN", latitude: 38.9140, longitude: 121.6147, portType: "seaport" },
+  { portCode: "LYTIP", portName: "Port of Tripoli", country: "LBY", latitude: 32.9081, longitude: 13.1805, portType: "seaport" },
+  // Key global hubs for comparison
+  { portCode: "SGSIN", portName: "Port of Singapore", country: "SGP", latitude: 1.2655, longitude: 103.8198, portType: "seaport" },
 ];
 
-async function ensurePortsSeed() {
+async function ensurePortsSeed(force = false) {
   const count = await getPortCount();
-  if (count > 0) return;
+  // Re-seed if forced or if we have fewer ports than the full seed set (e.g. after expanding SEED_PORTS)
+  if (!force && count >= SEED_PORTS.length) return;
   await seedPortLocations(SEED_PORTS);
 }
 
@@ -166,6 +190,26 @@ export const geospatialRouter = router({
       declarationBacklog: row.declarationBacklog ?? 0,
       lastUpdated: row.recordedAt ?? null,
     }));
+  }),
+
+  /**
+   * Admin: Force re-seed all port locations and congestion events.
+   * Use this after expanding SEED_PORTS to add new ports to the database.
+   */
+  reseedPorts: adminProcedure.mutation(async () => {
+    await ensurePortsSeed(true);
+    const statuses = ["clear", "moderate", "congested", "critical"] as const;
+    const events = SEED_PORTS.map((p, i) => ({
+      portCode: p.portCode,
+      congestionStatus: statuses[i % 4],
+      vesselCount: Math.floor(Math.random() * 40) + 5,
+      waitTimeHours: Math.random() * 48,
+      declarationBacklog: Math.floor(Math.random() * 200),
+      inspectionQueueSize: Math.floor(Math.random() * 50),
+      metadata: { source: "seed" },
+    }));
+    await seedCongestionEvents(events);
+    return { seeded: SEED_PORTS.length, message: `${SEED_PORTS.length} ports seeded with congestion events.` };
   }),
 
   /**

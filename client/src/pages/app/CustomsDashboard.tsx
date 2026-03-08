@@ -229,15 +229,27 @@ export default function CustomsDashboard() {
                             {(() => {
                               const sla = getSLAStatus(d);
                               if (sla.label === "—") return <span className="text-xs text-muted-foreground">—</span>;
+                              const lane = d.riskLane ?? d.status;
+                              const threshold = SLA_HOURS[lane] ?? 24;
+                              const hoursOver = sla.isBreached ? (sla.hoursElapsed - threshold).toFixed(1) : null;
+                              const tooltipText = sla.isBreached
+                                ? `${sla.label} elapsed — ${hoursOver}h over SLA (limit: ${threshold}h for ${lane?.replace(/_/g, ' ')})`
+                                : sla.isWarning
+                                ? `${sla.label} elapsed — approaching SLA limit of ${threshold}h for ${lane?.replace(/_/g, ' ')}`
+                                : `${sla.label} elapsed — within SLA limit of ${threshold}h`;
                               return (
-                                <span className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
-                                  sla.isBreached ? "bg-red-100 text-red-700" :
-                                  sla.isWarning ? "bg-amber-100 text-amber-700" :
-                                  "bg-muted text-muted-foreground"
-                                }`}>
+                                <span
+                                  title={tooltipText}
+                                  className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded cursor-help ${
+                                    sla.isBreached ? "bg-red-100 text-red-700 ring-1 ring-red-300" :
+                                    sla.isWarning ? "bg-amber-100 text-amber-700 ring-1 ring-amber-300" :
+                                    "bg-muted text-muted-foreground"
+                                  }`}
+                                >
                                   {sla.isBreached && <AlertTriangle className="h-3 w-3" />}
                                   {sla.label}
                                   {sla.isBreached && " OVERDUE"}
+                                  {sla.isWarning && <Clock className="h-3 w-3" />}
                                 </span>
                               );
                             })()}

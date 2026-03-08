@@ -559,3 +559,29 @@
 
 ### Archive
 - [x] Generate comprehensive archive of entire project (tradegateway-sprint16-archive.zip — 467 files, 1.1MB)
+
+## Sprint 17 — Notification Completion, Port Data Seeding, SLA Tooltip
+
+### KYC & Payment Notifications
+- [x] Wire createUserNotification into kyc.reviewVerification (KYC approved/rejected/more-info)
+- [x] Wire createUserNotification into payments.confirm (payment confirmed)
+- [x] Wire createUserNotification into declarations.submit (submission confirmation)
+
+### African Port Data Seeding
+- [x] Expand scripts/seed-ports.mjs with 25 real African ports (UN LOCODE coordinates)
+- [x] Add 2,100 congestion events (7 days of hourly snapshots per port)
+- [x] Add 720 vessel tracking events (15 vessels × 48 positions)
+- [x] Run seed script — port_locations: 25, congestion_events: 2100, vessel_events: 720
+- [x] Add geospatial.reseed admin procedure for future reseeding
+
+### SLA Hover Tooltip
+- [x] Add native title tooltip to CustomsDashboard SLA badge
+- [x] Show "Xh elapsed — Yh over SLA (limit: Zh for green lane)" on hover
+- [x] Add cursor-help indicator and ring border for breached/warning badges
+- [x] Show Clock icon for warning state badges
+
+### Tests & Delivery
+- [x] Fix declarations.test.ts mock to include createUserNotification + getDeclarationStatsByTrader
+- [x] Update stats test: traders now get their own stats (not FORBIDDEN)
+- [x] All 277 tests pass across 14 test files
+- [x] Save checkpoint

@@ -64,6 +64,8 @@ vi.mock("./db", () => ({
   getUserById: vi.fn().mockResolvedValue(null),
   createNotification: vi.fn().mockResolvedValue(undefined),
   getNotificationsByUser: vi.fn().mockResolvedValue([]),
+  createUserNotification: vi.fn().mockResolvedValue(undefined),
+  getDeclarationStatsByTrader: vi.fn().mockResolvedValue({ total: 5, green: 3, yellow: 1, red: 1, cleared: 2, rejected: 0 }),
 }));
 
 vi.mock("./_core/llm", () => ({
@@ -152,9 +154,12 @@ describe("declarations router — auth guards", () => {
     ).rejects.toThrow();
   });
 
-  it("rejects non-admin access to stats", async () => {
+  it("returns trader-specific stats for trader role", async () => {
     const caller = appRouter.createCaller(createTraderCtx());
-    await expect(caller.declarations.stats()).rejects.toThrow();
+    // Traders now get their own stats (not FORBIDDEN) — getDeclarationStatsByTrader is called
+    const result = await caller.declarations.stats();
+    expect(result).toBeDefined();
+    expect(typeof result).toBe("object");
   });
 });
 

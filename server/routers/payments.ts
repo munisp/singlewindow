@@ -4,7 +4,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   createPayment, updatePayment, getPaymentsByDeclaration,
   getDeclarationById, updateDeclaration, logAuditEvent, createNotification,
-  getAllPayments
+  getAllPayments, createUserNotification
 } from "../db";
 import { nanoid } from "nanoid";
 
@@ -71,6 +71,15 @@ export const paymentsRouter = router({
         entityType: "payment",
         entityId: input.paymentId,
       });
+
+      // Also send in-app notification to the Notification Centre
+      await createUserNotification({
+        userId: updated.traderId,
+        type: "payment_confirmed",
+        title: "Payment Confirmed ✓",
+        body: `Your payment of ${updated.amount} ${updated.currency} (Ref: ${updated.reference}) has been confirmed. Your declaration is now queued for examination.`,
+        declarationId: updated.declarationId,
+      }).catch(() => { /* non-blocking */ });
 
       return updated;
     }),

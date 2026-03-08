@@ -30,6 +30,7 @@ import {
   getLatestKYCVerification,
   updateKYCVerification,
   listKYCVerifications,
+  createUserNotification,
 } from "../db";
 import { storagePut } from "../storage";
 
@@ -408,11 +409,37 @@ export const kycRouter = router({
         }).catch(() => { /* non-blocking */ });
       }
 
+      // Send in-app notification to the trader via Notification Centre
+      if (verification?.userId) {
+        const notifMap: Record<string, { title: string; message: string }> = {
+          APPROVED: {
+            title: "KYC Verification Approved ✓",
+            message: `Your identity/business verification (ID: ${input.verificationId}) has been approved. You now have full access to the TradeGateway platform.`,
+          },
+          REJECTED: {
+            title: "KYC Verification Rejected",
+            message: `Your identity/business verification (ID: ${input.verificationId}) was rejected.${input.rejectionReason ? ` Reason: ${input.rejectionReason}` : " Please contact support for details."}`,
+          },
+          MORE_INFO_REQUIRED: {
+            title: "KYC Verification — Additional Information Required",
+            message: `Your identity/business verification (ID: ${input.verificationId}) requires additional information.${input.notes ? ` Notes: ${input.notes}` : " Please re-submit with the requested documents."}`,
+          },
+        };
+        const notif = notifMap[input.decision];
+        if (notif) {
+          await createUserNotification({
+            userId: verification.userId,
+            type: "kyc_status_update",
+            title: notif.title,
+            body: notif.message,
+          }).catch(() => { /* non-blocking */ });
+        }
+      }
       return {
         verificationId: input.verificationId,
         status: input.decision,
         reviewedAt: verification?.reviewedAt ?? null,
-        notificationSent: input.decision === "APPROVED" || input.decision === "REJECTED",
+        notificationSent: true,
       };
     }),
 
