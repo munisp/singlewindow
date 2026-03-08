@@ -20,6 +20,10 @@ import SingaporeComparison from "@/components/SingaporeComparison";
 import HSCodeLookup from "@/components/HSCodeLookup";
 import OGASLADashboard from "@/components/OGASLADashboard";
 import PDFExport from "@/components/PDFExport";
+import MojaloopDemo from "@/components/MojaloopDemo";
+import KubernetesMap from "@/components/KubernetesMap";
+import LanguageToggle from "@/components/LanguageToggle";
+import { I18nProvider } from "@/contexts/I18nContext";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -446,6 +450,7 @@ export default function Home() {
   const toggleLayer = (id: string) => setOpenLayer(openLayer === id ? null : id);
 
   return (
+    <I18nProvider>
     <div className="min-h-screen bg-navy text-white font-body">
 
       {/* ── STICKY NAV ───────────────────────────────────────────────── */}
@@ -453,6 +458,9 @@ export default function Home() {
         <div className="container max-w-6xl mx-auto px-6">
           <div className="flex items-center justify-between h-14">
             <div className="font-display text-sm font-bold text-gold">TradeGateway™ NGSWTP</div>
+            <div className="flex items-center gap-3">
+              <LanguageToggle />
+            </div>
             <div className="hidden md:flex items-center gap-1 text-xs">
               {[
                 { label: "Research", href: "#research" },
@@ -470,6 +478,8 @@ export default function Home() {
                 { label: "Roadmap", href: "#roadmap" },
                 { label: "HS Lookup", href: "#hs-lookup" },
                 { label: "OGA SLA", href: "#oga-sla" },
+                { label: "Payment Flow", href: "#mojaloop-demo" },
+                { label: "K8s Map", href: "#k8s-map" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1120,6 +1130,10 @@ export default function Home() {
       <HSCodeLookup />
       {/* ── OGA SLA DASHBOARD ────────────────────────────────────────────── */}
       <OGASLADashboard />
+      {/* ── MOJALOOP PAYMENT FLOW DEMO ─────────────────────────────────── */}
+      <MojaloopDemo />
+      {/* ── KUBERNETES RESOURCE MAP ──────────────────────────────────────── */}
+      <KubernetesMap />
       {/* ── PDF EXPORT ───────────────────────────────────────────────────── */}
       <PDFExport />
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
@@ -1164,5 +1178,6 @@ export default function Home() {
         </div>
       </footer>
     </div>
+    </I18nProvider>
   );
 }
