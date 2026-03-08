@@ -585,3 +585,26 @@
 - [x] Update stats test: traders now get their own stats (not FORBIDDEN)
 - [x] All 277 tests pass across 14 test files
 - [x] Save checkpoint
+
+## Sprint 18 — Admin UX, Mobile PWA Badge, Notification Mark All Read
+
+### Reseed Port Data Button (Admin Console)
+- [x] Add geospatial.reseedPorts tRPC call to AdminConsole System Settings tab
+- [x] Show success/error toast after reseed completes
+- [x] Button shows spinner and "Reseeding..." label while pending
+
+### Mobile PWA Notification Badge
+- [x] Add clickable bell icon with unread count badge to mobile top bar in DashboardLayout
+- [x] Badge updates in real-time via trpc.userNotifications.getUnreadCount query
+- [x] Badge visible when count > 0; clicking navigates to /app/notification-centre
+- [x] Supports 99+ overflow display
+
+### Mark All Read Button (Notification Centre)
+- [x] "Mark all read" button already present in NotificationCentre page header (Sprint 15)
+- [x] Wired to userNotifications.markAllRead mutation
+- [x] Button disabled/hidden when there are no unread notifications
+- [x] Invalidates both getMyNotifications and getUnreadCount queries on success
+
+### Tests & Delivery
+- [x] Run full test suite — 277/277 tests passing
+- [x] Save checkpoint

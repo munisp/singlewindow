@@ -489,9 +489,18 @@ function DashboardLayoutContent({
               <SidebarTrigger className="h-9 w-9 rounded-lg" />
               <span className="font-medium text-sm">{activeLabel}</span>
             </div>
-            {unreadCount > 0 && (
-              <Badge variant="destructive" className="h-5 text-[10px]">{unreadCount}</Badge>
-            )}
+            <button
+              onClick={() => setLocation("/app/notification-centre")}
+              className="relative flex items-center justify-center h-9 w-9 rounded-lg hover:bg-muted transition-colors"
+              aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+            >
+              <Bell className="h-5 w-5" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </button>
           </div>
         )}
         <main className="flex-1 p-4 md:p-6">{children}</main>

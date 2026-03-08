@@ -10,6 +10,8 @@ import { trpc } from "@/lib/trpc";
 import {
   Building2,
   CheckCircle,
+  Database,
+  RefreshCw,
   Search,
   Shield,
   ShieldCheck,
@@ -18,6 +20,45 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+
+function PortDataCard() {
+  const utils = trpc.useUtils();
+  const reseed = trpc.geospatial.reseedPorts.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.message ?? "Port data reseeded successfully.");
+      utils.geospatial.listPorts.invalidate();
+    },
+    onError: (err) => {
+      toast.error(err.message ?? "Failed to reseed port data.");
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Database className="h-5 w-5" />
+          Port &amp; Congestion Data
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Reseed the 25 African port locations with fresh congestion events and vessel tracking
+          positions. This replaces all existing congestion data with newly generated seed data.
+        </p>
+        <Button
+          onClick={() => reseed.mutate()}
+          disabled={reseed.isPending}
+          variant="outline"
+          className="gap-2"
+        >
+          <RefreshCw className={`h-4 w-4 ${reseed.isPending ? "animate-spin" : ""}`} />
+          {reseed.isPending ? "Reseeding…" : "Reseed Port Data"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 const ROLE_COLORS: Record<string, string> = {
   trader: "bg-blue-100 text-blue-700",
@@ -138,6 +179,7 @@ export default function AdminConsole() {
           <TabsList>
             <TabsTrigger value="onboarding">Stakeholder Onboarding</TabsTrigger>
             <TabsTrigger value="users">User Management</TabsTrigger>
+            <TabsTrigger value="system">System Settings</TabsTrigger>
           </TabsList>
 
           {/* Onboarding tab */}
@@ -341,6 +383,10 @@ export default function AdminConsole() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+          {/* System Settings tab */}
+          <TabsContent value="system" className="space-y-4 mt-4">
+            <PortDataCard />
           </TabsContent>
         </Tabs>
       </div>
