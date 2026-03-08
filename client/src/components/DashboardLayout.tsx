@@ -182,9 +182,10 @@ function getNavGroups(role: string): NavGroup[] {
       {
         label: "Finance Operations",
         items: [
-          { icon: LayoutDashboard, label: "Finance Dashboard", path: "/app/admin" },
+          { icon: LayoutDashboard, label: "Finance Dashboard", path: "/app/finance" },
           { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
-          { icon: BarChart3, label: "Analytics", path: "/app/admin/analytics" },
+          { icon: BarChart3, label: "Revenue Analytics", path: "/app/finance" },
+          { icon: Map, label: "Port Heatmap", path: "/app/geo/heatmap" },
         ],
       },
       common,

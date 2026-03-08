@@ -17,6 +17,7 @@ import { aiRouter } from "./routers/ai";
 import { mojaloopRouter } from "./routers/mojaloop";
 import { temporalRouter } from "./routers/temporal";
 import { geospatialRouter } from "./routers/geospatial";
+import { financeRouter } from "./routers/finance";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -49,6 +50,7 @@ export const appRouter = router({
   mojaloop: mojaloopRouter,
   temporal: temporalRouter,
   geospatial: geospatialRouter,
+  finance: financeRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,4 +1,10 @@
+/**
+ * NewDeclaration.tsx — Multi-step declaration form with AI risk scoring
+ * After submission, automatically calls the AI risk engine and shows the
+ * risk score, lane assignment, and recommended action before redirecting.
+ */
 import DashboardLayout from "@/components/DashboardLayout";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -7,7 +13,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, ArrowRight, CheckCircle, FileText, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle,
+  FileText,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
+  Zap,
+} from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -47,9 +64,124 @@ type FormData = z.infer<typeof schema>;
 
 const STEPS = ["Parties", "Goods", "Transport", "Financial", "Review"];
 
+// ─── RISK RESULT PANEL ───────────────────────────────────────────────────────
+
+type RiskResult = {
+  riskScore: number;
+  riskLane: string;
+  riskFactors: string[];
+  recommendedAction: string;
+  reasoning: string;
+  hsCodeValid: boolean;
+  valuationFlag: boolean;
+  originRisk: string;
+  declarationId: string;
+  model?: string;
+};
+
+const LANE_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType; bg: string }> = {
+  GREEN: { label: "Green Lane", color: "text-emerald-600", icon: ShieldCheck, bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800" },
+  YELLOW: { label: "Yellow Lane", color: "text-amber-600", icon: ShieldQuestion, bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800" },
+  RED: { label: "Red Lane", color: "text-red-600", icon: ShieldAlert, bg: "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800" },
+  BLUE: { label: "Blue Lane", color: "text-blue-600", icon: ShieldCheck, bg: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800" },
+};
+
+function RiskResultPanel({
+  result,
+  declarationId,
+  onContinue,
+}: {
+  result: RiskResult;
+  declarationId: number;
+  onContinue: () => void;
+}) {
+  const lane = LANE_CONFIG[result.riskLane] ?? LANE_CONFIG["YELLOW"];
+  const LaneIcon = lane.icon;
+  const scoreColor =
+    result.riskScore < 30 ? "text-emerald-600" :
+    result.riskScore < 60 ? "text-amber-600" :
+    "text-red-600";
+
+  return (
+    <Card className={`border-2 ${lane.bg}`}>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Zap className="h-4 w-4 text-primary" />
+          AI Risk Assessment Complete
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Score + Lane */}
+        <div className="flex items-center gap-6">
+          <div className="text-center">
+            <div className={`text-4xl font-bold ${scoreColor}`}>{result.riskScore}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Risk Score</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <LaneIcon className={`h-6 w-6 ${lane.color}`} />
+            <div>
+              <div className={`font-semibold ${lane.color}`}>{lane.label}</div>
+              <div className="text-xs text-muted-foreground">
+                Action: <span className="font-medium">{result.recommendedAction.replace(/_/g, " ")}</span>
+              </div>
+            </div>
+          </div>
+          <div className="ml-auto flex flex-col gap-1 text-xs">
+            <Badge variant={result.hsCodeValid ? "default" : "destructive"} className="text-xs">
+              HS Code {result.hsCodeValid ? "Valid" : "Invalid"}
+            </Badge>
+            {result.valuationFlag && (
+              <Badge variant="destructive" className="text-xs">
+                <AlertTriangle className="h-3 w-3 mr-1" /> Valuation Flag
+              </Badge>
+            )}
+            <Badge variant="outline" className="text-xs">
+              Origin Risk: {result.originRisk}
+            </Badge>
+          </div>
+        </div>
+
+        {/* Reasoning */}
+        <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
+          {result.reasoning}
+        </div>
+
+        {/* Risk Factors */}
+        {result.riskFactors.length > 0 && (
+          <div>
+            <p className="text-xs font-medium mb-1.5">Risk Factors Identified</p>
+            <ul className="space-y-1">
+              {result.riskFactors.map((f, i) => (
+                <li key={i} className="flex gap-2 text-xs text-muted-foreground">
+                  <AlertTriangle className="h-3 w-3 text-amber-500 mt-0.5 shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {result.model && (
+          <p className="text-xs text-muted-foreground">Scored by: {result.model}</p>
+        )}
+
+        <Button onClick={onContinue} className="w-full gap-2">
+          <CheckCircle className="h-4 w-4" />
+          View Declaration Details
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
+
 export default function NewDeclaration() {
   const [, setLocation] = useLocation();
   const [step, setStep] = useState(0);
+  const [createdDeclarationId, setCreatedDeclarationId] = useState<number | null>(null);
+  const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
+  const [isScoring, setIsScoring] = useState(false);
   const utils = trpc.useUtils();
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
@@ -63,13 +195,39 @@ export default function NewDeclaration() {
     },
   });
 
+  const scoreRiskMutation = trpc.ai.scoreRisk.useMutation({
+    onSuccess: (data) => {
+      setRiskResult(data as RiskResult);
+      setIsScoring(false);
+    },
+    onError: () => {
+      setIsScoring(false);
+      // Non-fatal: skip risk scoring, proceed to declaration detail
+      if (createdDeclarationId) {
+        setLocation(`/app/trader/declarations/${createdDeclarationId}`);
+      }
+    },
+  });
+
   const createMutation = trpc.declarations.create.useMutation({
     onSuccess: (data) => {
       utils.declarations.myDeclarations.invalidate();
       toast.success("Declaration submitted successfully", {
         description: `Reference: ${data.declarationNumber}`,
       });
-      setLocation(`/app/trader/declarations/${data.id}`);
+      setCreatedDeclarationId(data.id);
+      // Trigger AI risk scoring
+      setIsScoring(true);
+      const formData = watch();
+      scoreRiskMutation.mutate({
+        declarationId: data.declarationNumber,
+        hsCode: formData.hsCode,
+        goodsDescription: formData.goodsDescription,
+        countryOfOrigin: formData.countryOfOrigin,
+        consigneeCountry: formData.countryOfDestination,
+        declaredValue: formData.invoiceValue,
+        weight: formData.grossWeight,
+      });
     },
     onError: (err) => {
       toast.error("Failed to submit declaration", { description: err.message });
@@ -91,6 +249,54 @@ export default function NewDeclaration() {
       invoiceCurrency: data.invoiceCurrency,
     });
   };
+
+  // If risk result is ready, show the risk panel
+  if (riskResult && createdDeclarationId) {
+    return (
+      <DashboardLayout title="Risk Assessment">
+        <div className="max-w-2xl space-y-6">
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Risk Assessment Result</h1>
+              <p className="text-sm text-muted-foreground">
+                AI-powered WCO SAFE Framework risk analysis for your declaration
+              </p>
+            </div>
+          </div>
+          <RiskResultPanel
+            result={riskResult}
+            declarationId={createdDeclarationId}
+            onContinue={() => setLocation(`/app/trader/declarations/${createdDeclarationId}`)}
+          />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  // If submitted and scoring in progress, show loading state
+  if (isScoring || createMutation.isPending) {
+    return (
+      <DashboardLayout title="Processing Declaration">
+        <div className="max-w-2xl">
+          <Card>
+            <CardContent className="pt-8 pb-8 flex flex-col items-center gap-4">
+              <Loader2 className="h-10 w-10 animate-spin text-primary" />
+              <div className="text-center">
+                <p className="font-semibold">
+                  {createMutation.isPending ? "Submitting declaration..." : "Running AI risk assessment..."}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {createMutation.isPending
+                    ? "Assigning Unique Reference Number and registering with customs system"
+                    : "Analysing HS code, origin, value, and trader profile against WCO SAFE Framework"}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout title="New Declaration">
@@ -245,21 +451,21 @@ export default function NewDeclaration() {
                       {errors.portOfLoading && <p className="text-xs text-destructive">{errors.portOfLoading.message}</p>}
                     </div>
                     <div className="grid gap-2">
-                      <Label>Vessel / Flight Name</Label>
-                      <Input {...register("vesselName")} placeholder="Optional" />
+                      <Label>Vessel Name</Label>
+                      <Input {...register("vesselName")} placeholder="e.g. MSC Gülsün" />
                     </div>
                     <div className="grid gap-2">
-                      <Label>Voyage / Flight Number</Label>
-                      <Input {...register("voyageNumber")} placeholder="Optional" />
+                      <Label>Voyage Number</Label>
+                      <Input {...register("voyageNumber")} placeholder="e.g. 2024-001" />
                     </div>
                     <div className="grid gap-2">
-                      <Label>Bill of Lading / AWB</Label>
-                      <Input {...register("billOfLadingNumber")} placeholder="Optional" />
+                      <Label>Bill of Lading Number</Label>
+                      <Input {...register("billOfLadingNumber")} placeholder="e.g. MAEU123456789" />
                     </div>
-                    <div className="grid gap-2 sm:col-span-2">
-                      <Label>Container Numbers</Label>
-                      <Input {...register("containerNumbers")} placeholder="Comma-separated, e.g. TCKU1234567, MSCU9876543" />
-                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Container Numbers</Label>
+                    <Input {...register("containerNumbers")} placeholder="e.g. TCKU3953461, MSCU4567890" />
                   </div>
                 </>
               )}
@@ -275,7 +481,7 @@ export default function NewDeclaration() {
                     </div>
                     <div className="grid gap-2">
                       <Label>Currency *</Label>
-                      <Input {...register("invoiceCurrency")} placeholder="USD" maxLength={3} className="uppercase" />
+                      <Input {...register("invoiceCurrency")} placeholder="USD" maxLength={3} />
                     </div>
                     <div className="grid gap-2">
                       <Label>Freight Cost</Label>
@@ -302,7 +508,7 @@ export default function NewDeclaration() {
               {step === 4 && (
                 <div className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    Please review your declaration details before submitting. Once submitted, the declaration will be assigned a Unique Reference Number (URN) and processed by the AI risk engine.
+                    Please review your declaration details before submitting. Once submitted, the declaration will be assigned a Unique Reference Number (URN) and automatically assessed by the AI risk engine.
                   </p>
                   <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
                     {[
@@ -322,6 +528,13 @@ export default function NewDeclaration() {
                         <span className="font-medium text-right max-w-[60%] truncate">{value || "—"}</span>
                       </div>
                     ))}
+                  </div>
+                  {/* AI scoring notice */}
+                  <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    <Zap className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                    <p className="text-xs text-muted-foreground">
+                      After submission, the AI risk engine will automatically analyse this declaration against WCO SAFE Framework criteria and assign a risk lane (Green / Yellow / Red).
+                    </p>
                   </div>
                 </div>
               )}
@@ -347,7 +560,7 @@ export default function NewDeclaration() {
                 {createMutation.isPending ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Submitting...</>
                 ) : (
-                  <><CheckCircle className="h-4 w-4" /> Submit Declaration</>
+                  <><Zap className="h-4 w-4" /> Submit & Score Risk</>
                 )}
               </Button>
             )}

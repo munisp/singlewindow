@@ -126,3 +126,19 @@
 - [x] Comprehensive audit report (AUDIT_REPORT.md)
 - [x] Additional vitest tests: geospatial (12), notifications (6), payments (8) — 65 tests total
 - [x] Generate comprehensive archive (tradegateway-audit-archive.zip)
+
+## Sprint 6 — Suggested Next Steps
+
+- [ ] Seed real African port data (portLocations + portCongestionEvents tables)
+- [ ] Add seedPorts admin tRPC procedure + seed script
+- [x] Build Finance role dashboard (/app/finance) with duty revenue charts
+- [x] Finance dashboard: revenue by HS chapter, by OGA, by corridor using recharts
+- [x] Finance dashboard: payment volume trend (last 30 days)
+- [x] Finance dashboard: outstanding duties / pending payments table
+- [x] Wire AI risk scoring into NewDeclaration submission flow
+- [x] Add real-time risk preview step in NewDeclaration form (before final submit)
+- [x] Show green/yellow/red lane assignment with AI explanation in declaration form
+- [x] Add /app/finance route to App.tsx and DashboardLayout nav
+- [x] Write vitest tests for finance router procedures (23 tests)
+- [x] Write vitest tests for AI risk scoring (25 tests) — 113 total tests
+- [x] Save checkpoint and generate updated archive

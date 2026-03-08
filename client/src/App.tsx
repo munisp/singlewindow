@@ -33,6 +33,7 @@ const AdminAnalytics = lazy(() => import("./pages/app/AdminAnalytics"));
 const CustomsRisk = lazy(() => import("./pages/app/CustomsRisk"));
 const TraderDeclarations = lazy(() => import("./pages/app/TraderDeclarations"));
 const Notifications = lazy(() => import("./pages/app/Notifications"));
+const Finance = lazy(() => import("./pages/app/Finance"));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -116,6 +117,10 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><Notifications /></Suspense>
       </Route>
 
+      {/* Finance Dashboard */}
+      <Route path="/app/finance">
+        <Suspense fallback={<LazyFallback />}><Finance /></Suspense>
+      </Route>
       {/* AI Assistant */}
       <Route path="/app/ai-assistant" component={AIAssistant} />
 

@@ -640,3 +640,201 @@ export async function insertVesselPosition(data: typeof vesselTrackingEvents.$in
   const result = await db.insert(vesselTrackingEvents).values(data).returning();
   return result[0] ?? null;
 }
+
+// ─── FINANCE ANALYTICS QUERIES ───────────────────────────────────────────────
+export async function getFinanceKPIs() {
+  const db = await getDb();
+  if (!db) return null;
+  const [totalRevenue, pendingPayments, confirmedPayments, failedPayments] = await Promise.all([
+    db.select({ total: sql<string>`COALESCE(SUM(CAST(amount AS DECIMAL)), 0)` })
+      .from(payments).where(eq(payments.status, "confirmed")),
+    db.select({ total: sql<string>`COALESCE(SUM(CAST(amount AS DECIMAL)), 0)`, count: count() })
+      .from(payments).where(eq(payments.status, "pending")),
+    db.select({ count: count() }).from(payments).where(eq(payments.status, "confirmed")),
+    db.select({ count: count() }).from(payments).where(eq(payments.status, "failed")),
+  ]);
+  const [dutyRevenue, vatRevenue, levyRevenue, overdueDeclarations] = await Promise.all([
+    db.select({ total: sql<string>`COALESCE(SUM(CAST(duty_amount AS DECIMAL)), 0)` })
+      .from(declarations).where(eq(declarations.status, "cleared")),
+    db.select({ total: sql<string>`COALESCE(SUM(CAST(vat_amount AS DECIMAL)), 0)` })
+      .from(declarations).where(eq(declarations.status, "cleared")),
+    db.select({ total: sql<string>`COALESCE(SUM(CAST(levy_amount AS DECIMAL)), 0)` })
+      .from(declarations).where(eq(declarations.status, "cleared")),
+    db.select({ count: count() }).from(declarations)
+      .where(eq(declarations.status, "payment_pending")),
+  ]);
+  return {
+    totalRevenue: parseFloat(totalRevenue[0]?.total ?? "0"),
+    pendingAmount: parseFloat(pendingPayments[0]?.total ?? "0"),
+    pendingCount: Number(pendingPayments[0]?.count ?? 0),
+    confirmedCount: Number(confirmedPayments[0]?.count ?? 0),
+    failedCount: Number(failedPayments[0]?.count ?? 0),
+    dutyRevenue: parseFloat(dutyRevenue[0]?.total ?? "0"),
+    vatRevenue: parseFloat(vatRevenue[0]?.total ?? "0"),
+    levyRevenue: parseFloat(levyRevenue[0]?.total ?? "0"),
+    overdueCount: Number(overdueDeclarations[0]?.count ?? 0),
+  };
+}
+
+export async function getRevenueByHsChapter(limit = 15) {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.select({
+    hsChapter: sql<string>`SUBSTRING(hs_code, 1, 2)`,
+    totalDuty: sql<string>`COALESCE(SUM(CAST(duty_amount AS DECIMAL)), 0)`,
+    totalVat: sql<string>`COALESCE(SUM(CAST(vat_amount AS DECIMAL)), 0)`,
+    totalLevy: sql<string>`COALESCE(SUM(CAST(levy_amount AS DECIMAL)), 0)`,
+    declarationCount: count(),
+  })
+    .from(declarations)
+    .where(and(
+      sql`hs_code IS NOT NULL`,
+      sql`hs_code != ''`,
+      eq(declarations.status, "cleared"),
+    ))
+    .groupBy(sql`SUBSTRING(hs_code, 1, 2)`)
+    .orderBy(desc(sql`SUM(CAST(duty_amount AS DECIMAL))`))
+    .limit(limit);
+  return results.map(r => ({
+    hsChapter: r.hsChapter,
+    totalDuty: parseFloat(r.totalDuty),
+    totalVat: parseFloat(r.totalVat),
+    totalLevy: parseFloat(r.totalLevy),
+    totalRevenue: parseFloat(r.totalDuty) + parseFloat(r.totalVat) + parseFloat(r.totalLevy),
+    declarationCount: Number(r.declarationCount),
+  }));
+}
+
+export async function getRevenueByCountry(limit = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.select({
+    country: declarations.countryOfOrigin,
+    totalDuty: sql<string>`COALESCE(SUM(CAST(duty_amount AS DECIMAL)), 0)`,
+    totalRevenue: sql<string>`COALESCE(SUM(CAST(total_due AS DECIMAL)), 0)`,
+    declarationCount: count(),
+  })
+    .from(declarations)
+    .where(and(
+      sql`country_of_origin IS NOT NULL`,
+      eq(declarations.status, "cleared"),
+    ))
+    .groupBy(declarations.countryOfOrigin)
+    .orderBy(desc(sql`SUM(CAST(total_due AS DECIMAL))`))
+    .limit(limit);
+  return results.map(r => ({
+    country: r.country ?? "Unknown",
+    totalDuty: parseFloat(r.totalDuty),
+    totalRevenue: parseFloat(r.totalRevenue),
+    declarationCount: Number(r.declarationCount),
+  }));
+}
+
+export async function getPaymentTrend(days = 30) {
+  const db = await getDb();
+  if (!db) return [];
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const results = await db.select({
+    date: sql<string>`DATE(created_at)`,
+    totalAmount: sql<string>`COALESCE(SUM(CAST(amount AS DECIMAL)), 0)`,
+    paymentCount: count(),
+    confirmedCount: sql<number>`COUNT(CASE WHEN status = 'confirmed' THEN 1 END)`,
+  })
+    .from(payments)
+    .where(sql`created_at >= ${since}`)
+    .groupBy(sql`DATE(created_at)`)
+    .orderBy(sql`DATE(created_at)`);
+  return results.map(r => ({
+    date: r.date,
+    totalAmount: parseFloat(r.totalAmount),
+    paymentCount: Number(r.paymentCount),
+    confirmedCount: Number(r.confirmedCount),
+  }));
+}
+
+export async function getRevenueByDeclarationType() {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.select({
+    declarationType: declarations.declarationType,
+    totalRevenue: sql<string>`COALESCE(SUM(CAST(total_due AS DECIMAL)), 0)`,
+    totalDuty: sql<string>`COALESCE(SUM(CAST(duty_amount AS DECIMAL)), 0)`,
+    declarationCount: count(),
+  })
+    .from(declarations)
+    .where(eq(declarations.status, "cleared"))
+    .groupBy(declarations.declarationType)
+    .orderBy(desc(sql`SUM(CAST(total_due AS DECIMAL))`));
+  return results.map(r => ({
+    declarationType: r.declarationType,
+    totalRevenue: parseFloat(r.totalRevenue),
+    totalDuty: parseFloat(r.totalDuty),
+    declarationCount: Number(r.declarationCount),
+  }));
+}
+
+export async function getPortRevenueBreakdown(limit = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.select({
+    portOfEntry: declarations.portOfEntry,
+    totalRevenue: sql<string>`COALESCE(SUM(CAST(total_due AS DECIMAL)), 0)`,
+    declarationCount: count(),
+  })
+    .from(declarations)
+    .where(and(
+      sql`port_of_entry IS NOT NULL`,
+      eq(declarations.status, "cleared"),
+    ))
+    .groupBy(declarations.portOfEntry)
+    .orderBy(desc(sql`SUM(CAST(total_due AS DECIMAL))`))
+    .limit(limit);
+  return results.map(r => ({
+    portOfEntry: r.portOfEntry ?? "Unknown",
+    totalRevenue: parseFloat(r.totalRevenue),
+    declarationCount: Number(r.declarationCount),
+  }));
+}
+
+export async function getPendingPaymentsList(limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: payments.id,
+    reference: payments.reference,
+    amount: payments.amount,
+    currency: payments.currency,
+    paymentMethod: payments.paymentMethod,
+    status: payments.status,
+    createdAt: payments.createdAt,
+    declarationId: payments.declarationId,
+    declarationNumber: declarations.declarationNumber,
+    hsCode: declarations.hsCode,
+    portOfEntry: declarations.portOfEntry,
+  })
+    .from(payments)
+    .innerJoin(declarations, eq(payments.declarationId, declarations.id))
+    .where(eq(payments.status, "pending"))
+    .orderBy(payments.createdAt)
+    .limit(limit);
+}
+
+export async function getRiskLaneRevenueBreakdown() {
+  const db = await getDb();
+  if (!db) return [];
+  const results = await db.select({
+    riskLane: declarations.riskLane,
+    totalRevenue: sql<string>`COALESCE(SUM(CAST(total_due AS DECIMAL)), 0)`,
+    declarationCount: count(),
+  })
+    .from(declarations)
+    .where(eq(declarations.status, "cleared"))
+    .groupBy(declarations.riskLane)
+    .orderBy(declarations.riskLane);
+  return results.map(r => ({
+    riskLane: r.riskLane ?? "unknown",
+    totalRevenue: parseFloat(r.totalRevenue),
+    declarationCount: Number(r.declarationCount),
+  }));
+}
