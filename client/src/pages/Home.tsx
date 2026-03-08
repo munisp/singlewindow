@@ -17,6 +17,9 @@ import APIPlayground from "@/components/APIPlayground";
 import DeclarationSimulator from "@/components/DeclarationSimulator";
 import PhaseGantt from "@/components/PhaseGantt";
 import SingaporeComparison from "@/components/SingaporeComparison";
+import HSCodeLookup from "@/components/HSCodeLookup";
+import OGASLADashboard from "@/components/OGASLADashboard";
+import PDFExport from "@/components/PDFExport";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -465,6 +468,8 @@ export default function Home() {
                 { label: "Simulator", href: "#simulator" },
                 { label: "API Playground", href: "#api-playground" },
                 { label: "Roadmap", href: "#roadmap" },
+                { label: "HS Lookup", href: "#hs-lookup" },
+                { label: "OGA SLA", href: "#oga-sla" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1111,6 +1116,12 @@ export default function Home() {
       {/* ── PHASE GANTT ──────────────────────────────────────────────────── */}
       <PhaseGantt />
 
+      {/* ── HS CODE LOOKUP ───────────────────────────────────────────────── */}
+      <HSCodeLookup />
+      {/* ── OGA SLA DASHBOARD ────────────────────────────────────────────── */}
+      <OGASLADashboard />
+      {/* ── PDF EXPORT ───────────────────────────────────────────────────── */}
+      <PDFExport />
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
       <footer className="py-12 bg-navy-950 border-t border-white/10">
         <div className="container max-w-6xl mx-auto px-6">
