@@ -12,6 +12,7 @@ import OGAIntegrationMap from "@/components/OGAIntegrationMap";
 import CostCalculator from "@/components/CostCalculator";
 import GovernanceFramework from "@/components/GovernanceFramework";
 import FullImplementation from "@/components/FullImplementation";
+import GapAnalysis from "@/components/GapAnalysis";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -455,6 +456,7 @@ export default function Home() {
                 { label: "Governance", href: "#governance" },
                 { label: "Security", href: "#security" },
                 { label: "Implementation", href: "#implementation" },
+                { label: "Gap Analysis", href: "#gap-analysis" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1085,6 +1087,9 @@ export default function Home() {
           <FullImplementation />
         </div>
       </section>
+
+      {/* ── GAP ANALYSIS ─────────────────────────────────────────────────── */}
+      <GapAnalysis />
 
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
       <footer className="py-12 bg-navy-950 border-t border-white/10">
