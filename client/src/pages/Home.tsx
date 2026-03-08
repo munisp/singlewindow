@@ -13,6 +13,10 @@ import CostCalculator from "@/components/CostCalculator";
 import GovernanceFramework from "@/components/GovernanceFramework";
 import FullImplementation from "@/components/FullImplementation";
 import GapAnalysis from "@/components/GapAnalysis";
+import APIPlayground from "@/components/APIPlayground";
+import DeclarationSimulator from "@/components/DeclarationSimulator";
+import PhaseGantt from "@/components/PhaseGantt";
+import SingaporeComparison from "@/components/SingaporeComparison";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -457,6 +461,10 @@ export default function Home() {
                 { label: "Security", href: "#security" },
                 { label: "Implementation", href: "#implementation" },
                 { label: "Gap Analysis", href: "#gap-analysis" },
+                { label: "SG Comparison", href: "#comparison" },
+                { label: "Simulator", href: "#simulator" },
+                { label: "API Playground", href: "#api-playground" },
+                { label: "Roadmap", href: "#roadmap" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1090,6 +1098,18 @@ export default function Home() {
 
       {/* ── GAP ANALYSIS ─────────────────────────────────────────────────── */}
       <GapAnalysis />
+
+      {/* ── SINGAPORE COMPARISON ─────────────────────────────────────────── */}
+      <SingaporeComparison />
+
+      {/* ── DECLARATION SIMULATOR ────────────────────────────────────────── */}
+      <DeclarationSimulator />
+
+      {/* ── API PLAYGROUND ───────────────────────────────────────────────── */}
+      <APIPlayground />
+
+      {/* ── PHASE GANTT ──────────────────────────────────────────────────── */}
+      <PhaseGantt />
 
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
       <footer className="py-12 bg-navy-950 border-t border-white/10">
