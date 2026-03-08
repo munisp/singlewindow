@@ -23,6 +23,8 @@ import PDFExport from "@/components/PDFExport";
 import MojaloopDemo from "@/components/MojaloopDemo";
 import KubernetesMap from "@/components/KubernetesMap";
 import LanguageToggle from "@/components/LanguageToggle";
+import MobileDrawer from "@/components/MobileDrawer";
+import TemporalWorkflow from "@/components/TemporalWorkflow";
 import { I18nProvider } from "@/contexts/I18nContext";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -460,6 +462,7 @@ export default function Home() {
             <div className="font-display text-sm font-bold text-gold">TradeGateway™ NGSWTP</div>
             <div className="flex items-center gap-3">
               <LanguageToggle />
+              <MobileDrawer />
             </div>
             <div className="hidden md:flex items-center gap-1 text-xs">
               {[
@@ -479,6 +482,7 @@ export default function Home() {
                 { label: "HS Lookup", href: "#hs-lookup" },
                 { label: "OGA SLA", href: "#oga-sla" },
                 { label: "Payment Flow", href: "#mojaloop-demo" },
+                { label: "Workflow", href: "#temporal-workflow" },
                 { label: "K8s Map", href: "#k8s-map" },
               ].map((item) => (
                 <a
@@ -1132,6 +1136,8 @@ export default function Home() {
       <OGASLADashboard />
       {/* ── MOJALOOP PAYMENT FLOW DEMO ─────────────────────────────────── */}
       <MojaloopDemo />
+      {/* ── TEMPORAL WORKFLOW TRACE ───────────────────────────────────── */}
+      <TemporalWorkflow />
       {/* ── KUBERNETES RESOURCE MAP ──────────────────────────────────────── */}
       <KubernetesMap />
       {/* ── PDF EXPORT ───────────────────────────────────────────────────── */}

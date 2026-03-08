@@ -10,6 +10,7 @@
  */
 
 import { useState, useCallback } from "react";
+import { useI18n } from "@/contexts/I18nContext";
 import { Search, AlertTriangle, CheckCircle, Info, ChevronDown, ChevronRight, Zap } from "lucide-react";
 
 // ─── HS Code Data (WCO Harmonized System 2022) ───────────────────────────────
@@ -183,6 +184,7 @@ const COUNTRY_NAMES: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function HSCodeLookup() {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<HSCode[]>([]);
   const [selectedCode, setSelectedCode] = useState<HSCode | null>(null);
@@ -240,16 +242,14 @@ export default function HSCodeLookup() {
           <div className="flex items-center gap-3 mb-4">
             <div className="w-1 h-10 bg-[#D4A017] rounded-full" />
             <span className="text-[#D4A017] text-sm font-semibold tracking-widest uppercase">
-              WCO Tariff Intelligence
+              {t.hs_badge}
             </span>
           </div>
           <h2 className="font-['Playfair_Display'] text-4xl font-bold text-white mb-4">
-            HS Code Lookup & Duty Calculator
+            {t.hs_title}
           </h2>
           <p className="text-slate-400 text-lg max-w-3xl">
-            Search the WCO Harmonized System 2022 tariff schedule. The BERT NLP classifier
-            provides confidence scores for commodity classification, with duty rates across
-            Kenya, Ghana, Rwanda, Singapore, and Nigeria.
+            {t.hs_subtitle}
           </p>
         </div>
 
@@ -263,7 +263,7 @@ export default function HSCodeLookup() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Search by HS code (e.g. 8471) or description (e.g. laptop, rice, petroleum)..."
+                placeholder={t.hs_search_placeholder}
                 className="w-full bg-[#0A1628] border border-slate-600 rounded-xl pl-12 pr-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-[#D4A017] transition-colors"
               />
             </div>

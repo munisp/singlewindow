@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
+import { useI18n } from "@/contexts/I18nContext";
 import { RefreshCw, CheckCircle, AlertTriangle, XCircle, Clock, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
@@ -73,6 +74,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function OGASLADashboard() {
+  const { t } = useI18n();
   const [ogas, setOgas] = useState<OGA[]>(generateOGAs());
   const [filter, setFilter] = useState<"ALL" | SLAStatus>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
@@ -136,15 +138,14 @@ export default function OGASLADashboard() {
             <div className="flex items-center gap-3 mb-4">
               <div className="w-1 h-10 bg-[#D4A017] rounded-full" />
               <span className="text-[#D4A017] text-sm font-semibold tracking-widest uppercase">
-                Real-Time Monitoring
+                {t.oga_badge}
               </span>
             </div>
             <h2 className="font-['Playfair_Display'] text-4xl font-bold text-white mb-4">
-              OGA SLA Dashboard
+              {t.oga_title}
             </h2>
             <p className="text-slate-400 text-lg max-w-2xl">
-              Live SLA compliance monitoring for all 37+ government agencies, international
-              systems, and financial institutions connected to the NGSWTP hub.
+              {t.oga_subtitle}
             </p>
           </div>
           <button
@@ -153,18 +154,18 @@ export default function OGASLADashboard() {
             className="flex items-center gap-2 bg-[#0D1E35] border border-slate-600 hover:border-[#D4A017] text-slate-300 hover:text-white px-4 py-2.5 rounded-xl transition-all text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
-            Refresh
+            {t.oga_refresh}
           </button>
         </div>
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
           {[
-            { label: "On Target", value: summary.green, color: "text-emerald-400", bg: "bg-emerald-900/20 border-emerald-700/30" },
-            { label: "At Risk", value: summary.amber, color: "text-amber-400", bg: "bg-amber-900/20 border-amber-700/30" },
-            { label: "Breached", value: summary.red, color: "text-red-400", bg: "bg-red-900/20 border-red-700/30" },
-            { label: "Avg Compliance", value: `${summary.avgCompliance}%`, color: "text-[#D4A017]", bg: "bg-[#D4A017]/10 border-[#D4A017]/20" },
-            { label: "Pending Requests", value: summary.totalPending, color: "text-blue-400", bg: "bg-blue-900/20 border-blue-700/30" },
+            { label: t.oga_on_target, value: summary.green, color: "text-emerald-400", bg: "bg-emerald-900/20 border-emerald-700/30" },
+            { label: t.oga_at_risk, value: summary.amber, color: "text-amber-400", bg: "bg-amber-900/20 border-amber-700/30" },
+            { label: t.oga_breached, value: summary.red, color: "text-red-400", bg: "bg-red-900/20 border-red-700/30" },
+            { label: t.oga_avg_compliance, value: `${summary.avgCompliance}%`, color: "text-[#D4A017]", bg: "bg-[#D4A017]/10 border-[#D4A017]/20" },
+            { label: t.oga_pending, value: summary.totalPending, color: "text-blue-400", bg: "bg-blue-900/20 border-blue-700/30" },
             { label: "SLA Breaches", value: summary.totalBreached, color: "text-red-400", bg: "bg-red-900/20 border-red-700/30" },
           ].map((card) => (
             <div key={card.label} className={`${card.bg} border rounded-xl p-4 text-center`}>
