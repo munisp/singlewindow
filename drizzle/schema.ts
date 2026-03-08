@@ -84,7 +84,10 @@ export const aeoAppStatusEnum = pgEnum("aeo_app_status", [
 export const notificationTypeEnum = pgEnum("notification_type", [
   "declaration_submitted", "declaration_cleared", "declaration_rejected",
   "payment_confirmed", "permit_approved", "permit_rejected",
-  "document_required", "aeo_status_update", "security_alert", "system"
+  "document_required", "aeo_status_update", "security_alert", "system",
+  "declaration_status_change", "permit_expiry_warning", "fraud_case_opened",
+  "fraud_case_assigned", "sla_breach", "kyc_approved", "kyc_rejected",
+  "duty_payment_due", "clearance_complete", "general"
 ]);
 
 // ─── USERS & AUTH ─────────────────────────────────────────────────────────────
@@ -662,3 +665,21 @@ export const clearanceCertificates = pgTable("clearance_certificates", {
   index("idx_cc_declaration_id").on(t.declarationId),
 ]);
 export type ClearanceCertificate = typeof clearanceCertificates.$inferSelect;
+
+// ─── USER NOTIFICATIONS ───────────────────────────────────────────────────────
+export const userNotifications = pgTable("user_notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: notificationTypeEnum("type").notNull().default("general"),
+  title: varchar("title", { length: 255 }).notNull(),
+  body: text("body").notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  isRead: boolean("is_read").default(false).notNull(),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_un_user_id").on(t.userId),
+  index("idx_un_user_unread").on(t.userId, t.isRead),
+  index("idx_un_created_at").on(t.createdAt),
+]);
+export type UserNotification = typeof userNotifications.$inferSelect;

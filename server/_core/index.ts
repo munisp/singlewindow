@@ -138,14 +138,85 @@ async function runPermitExpiryCheck() {
   }
 }
 
+// SLA breach scan — runs alongside nightly jobs, notifies traders of breached SLAs
+async function runSLABreachScan() {
+  console.log("[Cron] SLA breach scan starting…");
+  try {
+    const { getDb } = await import("../db");
+    const { declarations } = await import("../../drizzle/schema");
+    const { and, inArray, isNotNull } = await import("drizzle-orm");
+    const { createUserNotification } = await import("../db");
+    const db = await getDb();
+    if (!db) {
+      console.warn("[Cron] DB unavailable — skipping SLA breach scan");
+      return;
+    }
+
+    const SLA_MS: Record<string, number> = {
+      green: 4 * 60 * 60 * 1000,
+      yellow: 24 * 60 * 60 * 1000,
+      red: 72 * 60 * 60 * 1000,
+      blue: 48 * 60 * 60 * 1000,
+    };
+    const SLA_LABELS: Record<string, string> = {
+      green: "4 hours", yellow: "24 hours", red: "72 hours", blue: "48 hours",
+    };
+
+    const now = new Date();
+    const processingStatuses = ["submitted", "under_review", "inspection_required", "payment_pending"];
+    const rows = await db
+      .select()
+      .from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), isNotNull(declarations.submittedAt)))
+      .limit(500);
+
+    let notified = 0;
+    let critical = 0;
+    for (const decl of rows) {
+      if (!decl.submittedAt) continue;
+      const lane = decl.riskLane ?? "green";
+      const thresholdMs = SLA_MS[lane] ?? SLA_MS.green;
+      const elapsed = now.getTime() - new Date(decl.submittedAt).getTime();
+      if (elapsed > thresholdMs) {
+        const hoursElapsed = Math.round(elapsed / (60 * 60 * 1000) * 10) / 10;
+        if (elapsed > thresholdMs * 2) critical++;
+        try {
+          await createUserNotification({
+            userId: decl.traderId,
+            type: "sla_breach",
+            title: `SLA Breach: Declaration ${decl.declarationNumber}`,
+            body: `Your ${lane}-lane declaration (${decl.declarationNumber}) has been in "${decl.status}" status for ${hoursElapsed} hours, exceeding the ${SLA_LABELS[lane] ?? "SLA"} target. Our team has been notified.`,
+            declarationId: decl.id,
+          });
+          notified++;
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    if (critical > 0) {
+      try {
+        const { notifyOwner } = await import("./notification");
+        await notifyOwner({
+          title: `[Nightly SLA Scan] ${critical} critical breach${critical !== 1 ? "es" : ""} detected`,
+          content: `SLA breach scan at ${now.toUTCString()}. Total breaches: ${notified} (${critical} critical). Trader notifications sent: ${notified}.`,
+        });
+      } catch { /* non-fatal */ }
+    }
+    console.log(`[Cron] SLA breach scan complete — ${notified} notifications sent (${critical} critical)`);
+  } catch (err) {
+    console.error("[Cron] SLA breach scan failed:", err);
+  }
+}
+
 async function runNightlyJobs() {
   await runNightlyRiskScan();
   await runPermitExpiryCheck();
+  await runSLABreachScan();
 }
 
 // Schedule: second(0) minute(0) hour(2) day(*) month(*) weekday(*) = 02:00 UTC daily
 cron.schedule("0 0 2 * * *", runNightlyJobs, { timezone: "UTC" });
-console.log("[Cron] Nightly jobs scheduled at 02:00 UTC daily (risk scan + permit expiry check)");
+console.log("[Cron] Nightly jobs scheduled at 02:00 UTC daily (risk scan + permit expiry check + SLA breach scan)");
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {

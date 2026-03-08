@@ -57,6 +57,7 @@ import {
   Network,
   GitFork,
   Award,
+  Timer,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -81,7 +82,7 @@ function getNavGroups(role: string): NavGroup[] {
   const common: NavGroup = {
     label: "General",
     items: [
-      { icon: Bell, label: "Notifications", path: "/app/notifications" },
+      { icon: Bell, label: "Notification Centre", path: "/app/notification-centre" },
     ],
   };
 
@@ -136,6 +137,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: AlertTriangle, label: "High-Risk Shipments", path: "/app/admin/risk-alerts" },
           { icon: Shield, label: "Investigation Cases", path: "/app/admin/fraud-cases" },
           { icon: Users, label: "Officer Workload", path: "/app/admin/officer-workload" },
+          { icon: Timer, label: "SLA Breach Escalation", path: "/app/admin/sla-breach" },
         ],
       },
       {
@@ -180,6 +182,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: AlertTriangle, label: "High-Risk Shipments", path: "/app/admin/risk-alerts" },
           { icon: Shield, label: "Investigation Cases", path: "/app/admin/fraud-cases" },
           { icon: Users, label: "Officer Workload", path: "/app/admin/officer-workload" },
+          { icon: Timer, label: "SLA Breach Escalation", path: "/app/admin/sla-breach" },
         ],
       },
       common,
@@ -329,12 +332,12 @@ function DashboardLayoutContent({
 
   const navGroups = getNavGroups(user?.role ?? "user");
 
-  // Unread notifications count
-  const { data: notifications } = trpc.notifications.list.useQuery(
-    { limit: 20 },
+  // Unread notifications count (Sprint 15 - uses userNotifications.getUnreadCount for efficiency)
+  const { data: unreadData } = trpc.userNotifications.getUnreadCount.useQuery(
+    undefined,
     { refetchInterval: 30000 }
   );
-  const unreadCount = notifications?.filter((n: any) => !n.read).length ?? 0;
+  const unreadCount = unreadData?.count ?? 0;
 
   useEffect(() => {
     if (isCollapsed) setIsResizing(false);
@@ -416,7 +419,7 @@ function DashboardLayoutContent({
                         >
                           <item.icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
                           <span className="truncate">{item.label}</span>
-                          {item.label === "Notifications" && unreadCount > 0 && (
+                          {item.label === "Notification Centre" && unreadCount > 0 && (
                             <Badge variant="destructive" className="ml-auto h-5 min-w-5 text-[10px] px-1">
                               {unreadCount}
                             </Badge>

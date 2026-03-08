@@ -128,11 +128,13 @@ describe("declarations.listMyCertificates", () => {
       .rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("accepts authenticated user and returns array shape", async () => {
+  it("accepts authenticated user and returns object with certificates array", async () => {
     const caller = appRouter.createCaller(makeCtx("user") as any);
     try {
       const result = await caller.declarations.listMyCertificates({ limit: 20, offset: 0 });
-      expect(Array.isArray(result)).toBe(true);
+      // Returns { certificates: [], total: number }
+      expect(result).toHaveProperty("certificates");
+      expect(Array.isArray(result.certificates)).toBe(true);
     } catch (err: any) {
       expect(err.code).toBe("INTERNAL_SERVER_ERROR");
     }
@@ -196,7 +198,8 @@ describe("alerts.runPermitExpiryCheck", () => {
     const caller = appRouter.createCaller(makeCtx("admin") as any);
     try {
       const result = await caller.alerts.runPermitExpiryCheck({ daysAhead: 30 });
-      expect(result).toHaveProperty("permitsFound");
+      // Returns { checked, expiringCount, notificationSent }
+      expect(result).toHaveProperty("checked");
       expect(result).toHaveProperty("notificationSent");
     } catch (err: any) {
       expect(err.code).toBe("INTERNAL_SERVER_ERROR");

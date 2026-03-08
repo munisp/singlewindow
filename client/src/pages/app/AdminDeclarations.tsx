@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
-import { ClipboardList, Search, Eye, RefreshCw } from "lucide-react";
+import { ClipboardList, Search, Eye, RefreshCw, Download } from "lucide-react";
+import { ExportDeclarationsDialog } from "@/components/ExportDeclarationsDialog";
 
 const RISK_COLORS: Record<string, string> = {
   GREEN: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
@@ -61,10 +62,19 @@ export default function AdminDeclarations() {
               System-wide declaration management — {data?.length ?? 0} loaded
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
+              <RefreshCw className="h-4 w-4" />
+              Refresh
+            </Button>
+            <ExportDeclarationsDialog
+              trigger={
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Download className="h-4 w-4" />Export CSV/JSON
+                </Button>
+              }
+            />
+          </div>
         </div>
 
         {/* Filters */}

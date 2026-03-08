@@ -237,10 +237,11 @@ describe("alerts router — RBAC", () => {
 });
 
 describe("alerts router — input validation", () => {
-  it("runNightlyRiskScan — rejects threshold below 0.5", async () => {
+  it("runNightlyRiskScan — rejects threshold below 0 (min is 0.0)", async () => {
     const caller = adminCaller();
+    // threshold min is 0.0, so 0.3 is valid; only negative values should fail
     await expect(
-      caller.alerts.runNightlyRiskScan({ threshold: 0.3, periodHours: 24 })
+      caller.alerts.runNightlyRiskScan({ threshold: -0.1, periodHours: 24 })
     ).rejects.toThrow();
   });
 

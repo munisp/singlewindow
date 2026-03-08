@@ -267,7 +267,7 @@ export const visionRouter = router({
    */
   submitInspection: protectedProcedure
     .input(z.object({
-      imageData: z.string().describe("Base64-encoded image"),
+      imageData: z.string().min(1, "Image data is required").describe("Base64-encoded image"),
       imageFilename: z.string().min(1),
       contentType: z.enum(["image/jpeg", "image/png", "image/webp", "image/tiff"]),
       analysisType: z.enum([

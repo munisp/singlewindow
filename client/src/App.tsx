@@ -42,6 +42,8 @@ const FraudCases = lazy(() => import('./pages/app/FraudCases'));
 const RiskAlerts = lazy(() => import('./pages/app/RiskAlerts'));
 const MyCertificates = lazy(() => import('./pages/app/MyCertificates'));
 const OfficerWorkload = lazy(() => import('./pages/app/OfficerWorkload'));
+const NotificationCentre = lazy(() => import('./pages/app/NotificationCentre'));
+const SLABreachDashboard = lazy(() => import('./pages/app/SLABreachDashboard'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -168,6 +170,16 @@ function Router() {
       {/* Officer Workload Dashboard */}
       <Route path="/app/admin/officer-workload">
         <Suspense fallback={<LazyFallback />}><OfficerWorkload /></Suspense>
+      </Route>
+
+      {/* Notification Centre (Sprint 15) */}
+      <Route path="/app/notification-centre">
+        <Suspense fallback={<LazyFallback />}><NotificationCentre /></Suspense>
+      </Route>
+
+      {/* SLA Breach Escalation (Sprint 15) */}
+      <Route path="/app/admin/sla-breach">
+        <Suspense fallback={<LazyFallback />}><SLABreachDashboard /></Suspense>
       </Route>
 
       {/* AI Assistant */}

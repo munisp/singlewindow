@@ -13,11 +13,21 @@ import { ENV } from './_core/env';
 let _db: ReturnType<typeof drizzle> | null = null;
 let _pool: Pool | null = null;
 
+// Always use PostgreSQL. If DATABASE_URL is a mysql:// or tidb:// URL (injected by
+// the Manus platform), fall back to the local PostgreSQL instance.
+function resolvePostgresUrl(): string {
+  const raw = process.env.DATABASE_URL ?? "";
+  if (raw.startsWith("postgresql://") || raw.startsWith("postgres://")) return raw;
+  // Fall back to local dev PostgreSQL
+  return "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
+}
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  if (!_db) {
     try {
-      _pool = new Pool({ connectionString: process.env.DATABASE_URL });
+      const url = resolvePostgresUrl();
+      _pool = new Pool({ connectionString: url });
       _db = drizzle(_pool);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
@@ -837,4 +847,82 @@ export async function getRiskLaneRevenueBreakdown() {
     totalRevenue: parseFloat(r.totalRevenue),
     declarationCount: Number(r.declarationCount),
   }));
+}
+
+// ─── USER NOTIFICATION QUERIES (Sprint 15 Notification Centre) ────────────────
+
+export async function createUserNotification(data: {
+  userId: number;
+  type: string;
+  title: string;
+  body: string;
+  declarationId?: number | null;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const { userNotifications } = await import("../drizzle/schema");
+  const [result] = await db
+    .insert(userNotifications)
+    .values({
+      userId: data.userId,
+      type: data.type as any,
+      title: data.title,
+      body: data.body,
+      declarationId: data.declarationId ?? null,
+      isRead: false,
+    })
+    .returning();
+  return result;
+}
+
+export async function getUserNotifications(userId: number, limit = 50, onlyUnread = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const { userNotifications } = await import("../drizzle/schema");
+  const { eq, desc, and } = await import("drizzle-orm");
+  const conditions = onlyUnread
+    ? and(eq(userNotifications.userId, userId), eq(userNotifications.isRead, false))
+    : eq(userNotifications.userId, userId);
+  return db
+    .select()
+    .from(userNotifications)
+    .where(conditions)
+    .orderBy(desc(userNotifications.createdAt))
+    .limit(limit);
+}
+
+export async function getUserUnreadCount(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { userNotifications } = await import("../drizzle/schema");
+  const { eq, and, count: countFn } = await import("drizzle-orm");
+  const [result] = await db
+    .select({ count: countFn() })
+    .from(userNotifications)
+    .where(and(eq(userNotifications.userId, userId), eq(userNotifications.isRead, false)));
+  return Number(result?.count ?? 0);
+}
+
+export async function markUserNotificationRead(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  const { userNotifications } = await import("../drizzle/schema");
+  const { eq, and } = await import("drizzle-orm");
+  await db
+    .update(userNotifications)
+    .set({ isRead: true, readAt: new Date() })
+    .where(and(eq(userNotifications.id, id), eq(userNotifications.userId, userId)));
+}
+
+export async function markAllUserNotificationsRead(userId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { userNotifications } = await import("../drizzle/schema");
+  const { eq, and } = await import("drizzle-orm");
+  const result = await db
+    .update(userNotifications)
+    .set({ isRead: true, readAt: new Date() })
+    .where(and(eq(userNotifications.userId, userId), eq(userNotifications.isRead, false)))
+    .returning({ id: userNotifications.id });
+  return result.length;
 }

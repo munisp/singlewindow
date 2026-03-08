@@ -443,3 +443,83 @@
 - [x] Total: 254 tests across 13 files — all passing
 - [x] TypeScript: 0 errors
 - [x] Save checkpoint
+
+## Sprint 15 — Notification Centre, SLA Breach Escalation, Bulk Export (IN PROGRESS)
+
+### Trader Notification Centre
+- [ ] Add userNotifications table to drizzle/schema.ts (id, userId, type, title, body, declarationId, isRead, createdAt)
+- [ ] Run pnpm db:push to migrate
+- [ ] Add notifications tRPC router: listMyNotifications, markRead, markAllRead, getUnreadCount
+- [ ] Wire declaration status changes to create notifications (in declarations router)
+- [ ] Add notification badge (red dot + count) to DashboardLayout header
+- [ ] Build TraderNotifications.tsx inbox page with read/unread state
+- [ ] Add "Notifications" nav item to all role sidebars
+- [ ] Register /app/notifications route in App.tsx
+
+### SLA Breach Escalation
+- [ ] Add slaBreachAt computed field logic to declarations router (submittedAt + slaTargetHours)
+- [ ] Add alerts.checkSlaBreaches procedure (admin/customs_officer): lists declarations past SLA
+- [ ] Wire SLA breach check into nightly cron job
+- [ ] Flag overdue declarations red in CustomsDashboard queue (visual indicator)
+- [ ] Send supervisor notification when breach detected (notifyOwner)
+- [ ] Add SLA breach count KPI tile to OfficerWorkload dashboard
+
+### Bulk Declaration Export
+- [ ] Install xlsx package (SheetJS) on server
+- [ ] Add declarations.exportDeclarations tRPC procedure (admin/finance, date range + filters → base64 xlsx)
+- [ ] Add "Download Report" button to AdminDeclarations page with date range picker
+- [ ] Support CSV and Excel format toggle
+- [ ] Show export progress toast while generating
+
+### Tests & Delivery
+- [ ] Write vitest tests for notifications router
+- [ ] Write vitest tests for alerts.checkSlaBreaches
+- [ ] Write vitest tests for declarations.exportDeclarations
+- [ ] Save checkpoint
+
+## Sprint 15 — Notification Centre, SLA Breach Escalation, Bulk Export (COMPLETED)
+
+### Database & Infrastructure
+- [x] Add userNotifications table to drizzle/schema.ts (id, userId, type, title, body, declarationId, isRead, readAt, createdAt)
+- [x] Add 10 new notification_type enum values (sla_breach, general, permit_expiry, etc.)
+- [x] Apply migrations manually via psql (enum additions outside transaction + table creation)
+- [x] Mark migrations 0006 and 0007 as applied in drizzle.migrations tracking table
+- [x] Fix server/db.ts to always use local PostgreSQL (resolvePostgresUrl() ignores mysql:// DATABASE_URL)
+
+### Trader Notification Centre
+- [x] Add getUserNotifications, getUserUnreadCount, markUserNotificationRead, markAllUserNotificationsRead, createUserNotification helpers to server/db.ts
+- [x] Create server/routers/userNotifications.ts: getMyNotifications, getUnreadCount, markAsRead, markAllRead, adminSend procedures
+- [x] Register userNotificationsRouter in server/routers.ts
+- [x] Build client/src/pages/app/NotificationCentre.tsx: full inbox with read/unread state, type badges, mark-all-read
+- [x] Update DashboardLayout to use userNotifications.getUnreadCount for nav badge (all roles)
+- [x] Update DashboardLayout nav label from "Notifications" to "Notification Centre" with correct path
+- [x] Register /app/notifications route in App.tsx
+
+### SLA Breach Escalation
+- [x] Create server/routers/slaEscalation.ts: scan, list, stats procedures
+- [x] SLA thresholds: green 4h, yellow 24h, red 72h, blue 48h (AEO)
+- [x] scan: finds breached declarations, creates user_notifications for traders, notifies owner on critical breaches
+- [x] list: returns breach list with trader name, hours elapsed, overage, severity (warning/critical)
+- [x] stats: summary stats by lane (total in processing, breached, critical)
+- [x] Register slaEscalationRouter in server/routers.ts
+- [x] Wire slaEscalation.scan into nightly cron job in server/_core/index.ts
+- [x] Build client/src/pages/app/SLABreachDashboard.tsx: stats tiles, breach list with severity badges, manual scan trigger
+- [x] Add "SLA Breach Monitor" nav item to admin and customs_officer sidebars
+- [x] Register /app/admin/sla-breaches route in App.tsx
+
+### Bulk Declaration Export
+- [x] Create server/routers/bulkExport.ts: exportDeclarations, previewCount procedures
+- [x] Supports CSV and JSON formats; filters by status, riskLane, dateFrom, dateTo, traderId (admin)
+- [x] Returns base64-encoded file content with filename and record count
+- [x] Register bulkExportRouter in server/routers.ts
+- [x] Build client/src/components/ExportDeclarationsDialog.tsx: format picker, filters, progress toast, auto-download
+- [x] Wire ExportDeclarationsDialog into TraderDeclarations page header
+- [x] Wire ExportDeclarationsDialog into AdminDeclarations page header
+
+### Tests & Delivery
+- [x] Write 23 vitest tests in server/sprint15.test.ts covering all three new routers
+- [x] Fix 4 pre-existing test failures (threshold validation, return shape mismatches, imageData validation)
+- [x] Add .min(1) validation to vision.submitInspection imageData field
+- [x] Total: 277 tests across 14 files — all passing (0 failures)
+- [x] TypeScript: 0 errors
+- [x] Save checkpoint
