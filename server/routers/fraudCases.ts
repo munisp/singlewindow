@@ -396,4 +396,26 @@ export const fraudCasesRouter = router({
       await db.update(fraudCases).set({ updatedAt: new Date() }).where(eq(fraudCases.id, input.caseId));
       return ev;
     }),
+
+  // ── GET ASSIGNABLE OFFICERS ───────────────────────────────────────────────────
+  // Returns users with customs_officer or admin role for the assignment dropdown.
+  getOfficers: protectedProcedure
+    .query(async ({ ctx }) => {
+      requireInvestigator(ctx.user.role);
+
+      const { getDb } = await import("../db");
+      const { users } = await import("../../drizzle/schema");
+      const { inArray } = await import("drizzle-orm");
+
+      const db = await getDb();
+      if (!db) return [];
+
+      const officers = await db
+        .select({ id: users.id, name: users.name, email: users.email, role: users.role })
+        .from(users)
+        .where(inArray(users.role, ["admin", "customs_officer"]))
+        .orderBy(users.name);
+
+      return officers;
+    }),
 });

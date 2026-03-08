@@ -44,7 +44,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
     label: "Payment Pending",
     color: "bg-purple-100 text-purple-700 border-purple-200",
     icon: <DollarSign className="h-4 w-4" />,
-    description: "Duties assessed — awaiting payment via Mojaloop",
+    description: "Duties and taxes have been assessed — awaiting payment to proceed",
   },
   under_examination: {
     label: "Under Examination",

@@ -40,10 +40,10 @@ export default function MojaloopPayments() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <CreditCard className="h-6 w-6 text-primary" />Mojaloop Payment Flows
+              <CreditCard className="h-6 w-6 text-primary" />Duty Payment Centre
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Real-time duty payment transactions via Mojaloop interoperable switch
+              Real-time duty and tax payment transactions across all financial institutions
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
@@ -51,13 +51,13 @@ export default function MojaloopPayments() {
           </Button>
         </div>
 
-        {/* Mojaloop Integration Status */}
+        {/* Payment Gateway Status */}
         {mojaStatus && (
           <Card className={mojaStatus.connected ? "border-emerald-500/30" : "border-amber-500/30"}>
             <CardContent className="p-3 flex items-center gap-3">
               <div className={`h-2 w-2 rounded-full ${mojaStatus.connected ? "bg-emerald-400" : "bg-amber-400"}`} />
-              <span className="text-sm font-medium">{mojaStatus.connected ? "Mojaloop Connected" : "Mojaloop Simulation Mode"}</span>
-              <span className="text-xs text-muted-foreground ml-auto">ILP: {mojaStatus.ilpVersion} · ISO: {mojaStatus.isoStandard} · FSPs: {mojaStatus.supportedFSPs}</span>
+              <span className="text-sm font-medium">{mojaStatus.connected ? "Payment Gateway: Live" : "Payment Gateway: Simulation Mode"}</span>
+              <span className="text-xs text-muted-foreground ml-auto">Protocol: {mojaStatus.ilpVersion} · Standard: {mojaStatus.isoStandard} · Banks supported: {mojaStatus.supportedFSPs}</span>
             </CardContent>
           </Card>
         )}

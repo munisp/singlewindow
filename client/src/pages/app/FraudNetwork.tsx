@@ -105,10 +105,10 @@ function riskBadgeVariant(score: number): "destructive" | "secondary" | "outline
 
 const TYPE_LABELS: Record<NodeType, string> = {
   trader: "Trader",
-  hs_code: "HS Code",
+  hs_code: "Commodity",
   port: "Port",
-  oga: "OGA",
-  corridor: "Corridor",
+  oga: "Government Agency",
+  corridor: "Trade Route",
 };
 
 const TYPE_ICONS: Record<NodeType, React.ReactNode> = {
@@ -407,17 +407,17 @@ export default function FraudNetwork() {
           <div>
             <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
               <Network size={24} className="text-primary" />
-              Fraud Network Intelligence
+              Trade Risk Network Map
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              GNN-powered trade entity graph — node colour indicates risk lane (red/amber/green)
+              Visual map of traders, shipments, ports, and agencies — colour indicates risk level (red = high, amber = medium, green = low)
             </p>
           </div>
           <div className="flex items-center gap-2">
             {data?.fallback && (
               <Badge variant="secondary" className="gap-1">
                 <Info size={12} />
-                Demo data — bridge offline
+                Showing sample data — live data service offline
               </Badge>
             )}
             <Button

@@ -286,3 +286,41 @@
 - [x] Write vitest tests for uploadEvidenceFile procedure: 7 tests (RBAC, input validation, happy path)
 - [x] Total: 217 tests across 11 files — 216 passing (1 pre-existing flaky LLM timeout in ai.risk.test.ts)
 - [x] Save checkpoint
+
+## Sprint 12 — Test Fixes, Case Assignment, Drag-and-Drop Upload, UX Overhaul (COMPLETED)
+
+### Technical Fixes
+- [x] Increase LLM test timeout in vitest.config.ts to 15000ms
+- [x] All 217 tests pass with 0 flaky failures
+
+### Case Assignment Workflow
+- [x] assignedTo field already existed in fraudCases schema
+- [x] Add getOfficers procedure to fraudCases router (lists customs_officer and admin users)
+- [x] Add assignCase procedure to fraudCases router (sends owner notification on assignment)
+- [x] Add officer assignment dropdown UI to FraudCases detail panel
+- [x] Show assigned officer name in case list and detail view
+
+### Drag-and-Drop Evidence Upload
+- [x] Install react-dropzone
+- [x] Replace file picker button in FraudCases with drag-and-drop zone
+- [x] Show file preview (name, size, type icon) before upload
+- [x] Retain progress bar and upload confirmation
+
+### Platform-Wide UX / Language Overhaul (Non-Technical Stakeholders)
+- [x] Audit all page titles, nav labels, section headers for technical jargon
+- [x] DashboardLayout: all nav labels rewritten to be role/task-oriented across all 5 user roles
+- [x] Home landing page: fully rewritten — removed all tech stack jargon, replaced with business value propositions
+- [x] MojaloopPayments → "Duty Payment Flows"; TemporalWorkflows → "Clearance Workflow Tracker"
+- [x] KnowledgeGraph: EPR-KGQA → "Ask a Question"; Cypher Explorer → "Advanced Query"
+- [x] VisionAnalysis: rewritten as "Cargo Image Inspection" with plain-English descriptions
+- [x] SecurityOps: "SIEM Alert Feed" → "Security Alert Feed"; rewritten header
+- [x] KYCPortal: "KYC/KYB Verification" → "Identity & Business Verification"
+- [x] FraudNetwork: "Fraud Network Intelligence" → "Trade Risk Network Map"
+- [x] RiskAlerts: "Automated nightly risk scan" → "Automated daily review"
+- [x] NewDeclaration: WCO SAFE Framework jargon replaced with plain-English descriptions
+- [x] DeclarationDetail: Mojaloop payment reference removed
+
+### Tests & Delivery
+- [x] 217 tests across 11 files — all passing (0 failures)
+- [x] TypeScript: 0 errors
+- [x] Save checkpoint

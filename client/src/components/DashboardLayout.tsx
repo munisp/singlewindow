@@ -89,57 +89,57 @@ function getNavGroups(role: string): NavGroup[] {
       {
         label: "Administration",
         items: [
-          { icon: LayoutDashboard, label: "Admin Dashboard", path: "/app/admin" },
-          { icon: Users, label: "User Management", path: "/app/admin/users" },
-          { icon: ClipboardList, label: "All Declarations", path: "/app/admin/declarations" },
-          { icon: ShieldCheck, label: "AEO Management", path: "/app/admin/aeo" },
-          { icon: UserCheck, label: "KYC Review", path: "/app/admin/kyc-review" },
-          { icon: BarChart3, label: "Analytics", path: "/app/admin/analytics" },
+          { icon: LayoutDashboard, label: "Overview", path: "/app/admin" },
+          { icon: Users, label: "Staff & Accounts", path: "/app/admin/users" },
+          { icon: ClipboardList, label: "All Shipment Declarations", path: "/app/admin/declarations" },
+          { icon: ShieldCheck, label: "Trusted Trader Programme", path: "/app/admin/aeo" },
+          { icon: UserCheck, label: "Trader Verification", path: "/app/admin/kyc-review" },
+          { icon: BarChart3, label: "Performance Reports", path: "/app/admin/analytics" },
         ],
       },
       {
-        label: "Customs Operations",
+        label: "Clearance Operations",
         items: [
-          { icon: FileText, label: "Declaration Queue", path: "/app/customs" },
-          { icon: AlertTriangle, label: "Risk Assessment", path: "/app/customs/risk" },
-          { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
-          { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
-          { icon: Workflow, label: "Workflow Traces", path: "/app/customs/workflows" },
-          { icon: ClipboardCheck, label: "Post-Clearance Audit", path: "/app/customs/audit" },
+          { icon: FileText, label: "Pending Declarations", path: "/app/customs" },
+          { icon: AlertTriangle, label: "Risk Screening", path: "/app/customs/risk" },
+          { icon: Camera, label: "Cargo Inspection", path: "/app/customs/vision" },
+          { icon: CreditCard, label: "Duty Payments", path: "/app/customs/payments" },
+          { icon: Workflow, label: "Clearance Workflows", path: "/app/customs/workflows" },
+          { icon: ClipboardCheck, label: "Post-Clearance Review", path: "/app/customs/audit" },
         ],
       },
       {
-        label: "Geospatial",
+        label: "Port & Trade Intelligence",
         items: [
-          { icon: Anchor, label: "Port Heatmap", path: "/app/geo/heatmap" },
+          { icon: Anchor, label: "Port Activity Map", path: "/app/geo/heatmap" },
         ],
       },
       {
-        label: "Security",
+        label: "Compliance & Security",
         items: [
-          { icon: Shield, label: "Security Ops", path: "/app/security" },
-          { icon: Globe, label: "Sanctions Screening", path: "/app/security/sanctions" },
+          { icon: Shield, label: "Security Monitoring", path: "/app/security" },
+          { icon: Globe, label: "Restricted Parties", path: "/app/security/sanctions" },
         ],
       },
       {
-        label: "AI Tools",
+        label: "Smart Tools",
         items: [
-          { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
-          { icon: Network, label: "Knowledge Graph", path: "/app/knowledge-graph" },
-          { icon: GitFork, label: "Fraud Network", path: "/app/admin/fraud-network" },
+          { icon: Sparkles, label: "Trade Advisory Assistant", path: "/app/ai-assistant" },
+          { icon: Network, label: "Entity Relationship Map", path: "/app/knowledge-graph" },
+          { icon: GitFork, label: "Suspicious Activity Map", path: "/app/admin/fraud-network" },
         ],
       },
       {
         label: "Investigations",
         items: [
-          { icon: AlertTriangle, label: "Risk Alerts", path: "/app/admin/risk-alerts" },
-          { icon: Shield, label: "Fraud Cases", path: "/app/admin/fraud-cases" },
+          { icon: AlertTriangle, label: "High-Risk Shipments", path: "/app/admin/risk-alerts" },
+          { icon: Shield, label: "Investigation Cases", path: "/app/admin/fraud-cases" },
         ],
       },
       {
         label: "Reference",
         items: [
-          { icon: BookOpen, label: "Specification", path: "/specification" },
+          { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },
       common,
@@ -148,35 +148,35 @@ function getNavGroups(role: string): NavGroup[] {
   if (role === "customs_officer" || role === "inspector") {
     return [
       {
-        label: "Customs Operations",
+        label: "Clearance Operations",
         items: [
-          { icon: LayoutDashboard, label: "Customs Dashboard", path: "/app/customs" },
-          { icon: FileText, label: "Declaration Queue", path: "/app/customs" },
-          { icon: AlertTriangle, label: "Risk Assessment", path: "/app/customs/risk" },
-          { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
-          { icon: Package, label: "OGA Permits", path: "/app/oga" },
-          { icon: ClipboardCheck, label: "Post-Clearance Audit", path: "/app/customs/audit" },
+          { icon: LayoutDashboard, label: "My Workstation", path: "/app/customs" },
+          { icon: FileText, label: "Pending Declarations", path: "/app/customs" },
+          { icon: AlertTriangle, label: "Risk Screening", path: "/app/customs/risk" },
+          { icon: Camera, label: "Cargo Inspection", path: "/app/customs/vision" },
+          { icon: Package, label: "Agency Permits", path: "/app/oga" },
+          { icon: ClipboardCheck, label: "Post-Clearance Review", path: "/app/customs/audit" },
         ],
       },
       {
-        label: "Geospatial",
+        label: "Port & Trade Intelligence",
         items: [
-          { icon: Anchor, label: "Port Heatmap", path: "/app/geo/heatmap" },
+          { icon: Anchor, label: "Port Activity Map", path: "/app/geo/heatmap" },
         ],
       },
       {
-        label: "AI Tools",
+        label: "Smart Tools",
         items: [
-          { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
-          { icon: Network, label: "Knowledge Graph", path: "/app/knowledge-graph" },
-          { icon: GitFork, label: "Fraud Network", path: "/app/admin/fraud-network" },
+          { icon: Sparkles, label: "Trade Advisory Assistant", path: "/app/ai-assistant" },
+          { icon: Network, label: "Entity Relationship Map", path: "/app/knowledge-graph" },
+          { icon: GitFork, label: "Suspicious Activity Map", path: "/app/admin/fraud-network" },
         ],
       },
       {
         label: "Investigations",
         items: [
-          { icon: AlertTriangle, label: "Risk Alerts", path: "/app/admin/risk-alerts" },
-          { icon: Shield, label: "Fraud Cases", path: "/app/admin/fraud-cases" },
+          { icon: AlertTriangle, label: "High-Risk Shipments", path: "/app/admin/risk-alerts" },
+          { icon: Shield, label: "Investigation Cases", path: "/app/admin/fraud-cases" },
         ],
       },
       common,
@@ -185,17 +185,17 @@ function getNavGroups(role: string): NavGroup[] {
   if (role === "oga_officer") {
     return [
       {
-        label: "OGA Operations",
+        label: "Permit Operations",
         items: [
-          { icon: LayoutDashboard, label: "OGA Dashboard", path: "/app/oga" },
-          { icon: Package, label: "Permit Queue", path: "/app/oga" },
-          { icon: FileText, label: "Declarations", path: "/app/customs" },
+          { icon: LayoutDashboard, label: "My Workstation", path: "/app/oga" },
+          { icon: Package, label: "Pending Permit Requests", path: "/app/oga" },
+          { icon: FileText, label: "Related Declarations", path: "/app/customs" },
         ],
       },
       {
-        label: "AI Tools",
+        label: "Smart Tools",
         items: [
-          { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
+          { icon: Sparkles, label: "Trade Advisory Assistant", path: "/app/ai-assistant" },
         ],
       },
       common,
@@ -204,13 +204,13 @@ function getNavGroups(role: string): NavGroup[] {
   if (role === "finance") {
     return [
       {
-        label: "Finance Operations",
+        label: "Revenue & Finance",
         items: [
-          { icon: LayoutDashboard, label: "Finance Dashboard", path: "/app/finance" },
-          { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
-          { icon: BarChart3, label: "Revenue Analytics", path: "/app/finance" },
-          { icon: RotateCcw, label: "Duty Drawback", path: "/app/finance/drawback" },
-          { icon: Map, label: "Port Heatmap", path: "/app/geo/heatmap" },
+          { icon: LayoutDashboard, label: "Revenue Overview", path: "/app/finance" },
+          { icon: CreditCard, label: "Duty Collections", path: "/app/customs/payments" },
+          { icon: BarChart3, label: "Revenue Reports", path: "/app/finance" },
+          { icon: RotateCcw, label: "Duty Refunds", path: "/app/finance/drawback" },
+          { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
         ],
       },
       common,
@@ -220,14 +220,14 @@ function getNavGroups(role: string): NavGroup[] {
   // Default: trader view
   return [
     {
-      label: "Trade Operations",
+      label: "My Trade Portal",
       items: [
-        { icon: LayoutDashboard, label: "My Dashboard", path: "/app/trader" },
-        { icon: FileText, label: "My Declarations", path: "/app/trader/declarations" },
-        { icon: Building2, label: "My Profile", path: "/app/trader/profile" },
-        { icon: ShieldCheck, label: "AEO Application", path: "/app/trader/aeo" },
-        { icon: RotateCcw, label: "Duty Drawback", path: "/app/trader/drawback" },
-        { icon: Fingerprint, label: "KYC Verification", path: "/app/trader/kyc" },
+        { icon: LayoutDashboard, label: "My Overview", path: "/app/trader" },
+        { icon: FileText, label: "My Shipment Declarations", path: "/app/trader/declarations" },
+        { icon: Building2, label: "My Business Profile", path: "/app/trader/profile" },
+        { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
+        { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },
+        { icon: Fingerprint, label: "Identity Verification", path: "/app/trader/kyc" },
       ],
     },
     {

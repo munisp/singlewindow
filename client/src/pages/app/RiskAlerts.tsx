@@ -80,12 +80,12 @@ function ScanTriggerDialog({ onComplete }: { onComplete: () => void }) {
       </DialogTrigger>
       <DialogContent className="bg-navy-900 border-white/10 text-white max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-gold font-display">Configure Risk Scan</DialogTitle>
+                  <DialogTitle className="text-gold font-display">Configure Risk Review</DialogTitle>
         </DialogHeader>
         <div className="space-y-6 pt-2">
           <div>
             <Label className="text-slate-300 text-xs mb-3 block">
-              Risk Threshold: <span className="text-gold font-semibold">{threshold.toFixed(2)}</span>
+              Risk Sensitivity: <span className="text-gold font-semibold">{threshold.toFixed(2)}</span>
             </Label>
             <Slider
               min={0.5}
@@ -96,13 +96,13 @@ function ScanTriggerDialog({ onComplete }: { onComplete: () => void }) {
               className="w-full"
             />
             <div className="flex justify-between text-xs text-slate-500 mt-1">
-              <span>0.50 (moderate)</span>
-              <span>1.00 (critical)</span>
+              <span>0.50 — Moderate risk</span>
+              <span>1.00 — Critical risk only</span>
             </div>
           </div>
           <div>
             <Label className="text-slate-300 text-xs mb-3 block">
-              Scan Period: <span className="text-gold font-semibold">{periodHours}h</span>
+              Review Period: <span className="text-gold font-semibold">{periodHours}h</span>
             </Label>
             <Slider
               min={1}
@@ -119,9 +119,9 @@ function ScanTriggerDialog({ onComplete }: { onComplete: () => void }) {
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <Label className="text-slate-300 text-xs">Auto-create Fraud Cases</Label>
+              <Label className="text-slate-300 text-xs">Automatically Open Investigation Cases</Label>
               <p className="text-xs text-slate-500 mt-0.5">
-                Automatically open cases for red-lane declarations
+                Create a new investigation case for every high-risk shipment found
               </p>
             </div>
             <Switch
@@ -183,10 +183,10 @@ export default function RiskAlerts() {
           <div>
             <h1 className="text-xl font-bold text-white font-display flex items-center gap-2">
               <Bell size={20} className="text-gold" />
-              Risk Alerts
+              High-Risk Shipment Alerts
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              Automated nightly risk scan and high-risk declaration monitoring
+              Automated daily review of shipments exceeding the risk threshold, with case management and notifications
             </p>
           </div>
           <ScanTriggerDialog
@@ -216,8 +216,8 @@ export default function RiskAlerts() {
                     color: "text-gold",
                   },
                   {
-                    label: "Threshold",
-                    value: Number(latestScan.thresholdUsed).toFixed(2),
+                  label: "Risk Sensitivity",
+                  value: Number(latestScan.thresholdUsed).toFixed(2),
                     icon: <TrendingUp size={16} className="text-blue-400" />,
                     color: "text-blue-300",
                   },
@@ -260,7 +260,7 @@ export default function RiskAlerts() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-mono tracking-widest text-gold uppercase flex items-center gap-2">
                   <AlertTriangle size={14} />
-                  Latest Flagged Declarations
+                  High-Risk Shipments Identified
                   {latestScan && (
                     <span className="text-slate-500 font-normal normal-case tracking-normal ml-auto text-xs">
                       Scan: {latestScan.scanRunAt ? new Date(latestScan.scanRunAt).toLocaleString() : "—"}

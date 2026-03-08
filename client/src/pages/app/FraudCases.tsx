@@ -9,7 +9,8 @@
  *   - Add investigator notes
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
+import { useDropzone } from "react-dropzone";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -228,6 +229,7 @@ function CaseDetailPanel({
   const [newStatus, setNewStatus] = useState<CaseStatus | "">("");
   const [uploadDescription, setUploadDescription] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const utils = trpc.useUtils();
 
@@ -253,6 +255,18 @@ function CaseDetailPanel({
     onError: (err) => toast.error(`Failed to update status: ${err.message}`),
   });
 
+  const { data: officers } = trpc.fraudCases.getOfficers.useQuery();
+
+  const assignCase = trpc.fraudCases.assignCase.useMutation({
+    onSuccess: (updated) => {
+      const officerName = officers?.find((o) => o.id === updated.assignedTo)?.name ?? "Unassigned";
+      toast.success(updated.assignedTo ? `Case assigned to ${officerName}` : "Case unassigned");
+      utils.fraudCases.getCase.invalidate({ caseId });
+      utils.fraudCases.listCases.invalidate();
+    },
+    onError: (err) => toast.error(`Assignment failed: ${err.message}`),
+  });
+
   const uploadEvidence = trpc.fraudCases.uploadEvidenceFile.useMutation({
     onSuccess: () => {
       toast.success("Evidence file uploaded");
@@ -267,9 +281,7 @@ function CaseDetailPanel({
     },
   });
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  function uploadFile(file: File) {
     if (file.size > 16 * 1024 * 1024) {
       toast.error("File exceeds 16 MB limit");
       return;
@@ -284,11 +296,39 @@ function CaseDetailPanel({
       const base64Data = (reader.result as string).split(",")[1];
       uploadEvidence.mutate(
         { caseId, fileName: file.name, mimeType: file.type || "application/octet-stream", base64Data, description: uploadDescription || undefined },
-        { onSettled: () => setUploadProgress(100) }
+        { onSettled: () => { setUploadProgress(100); setPendingFile(null); } }
       );
     };
     reader.readAsDataURL(file);
   }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) { setPendingFile(file); }
+  }
+
+  const onDrop = useCallback((accepted: File[]) => {
+    if (accepted[0]) setPendingFile(accepted[0]);
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    multiple: false,
+    maxSize: 16 * 1024 * 1024,
+    accept: {
+      "image/*": [],
+      "application/pdf": [],
+      "application/msword": [],
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [],
+      "application/vnd.ms-excel": [],
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [],
+      "text/csv": [],
+      "text/plain": [],
+      "application/zip": [],
+    },
+    onDropRejected: () => toast.error("File rejected — check type or size (max 16 MB)"),
+    disabled: uploadProgress !== null && uploadProgress < 100,
+  });
 
   if (isLoading) {
     return (
@@ -359,6 +399,40 @@ function CaseDetailPanel({
                 {data.updatedAt ? new Date(data.updatedAt).toLocaleDateString() : "—"}
               </div>
             </div>
+          </div>
+
+          <Separator className="bg-white/10" />
+
+          {/* Assignment */}
+          <div>
+            <div className="text-xs font-mono tracking-widest text-gold uppercase mb-2 flex items-center gap-2">
+              <Shield size={12} />
+              Assigned Investigator
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={data.assignedTo ?? ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  assignCase.mutate({ caseId, assignedTo: val ? Number(val) : null });
+                }}
+                disabled={assignCase.isPending}
+                className="flex-1 bg-navy-800/60 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-gold/50 disabled:opacity-50"
+              >
+                <option value="">— Unassigned —</option>
+                {(officers ?? []).map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({o.role === "admin" ? "Admin" : "Customs Officer"})
+                  </option>
+                ))}
+              </select>
+              {assignCase.isPending && <Loader2 size={14} className="animate-spin text-gold shrink-0" />}
+            </div>
+            {data.assignedTo && (
+              <div className="text-xs text-slate-500 mt-1">
+                Currently assigned to: <span className="text-slate-300">{officers?.find((o) => o.id === data.assignedTo)?.name ?? `Officer #${data.assignedTo}`}</span>
+              </div>
+            )}
           </div>
 
           <Separator className="bg-white/10" />
@@ -473,24 +547,70 @@ function CaseDetailPanel({
               </div>
             )}
 
-            {/* Upload new evidence */}
-            <div className="bg-navy-800/40 border border-white/10 rounded-lg p-3 space-y-2">
-              <div className="text-xs text-slate-400 mb-1">Attach Evidence File (max 16 MB)</div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
-                onChange={handleFileChange}
-                disabled={uploadProgress !== null && uploadProgress < 100}
-                className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-medium file:bg-gold/20 file:text-gold hover:file:bg-gold/30 cursor-pointer disabled:opacity-50"
-              />
-              <Input
-                value={uploadDescription}
-                onChange={(e) => setUploadDescription(e.target.value)}
-                placeholder="Optional description…"
-                className="h-7 text-xs bg-navy-900/60 border-white/10 text-white placeholder:text-slate-500"
-                disabled={uploadProgress !== null && uploadProgress < 100}
-              />
+            {/* Upload new evidence — drag-and-drop zone */}
+            <div className="space-y-2">
+              {/* Dropzone */}
+              <div
+                {...getRootProps()}
+                className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${
+                  isDragActive
+                    ? "border-gold bg-gold/10 scale-[1.01]"
+                    : "border-white/20 hover:border-gold/50 bg-navy-800/30 hover:bg-navy-800/50"
+                } ${uploadProgress !== null && uploadProgress < 100 ? "opacity-50 pointer-events-none" : ""}`}
+              >
+                <input {...getInputProps()} ref={fileInputRef} onChange={handleFileChange} />
+                <Upload size={20} className={`mx-auto mb-2 ${isDragActive ? "text-gold" : "text-slate-500"}`} />
+                {isDragActive ? (
+                  <p className="text-sm text-gold font-medium">Drop the file here</p>
+                ) : pendingFile ? (
+                  <div className="space-y-1">
+                    <p className="text-sm text-white font-medium truncate">{pendingFile.name}</p>
+                    <p className="text-xs text-slate-400">
+                      {pendingFile.size >= 1024 * 1024
+                        ? `${(pendingFile.size / (1024 * 1024)).toFixed(1)} MB`
+                        : `${(pendingFile.size / 1024).toFixed(0)} KB`}
+                      {" · "}{pendingFile.type || "unknown type"}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-slate-400">Drag &amp; drop a file here, or <span className="text-gold underline">browse</span></p>
+                    <p className="text-xs text-slate-600 mt-1">PDF, images, Word, Excel, CSV, ZIP · max 16 MB</p>
+                  </>
+                )}
+              </div>
+
+              {/* Optional description */}
+              {pendingFile && uploadProgress === null && (
+                <Input
+                  value={uploadDescription}
+                  onChange={(e) => setUploadDescription(e.target.value)}
+                  placeholder="Optional description…"
+                  className="h-7 text-xs bg-navy-900/60 border-white/10 text-white placeholder:text-slate-500"
+                />
+              )}
+
+              {/* Upload button */}
+              {pendingFile && uploadProgress === null && (
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    className="flex-1 h-8 text-xs bg-gold text-navy-900 hover:bg-gold/90 font-semibold"
+                    onClick={() => uploadFile(pendingFile)}
+                  >
+                    <Upload size={12} className="mr-1" /> Upload Evidence
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-slate-400 hover:text-white"
+                    onClick={() => { setPendingFile(null); setUploadDescription(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+
               {/* Progress bar */}
               {uploadProgress !== null && (
                 <div className="space-y-1">
@@ -512,16 +632,6 @@ function CaseDetailPanel({
                     )}
                   </div>
                 </div>
-              )}
-              {uploadProgress === null && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full h-7 text-xs border-white/10 text-slate-400 hover:text-white hover:border-gold/50"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload size={12} className="mr-1" /> Choose File to Upload
-                </Button>
               )}
             </div>
           </div>

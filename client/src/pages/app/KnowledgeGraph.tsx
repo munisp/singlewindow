@@ -157,10 +157,10 @@ export default function KnowledgeGraph() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Network className="h-6 w-6 text-gold" />
-            Knowledge Graph Explorer
+            Entity Relationship Map
           </h1>
           <p className="text-slate-400 mt-1 text-sm">
-            FalkorDB / Neo4j · Rust GNN · CocoIndex · EPR-KGQA · ART · Ollama
+            Visualise connections between traders, shipments, agencies, and risk patterns
           </p>
         </div>
         <Button
@@ -179,7 +179,7 @@ export default function KnowledgeGraph() {
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-mono tracking-widest text-gold uppercase flex items-center gap-2">
             <Server className="h-4 w-4" />
-            Polyglot Stack Health
+            Intelligence Services Status
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -192,27 +192,27 @@ export default function KnowledgeGraph() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
               <StatusBadge
                 ok={health?.bridgeReachable ?? false}
-                label="Go Bridge"
+                label="Integration Layer"
               />
               <StatusBadge
                 ok={health?.graph ?? false}
-                label="Graph DB"
+                label="Relationship Database"
               />
               <StatusBadge
                 ok={health?.bridgeReachable ?? false}
-                label="Rust GNN"
+                label="Risk Scoring Engine"
               />
               <StatusBadge
                 ok={health?.bridgeReachable ?? false}
-                label="CocoIndex"
+                label="Document Indexer"
               />
               <StatusBadge
                 ok={health?.bridgeReachable ?? false}
-                label="EPR-KGQA"
+                label="Query Intelligence"
               />
               <StatusBadge
                 ok={health?.bridgeReachable ?? false}
-                label="Ollama"
+                label="AI Language Model"
               />
             </div>
           )}
@@ -237,8 +237,8 @@ export default function KnowledgeGraph() {
         {(
           [
             { id: "overview", label: "Overview", icon: TrendingUp },
-            { id: "kgqa", label: "Ask the Graph (EPR-KGQA)", icon: MessageSquare },
-            { id: "cypher", label: "Cypher Explorer", icon: Code },
+            { id: "kgqa", label: "Ask a Question", icon: MessageSquare },
+            { id: "cypher", label: "Advanced Query", icon: Code }
           ] as const
         ).map(({ id, label, icon: Icon }) => (
           <button
@@ -271,7 +271,7 @@ export default function KnowledgeGraph() {
                 High-Risk Trade Corridors
               </CardTitle>
               <CardDescription>
-                GNN-scored corridors with risk index ≥ 50%
+                Trade routes with elevated risk indicators requiring closer scrutiny
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -324,10 +324,10 @@ export default function KnowledgeGraph() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Clock className="h-4 w-4 text-gold" />
-                OGA Processing Backlog
+                Agency Processing Backlog
               </CardTitle>
               <CardDescription>
-                Real-time agency backlog from the knowledge graph
+                Current permit and approval queues across all government agencies
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -401,11 +401,10 @@ export default function KnowledgeGraph() {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Brain className="h-4 w-4 text-gold" />
-                Polyglot AI/Graph Architecture
+                How the Intelligence Platform Works
               </CardTitle>
               <CardDescription>
-                How CocoIndex, EPR-KGQA, FalkorDB, Neo4j, Ollama, and ART add
-                value to TradeGateway
+                The analytical capabilities that power risk detection, document processing, and trade insights
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -413,86 +412,86 @@ export default function KnowledgeGraph() {
                 {[
                   {
                     icon: <Network className="h-5 w-5" />,
-                    title: "FalkorDB / Neo4j",
-                    subtitle: "Trade Knowledge Graph",
+                    title: "Trade Relationship Database",
+                    subtitle: "Connecting Traders, Shipments & Agencies",
                     color: "text-blue-400",
                     bg: "bg-blue-500/10 border-blue-500/20",
                     points: [
-                      "Traders, declarations, HS codes as graph nodes",
-                      "Relationships: SUBMITTED, USES_HS_CODE, ENTERS_VIA",
-                      "GNN risk propagation across trader networks",
-                      "Sanctions screening via graph similarity",
-                      "Cypher queries for complex pattern detection",
+                      "Maps every trader, declaration, and commodity code as linked entities",
+                      "Tracks who submitted what, through which port, using which agent",
+                      "Spreads risk signals across connected trader networks",
+                      "Screens for restricted-party connections automatically",
+                      "Detects complex patterns across thousands of shipments",
                     ],
                   },
                   {
                     icon: <Zap className="h-5 w-5" />,
-                    title: "Rust GNN Engine",
-                    subtitle: "High-Performance Risk Scoring",
+                    title: "Risk Scoring Engine",
+                    subtitle: "Automated Threat Assessment",
                     color: "text-orange-400",
                     bg: "bg-orange-500/10 border-orange-500/20",
                     points: [
-                      "GraphSAGE-style neighbourhood aggregation",
-                      "Risk propagates from trader → declaration → HS code",
-                      "1M+ nodes/second traversal (petgraph + rayon)",
-                      "Weighted combination with rule-based scorer",
-                      "Fallback to rules-only if engine unavailable",
+                      "Analyses trader history, declaration patterns, and commodity risk",
+                      "Risk signals flow from trader level down to individual shipments",
+                      "Processes millions of data points in seconds",
+                      "Combines automated scoring with rule-based compliance checks",
+                      "Falls back to rule-based scoring if the engine is unavailable",
                     ],
                   },
                   {
                     icon: <Brain className="h-5 w-5" />,
-                    title: "CocoIndex + EPR-KGQA",
-                    subtitle: "Document Intelligence & QA",
+                    title: "Document Intelligence",
+                    subtitle: "Automated Document Reading & Q&A",
                     color: "text-purple-400",
                     bg: "bg-purple-500/10 border-purple-500/20",
                     points: [
-                      "CocoIndex: incremental trade document indexing",
-                      "Semantic chunking of BoL, invoices, permits",
-                      "EPR-KGQA: NL → Cypher query translation",
-                      "Entity extraction: traders, HS codes, ports",
-                      "ART: multi-step reasoning with graph retrieval",
+                      "Automatically reads and indexes Bills of Lading, invoices, and permits",
+                      "Extracts key data: trader names, commodity codes, port details",
+                      "Answers natural-language questions about any shipment document",
+                      "Identifies discrepancies between declared and extracted values",
+                      "Multi-step reasoning to surface the most relevant information",
                     ],
                   },
                   {
                     icon: <MessageSquare className="h-5 w-5" />,
-                    title: "Ollama LLM Bridge",
-                    subtitle: "Privacy-Preserving Inference",
+                    title: "Secure AI Language Model",
+                    subtitle: "On-Premise, Data-Sovereign AI",
                     color: "text-emerald-400",
                     bg: "bg-emerald-500/10 border-emerald-500/20",
                     points: [
-                      "On-premise LLM (Llama 3 / Mistral / Phi-3)",
-                      "No trade data leaves the national data centre",
-                      "Risk explanation generation (ART layer)",
-                      "Document summarisation for customs officers",
-                      "Fallback to cloud LLM if Ollama unavailable",
+                      "AI model runs entirely within the national data centre",
+                      "No trade data is ever sent to external cloud providers",
+                      "Generates plain-language explanations of risk decisions",
+                      "Summarises complex documents for customs officers",
+                      "Falls back to approved cloud AI if the local model is unavailable",
                     ],
                   },
                   {
                     icon: <Server className="h-5 w-5" />,
-                    title: "Go Bridge Microservice",
-                    subtitle: "Polyglot Orchestration Layer",
+                    title: "Integration Orchestrator",
+                    subtitle: "Connecting All Intelligence Services",
                     color: "text-cyan-400",
                     bg: "bg-cyan-500/10 border-cyan-500/20",
                     points: [
-                      "Single HTTP integration point for Node.js tRPC",
-                      "Concurrent calls to Rust + Python + Graph",
-                      "Graceful fallback on any engine failure",
-                      "CORS + request logging middleware",
-                      "Horizontally scalable (Kubernetes-ready)",
+                      "Single connection point linking all analytical services",
+                      "Runs risk scoring, document analysis, and graph queries simultaneously",
+                      "Automatically recovers if any individual service is unavailable",
+                      "Full request logging for audit and compliance purposes",
+                      "Scales horizontally to handle peak declaration volumes",
                     ],
                   },
                   {
                     icon: <TrendingUp className="h-5 w-5" />,
-                    title: "ART Reasoning",
-                    subtitle: "Adaptive Retrieval-augmented Thinking",
+                    title: "Explainable Decision Engine",
+                    subtitle: "Transparent, Auditable Risk Reasoning",
                     color: "text-gold",
                     bg: "bg-yellow-500/10 border-yellow-500/20",
                     points: [
-                      "Multi-step reasoning: retrieve → think → answer",
-                      "Graph retrieval augments LLM context",
-                      "Explains why a declaration got its risk lane",
-                      "Recommends specific customs officer actions",
-                      "Cites precedents from the knowledge graph",
+                      "Explains in plain language why a shipment received its risk rating",
+                      "Retrieves relevant precedents from historical trade data",
+                      "Recommends specific actions for customs officers to take",
+                      "Every decision is traceable and can be reviewed by supervisors",
+                      "Cites similar past cases to support recommendations",
                     ],
                   },
                 ].map((card) => (
@@ -536,8 +535,7 @@ export default function KnowledgeGraph() {
                 Ask the Trade Knowledge Graph
               </CardTitle>
               <CardDescription>
-                EPR-KGQA translates your natural language question into a Cypher
-                query and returns structured results from the graph.
+                Ask a question in plain English and get structured answers from the trade intelligence graph.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -609,7 +607,7 @@ export default function KnowledgeGraph() {
                   {kgqaMutation.data.cypher && (
                     <div>
                       <div className="text-xs text-slate-500 mb-1 font-mono">
-                        Generated Cypher:
+                        Query generated:
                       </div>
                       <pre className="text-xs text-emerald-400 bg-black/40 rounded-lg p-3 border border-white/10 overflow-x-auto">
                         {kgqaMutation.data.cypher}
@@ -666,10 +664,10 @@ export default function KnowledgeGraph() {
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Code className="h-4 w-4 text-gold" />
-              Cypher Query Explorer
+              Advanced Graph Query
             </CardTitle>
             <CardDescription>
-              Execute raw Cypher queries against FalkorDB or Neo4j. Admin only.
+              Run direct queries against the trade intelligence graph database. Administrator access only.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -690,7 +688,7 @@ export default function KnowledgeGraph() {
               ) : (
                 <Zap className="h-4 w-4" />
               )}
-              Execute Cypher
+              Run Query
             </Button>
 
             {cypherMutation.data && (

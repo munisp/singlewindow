@@ -259,7 +259,7 @@ export default function NewDeclaration() {
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Risk Assessment Result</h1>
               <p className="text-sm text-muted-foreground">
-                AI-powered WCO SAFE Framework risk analysis for your declaration
+              Automated risk assessment for your shipment declaration
               </p>
             </div>
           </div>
@@ -287,8 +287,8 @@ export default function NewDeclaration() {
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
                   {createMutation.isPending
-                    ? "Assigning Unique Reference Number and registering with customs system"
-                    : "Analysing HS code, origin, value, and trader profile against WCO SAFE Framework"}
+                    ? "Assigning a unique reference number and registering your declaration"
+                    : "Checking commodity code, origin, declared value, and trader history against risk criteria"}
                 </p>
               </div>
             </CardContent>
@@ -533,7 +533,7 @@ export default function NewDeclaration() {
                   <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
                     <Zap className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                     <p className="text-xs text-muted-foreground">
-                      After submission, the AI risk engine will automatically analyse this declaration against WCO SAFE Framework criteria and assign a risk lane (Green / Yellow / Red).
+                      After submission, the system will automatically assess this declaration for risk and assign a clearance lane: Green (fast-track), Yellow (document review), or Red (physical inspection).
                     </p>
                   </div>
                 </div>

@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BarChart3,
   CheckCircle,
+  Clock,
   Globe,
   Lock,
   Network,
@@ -23,59 +24,84 @@ const PORTALS = [
     href: "/app/trader",
     icon: <Truck className="h-6 w-6" />,
     color: "bg-blue-600",
-    description: "Submit declarations, track shipments, manage payments, and apply for AEO certification.",
-    features: ["Multi-step declaration form", "Document upload (S3)", "Duty payment via Mojaloop", "AEO application workflow"],
+    description: "Submit shipment declarations, track cargo status, pay duties, and apply for trusted trader status.",
+    features: ["Step-by-step declaration form", "Document upload & management", "Duty payment & receipts", "Trusted Trader (AEO) application"],
   },
   {
     role: "Customs Officer",
     href: "/app/customs",
     icon: <ShieldCheck className="h-6 w-6" />,
     color: "bg-purple-600",
-    description: "Review declarations, apply AI risk scoring, conduct examinations, and issue clearances.",
-    features: ["AI risk score dashboard", "Green/Yellow/Red lane assignment", "Examination workflow", "Release & hold actions"],
+    description: "Review incoming declarations, assess risk, conduct examinations, and issue clearance decisions.",
+    features: ["Risk-scored declaration queue", "Fast-track / Review / Inspect lane assignment", "Examination & inspection workflow", "Clearance and hold actions"],
   },
   {
-    role: "OGA Officer",
+    role: "Government Agency Officer",
     href: "/app/oga",
     icon: <Globe className="h-6 w-6" />,
     color: "bg-amber-600",
-    description: "Review and approve permits for your agency. Joint inspection model with real-time notifications.",
-    features: ["Permit review queue", "Approve / reject / conditional", "Agency-specific workflows", "Audit trail"],
+    description: "Review and approve permits for your agency. Participate in joint inspections with real-time updates.",
+    features: ["Permit review queue", "Approve, reject, or add conditions", "Agency-specific workflows", "Full audit trail"],
   },
   {
     role: "Administrator",
     href: "/app/admin",
     icon: <Users className="h-6 w-6" />,
     color: "bg-emerald-600",
-    description: "Manage users, approve stakeholder registrations, configure roles, and monitor platform health.",
-    features: ["Stakeholder onboarding approval", "User role management", "Profile verification", "System audit log"],
+    description: "Manage users, approve stakeholder registrations, configure access roles, and monitor platform activity.",
+    features: ["Stakeholder onboarding approval", "User role management", "Profile & identity verification", "System activity log"],
   },
   {
     role: "Security Analyst",
     href: "/app/security",
     icon: <Shield className="h-6 w-6" />,
     color: "bg-red-600",
-    description: "Monitor SIEM alerts from Wazuh, screen entities against sanctions lists, and manage threat intelligence.",
-    features: ["Real-time alert feed", "OFAC / UN / EU / OFSI screening", "Dual-use goods detection", "Risk explainability"],
+    description: "Monitor security alerts, screen traders and entities against international sanctions lists, and manage threat intelligence.",
+    features: ["Real-time security alert feed", "OFAC / UN / EU / OFSI sanctions screening", "Dual-use goods detection", "Risk explanation reports"],
   },
 ];
 
 const STATS = [
-  { value: "< 4 hrs", label: "Green-lane clearance", icon: <Zap className="h-5 w-5" /> },
-  { value: "37+", label: "OGAs connected", icon: <Network className="h-5 w-5" /> },
-  { value: "99.99%", label: "Uptime SLA", icon: <BarChart3 className="h-5 w-5" /> },
-  { value: "5M+", label: "Annual declarations", icon: <Globe className="h-5 w-5" /> },
+  { value: "< 4 hrs", label: "Fast-track clearance time", icon: <Zap className="h-5 w-5" /> },
+  { value: "37+", label: "Government agencies connected", icon: <Network className="h-5 w-5" /> },
+  { value: "99.99%", label: "Platform availability", icon: <BarChart3 className="h-5 w-5" /> },
+  { value: "5M+", label: "Declarations processed annually", icon: <Globe className="h-5 w-5" /> },
 ];
 
-const TECH_STACK = [
-  { tier: "Go", role: "Business microservices", items: ["declaration-service", "oga-service", "payment-service", "profile-service"] },
-  { tier: "Python", role: "AI/ML engines", items: ["risk-engine (GNN + scikit-learn)", "sanctions-screener (LLM)", "fluvio-consumer (AIS streams)"] },
-  { tier: "Rust", role: "Performance engines", items: ["rule-engine (200 customs rules)", "tigerbeetle-bridge (ledger)", "document-parser (HS extraction)"] },
-  { tier: "Node.js", role: "API gateway + UI", items: ["tRPC gateway", "React 19 + Tailwind 4", "PostgreSQL via Drizzle ORM"] },
+const CAPABILITIES = [
+  {
+    icon: <Clock className="h-6 w-6 text-blue-400" />,
+    title: "Faster Clearance",
+    desc: "Low-risk shipments are cleared in under 4 hours through the automated fast-track lane, reducing port dwell time and storage costs.",
+  },
+  {
+    icon: <Shield className="h-6 w-6 text-emerald-400" />,
+    title: "Single Submission",
+    desc: "Traders submit once. The platform automatically routes permits, licences, and certificates to all relevant government agencies simultaneously.",
+  },
+  {
+    icon: <Network className="h-6 w-6 text-purple-400" />,
+    title: "Full Cargo Visibility",
+    desc: "Track every shipment from arrival to release. All parties — traders, customs, port operators, and agencies — see the same real-time status.",
+  },
+  {
+    icon: <Lock className="h-6 w-6 text-amber-400" />,
+    title: "Fraud & Risk Detection",
+    desc: "Automated risk scoring flags suspicious shipments before they reach the border, protecting government revenue and national security.",
+  },
+];
+
+const SECURITY_FEATURES = [
+  "Multi-factor authentication for all users",
+  "Role-based access — each user sees only what they need",
+  "AI-powered web application firewall blocks attacks in real time",
+  "Continuous security monitoring and automated incident response",
+  "International sanctions and restricted-party screening",
+  "Encrypted communications between all system components",
 ];
 
 export default function Home() {
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -87,12 +113,12 @@ export default function Home() {
               <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
                 <Globe className="h-4 w-4 text-primary-foreground" />
               </div>
-              <span className="font-bold text-lg tracking-tight">TradeGateway™ NGSWTP</span>
+              <span className="font-bold text-lg tracking-tight">TradeGateway™</span>
             </div>
             <div className="flex items-center gap-3">
               <Link href="/specification">
                 <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground">
-                  Architecture Spec
+                  Technical Specification
                 </Button>
               </Link>
               {isAuthenticated ? (
@@ -124,15 +150,15 @@ export default function Home() {
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-300 text-xs font-medium mb-6">
               <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
-              Production-Ready · PostgreSQL · Go · Python · Rust · gRPC
+              National Customs Single Window · Inspired by Singapore, Ghana & Rwanda
             </div>
             <h1 className="text-5xl md:text-6xl font-bold leading-tight mb-6">
-              Next Generation<br />
-              <span className="text-blue-400">Single Window</span><br />
-              Trade Platform
+              National<br />
+              <span className="text-blue-400">Trade Gateway</span><br />
+              Single Window
             </h1>
             <p className="text-xl text-slate-300 mb-8 leading-relaxed max-w-2xl">
-              A polyglot microservices platform for national customs clearance — synthesized from Singapore NTP, Ghana ICUMS, and Rwanda ReSW, built on Go, Python, Rust, Kafka, Temporal, and Dapr.
+              A unified platform where traders, customs officers, government agencies, and port operators collaborate to clear goods faster, reduce costs, and strengthen border security.
             </p>
             <div className="flex flex-wrap gap-4">
               {isAuthenticated ? (
@@ -152,7 +178,7 @@ export default function Home() {
               )}
               <Link href="/specification">
                 <Button size="lg" variant="outline" className="gap-2 border-white/20 text-white hover:bg-white/10 bg-transparent">
-                  View Architecture Spec
+                  View Technical Specification
                 </Button>
               </Link>
             </div>
@@ -183,9 +209,9 @@ export default function Home() {
       <section className="py-20 bg-muted/30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold mb-3">Five Role-Based Portals</h2>
+            <h2 className="text-3xl font-bold mb-3">A Portal for Every Stakeholder</h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              Each stakeholder group has a dedicated authenticated workspace with real backend data flows, PostgreSQL persistence, and role-based access control.
+              Each user group has a dedicated, secure workspace tailored to their role — with only the tools and information they need to do their job.
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -221,31 +247,22 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Tech stack */}
+      {/* Key capabilities */}
       <section className="py-20 bg-background">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold mb-3">Polyglot Microservices Architecture</h2>
+            <h2 className="text-3xl font-bold mb-3">What TradeGateway Delivers</h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
-              Each service tier is implemented in the language best suited to its workload — Go for throughput, Python for AI/ML, Rust for deterministic performance.
+              Designed around the needs of traders, government agencies, and border management authorities.
             </p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {TECH_STACK.map((tier) => (
-              <Card key={tier.tier} className="border">
-                <CardContent className="p-5">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="font-mono font-bold text-primary text-lg">{tier.tier}</span>
-                    <span className="text-xs text-muted-foreground">{tier.role}</span>
-                  </div>
-                  <ul className="space-y-1.5">
-                    {tier.items.map((item) => (
-                      <li key={item} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                        <span className="text-primary mt-0.5">›</span>
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
+            {CAPABILITIES.map((cap) => (
+              <Card key={cap.title} className="border">
+                <CardContent className="p-6">
+                  <div className="mb-4">{cap.icon}</div>
+                  <h3 className="font-bold text-base mb-2">{cap.title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{cap.desc}</p>
                 </CardContent>
               </Card>
             ))}
@@ -253,46 +270,17 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Middleware section */}
-      <section className="py-16 bg-muted/30 border-t">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-2xl font-bold mb-8 text-center">Integrated Middleware Stack</h2>
-          <div className="flex flex-wrap justify-center gap-3">
-            {[
-              "Apache Kafka", "Redis", "Dapr", "Temporal", "Keycloak",
-              "APISIX", "TigerBeetle", "Fluvio", "Permify", "Delta Lake",
-              "Wazuh SIEM", "OpenCTI", "Mojaloop", "gRPC", "PostgreSQL",
-              "MinIO S3", "Prometheus", "Grafana", "OpenAppSec WAF",
-            ].map((tech) => (
-              <span
-                key={tech}
-                className="px-3 py-1.5 rounded-full text-sm font-medium bg-background border border-border text-foreground"
-              >
-                {tech}
-              </span>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Security section */}
-      <section className="py-20 bg-background">
+      <section className="py-20 bg-muted/30 border-t">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div>
-              <h2 className="text-3xl font-bold mb-4">Zero-Trust Security Architecture</h2>
+              <h2 className="text-3xl font-bold mb-4">Built for National-Level Security</h2>
               <p className="text-muted-foreground mb-6 leading-relaxed">
-                A national trade platform is a high-value target. The security architecture implements defence-in-depth with Keycloak IAM, OpenAppSec AI WAF, Wazuh SIEM/XDR, and OpenCTI threat intelligence — all integrated into the real-time Security Operations Center portal.
+                A national trade platform is a high-value target for fraud and cyberattacks. TradeGateway is designed with multiple layers of protection — from the moment a user logs in to every data exchange between agencies.
               </p>
               <ul className="space-y-3">
-                {[
-                  "Keycloak OIDC/SAML with MFA (TOTP + WebAuthn)",
-                  "RBAC + ABAC via Permify authorization engine",
-                  "OpenAppSec ML-based WAF — zero-day blocking",
-                  "Wazuh real-time SIEM with automated response",
-                  "OFAC / UN / EU / OFSI sanctions screening",
-                  "mTLS between all microservices via Dapr",
-                ].map((item) => (
+                {SECURITY_FEATURES.map((item) => (
                   <li key={item} className="flex items-start gap-2 text-sm">
                     <Lock className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                     {item}
@@ -302,16 +290,16 @@ export default function Home() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               {[
-                { tool: "Keycloak", role: "Identity & Access", color: "bg-blue-50 border-blue-200" },
-                { tool: "OpenAppSec", role: "AI WAF", color: "bg-emerald-50 border-emerald-200" },
-                { tool: "Wazuh", role: "SIEM / XDR", color: "bg-red-50 border-red-200" },
-                { tool: "OpenCTI", role: "Threat Intel", color: "bg-purple-50 border-purple-200" },
-                { tool: "Permify", role: "Authorization", color: "bg-amber-50 border-amber-200" },
-                { tool: "TigerBeetle", role: "Financial Ledger", color: "bg-slate-50 border-slate-200" },
+                { tool: "Identity Management", role: "Secure login with multi-factor authentication", color: "bg-blue-50 border-blue-200" },
+                { tool: "Web Application Firewall", role: "Blocks malicious traffic before it reaches the platform", color: "bg-emerald-50 border-emerald-200" },
+                { tool: "Security Monitoring", role: "24/7 automated threat detection and response", color: "bg-red-50 border-red-200" },
+                { tool: "Threat Intelligence", role: "Global threat feeds integrated into risk decisions", color: "bg-purple-50 border-purple-200" },
+                { tool: "Access Control", role: "Fine-grained permissions — users see only what they need", color: "bg-amber-50 border-amber-200" },
+                { tool: "Financial Integrity", role: "Tamper-proof audit ledger for all duty transactions", color: "bg-slate-50 border-slate-200" },
               ].map((item) => (
                 <div key={item.tool} className={`p-4 rounded-xl border ${item.color}`}>
                   <p className="font-semibold text-sm">{item.tool}</p>
-                  <p className="text-xs text-muted-foreground">{item.role}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{item.role}</p>
                 </div>
               ))}
             </div>
@@ -324,7 +312,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl font-bold mb-4">Ready to explore the platform?</h2>
           <p className="text-blue-100 mb-8 max-w-xl mx-auto">
-            Sign in to access your role-based portal, or browse the full architecture specification.
+            Sign in to access your role-based portal, or review the full technical specification.
           </p>
           <div className="flex flex-wrap gap-4 justify-center">
             {isAuthenticated ? (
@@ -344,7 +332,7 @@ export default function Home() {
             )}
             <Link href="/specification">
               <Button size="lg" variant="outline" className="border-white/40 text-white hover:bg-white/10 bg-transparent gap-2">
-                Architecture Spec
+                Technical Specification
               </Button>
             </Link>
           </div>
@@ -359,10 +347,10 @@ export default function Home() {
               <div className="h-6 w-6 rounded bg-primary flex items-center justify-center">
                 <Globe className="h-3 w-3 text-primary-foreground" />
               </div>
-              <span className="font-semibold text-sm">TradeGateway™ NGSWTP</span>
+              <span className="font-semibold text-sm">TradeGateway™ National Single Window Trade Platform</span>
             </div>
             <p className="text-xs text-muted-foreground text-center">
-              Next Generation Single Window Trade Platform · v3.0 · March 2026 · Synthesized from Singapore NTP, Ghana ICUMS, Rwanda ReSW
+              v3.0 · March 2026 · Benchmarked against Singapore NTP, Ghana ICUMS, and Rwanda ReSW
             </p>
           </div>
         </div>

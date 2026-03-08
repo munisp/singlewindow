@@ -27,10 +27,10 @@ export default function TemporalWorkflows() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Workflow className="h-6 w-6 text-primary" />Temporal Workflow Engine
+              <Workflow className="h-6 w-6 text-primary" />Clearance Workflow Tracker
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Durable workflow orchestration for declaration processing pipelines
+              Track the step-by-step progress of every shipment declaration through the clearance process
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
@@ -44,9 +44,9 @@ export default function TemporalWorkflows() {
             <CardContent className="p-4 flex items-center gap-4">
               <div className={`h-3 w-3 rounded-full ${status.connected ? "bg-emerald-400" : "bg-amber-400"}`} />
               <div>
-                <p className="font-semibold">{status.connected ? "Temporal Connected" : "Simulation Mode"}</p>
+                <p className="font-semibold">{status.connected ? "Workflow Engine: Live" : "Workflow Engine: Simulation Mode"}</p>
                 <p className="text-xs text-muted-foreground">
-                  Namespace: {status.namespace} · Mode: {status.mode} · Queue: {status.taskQueues?.join(", ")}
+                  Environment: {status.namespace} · Mode: {status.mode} · Queues: {status.taskQueues?.join(", ")}
                 </p>
               </div>
               <div className="ml-auto grid grid-cols-3 gap-4 text-center">
@@ -69,7 +69,7 @@ export default function TemporalWorkflows() {
 
         {/* Workflow List */}
         <Card>
-          <CardHeader><CardTitle className="text-base">Recent Workflows</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Recent Clearance Processes</CardTitle></CardHeader>
           <CardContent className="p-0">
             {wfLoading ? (
               <div className="p-4 space-y-2">{Array.from({length:8}).map((_,i)=><Skeleton key={i} className="h-12 w-full"/>)}</div>

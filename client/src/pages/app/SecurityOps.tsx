@@ -73,9 +73,9 @@ export default function SecurityOps() {
     <DashboardLayout title="Security Operations">
       <div className="space-y-6 max-w-7xl">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Security Operations Center</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Trade Security & Compliance Centre</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Real-time SIEM alerts, sanctions screening, and threat intelligence.
+            Real-time security alerts, restricted-party screening, and threat monitoring for all trade activity.
           </p>
         </div>
 
@@ -129,11 +129,11 @@ export default function SecurityOps() {
 
         <Tabs defaultValue="alerts">
           <TabsList>
-            <TabsTrigger value="alerts">SIEM Alert Feed</TabsTrigger>
+            <TabsTrigger value="alerts">Security Alert Feed</TabsTrigger>
             <TabsTrigger value="sanctions">Sanctions Screening</TabsTrigger>
           </TabsList>
 
-          {/* SIEM Alerts */}
+          {/* Security Alerts */}
           <TabsContent value="alerts" className="space-y-4 mt-4">
             <div className="flex gap-3 flex-wrap">
               <div className="relative flex-1 min-w-48">

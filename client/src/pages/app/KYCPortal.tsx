@@ -562,17 +562,17 @@ export default function KYCPortal() {
   };
 
   return (
-    <DashboardLayout title="KYC/KYB Verification">
+    <DashboardLayout title="Identity & Business Verification">
       <div className="space-y-6 max-w-5xl">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <ShieldCheck className="h-6 w-6 text-primary" />
-            KYC / KYB Verification
+            Identity & Business Verification
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Verify your identity or business entity to unlock full trading capabilities.
-            Documents are analysed using PaddleOCR, DocLing, and Qwen2-VL.
+            Verify your identity or business registration to unlock full trading capabilities.
+            Submitted documents are automatically reviewed for authenticity and compliance.
           </p>
         </div>
 
@@ -584,18 +584,18 @@ export default function KYCPortal() {
           {[
             {
               icon: <FileText className="h-4 w-4" />,
-              title: "OCR Extraction",
-              desc: "PaddleOCR + DocLing extract text and structure from your documents",
+              title: "Document Reading",
+              desc: "Automatically reads and extracts key information from your uploaded documents",
             },
             {
               icon: <Eye className="h-4 w-4" />,
-              title: "Visual Analysis",
-              desc: "Qwen2-VL verifies security features, signatures, and authenticity",
+              title: "Authenticity Check",
+              desc: "Verifies security features, signatures, and document authenticity using AI",
             },
             {
               icon: <ShieldCheck className="h-4 w-4" />,
-              title: "Compliance Check",
-              desc: "Entity data matched against AML/sanctions databases",
+              title: "Compliance Screening",
+              desc: "Your details are cross-checked against international restricted-party and sanctions lists",
             },
           ].map((step) => (
             <Card key={step.title} className="bg-muted/30">

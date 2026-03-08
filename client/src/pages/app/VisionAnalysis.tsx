@@ -51,9 +51,9 @@ const ANALYSIS_LABELS: Record<AnalysisType, { label: string; icon: React.ReactNo
     description: "Container seal integrity check — detect tampering or damage",
   },
   plate_ocr: {
-    label: "Container / Plate OCR",
+    label: "Container & Plate Reading",
     icon: <ScanLine className="h-4 w-4" />,
-    description: "Extract container numbers, vehicle plates, and shipping marks",
+    description: "Automatically reads container numbers, vehicle plates, and shipping marks from images",
   },
   dangerous_goods: {
     label: "Dangerous Goods Labels",
@@ -173,7 +173,7 @@ function AnalysisResultPanel({ result }: { result: Record<string, unknown> }) {
       {ocrText && (
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm font-medium mb-2">Extracted Text (OCR)</p>
+            <p className="text-sm font-medium mb-2">Text Extracted from Image</p>
             <pre className="text-xs bg-muted p-3 rounded-md overflow-x-auto whitespace-pre-wrap font-mono">
               {ocrText}
             </pre>
@@ -184,7 +184,7 @@ function AnalysisResultPanel({ result }: { result: Record<string, unknown> }) {
       {/* Detections */}
       {detections.length > 0 && (
         <div>
-          <p className="text-sm font-medium mb-2">Detected Objects ({detections.length})</p>
+          <p className="text-sm font-medium mb-2">Items Identified ({detections.length})</p>
           <div className="grid grid-cols-2 gap-2">
             {detections.map((det, i) => (
               <DetectionCard key={i} detection={det} />
@@ -492,17 +492,16 @@ function RecentAnalyses() {
 
 export default function VisionAnalysis() {
   return (
-    <DashboardLayout title="Vision Analysis">
+    <DashboardLayout title="Cargo Image Inspection">
       <div className="space-y-6 max-w-6xl">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Camera className="h-6 w-6 text-primary" />
-            Computer Vision Cargo Inspection
+            Cargo Image Inspection
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            AI-powered cargo image analysis using YOLOv8 object detection, OpenCV OCR,
-            SAM2 segmentation, and IMDG dangerous goods classification.
+            Upload photos of cargo, containers, or shipping documents for automated inspection — detecting contraband, seal tampering, hazardous materials, and identity markings.
           </p>
         </div>
 
