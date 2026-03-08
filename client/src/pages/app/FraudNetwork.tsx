@@ -34,7 +34,16 @@ import {
   Package,
   Anchor,
   Building2,
+  Search,
+  ShieldAlert,
+  TrendingUp,
+  FileText,
+  X,
+  CheckCircle,
+  Clock,
+  BarChart2,
 } from "lucide-react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -117,11 +126,27 @@ export default function FraudNetwork() {
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
 
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [investigationTraderId, setInvestigationTraderId] = useState<string | null>(null);
   const [minRisk, setMinRisk] = useState(0.4);
   const [limit, setLimit] = useState(200);
   const [filterType, setFilterType] = useState<NodeType | "all">("all");
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Investigation data from tRPC
+  const investigationQuery = trpc.knowledgeGraph.getTraderInvestigation.useQuery(
+    { traderId: investigationTraderId ?? "", months: 12 },
+    { enabled: !!investigationTraderId, refetchOnWindowFocus: false }
+  );
+
+  // Post-clearance audit mutation to flag a trader
+  const scheduleAuditMutation = trpc.postAudit.schedule.useMutation({
+    onSuccess: () => {
+      toast.success("Trader flagged for post-clearance audit");
+      investigationQuery.refetch();
+    },
+    onError: (err: { message: string }) => toast.error("Failed to flag audit", { description: err.message }),
+  });
 
   const { data, isLoading, refetch, isFetching } = trpc.knowledgeGraph.fraudNetwork.useQuery(
     { limit, minRisk },
@@ -226,6 +251,10 @@ export default function FraudNetwork() {
       .on("click", (event, d) => {
         event.stopPropagation();
         setSelectedNode(d);
+        // Open investigation panel for trader nodes
+        if (d.type === "trader") {
+          setInvestigationTraderId(d.id);
+        }
       })
       .call(
         d3
@@ -550,6 +579,16 @@ export default function FraudNetwork() {
                     <Badge variant={riskBadgeVariant(selectedNode.riskScore)} className="ml-auto">
                       {riskLabel(selectedNode.riskScore)} RISK · {(selectedNode.riskScore * 100).toFixed(1)}%
                     </Badge>
+                    {selectedNode.type === "trader" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-2 gap-1 text-xs"
+                        onClick={() => setInvestigationTraderId(selectedNode.id)}
+                      >
+                        <Search size={12} /> Investigate
+                      </Button>
+                    )}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
@@ -569,6 +608,204 @@ export default function FraudNetwork() {
                       </div>
                     ))}
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Fraud Investigation Drill-Down Panel ── */}
+            {investigationTraderId && (
+              <Card className="shrink-0 border-destructive/50">
+                <CardHeader className="pb-2 pt-4 px-4">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <ShieldAlert size={16} className="text-destructive" />
+                    Fraud Investigation
+                    {investigationQuery.data && (
+                      <span className="text-muted-foreground font-normal ml-1">
+                        — {investigationQuery.data.trader.companyName || `Trader ${investigationTraderId}`}
+                      </span>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto h-6 w-6 p-0"
+                      onClick={() => setInvestigationTraderId(null)}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  {investigationQuery.isLoading && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                      <RefreshCw size={14} className="animate-spin" /> Loading investigation data…
+                    </div>
+                  )}
+                  {investigationQuery.error && (
+                    <div className="text-sm text-destructive py-2">
+                      {investigationQuery.error.message}
+                    </div>
+                  )}
+                  {investigationQuery.data && (() => {
+                    const inv = investigationQuery.data;
+                    return (
+                      <div className="space-y-4">
+                        {/* Summary KPIs */}
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                          {[
+                            { label: "Declarations", value: inv.summary.totalDeclarations, icon: <FileText size={12} /> },
+                            { label: "Red Lane", value: inv.summary.redLaneCount, icon: <AlertTriangle size={12} className="text-destructive" /> },
+                            { label: "Yellow Lane", value: inv.summary.yellowLaneCount, icon: <Clock size={12} className="text-amber-500" /> },
+                            { label: "Green Lane", value: inv.summary.greenLaneCount, icon: <CheckCircle size={12} className="text-emerald-500" /> },
+                            { label: "Avg Risk", value: `${(inv.summary.avgRiskScore * 100).toFixed(0)}%`, icon: <TrendingUp size={12} /> },
+                            { label: "Open Audits", value: inv.summary.openAudits, icon: <Activity size={12} className="text-orange-500" /> },
+                          ].map((kpi) => (
+                            <div key={kpi.label} className="bg-muted/40 rounded-lg p-2 text-center">
+                              <div className="flex justify-center mb-1 text-muted-foreground">{kpi.icon}</div>
+                              <div className="text-base font-bold">{kpi.value}</div>
+                              <div className="text-[10px] text-muted-foreground">{kpi.label}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Declaration Timeline */}
+                        <div>
+                          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                            <FileText size={11} /> Declaration Timeline (last 12 months)
+                          </div>
+                          <div className="max-h-40 overflow-y-auto space-y-1">
+                            {inv.timeline.length === 0 && (
+                              <div className="text-xs text-muted-foreground italic">No declarations in this period.</div>
+                            )}
+                            {inv.timeline.map((d) => (
+                              <div
+                                key={d.id}
+                                className="flex items-center gap-2 text-xs px-2 py-1.5 rounded bg-muted/30 hover:bg-muted/50 transition-colors"
+                              >
+                                <div
+                                  className="w-2 h-2 rounded-full shrink-0"
+                                  style={{
+                                    backgroundColor:
+                                      d.riskLane === "red" ? "#ef4444" :
+                                      d.riskLane === "yellow" ? "#f59e0b" : "#22c55e",
+                                  }}
+                                />
+                                <span className="font-mono text-[10px] text-muted-foreground shrink-0">
+                                  {d.date ? new Date(d.date).toLocaleDateString() : "—"}
+                                </span>
+                                <span className="font-medium truncate flex-1">{d.declarationNumber}</span>
+                                <span className="text-muted-foreground shrink-0">{d.hsCode}</span>
+                                <Badge
+                                  variant={d.riskLane === "red" ? "destructive" : d.riskLane === "yellow" ? "outline" : "secondary"}
+                                  className="text-[9px] px-1 py-0 shrink-0"
+                                >
+                                  {d.riskLane.toUpperCase()}
+                                </Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Connected Entities */}
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          {/* HS Codes */}
+                          {inv.connectedEntities.sharedHsCodes.length > 0 && (
+                            <div>
+                              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <Package size={11} /> Top HS Codes
+                              </div>
+                              <div className="space-y-1">
+                                {inv.connectedEntities.sharedHsCodes.slice(0, 5).map((hs) => (
+                                  <div key={hs.code} className="flex items-center gap-2 text-xs">
+                                    <span className="font-mono text-muted-foreground w-16 shrink-0">{hs.code}</span>
+                                    <div className="flex-1 bg-muted rounded-full h-1.5 overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full"
+                                        style={{
+                                          width: `${(hs.avgRisk * 100).toFixed(0)}%`,
+                                          backgroundColor: hs.avgRisk >= 0.65 ? "#ef4444" : hs.avgRisk >= 0.35 ? "#f59e0b" : "#22c55e",
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="text-muted-foreground shrink-0">{hs.count}×</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {/* Ports */}
+                          {inv.connectedEntities.sharedPorts.length > 0 && (
+                            <div>
+                              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <Anchor size={11} /> Ports Used
+                              </div>
+                              <div className="space-y-1">
+                                {inv.connectedEntities.sharedPorts.map((p) => (
+                                  <div key={p.port} className="flex items-center justify-between text-xs">
+                                    <span className="truncate">{p.port}</span>
+                                    <span className="text-muted-foreground ml-2 shrink-0">{p.count}×</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Audit Flags */}
+                        {inv.auditFlags.length > 0 && (
+                          <div>
+                            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1 flex items-center gap-1">
+                              <BarChart2 size={11} /> Audit History
+                            </div>
+                            <div className="space-y-1">
+                              {inv.auditFlags.slice(0, 3).map((a) => (
+                                <div key={a.id} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-muted/30">
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0">{a.status}</Badge>
+                                  <span className="flex-1 truncate">{a.riskIndicators[0] ?? a.auditType}</span>
+                                  <span className="text-muted-foreground shrink-0">
+                                    {a.createdAt ? new Date(a.createdAt).toLocaleDateString() : "—"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Flag for Audit action */}
+                        <div className="flex items-center gap-2 pt-1 border-t">
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="gap-1 text-xs"
+                            disabled={scheduleAuditMutation.isPending || inv.timeline.length === 0}
+                            onClick={() => {
+                              // Use the most recent cleared declaration for the audit
+                              const clearedDecl = inv.timeline.find((d) => d.status === "cleared");
+                              if (!clearedDecl) {
+                                toast.warning("No cleared declarations found to audit for this trader.");
+                                return;
+                              }
+                              scheduleAuditMutation.mutate({
+                                declarationId: parseInt(clearedDecl.id, 10),
+                                triggerReason: `Flagged via Fraud Network investigation — risk score ${(inv.summary.avgRiskScore * 100).toFixed(1)}%, ${inv.summary.redLaneCount} red-lane declarations in last 12 months.`,
+                              });
+                            }}
+                          >
+                            {scheduleAuditMutation.isPending ? (
+                              <RefreshCw size={12} className="animate-spin" />
+                            ) : (
+                              <ShieldAlert size={12} />
+                            )}
+                            Flag for Post-Clearance Audit
+                          </Button>
+                          {inv.fallback && (
+                            <span className="text-[10px] text-muted-foreground">
+                              (DB fallback — graph bridge offline)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             )}

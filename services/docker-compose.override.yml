@@ -1,0 +1,71 @@
+# ─── Local Development Override ───────────────────────────────────────────────
+# This file is automatically merged with docker-compose.yml when running
+# `docker compose up` locally. It adds bind mounts for hot reload and exposes
+# additional debug ports. Do NOT commit secrets here.
+#
+# Usage:
+#   docker compose up -d                          # uses both files automatically
+#   docker compose -f docker-compose.yml up -d   # production only (no override)
+
+version: "3.9"
+
+services:
+
+  # ── Python AI Service: bind-mount source for live reload ───────────────────
+  python-ai:
+    volumes:
+      - ./python-ai:/app:cached        # live source reload
+      - gnn-models:/app/models         # persist trained model weights
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      DEBUG: "true"
+    command: >
+      uvicorn main:app
+        --host 0.0.0.0
+        --port 8099
+        --reload
+        --reload-dir /app
+
+  # ── Go Graph Bridge: expose pprof debug endpoint ───────────────────────────
+  go-graph-bridge:
+    ports:
+      - "8100:8100"
+      - "6060:6060"    # pprof profiling
+    environment:
+      PPROF_ENABLED: "true"
+      LOG_LEVEL: "debug"
+
+  # ── Rust Graph-Risk: verbose logging ──────────────────────────────────────
+  rust-graph-risk:
+    environment:
+      RUST_LOG: "rust_graph_risk=debug,actix_web=info"
+      RUST_BACKTRACE: "1"
+
+  # ── FalkorDB: expose Redis CLI port for direct graph inspection ────────────
+  falkordb:
+    ports:
+      - "6380:6379"    # extra mapping so host Redis (6379) doesn't conflict
+      - "3010:3000"    # FalkorDB browser UI (avoid conflict with app on 3000)
+
+  # ── Neo4j: expose Bolt for local Neo4j Desktop / cypher-shell ─────────────
+  neo4j:
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/ngswtp_neo4j_2026
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      # Allow localhost connections without TLS in dev
+      NEO4J_dbms_connector_bolt_tls__level: DISABLED
+
+  # ── PostgreSQL: expose for local psql / DBeaver ───────────────────────────
+  postgres:
+    ports:
+      - "5432:5432"
+
+  # ── Grafana: pre-load local dashboards ────────────────────────────────────
+  grafana:
+    volumes:
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro

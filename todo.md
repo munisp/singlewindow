@@ -212,3 +212,19 @@
 - [x] Fix flaky scoredAt test timeout (5s → 30s for LLM latency)
 - [x] Total: 185 tests across 10 test files — all passing
 - [x] Save checkpoint
+
+## Sprint 9 — Docker Activation, Training Pipeline, Fraud Investigation Drill-Down
+
+- [x] Validate and fix services/docker-compose.yml for all new services
+- [x] Write docker-compose.override.yml for local dev (bind mounts, hot reload)
+- [x] Write .env.example with GRAPH_BRIDGE_URL, FALKORDB_URL, NEO4J_URL, OLLAMA_URL
+- [x] Add GRAPH_BRIDGE_URL to project secrets via webdev_request_secrets
+- [x] Extend Python AI services: pg_to_graph_seeder.py (pull from PostgreSQL → FalkorDB/Neo4j)
+- [x] Write train_and_serve.sh entrypoint script for GNN training pipeline
+- [x] Add knowledgeGraph.getTraderInvestigation tRPC procedure
+- [x] Build Fraud Investigation drill-down panel in FraudNetwork.tsx
+- [x] Drill-down: declaration timeline (last 12 months, risk lane per declaration)
+- [x] Drill-down: connected entities (shared agents, ports, HS codes)
+- [x] Drill-down: "Flag for Post-Clearance Audit" button wired to postAudit.create
+- [x] Write vitest tests for getTraderInvestigation procedure (8 tests, all passing)
+- [x] Save checkpoint

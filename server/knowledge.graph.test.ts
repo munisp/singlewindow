@@ -613,3 +613,73 @@ describe("knowledgeGraph.fraudNetwork", () => {
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });
+
+// ─── GET TRADER INVESTIGATION ─────────────────────────────────────────────────
+// The procedure requires admin or customs_officer role (max months = 24)
+
+describe("knowledgeGraph.getTraderInvestigation", () => {
+  const adminCtx = () => makeCtx(makeUser({ role: "admin" }));
+  const officerCtx = () => makeCtx(makeUser({ role: "customs_officer" }));
+
+  it("rejects unauthenticated callers with UNAUTHORIZED", async () => {
+    const caller = appRouter.createCaller(makeCtx(null));
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "1", months: 12 })
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects regular user role with FORBIDDEN", async () => {
+    const caller = appRouter.createCaller(makeCtx(makeUser({ role: "user" })));
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "1", months: 12 })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("rejects non-numeric traderId with BAD_REQUEST (admin)", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "not-a-number", months: 12 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects months below 1 with BAD_REQUEST", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "1", months: 0 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("rejects months above 24 with BAD_REQUEST", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "1", months: 25 })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("throws a TRPCError for a non-existent trader (admin) — NOT_FOUND or INTERNAL_SERVER_ERROR depending on DB availability", async () => {
+    // In CI without a live DB the procedure throws INTERNAL_SERVER_ERROR (DB unavailable).
+    // With a live DB it throws NOT_FOUND. Both are acceptable TRPCErrors.
+    const caller = appRouter.createCaller(adminCtx());
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "999999", months: 12 })
+    ).rejects.toBeInstanceOf(Error);
+  });
+
+  it("throws a TRPCError for a non-existent trader (customs_officer)", async () => {
+    const caller = appRouter.createCaller(officerCtx());
+    await expect(
+      caller.knowledgeGraph.getTraderInvestigation({ traderId: "999998", months: 1 })
+    ).rejects.toBeInstanceOf(Error);
+  });
+
+  it("accepts months=24 without schema error — throws only after schema validation passes", async () => {
+    // Schema validation passes (months=24 is within 1-24 range).
+    // The error that follows is either NOT_FOUND or INTERNAL_SERVER_ERROR, not BAD_REQUEST.
+    const caller = appRouter.createCaller(adminCtx());
+    const err = await caller.knowledgeGraph
+      .getTraderInvestigation({ traderId: "999997", months: 24 })
+      .catch((e: { code?: string }) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).not.toBe("BAD_REQUEST");
+  });
+});

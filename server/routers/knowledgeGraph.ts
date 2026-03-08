@@ -590,4 +590,265 @@ export const knowledgeGraphRouter = router({
 
       return { ...result, fallback: false };
     }),
+
+  // ─── TRADER INVESTIGATION ──────────────────────────────────────────────────
+  // Returns a full investigation dossier for a single trader:
+  //   - declaration timeline (last 12 months, one entry per declaration)
+  //   - connected entities (shared agents, shared HS codes, shared ports)
+  //   - risk trend (monthly avg risk score)
+  //   - active audit flags
+  // Used by the Fraud Investigation drill-down panel in FraudNetwork.tsx.
+
+  getTraderInvestigation: protectedProcedure
+    .input(
+      z.object({
+        traderId: z.string(),
+        months: z.number().int().min(1).max(24).default(12),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      // Only admin and customs_officer roles may investigate traders
+      const role = (ctx.user as { role?: string }).role;
+      if (role !== "admin" && role !== "customs_officer") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only admin or customs_officer roles may access investigation data.",
+        });
+      }
+
+      // Try the Go bridge first
+      const bridgeResult = await bridgePost<{
+        trader: {
+          id: string;
+          companyName: string;
+          tinNumber: string;
+          aeoStatus: string;
+          riskScore: number;
+          country: string;
+          traderType: string;
+        };
+        timeline: Array<{
+          id: string;
+          declarationNumber: string;
+          date: string;
+          type: string;
+          status: string;
+          riskLane: string;
+          riskScore: number;
+          declaredValue: number;
+          currency: string;
+          hsCode: string;
+          originCountry: string;
+          portOfEntry: string;
+        }>;
+        connectedEntities: {
+          sharedAgents: Array<{ agentId: string; agentName: string; sharedTraders: number; declarations: number }>;
+          sharedHsCodes: Array<{ code: string; description: string; count: number; avgRisk: number }>;
+          sharedPorts: Array<{ port: string; country: string; count: number; avgRisk: number }>;
+          relatedTraders: Array<{ id: string; companyName: string; connectionType: string; riskScore: number }>;
+        };
+        riskTrend: Array<{ month: string; avgRisk: number; declarations: number; redLane: number }>;
+        auditFlags: Array<{
+          id: string;
+          auditType: string;
+          status: string;
+          riskIndicators: string[];
+          createdAt: string;
+        }>;
+        summary: {
+          totalDeclarations: number;
+          redLaneCount: number;
+          yellowLaneCount: number;
+          greenLaneCount: number;
+          totalDeclaredValue: number;
+          avgRiskScore: number;
+          openAudits: number;
+        };
+      }>("/trader/investigate", { traderId: input.traderId, months: input.months });
+
+      if (bridgeResult) {
+        return { ...bridgeResult, fallback: false };
+      }
+
+      // ── Fallback: query PostgreSQL directly ──────────────────────────────
+      // This ensures the investigation panel works even without the Go bridge.
+      const { getDb } = await import("../db");
+      const { declarations, stakeholderProfiles, postClearanceAudits } = await import("../../drizzle/schema");
+      const { eq, and, gte, desc } = await import("drizzle-orm");
+
+      const traderIdNum = parseInt(input.traderId, 10);
+      if (isNaN(traderIdNum)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "traderId must be a numeric string." });
+      }
+
+      const db = await getDb();
+      if (!db) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable." });
+      }
+
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - input.months);
+
+      // Trader profile
+      const traderRows = await db
+        .select()
+        .from(stakeholderProfiles)
+        .where(eq(stakeholderProfiles.id, traderIdNum))
+        .limit(1);
+
+      const trader = traderRows[0];
+      if (!trader) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Trader not found." });
+      }
+
+      // Declaration timeline
+      const decls = await db
+        .select()
+        .from(declarations)
+        .where(
+          and(
+            eq(declarations.traderId, traderIdNum),
+            gte(declarations.createdAt, cutoff)
+          )
+        )
+        .orderBy(desc(declarations.createdAt))
+        .limit(200);
+
+      const timeline = decls.map((d) => ({
+        id: String(d.id),
+        declarationNumber: d.declarationNumber ?? "",
+        date: d.createdAt?.toISOString() ?? "",
+        type: d.declarationType ?? "import",
+        status: d.status ?? "pending",
+        riskLane: d.riskLane ?? "green",
+        riskScore: Number(d.riskScore ?? 0),
+        declaredValue: Number(d.invoiceValue ?? 0),
+        currency: d.invoiceCurrency ?? "USD",
+        hsCode: d.hsCode ?? "",
+        originCountry: d.countryOfOrigin ?? "",
+        portOfEntry: d.portOfEntry ?? "",
+      }));
+
+      // Risk trend (monthly)
+      const riskTrend: Array<{ month: string; avgRisk: number; declarations: number; redLane: number }> = [];
+      const monthMap = new Map<string, { total: number; count: number; red: number }>();
+      for (const d of decls) {
+        if (!d.createdAt) continue;
+        const key = d.createdAt.toISOString().slice(0, 7); // YYYY-MM
+        const entry = monthMap.get(key) ?? { total: 0, count: 0, red: 0 };
+        entry.total += Number(d.riskScore ?? 0);
+        entry.count += 1;
+        if (d.riskLane === "red") entry.red += 1;
+        monthMap.set(key, entry);
+      }
+      for (const [month, v] of Array.from(monthMap.entries()).sort()) {
+        riskTrend.push({
+          month,
+          avgRisk: v.count > 0 ? Math.round((v.total / v.count) * 100) / 100 : 0,
+          declarations: v.count,
+          redLane: v.red,
+        });
+      }
+
+      // HS code frequency
+      type DeclRow2 = typeof decls[number];
+      const hsMap = new Map<string, { count: number; totalRisk: number }>();
+      for (const d of decls) {
+        const hs = d.hsCode ?? "";
+        if (!hs) continue;
+        const e = hsMap.get(hs) ?? { count: 0, totalRisk: 0 };
+        e.count += 1;
+        e.totalRisk += Number(d.riskScore ?? 0);
+        hsMap.set(hs, e);
+      }
+      const sharedHsCodes = Array.from(hsMap.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 10)
+        .map(([code, v]) => ({
+          code,
+          description: "",
+          count: v.count,
+          avgRisk: v.count > 0 ? Math.round((v.totalRisk / v.count) * 100) / 100 : 0,
+        }));
+
+      // Port frequency
+      const portMap = new Map<string, { count: number; totalRisk: number }>();
+      for (const d of decls) {
+        const port = d.portOfEntry ?? "";
+        if (!port) continue;
+        const e = portMap.get(port) ?? { count: 0, totalRisk: 0 };
+        e.count += 1;
+        e.totalRisk += Number(d.riskScore ?? 0);
+        portMap.set(port, e);
+      }
+      const sharedPorts = Array.from(portMap.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 5)
+        .map(([port, v]) => ({
+          port,
+          country: "",
+          count: v.count,
+          avgRisk: v.count > 0 ? Math.round((v.totalRisk / v.count) * 100) / 100 : 0,
+        }));
+
+      // Open audit flags
+      const auditRows = await db
+        .select()
+        .from(postClearanceAudits)
+        .where(eq(postClearanceAudits.traderId, traderIdNum))
+        .orderBy(desc(postClearanceAudits.createdAt))
+        .limit(20);
+
+      type AuditRow = typeof auditRows[number];
+      const auditFlags = auditRows.map((a: AuditRow) => ({
+        id: String(a.id),
+        auditType: a.outcome ?? "pending",
+        status: a.status ?? "scheduled",
+        riskIndicators: a.triggerReason ? [a.triggerReason] : [],
+        createdAt: a.createdAt?.toISOString() ?? "",
+      }));
+
+      // Summary
+      type DeclRow = typeof decls[number];
+      const redCount = decls.filter((d: DeclRow) => d.riskLane === "red").length;
+      const yellowCount = decls.filter((d: DeclRow) => d.riskLane === "yellow").length;
+      const greenCount = decls.filter((d: DeclRow) => d.riskLane === "green").length;
+      const totalValue = decls.reduce((s: number, d: DeclRow) => s + Number(d.invoiceValue ?? 0), 0);
+      const avgRisk =
+        decls.length > 0
+          ? decls.reduce((s: number, d: DeclRow) => s + Number(d.riskScore ?? 0), 0) / decls.length
+          : 0;
+
+      return {
+        trader: {
+          id: String(trader.id),
+          companyName: trader.organizationName ?? "",
+          tinNumber: trader.taxId ?? "",
+          aeoStatus: trader.aeoStatus ?? "none",
+          riskScore: 0, // stakeholderProfiles does not store a riskScore column
+          country: trader.country ?? "",
+          traderType: trader.stakeholderType ?? "trader",
+        },
+        timeline,
+        connectedEntities: {
+          sharedAgents: [],
+          sharedHsCodes,
+          sharedPorts,
+          relatedTraders: [],
+        },
+        riskTrend,
+        auditFlags,
+        summary: {
+          totalDeclarations: decls.length,
+          redLaneCount: redCount,
+          yellowLaneCount: yellowCount,
+          greenLaneCount: greenCount,
+          totalDeclaredValue: Math.round(totalValue * 100) / 100,
+          avgRiskScore: Math.round(avgRisk * 100) / 100,
+          // postClearanceAudits uses 'scheduled'|'in_progress'|'completed'|'escalated'|'closed'
+          openAudits: auditFlags.filter((a) => a.status === "scheduled" || a.status === "in_progress").length,
+        },
+        fallback: true,
+      };
+    }),
 });

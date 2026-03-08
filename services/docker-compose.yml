@@ -529,7 +529,7 @@ services:
   # ── Rust Graph-Risk Engine (GNN propagation, high-perf traversal) ─────────────
   rust-graph-risk:
     build:
-      context: ../services/rust-graph-risk
+      context: ./rust-graph-risk
       dockerfile: Dockerfile
     container_name: ngswtp-rust-graph-risk
     restart: unless-stopped
@@ -549,7 +549,7 @@ services:
   # ── Python AI Service (GNN trainer, CocoIndex, EPR-KGQA, ART, Ollama bridge) ──
   python-ai:
     build:
-      context: ../services/python-ai
+      context: ./python-ai
       dockerfile: Dockerfile
     container_name: ngswtp-python-ai
     restart: unless-stopped
@@ -582,7 +582,7 @@ services:
   # ── Go Graph Bridge (orchestrates Rust engine + Python AI) ───────────────────
   go-graph-bridge:
     build:
-      context: ../services/go-graph-bridge
+      context: ./go-graph-bridge
       dockerfile: Dockerfile
     container_name: ngswtp-go-graph-bridge
     restart: unless-stopped
