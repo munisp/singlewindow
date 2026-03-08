@@ -1,0 +1,68 @@
+syntax = "proto3";
+package risk;
+option go_package = "tradegateway/proto/risk";
+
+import "common/common.proto";
+
+// ─── RISK ENGINE (Python gRPC service) ───────────────────────────────────────
+
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  LOW      = 1;
+  MEDIUM   = 2;
+  HIGH     = 3;
+  CRITICAL = 4;
+}
+
+message RiskFactor {
+  string name        = 1;
+  double contribution = 2;  // 0.0 – 1.0 SHAP value
+  string description = 3;
+  string direction   = 4;  // "increases_risk" | "decreases_risk"
+}
+
+message RiskScoreRequest {
+  int64  declaration_id    = 1;
+  int64  trader_id         = 2;
+  string hs_code           = 3;
+  string country_of_origin = 4;
+  string country_of_dest   = 5;
+  string port_of_entry     = 6;
+  double invoice_value_usd = 7;
+  double gross_weight_kg   = 8;
+  int32  num_packages      = 9;
+  string declaration_type  = 10;
+  bool   trader_is_aeo     = 11;
+  int32  trader_history_count = 12;
+  double trader_violation_rate = 13;
+}
+
+message RiskScoreResponse {
+  double              score         = 1;  // 0–100
+  string              lane          = 2;  // green|yellow|red|blue
+  RiskLevel           level         = 3;
+  repeated RiskFactor factors       = 4;
+  string              explanation   = 5;  // human-readable summary
+  double              duty_rate     = 6;  // e.g. 0.10 = 10%
+  double              vat_rate      = 7;  // e.g. 0.15 = 15%
+  double              duty_amount   = 8;
+  double              vat_amount    = 9;
+  double              total_due     = 10;
+  string              model_version = 11;
+  bool                gnn_flagged   = 12;  // GNN fraud graph flag
+  double              gnn_score     = 13;
+}
+
+message BatchRiskRequest {
+  repeated RiskScoreRequest requests = 1;
+}
+
+message BatchRiskResponse {
+  repeated RiskScoreResponse responses = 1;
+}
+
+service RiskEngine {
+  rpc ScoreDeclaration (RiskScoreRequest)  returns (RiskScoreResponse);
+  rpc BatchScore       (BatchRiskRequest)  returns (BatchRiskResponse);
+  rpc Health           (common.PageRequest) returns (common.HealthResponse);
+}

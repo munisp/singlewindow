@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package ngswtp.risk.v1;
+
+option go_package = "github.com/ngswtp/services/risk/v1";
+
+// ─── RISK ENGINE SERVICE ──────────────────────────────────────────────────────
+// ML-powered risk scoring and lane assignment for customs declarations
+// Implements WCO SAFE Framework risk management principles
+
+service RiskEngineService {
+  // Score a single declaration and assign risk lane
+  rpc ScoreDeclaration(ScoreRequest) returns (ScoreResponse);
+
+  // Batch score multiple declarations
+  rpc BatchScore(BatchScoreRequest) returns (BatchScoreResponse);
+
+  // Get risk profile for a trader
+  rpc GetTraderRiskProfile(TraderRiskRequest) returns (TraderRiskProfile);
+
+  // Update risk model with feedback (officer override)
+  rpc SubmitFeedback(RiskFeedback) returns (FeedbackResponse);
+}
+
+// ─── MESSAGES ─────────────────────────────────────────────────────────────────
+
+message ScoreRequest {
+  int64 declaration_id = 1;
+  int64 trader_id = 2;
+  string hs_code = 3;
+  string origin_country = 4;
+  string destination_country = 5;
+  double declared_value = 6;
+  double gross_weight_kg = 7;
+  string declaration_type = 8;
+  bool is_aeo_certified = 9;
+  int32 trader_declaration_count = 10; // Historical declaration count
+  double trader_compliance_rate = 11;  // Historical compliance rate (0-1)
+  repeated string document_types = 12;
+  bool preferential_origin_claim = 13;
+}
+
+message ScoreResponse {
+  int64 declaration_id = 1;
+  double risk_score = 2;        // 0.0 - 1.0
+  string risk_lane = 3;         // green | yellow | red
+  repeated string risk_factors = 4;
+  repeated string recommended_checks = 5;
+  bool requires_physical_inspection = 6;
+  bool requires_document_review = 7;
+  double confidence = 8;        // Model confidence 0.0 - 1.0
+  int64 scored_at = 9;
+}
+
+message BatchScoreRequest {
+  repeated ScoreRequest declarations = 1;
+}
+
+message BatchScoreResponse {
+  repeated ScoreResponse results = 1;
+  int32 green_count = 2;
+  int32 yellow_count = 3;
+  int32 red_count = 4;
+}
+
+message TraderRiskRequest {
+  int64 trader_id = 1;
+}
+
+message TraderRiskProfile {
+  int64 trader_id = 1;
+  double overall_risk_score = 2;
+  int32 total_declarations = 3;
+  int32 violations_count = 4;
+  double compliance_rate = 5;
+  string risk_category = 6; // low | medium | high | very_high
+  bool is_aeo_eligible = 7;
+  repeated string risk_indicators = 8;
+  int64 profile_updated_at = 9;
+}
+
+message RiskFeedback {
+  int64 declaration_id = 1;
+  string officer_id = 2;
+  string original_lane = 3;
+  string actual_outcome = 4; // compliant | minor_violation | major_violation | fraud
+  string notes = 5;
+}
+
+message FeedbackResponse {
+  bool accepted = 1;
+  string feedback_id = 2;
+}

@@ -1,0 +1,83 @@
+syntax = "proto3";
+package payment;
+option go_package = "tradegateway/proto/payment";
+
+import "google/protobuf/timestamp.proto";
+import "common/common.proto";
+
+// ─── PAYMENT SERVICE (Go gRPC service) ───────────────────────────────────────
+
+enum PaymentStatus {
+  PAYMENT_STATUS_UNSPECIFIED = 0;
+  PENDING    = 1;
+  PROCESSING = 2;
+  CONFIRMED  = 3;
+  FAILED     = 4;
+  REFUNDED   = 5;
+}
+
+enum PaymentMethod {
+  PAYMENT_METHOD_UNSPECIFIED = 0;
+  MOJALOOP_BANK    = 1;
+  MOJALOOP_MOBILE  = 2;
+  BANK_TRANSFER    = 3;
+  CUSTOMS_BOND     = 4;
+  DUTY_DRAWBACK    = 5;
+}
+
+message Payment {
+  int64         id              = 1;
+  int64         declaration_id  = 2;
+  int64         trader_id       = 3;
+  string        payment_ref     = 4;
+  common.Money  amount          = 5;
+  PaymentMethod method          = 6;
+  PaymentStatus status          = 7;
+  string        mojaloop_txn_id = 8;
+  string        failure_reason  = 9;
+  google.protobuf.Timestamp initiated_at = 10;
+  google.protobuf.Timestamp confirmed_at = 11;
+}
+
+message InitiatePaymentRequest {
+  int64         declaration_id = 1;
+  int64         trader_id      = 2;
+  common.Money  amount         = 3;
+  PaymentMethod method         = 4;
+  string        return_url     = 5;
+}
+
+message InitiatePaymentResponse {
+  Payment payment        = 1;
+  string  redirect_url   = 2;  // Mojaloop payment URL
+  string  qr_code_data   = 3;  // for mobile money
+}
+
+message ConfirmPaymentRequest {
+  string payment_ref     = 1;
+  string mojaloop_txn_id = 2;
+}
+
+message GetPaymentsRequest {
+  int64 declaration_id = 1;
+  int64 trader_id      = 2;
+}
+
+message GetPaymentsResponse {
+  repeated Payment payments = 1;
+}
+
+message PaymentSummary {
+  int64        total_transactions = 1;
+  common.Money total_collected    = 2;
+  common.Money pending_amount     = 3;
+  int64        failed_count       = 4;
+}
+
+service PaymentService {
+  rpc InitiatePayment  (InitiatePaymentRequest)  returns (InitiatePaymentResponse);
+  rpc ConfirmPayment   (ConfirmPaymentRequest)   returns (Payment);
+  rpc GetPayments      (GetPaymentsRequest)      returns (GetPaymentsResponse);
+  rpc GetSummary       (common.PageRequest)      returns (PaymentSummary);
+  rpc Health           (common.PageRequest)      returns (common.HealthResponse);
+}

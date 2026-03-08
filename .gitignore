@@ -44,6 +44,7 @@ pids
 *.pid
 *.seed
 *.pid.lock
+*.bak
 
 # Coverage directory used by tools like istanbul
 coverage/
@@ -107,3 +108,15 @@ temp/
 
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
+
+# TigerBeetle data files (large binary, regenerated on startup with `tigerbeetle format`)
+data/tigerbeetle/*.tigerbeetle
+
+# Rust build artifacts
+services/rust/*/target/
+
+# Go build artifacts
+services/go/*/vendor/
+
+# TigerBeetle binary (large, downloaded separately)
+services/rust/tigerbeetle-bridge/bin/tigerbeetle

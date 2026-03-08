@@ -1,0 +1,84 @@
+syntax = "proto3";
+package sanctions;
+option go_package = "tradegateway/proto/sanctions";
+
+import "common/common.proto";
+
+// ─── SANCTIONS SCREENER (Python gRPC service) ─────────────────────────────────
+
+enum ScreeningList {
+  SCREENING_LIST_UNSPECIFIED = 0;
+  OFAC_SDN          = 1;
+  UN_SECURITY       = 2;
+  EU_CONSOLIDATED   = 3;
+  OFSI_UK           = 4;
+  INTERPOL          = 5;
+  WCO_CEN           = 6;
+  DUAL_USE_EAR99    = 7;
+  DUAL_USE_CCL      = 8;
+  ITAR              = 9;
+}
+
+enum MatchConfidence {
+  MATCH_CONFIDENCE_UNSPECIFIED = 0;
+  EXACT       = 1;
+  HIGH        = 2;
+  MEDIUM      = 3;
+  LOW         = 4;
+}
+
+message ScreeningMatch {
+  ScreeningList    list            = 1;
+  string           list_entry_id   = 2;
+  string           matched_name    = 3;
+  MatchConfidence  confidence      = 4;
+  string           reason          = 5;
+  string           program         = 6;  // e.g. "IRAN", "DPRK"
+  string           action_required = 7;  // "block" | "escalate" | "flag"
+}
+
+message ScreenEntityRequest {
+  string entity_name    = 1;
+  string entity_type    = 2;  // "person" | "organization" | "vessel" | "aircraft"
+  string country        = 3;
+  string identifier     = 4;  // passport, tax ID, IMO number
+  int64  declaration_id = 5;
+}
+
+message ScreenEntityResponse {
+  bool                    is_clear  = 1;
+  repeated ScreeningMatch matches   = 2;
+  string                  summary   = 3;
+  int32                   checked_lists = 4;
+}
+
+message ScreenHSCodeRequest {
+  string hs_code           = 1;
+  string goods_description = 2;
+  string country_of_origin = 3;
+  string country_of_dest   = 4;
+}
+
+message ScreenHSCodeResponse {
+  bool   is_controlled     = 1;
+  bool   is_dual_use       = 2;
+  bool   requires_license  = 3;
+  string classification    = 4;  // "EAR99" | "CCL" | "ITAR" | "unrestricted"
+  string reason            = 5;
+  string license_type      = 6;
+}
+
+message BatchScreenRequest {
+  repeated ScreenEntityRequest entities = 1;
+}
+
+message BatchScreenResponse {
+  repeated ScreenEntityResponse results = 1;
+}
+
+service SanctionsScreener {
+  rpc ScreenEntity   (ScreenEntityRequest)  returns (ScreenEntityResponse);
+  rpc BatchScreen    (BatchScreenRequest)   returns (BatchScreenResponse);
+  rpc ScreenHSCode   (ScreenHSCodeRequest)  returns (ScreenHSCodeResponse);
+  rpc Health         (common.PageRequest)   returns (common.HealthResponse);
+}

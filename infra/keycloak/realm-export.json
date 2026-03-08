@@ -1,0 +1,85 @@
+{
+  "realm": "tradegateway",
+  "displayName": "TradeGateway™ NGSWTP",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "accessTokenLifespan": 3600,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "trader",           "description": "Registered trader / importer / exporter" },
+      { "name": "customs_officer",  "description": "Customs authority officer" },
+      { "name": "oga_officer",      "description": "Other Government Agency officer" },
+      { "name": "admin",            "description": "System administrator" },
+      { "name": "security_analyst", "description": "Security operations center analyst" },
+      { "name": "auditor",          "description": "Post-clearance auditor" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "tradegateway-web",
+      "name": "TradeGateway Web Portal",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:9080/*",
+        "https://*.manus.space/*"
+      ],
+      "webOrigins": ["+"],
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "tradegateway-api",
+      "name": "TradeGateway API Gateway",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "secret": "tradegateway-api-secret-2026",
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "tradegateway-services",
+      "name": "TradeGateway Microservices",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "tradegateway-services-secret-2026",
+      "protocol": "openid-connect"
+    }
+  ],
+  "requiredActions": [
+    { "alias": "CONFIGURE_TOTP", "name": "Configure OTP", "enabled": true, "defaultAction": false },
+    { "alias": "UPDATE_PASSWORD", "name": "Update Password", "enabled": true, "defaultAction": false },
+    { "alias": "VERIFY_EMAIL",    "name": "Verify Email",    "enabled": true, "defaultAction": true }
+  ],
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30
+}

@@ -1,0 +1,97 @@
+syntax = "proto3";
+package rules;
+option go_package = "tradegateway/proto/rules";
+
+import "common/common.proto";
+
+// ─── RULE ENGINE (Rust gRPC service) ─────────────────────────────────────────
+
+enum RuleSeverity {
+  RULE_SEVERITY_UNSPECIFIED = 0;
+  INFO     = 1;
+  WARNING  = 2;
+  ERROR    = 3;
+  BLOCKING = 4;
+}
+
+enum RuleCategory {
+  RULE_CATEGORY_UNSPECIFIED = 0;
+  HS_CODE_VALIDATION        = 1;
+  VALUATION                 = 2;
+  WEIGHT_VOLUME             = 3;
+  DOCUMENT_COMPLETENESS     = 4;
+  PROHIBITED_GOODS          = 5;
+  RESTRICTED_GOODS          = 6;
+  TARIFF_CLASSIFICATION     = 7;
+  ORIGIN_VERIFICATION       = 8;
+  LICENSING                 = 9;
+  QUOTA                     = 10;
+  ANTI_DUMPING              = 11;
+  SAFEGUARD                 = 12;
+  PHYTOSANITARY             = 13;
+  VETERINARY                = 14;
+  FOOD_SAFETY               = 15;
+  DRUG_PRECURSOR            = 16;
+  DUAL_USE                  = 17;
+  ARMS_MUNITIONS            = 18;
+  CITES                     = 19;
+  CULTURAL_PROPERTY         = 20;
+}
+
+message RuleViolation {
+  string       rule_id     = 1;
+  string       rule_name   = 2;
+  RuleCategory category    = 3;
+  RuleSeverity severity    = 4;
+  string       message     = 5;
+  string       field       = 6;  // which field triggered this
+  string       remediation = 7;  // how to fix it
+}
+
+message ValidateDeclarationRequest {
+  int64  declaration_id    = 1;
+  string hs_code           = 2;
+  string goods_description = 3;
+  string country_of_origin = 4;
+  string country_of_dest   = 5;
+  string declaration_type  = 6;
+  double invoice_value_usd = 7;
+  double gross_weight_kg   = 8;
+  int32  num_packages      = 9;
+  repeated string document_types_present = 10;
+  bool   has_license       = 11;
+  string license_number    = 12;
+}
+
+message ValidateDeclarationResponse {
+  bool                    is_valid         = 1;
+  repeated RuleViolation  violations       = 2;
+  int32                   rules_checked    = 3;
+  int32                   rules_passed     = 4;
+  int32                   rules_failed     = 5;
+  string                  validation_id    = 6;
+}
+
+message GetRulesRequest {
+  RuleCategory category = 1;  // 0 = all
+}
+
+message Rule {
+  string       rule_id     = 1;
+  string       name        = 2;
+  RuleCategory category    = 3;
+  RuleSeverity severity    = 4;
+  string       description = 5;
+  bool         active      = 6;
+}
+
+message GetRulesResponse {
+  repeated Rule rules = 1;
+  int32         total = 2;
+}
+
+service RuleEngine {
+  rpc ValidateDeclaration (ValidateDeclarationRequest) returns (ValidateDeclarationResponse);
+  rpc GetRules            (GetRulesRequest)            returns (GetRulesResponse);
+  rpc Health              (common.PageRequest)         returns (common.HealthResponse);
+}

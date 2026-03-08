@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package ngswtp.declarations.v1;
+
+option go_package = "github.com/ngswtp/services/declarations/v1";
+
+// ─── DECLARATION SERVICE ──────────────────────────────────────────────────────
+// Core customs declaration processing service
+// Implements WCO Data Model v3.10 message structures
+
+service DeclarationService {
+  // Submit a new customs declaration
+  rpc SubmitDeclaration(SubmitDeclarationRequest) returns (SubmitDeclarationResponse);
+
+  // Get declaration status
+  rpc GetDeclaration(GetDeclarationRequest) returns (Declaration);
+
+  // Update declaration status (internal — customs officers only)
+  rpc UpdateDeclarationStatus(UpdateStatusRequest) returns (UpdateStatusResponse);
+
+  // Stream real-time status updates for a declaration
+  rpc WatchDeclaration(WatchDeclarationRequest) returns (stream DeclarationEvent);
+
+  // List declarations for a trader
+  rpc ListDeclarations(ListDeclarationsRequest) returns (ListDeclarationsResponse);
+}
+
+// ─── MESSAGES ─────────────────────────────────────────────────────────────────
+
+message SubmitDeclarationRequest {
+  int64 trader_id = 1;
+  string declaration_type = 2; // import | export | transit | re-export
+  string hs_code = 3;
+  string description = 4;
+  string origin_country = 5;
+  string destination_country = 6;
+  double declared_value = 7;
+  string currency = 8;
+  double gross_weight_kg = 9;
+  double net_weight_kg = 10;
+  int32 num_packages = 11;
+  string incoterms = 12;
+  repeated string document_types = 13;
+  bool preferential_origin_claim = 14;
+  bool free_zone_destination = 15;
+}
+
+message SubmitDeclarationResponse {
+  int64 declaration_id = 1;
+  string urn = 2; // Unique Reference Number
+  string status = 3;
+  string risk_lane = 4; // green | yellow | red
+  double risk_score = 5;
+  repeated string required_actions = 6;
+  int64 created_at = 7; // Unix timestamp ms
+}
+
+message GetDeclarationRequest {
+  int64 declaration_id = 1;
+}
+
+message Declaration {
+  int64 id = 1;
+  int64 trader_id = 2;
+  string urn = 3;
+  string declaration_type = 4;
+  string hs_code = 5;
+  string description = 6;
+  string origin_country = 7;
+  string destination_country = 8;
+  double declared_value = 9;
+  string currency = 10;
+  double gross_weight_kg = 11;
+  string status = 12;
+  string risk_lane = 13;
+  double risk_score = 14;
+  double duty_amount = 15;
+  double vat_amount = 16;
+  double levy_amount = 17;
+  int64 submitted_at = 18;
+  int64 updated_at = 19;
+}
+
+message UpdateStatusRequest {
+  int64 declaration_id = 1;
+  string new_status = 2;
+  string officer_id = 3;
+  string notes = 4;
+}
+
+message UpdateStatusResponse {
+  bool success = 1;
+  string status = 2;
+  int64 updated_at = 3;
+}
+
+message WatchDeclarationRequest {
+  int64 declaration_id = 1;
+}
+
+message DeclarationEvent {
+  int64 declaration_id = 1;
+  string event_type = 2; // status_changed | document_requested | payment_required | cleared
+  string old_status = 3;
+  string new_status = 4;
+  string message = 5;
+  int64 timestamp = 6;
+}
+
+message ListDeclarationsRequest {
+  int64 trader_id = 1;
+  string status_filter = 2; // optional
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListDeclarationsResponse {
+  repeated Declaration declarations = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}

@@ -1,0 +1,329 @@
+version: "3.9"
+
+# ─── NGSWTP Microservices Stack ───────────────────────────────────────────────
+# Full production-grade service orchestration
+# Services: API Gateway, Risk Engine, Sanctions Screener, Rule Engine,
+#           TigerBeetle Bridge, Kafka, Redis, PostgreSQL, Temporal, Dapr
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up risk-engine     # Start specific service
+#   docker-compose logs -f            # Follow all logs
+#   docker-compose down -v            # Stop and remove volumes
+
+networks:
+  ngswtp-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres-data:
+  redis-data:
+  kafka-data:
+  temporal-data:
+
+# ─── SERVICES ─────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: ngswtp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tradegateway
+      POSTGRES_USER: tradegateway
+      POSTGRES_PASSWORD: tradegateway_secure_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradegateway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ngswtp-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ngswtp_redis_2026
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "ngswtp_redis_2026", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Apache Kafka ─────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: ngswtp-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - ngswtp-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: ngswtp-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Kafka UI ─────────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: ngswtp-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ngswtp
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    networks:
+      - ngswtp-net
+
+  # ── Temporal Workflow Engine ──────────────────────────────────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: ngswtp-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=tradegateway
+      - POSTGRES_PWD=tradegateway_secure_2026
+      - POSTGRES_SEEDS=postgres
+    networks:
+      - ngswtp-net
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    container_name: ngswtp-temporal-ui
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    ports:
+      - "8088:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "http://localhost:3000"
+    networks:
+      - ngswtp-net
+
+  # ── Python Risk Engine ────────────────────────────────────────────────────────
+  risk-engine:
+    build:
+      context: ./python/risk-engine
+      dockerfile: Dockerfile
+    container_name: ngswtp-risk-engine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      REDIS_URL: redis://:ngswtp_redis_2026@redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      RISK_ENGINE_PORT: "8090"
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Python Sanctions Screener ─────────────────────────────────────────────────
+  sanctions-screener:
+    build:
+      context: ./python/sanctions-screener
+      dockerfile: Dockerfile
+    container_name: ngswtp-sanctions-screener
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8091:8091"
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      SANCTIONS_PORT: "8091"
+      MATCH_THRESHOLD: "0.80"
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Rust Rule Engine ──────────────────────────────────────────────────────────
+  rule-engine:
+    build:
+      context: ./rust/rule-engine
+      dockerfile: Dockerfile
+    container_name: ngswtp-rule-engine
+    restart: unless-stopped
+    ports:
+      - "8092:8092"
+    environment:
+      RULE_ENGINE_PORT: "8092"
+      RUST_LOG: "rule_engine=info"
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Rust TigerBeetle Bridge ───────────────────────────────────────────────────
+  tigerbeetle-bridge:
+    build:
+      context: ./rust/tigerbeetle-bridge
+      dockerfile: Dockerfile
+    container_name: ngswtp-tigerbeetle-bridge
+    restart: unless-stopped
+    ports:
+      - "8093:8093"
+    environment:
+      TIGERBEETLE_BRIDGE_PORT: "8093"
+      RUST_LOG: "tigerbeetle_bridge=info"
+    networks:
+      - ngswtp-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Main Node.js/tRPC API Server ──────────────────────────────────────────────
+  api-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: ngswtp-api-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      REDIS_URL: redis://:ngswtp_redis_2026@redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      RISK_ENGINE_URL: http://risk-engine:8090
+      SANCTIONS_SCREENER_URL: http://sanctions-screener:8091
+      RULE_ENGINE_URL: http://rule-engine:8092
+      TIGERBEETLE_BRIDGE_URL: http://tigerbeetle-bridge:8093
+      TEMPORAL_ADDRESS: temporal:7233
+    networks:
+      - ngswtp-net
+
+  # ── OpenSearch (Logs + Search) ────────────────────────────────────────────────
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: ngswtp-opensearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - plugins.security.disabled=true
+    ports:
+      - "9200:9200"
+    networks:
+      - ngswtp-net
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.13.0
+    container_name: ngswtp-opensearch-dashboards
+    restart: unless-stopped
+    depends_on:
+      - opensearch
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    networks:
+      - ngswtp-net
+
+  # ── Prometheus + Grafana ──────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: ngswtp-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - ngswtp-net
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ngswtp-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ngswtp_grafana_2026
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    networks:
+      - ngswtp-net

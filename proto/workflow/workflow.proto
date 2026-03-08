@@ -1,0 +1,82 @@
+syntax = "proto3";
+package workflow;
+option go_package = "tradegateway/proto/workflow";
+
+import "google/protobuf/timestamp.proto";
+import "common/common.proto";
+
+// ─── WORKFLOW SERVICE (Go — Temporal client wrapper) ─────────────────────────
+
+enum WorkflowType {
+  WORKFLOW_TYPE_UNSPECIFIED  = 0;
+  DECLARATION_LIFECYCLE      = 1;
+  OGA_JOINT_INSPECTION       = 2;
+  PAYMENT_SETTLEMENT         = 3;
+  AEO_CERTIFICATION          = 4;
+  POST_CLEARANCE_AUDIT       = 5;
+  SANCTIONS_ESCALATION       = 6;
+}
+
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNSPECIFIED = 0;
+  RUNNING    = 1;
+  COMPLETED  = 2;
+  FAILED     = 3;
+  CANCELLED  = 4;
+  TIMED_OUT  = 5;
+  TERMINATED = 6;
+}
+
+message WorkflowInstance {
+  string         workflow_id   = 1;
+  string         run_id        = 2;
+  WorkflowType   type          = 3;
+  WorkflowStatus status        = 4;
+  int64          entity_id     = 5;  // declaration_id, aeo_id, etc.
+  string         current_state = 6;
+  string         error_message = 7;
+  google.protobuf.Timestamp started_at   = 8;
+  google.protobuf.Timestamp completed_at = 9;
+}
+
+message StartWorkflowRequest {
+  WorkflowType type      = 1;
+  int64        entity_id = 2;
+  string       input_json = 3;  // JSON payload
+}
+
+message StartWorkflowResponse {
+  string workflow_id = 1;
+  string run_id      = 2;
+}
+
+message GetWorkflowRequest {
+  string workflow_id = 1;
+}
+
+message SignalWorkflowRequest {
+  string workflow_id  = 1;
+  string signal_name  = 2;  // e.g. "payment_confirmed", "oga_approved"
+  string signal_data  = 3;  // JSON
+}
+
+message ListWorkflowsRequest {
+  WorkflowType   type      = 1;
+  WorkflowStatus status    = 2;
+  int64          entity_id = 3;
+  common.PageRequest page  = 4;
+}
+
+message ListWorkflowsResponse {
+  repeated WorkflowInstance workflows = 1;
+  common.PageMeta           meta      = 2;
+}
+
+service WorkflowService {
+  rpc StartWorkflow  (StartWorkflowRequest)  returns (StartWorkflowResponse);
+  rpc GetWorkflow    (GetWorkflowRequest)    returns (WorkflowInstance);
+  rpc SignalWorkflow (SignalWorkflowRequest) returns (common.StatusResponse);
+  rpc CancelWorkflow (GetWorkflowRequest)   returns (common.StatusResponse);
+  rpc ListWorkflows  (ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  rpc Health         (common.PageRequest)   returns (common.HealthResponse);
+}

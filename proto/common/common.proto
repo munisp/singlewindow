@@ -1,0 +1,47 @@
+syntax = "proto3";
+package common;
+option go_package = "tradegateway/proto/common";
+
+import "google/protobuf/timestamp.proto";
+
+// ─── PAGINATION ───────────────────────────────────────────────────────────────
+message PageRequest {
+  int32 limit  = 1;
+  int32 offset = 2;
+}
+
+message PageMeta {
+  int64 total  = 1;
+  int32 limit  = 2;
+  int32 offset = 3;
+}
+
+// ─── STANDARD RESPONSES ──────────────────────────────────────────────────────
+message StatusResponse {
+  bool   success = 1;
+  string message = 2;
+}
+
+message HealthResponse {
+  string service   = 1;
+  string version   = 2;
+  string status    = 3;  // "healthy" | "degraded" | "unhealthy"
+  google.protobuf.Timestamp checked_at = 4;
+}
+
+// ─── MONEY ───────────────────────────────────────────────────────────────────
+message Money {
+  string amount   = 1;  // decimal string, e.g. "12345.67"
+  string currency = 2;  // ISO 4217, e.g. "USD"
+}
+
+// ─── AUDIT ───────────────────────────────────────────────────────────────────
+message AuditEntry {
+  int64  actor_id    = 1;
+  string actor_type  = 2;
+  string action      = 3;
+  string entity_type = 4;
+  int64  entity_id   = 5;
+  string notes       = 6;
+  google.protobuf.Timestamp occurred_at = 7;
+}

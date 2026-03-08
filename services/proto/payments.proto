@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package ngswtp.payments.v1;
+
+option go_package = "github.com/ngswtp/services/payments/v1";
+
+// ─── PAYMENT SERVICE ──────────────────────────────────────────────────────────
+// Mojaloop + TigerBeetle payment orchestration
+// Implements ISO 20022 payment messaging standards
+
+service PaymentService {
+  // Initiate a duty payment via Mojaloop
+  rpc InitiatePayment(InitiatePaymentRequest) returns (InitiatePaymentResponse);
+
+  // Confirm payment settlement from Mojaloop callback
+  rpc ConfirmSettlement(ConfirmSettlementRequest) returns (ConfirmSettlementResponse);
+
+  // Get payment status
+  rpc GetPaymentStatus(GetPaymentStatusRequest) returns (PaymentStatus);
+
+  // Request duty drawback
+  rpc RequestDrawback(DrawbackRequest) returns (DrawbackResponse);
+
+  // Get outstanding balance for a declaration
+  rpc GetOutstandingBalance(BalanceRequest) returns (BalanceResponse);
+}
+
+// ─── MESSAGES ─────────────────────────────────────────────────────────────────
+
+message InitiatePaymentRequest {
+  int64 declaration_id = 1;
+  int64 trader_id = 2;
+  double amount = 3;
+  string currency = 4;
+  string payment_method = 5; // mojaloop | bank_transfer | mobile_money | rtgs
+  string payer_fsp_id = 6;   // Mojaloop FSP identifier
+  string payer_account = 7;
+  string payee_fsp_id = 8;   // Customs authority FSP
+  string payee_account = 9;
+  string note = 10;
+}
+
+message InitiatePaymentResponse {
+  string payment_id = 1;
+  string mojaloop_transfer_id = 2;
+  string status = 3; // pending | processing | completed | failed
+  double amount = 4;
+  string currency = 5;
+  string redirect_url = 6; // For mobile money USSD redirect
+  int64 expires_at = 7;    // Payment window expiry (Unix ms)
+}
+
+message ConfirmSettlementRequest {
+  string mojaloop_transfer_id = 1;
+  string fulfillment = 2;   // Mojaloop ILP fulfillment
+  string condition = 3;     // Mojaloop ILP condition
+  int64 completed_at = 4;
+}
+
+message ConfirmSettlementResponse {
+  bool success = 1;
+  string payment_id = 2;
+  int64 declaration_id = 3;
+  string ledger_transfer_id = 4; // TigerBeetle transfer ID
+  bool clearance_triggered = 5;  // Whether clearance workflow was triggered
+}
+
+message GetPaymentStatusRequest {
+  string payment_id = 1;
+}
+
+message PaymentStatus {
+  string payment_id = 1;
+  int64 declaration_id = 2;
+  double amount = 3;
+  string currency = 4;
+  string status = 5;
+  string payment_method = 6;
+  string mojaloop_transfer_id = 7;
+  string ledger_transfer_id = 8;
+  int64 initiated_at = 9;
+  int64 settled_at = 10;
+}
+
+message DrawbackRequest {
+  int64 declaration_id = 1;
+  int64 trader_id = 2;
+  double amount = 3;
+  string currency = 4;
+  string reason = 5; // re_export | manufacturing | damaged | over_assessment
+  string supporting_document_id = 6;
+}
+
+message DrawbackResponse {
+  string drawback_id = 1;
+  int64 declaration_id = 2;
+  double amount = 3;
+  string status = 4; // pending_approval | approved | paid | rejected
+  int64 submitted_at = 5;
+  int64 expected_payment_at = 6;
+}
+
+message BalanceRequest {
+  int64 declaration_id = 1;
+  int64 trader_id = 2;
+}
+
+message BalanceResponse {
+  int64 declaration_id = 1;
+  double assessed_amount = 2;
+  double paid_amount = 3;
+  double outstanding_amount = 4;
+  string currency = 5;
+  bool fully_paid = 6;
+}

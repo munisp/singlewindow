@@ -5,31 +5,57 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import TraderDashboard from "./pages/app/TraderDashboard";
+import NewDeclaration from "./pages/app/NewDeclaration";
+import CustomsDashboard from "./pages/app/CustomsDashboard";
+import OGAPortal from "./pages/app/OGAPortal";
+import AdminConsole from "./pages/app/AdminConsole";
+import SecurityOps from "./pages/app/SecurityOps";
 
+// Lazy-load the specification page (it's large)
+import { lazy, Suspense } from "react";
+const Specification = lazy(() => import("./pages/Specification"));
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
+      {/* Public landing page */}
+      <Route path="/" component={Home} />
+
+      {/* Architecture specification (all 29 interactive components) */}
+      <Route path="/specification">
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading specification...</div>}>
+          <Specification />
+        </Suspense>
+      </Route>
+
+      {/* Trader Portal */}
+      <Route path="/app/trader" component={TraderDashboard} />
+      <Route path="/app/trader/new" component={NewDeclaration} />
+
+      {/* Customs Officer Portal */}
+      <Route path="/app/customs" component={CustomsDashboard} />
+
+      {/* OGA Portal */}
+      <Route path="/app/oga" component={OGAPortal} />
+
+      {/* Admin Console */}
+      <Route path="/app/admin" component={AdminConsole} />
+
+      {/* Security Operations Center */}
+      <Route path="/app/security" component={SecurityOps} />
+
+      {/* 404 */}
+      <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
           <Router />

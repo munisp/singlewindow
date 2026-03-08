@@ -1,0 +1,90 @@
+// TradeGateway NGSWTP — Permify Fine-Grained Authorization Schema
+// Defines entities, relations, and permissions for all platform resources
+
+entity user {}
+
+entity organization {
+  relation member  @user
+  relation admin   @user
+  relation owner   @user
+
+  permission manage = admin or owner
+  permission view   = member or admin or owner
+}
+
+entity declaration {
+  relation owner          @user
+  relation customs_officer @user
+  relation oga_officer    @user
+  relation admin          @user
+
+  permission view    = owner or customs_officer or oga_officer or admin
+  permission edit    = owner
+  permission submit  = owner
+  permission assess  = customs_officer or admin
+  permission release = customs_officer or admin
+  permission reject  = customs_officer or admin
+  permission audit   = admin
+}
+
+entity permit {
+  relation oga_officer @user
+  relation admin       @user
+  relation declaration_owner @user
+
+  permission view    = oga_officer or admin or declaration_owner
+  permission approve = oga_officer or admin
+  permission reject  = oga_officer or admin
+}
+
+entity payment {
+  relation owner   @user
+  relation admin   @user
+
+  permission view    = owner or admin
+  permission initiate = owner
+  permission confirm = admin
+  permission refund  = admin
+}
+
+entity profile {
+  relation owner    @user
+  relation reviewer @user
+  relation admin    @user
+
+  permission view    = owner or reviewer or admin
+  permission edit    = owner
+  permission approve = reviewer or admin
+  permission suspend = admin
+}
+
+entity security_alert {
+  relation analyst @user
+  relation admin   @user
+
+  permission view        = analyst or admin
+  permission acknowledge = analyst or admin
+  permission escalate    = analyst or admin
+  permission resolve     = admin
+}
+
+entity aeo_application {
+  relation applicant @user
+  relation reviewer  @user
+  relation admin     @user
+
+  permission view    = applicant or reviewer or admin
+  permission submit  = applicant
+  permission review  = reviewer or admin
+  permission approve = admin
+  permission revoke  = admin
+}
+
+entity system {
+  relation admin @user
+
+  permission manage_users   = admin
+  permission view_analytics = admin
+  permission configure      = admin
+  permission audit_all      = admin
+}

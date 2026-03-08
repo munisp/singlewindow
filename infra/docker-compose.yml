@@ -1,0 +1,349 @@
+version: "3.9"
+
+# ─── TradeGateway NGSWTP — Full Middleware Stack ─────────────────────────────
+# Services:
+#   Kafka + Zookeeper   → Event bus (port 9092)
+#   Redis               → Cache + Pub/Sub (port 6379)
+#   Keycloak            → IAM / OIDC (port 8080)
+#   APISIX + etcd       → API Gateway (port 9080 HTTP, 9443 HTTPS, 9180 admin)
+#   Temporal + UI       → Workflow engine (port 7233, UI 8088)
+#   Dapr placement      → Service mesh (port 50005)
+#   MinIO               → S3-compatible object store (port 9000, console 9001)
+#   Fluvio SC           → Real-time streaming (port 9003)
+#   Permify             → Fine-grained authz (port 3476)
+#   PostgreSQL          → Primary database (port 5432)
+
+networks:
+  tradegateway:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  keycloak_data:
+  etcd_data:
+  temporal_data:
+  minio_data:
+  fluvio_data:
+  permify_data:
+
+services:
+
+  # ── POSTGRESQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg-postgres
+    environment:
+      POSTGRES_DB: tradegateway
+      POSTGRES_USER: tradegateway
+      POSTGRES_PASSWORD: tradegateway_secure_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradegateway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradegateway
+
+  # ── REDIS ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tg-redis
+    command: redis-server --requirepass tradegateway_redis_2026 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "tradegateway_redis_2026", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradegateway
+
+  # ── ZOOKEEPER ──────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: tg-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradegateway
+
+  # ── KAFKA ──────────────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: tg-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - tradegateway
+
+  # ── KAFKA TOPIC INIT ───────────────────────────────────────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: tg-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic declaration.submitted --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic declaration.status_changed --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic declaration.cleared --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic payment.initiated --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic payment.confirmed --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic oga.permit_requested --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic oga.permit_reviewed --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic risk.score_computed --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic sanctions.alert --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic security.alert --partitions 3 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic ais.vessel_positions --partitions 6 --replication-factor 1 &&
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --topic audit.events --partitions 3 --replication-factor 1 &&
+        echo 'All Kafka topics created successfully'
+      "
+    networks:
+      - tradegateway
+
+  # ── KEYCLOAK ───────────────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: tg-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/tradegateway
+      KC_DB_USERNAME: tradegateway
+      KC_DB_PASSWORD: tradegateway_secure_2026
+      KC_DB_SCHEMA: keycloak
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin_secure_2026
+      KC_HTTP_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - tradegateway
+
+  # ── ETCD (for APISIX) ──────────────────────────────────────────────────────
+  etcd:
+    image: bitnami/etcd:3.5
+    container_name: tg-etcd
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+    volumes:
+      - etcd_data:/bitnami/etcd
+    healthcheck:
+      test: ["CMD-SHELL", "etcdctl endpoint health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradegateway
+
+  # ── APISIX ─────────────────────────────────────────────────────────────────
+  apisix:
+    image: apache/apisix:3.9.0-debian
+    container_name: tg-apisix
+    depends_on:
+      etcd:
+        condition: service_healthy
+    ports:
+      - "9080:9080"   # HTTP
+      - "9443:9443"   # HTTPS
+      - "9180:9180"   # Admin API
+      - "9091:9091"   # Prometheus metrics
+    volumes:
+      - ./apisix/config.yaml:/usr/local/apisix/conf/config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9080/apisix/status || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - tradegateway
+
+  # ── TEMPORAL ───────────────────────────────────────────────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: tg-temporal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: tradegateway
+      POSTGRES_PWD: tradegateway_secure_2026
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes:
+      - temporal_data:/etc/temporal
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address localhost:7233 cluster health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - tradegateway
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    container_name: tg-temporal-ui
+    depends_on:
+      - temporal
+    ports:
+      - "8088:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    networks:
+      - tradegateway
+
+  # ── DAPR PLACEMENT ─────────────────────────────────────────────────────────
+  dapr-placement:
+    image: daprio/dapr:1.13.3
+    container_name: tg-dapr-placement
+    command: ["./placement", "-port", "50005", "-log-level", "info"]
+    ports:
+      - "50005:50005"
+    networks:
+      - tradegateway
+
+  # ── MINIO (S3-compatible object store for Delta Lake) ──────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: tg-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: tradegateway_minio
+      MINIO_ROOT_PASSWORD: minio_secure_2026
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tradegateway
+
+  # ── MINIO BUCKET INIT ──────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: tg-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set myminio http://minio:9000 tradegateway_minio minio_secure_2026 &&
+        mc mb --ignore-existing myminio/tradegateway-lakehouse &&
+        mc mb --ignore-existing myminio/tradegateway-documents &&
+        mc mb --ignore-existing myminio/tradegateway-exports &&
+        echo 'MinIO buckets initialized'
+      "
+    networks:
+      - tradegateway
+
+  # ── PERMIFY ────────────────────────────────────────────────────────────────
+  permify:
+    image: ghcr.io/permify/permify:latest
+    container_name: tg-permify
+    command: serve
+    environment:
+      PERMIFY_DATABASE_ENGINE: postgres
+      PERMIFY_DATABASE_URI: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      PERMIFY_DATABASE_MAX_OPEN_CONNECTIONS: 20
+    ports:
+      - "3476:3476"
+      - "3478:3478"  # gRPC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+
+  # ── PROMETHEUS ─────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: tg-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - tradegateway
+
+  # ── GRAFANA ────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: tg-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: grafana_secure_2026
+    volumes:
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+    depends_on:
+      - prometheus
+    networks:
+      - tradegateway

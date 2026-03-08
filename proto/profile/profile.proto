@@ -1,0 +1,115 @@
+syntax = "proto3";
+package profile;
+option go_package = "tradegateway/proto/profile";
+
+import "google/protobuf/timestamp.proto";
+import "common/common.proto";
+
+// ─── PROFILE / STAKEHOLDER SERVICE (Go gRPC service) ─────────────────────────
+
+enum StakeholderRole {
+  STAKEHOLDER_ROLE_UNSPECIFIED = 0;
+  TRADER           = 1;
+  CUSTOMS_OFFICER  = 2;
+  OGA_OFFICER      = 3;
+  ADMIN            = 4;
+  SECURITY_ANALYST = 5;
+  AUDITOR          = 6;
+}
+
+enum ProfileStatus {
+  PROFILE_STATUS_UNSPECIFIED = 0;
+  PENDING_REVIEW = 1;
+  APPROVED       = 2;
+  SUSPENDED      = 3;
+  REJECTED       = 4;
+}
+
+enum TraderType {
+  TRADER_TYPE_UNSPECIFIED = 0;
+  IMPORTER         = 1;
+  EXPORTER         = 2;
+  CUSTOMS_BROKER   = 3;
+  FREIGHT_FORWARDER = 4;
+  WAREHOUSE_OPERATOR = 5;
+  SHIPPING_LINE    = 6;
+}
+
+message StakeholderProfile {
+  int64           id                  = 1;
+  int64           user_id             = 2;
+  StakeholderRole role                = 3;
+  string          organization_name   = 4;
+  string          tax_id              = 5;
+  string          registration_number = 6;
+  TraderType      trader_type         = 7;
+  string          country             = 8;
+  string          address             = 9;
+  string          phone               = 10;
+  string          contact_email       = 11;
+  ProfileStatus   status              = 12;
+  bool            is_aeo              = 13;
+  string          aeo_certificate     = 14;
+  int32           compliance_score    = 15;
+  string          reviewed_by_name    = 16;
+  google.protobuf.Timestamp aeo_expires_at = 17;
+  google.protobuf.Timestamp created_at     = 18;
+  google.protobuf.Timestamp updated_at     = 19;
+}
+
+message CreateProfileRequest {
+  int64           user_id             = 1;
+  StakeholderRole role                = 2;
+  string          organization_name   = 3;
+  string          tax_id              = 4;
+  string          registration_number = 5;
+  TraderType      trader_type         = 6;
+  string          country             = 7;
+  string          address             = 8;
+  string          phone               = 9;
+  string          contact_email       = 10;
+}
+
+message GetProfileRequest {
+  int64 user_id    = 1;
+  int64 profile_id = 2;
+}
+
+message UpdateProfileStatusRequest {
+  int64         profile_id  = 1;
+  ProfileStatus status      = 2;
+  string        notes       = 3;
+  int64         reviewer_id = 4;
+}
+
+message ListProfilesRequest {
+  StakeholderRole role   = 1;  // 0 = all
+  ProfileStatus   status = 2;  // 0 = all
+  common.PageRequest page = 3;
+}
+
+message ListProfilesResponse {
+  repeated StakeholderProfile profiles = 1;
+  common.PageMeta             meta     = 2;
+}
+
+message OnboardingChecklist {
+  int64  profile_id              = 1;
+  bool   profile_submitted       = 2;
+  bool   profile_approved        = 3;
+  bool   documents_uploaded      = 4;
+  bool   tax_id_verified         = 5;
+  bool   bank_account_linked     = 6;
+  bool   training_completed      = 7;
+  bool   system_access_granted   = 8;
+  int32  completion_percentage   = 9;
+}
+
+service ProfileService {
+  rpc CreateProfile        (CreateProfileRequest)       returns (StakeholderProfile);
+  rpc GetProfile           (GetProfileRequest)          returns (StakeholderProfile);
+  rpc UpdateProfileStatus  (UpdateProfileStatusRequest) returns (StakeholderProfile);
+  rpc ListProfiles         (ListProfilesRequest)        returns (ListProfilesResponse);
+  rpc GetOnboardingStatus  (GetProfileRequest)          returns (OnboardingChecklist);
+  rpc Health               (common.PageRequest)         returns (common.HealthResponse);
+}
