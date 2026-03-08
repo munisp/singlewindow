@@ -286,4 +286,258 @@ export const declarationsRouter = router({
     if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
     return getDeclarationStats();
   }),
+
+  /**
+   * Get the status timeline for a declaration.
+   * Derives timeline steps from the declaration's current status and audit events.
+   */
+  getTimeline: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.id);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+
+      // Only the owner (user role) or admin/customs_officer can view
+      if (ctx.user.role === "user" && decl.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      // Fetch audit events for this declaration
+      const db = await (await import("../db")).getDb();
+      let auditRows: Array<{ action: string; actorType: string | null; createdAt: Date; metadata: unknown }> = [];
+      if (db) {
+        const { auditEvents } = await import("../../drizzle/schema");
+        const { eq, and } = await import("drizzle-orm");
+        auditRows = await db.select({
+          action: auditEvents.action,
+          actorType: auditEvents.actorType,
+          createdAt: auditEvents.createdAt,
+          metadata: auditEvents.metadata,
+        })
+          .from(auditEvents)
+          .where(and(
+            eq(auditEvents.entityType, "declaration"),
+            eq(auditEvents.entityId, input.id)
+          ))
+          .orderBy(auditEvents.createdAt);
+      }
+
+      // Define the ordered pipeline steps
+      const STEPS = [
+        { key: "draft",               label: "Declaration Drafted",      description: "Shipment details entered and saved as draft." },
+        { key: "submitted",           label: "Submitted for Review",      description: "Declaration submitted to customs for assessment." },
+        { key: "under_assessment",    label: "Risk Assessment",           description: "Automated risk scoring and document verification in progress." },
+        { key: "docs_required",       label: "Additional Documents Requested", description: "Customs has requested supporting documents." },
+        { key: "payment_pending",     label: "Duty Payment Due",          description: "Duties and taxes calculated. Awaiting payment." },
+        { key: "payment_confirmed",   label: "Payment Confirmed",         description: "Duty payment received and verified." },
+        { key: "under_examination",   label: "Physical Inspection",       description: "Cargo selected for physical examination by customs officers." },
+        { key: "examination_complete",label: "Inspection Complete",       description: "Physical inspection completed. Awaiting final clearance." },
+        { key: "cleared",             label: "Goods Released",            description: "Customs clearance granted. Goods released for collection." },
+      ];
+
+      const currentStatus = decl.status;
+      const currentIdx = STEPS.findIndex(s => s.key === currentStatus);
+
+      // Build timeline steps with timestamps from audit events
+      const steps = STEPS.map((step, idx) => {
+        // Find the audit event for this status transition
+        const auditMatch = auditRows.find(a =>
+          a.action === `status_changed_to_${step.key}` ||
+          (step.key === "submitted" && a.action === "declaration_submitted") ||
+          (step.key === "draft" && a.action === "declaration_created")
+        );
+
+        let timestamp: Date | null = null;
+        if (step.key === "draft") timestamp = decl.createdAt;
+        else if (step.key === "submitted") timestamp = decl.submittedAt ?? null;
+        else if (step.key === "cleared") timestamp = decl.clearedAt ?? null;
+        else if (auditMatch) timestamp = auditMatch.createdAt;
+
+        const isCompleted = currentIdx > idx || currentStatus === step.key;
+        const isCurrent = currentStatus === step.key;
+        const isSkipped = currentStatus === "rejected" || currentStatus === "cancelled";
+
+        return {
+          key: step.key,
+          label: step.label,
+          description: step.description,
+          status: isCurrent ? "current" as const
+            : isCompleted ? "completed" as const
+            : isSkipped && idx > currentIdx ? "skipped" as const
+            : "pending" as const,
+          timestamp,
+          actor: auditMatch?.actorType ?? null,
+          notes: (auditMatch?.metadata as Record<string, unknown> | null)?.notes as string | null ?? null,
+        };
+      });
+
+      // Append rejection/cancellation as terminal step if applicable
+      if (currentStatus === "rejected" || currentStatus === "cancelled") {
+        const terminalAudit = auditRows.find(a => a.action.includes(currentStatus));
+        steps.push({
+          key: currentStatus,
+          label: currentStatus === "rejected" ? "Declaration Rejected" : "Declaration Cancelled",
+          description: currentStatus === "rejected"
+            ? "This declaration was rejected by customs. Please review the notes and resubmit."
+            : "This declaration was cancelled.",
+          status: "current" as const,
+          timestamp: terminalAudit?.createdAt ?? decl.updatedAt,
+          actor: terminalAudit?.actorType ?? null,
+          notes: (terminalAudit?.metadata as Record<string, unknown> | null)?.notes as string | null ?? null,
+        });
+      }
+
+      return {
+        declarationId: input.id,
+        declarationNumber: decl.declarationNumber,
+        currentStatus,
+        riskLane: decl.riskLane,
+        steps,
+      };
+    }),
+
+  /**
+   * Generate and return a clearance certificate PDF URL.
+   * Only available for cleared declarations.
+   */
+  generateClearanceCertificate: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.id);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+      if (decl.status !== "cleared") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Clearance certificate is only available for cleared declarations." });
+      }
+      // Only the owner (user role) or admin can download
+      if (ctx.user.role === "user" && decl.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+
+      // Build PDF content using a simple HTML template
+      const clearedDate = decl.clearedAt
+        ? new Date(decl.clearedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })
+        : new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+
+      const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 40px; color: #1a1a2e; }
+    .header { text-align: center; border-bottom: 3px solid #D4A017; padding-bottom: 20px; margin-bottom: 30px; }
+    .header h1 { font-size: 28px; color: #0A1628; margin: 0 0 4px; letter-spacing: 1px; }
+    .header h2 { font-size: 16px; color: #D4A017; margin: 0; font-weight: 500; }
+    .cert-number { text-align: center; font-size: 13px; color: #666; margin-bottom: 30px; }
+    .section { margin-bottom: 24px; }
+    .section-title { font-size: 11px; font-weight: 700; color: #D4A017; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 12px; }
+    .row { display: flex; margin-bottom: 8px; }
+    .label { font-size: 12px; color: #6b7280; width: 200px; flex-shrink: 0; }
+    .value { font-size: 12px; color: #1a1a2e; font-weight: 600; }
+    .clearance-box { background: #f0fdf4; border: 2px solid #16a34a; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }
+    .clearance-box h3 { color: #16a34a; font-size: 20px; margin: 0 0 8px; }
+    .clearance-box p { color: #374151; font-size: 13px; margin: 0; }
+    .signature { display: flex; justify-content: space-between; margin-top: 60px; padding-top: 20px; }
+    .sig-block { text-align: center; width: 200px; }
+    .sig-line { border-top: 1px solid #374151; padding-top: 8px; font-size: 11px; color: #6b7280; }
+    .footer { text-align: center; font-size: 10px; color: #9ca3af; margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 16px; }
+    .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-45deg); font-size: 80px; color: rgba(212,160,23,0.08); font-weight: 900; letter-spacing: 8px; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <div class="watermark">CLEARED</div>
+  <div class="header">
+    <h1>NATIONAL TRADE GATEWAY</h1>
+    <h2>CUSTOMS CLEARANCE CERTIFICATE</h2>
+  </div>
+  <div class="cert-number">Certificate No: CERT-${decl.declarationNumber} &nbsp;|&nbsp; Issued: ${clearedDate}</div>
+
+  <div class="clearance-box">
+    <h3>✓ GOODS RELEASED FOR COLLECTION</h3>
+    <p>This certificate confirms that the goods described below have been assessed, duties paid, and released by Customs Authority.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Declaration Details</div>
+    <div class="row"><span class="label">Declaration Number</span><span class="value">${decl.declarationNumber}</span></div>
+    <div class="row"><span class="label">Unique Consignment Reference</span><span class="value">${decl.ucr ?? "N/A"}</span></div>
+    <div class="row"><span class="label">Declaration Type</span><span class="value">${(decl.declarationType ?? "").replace(/_/g, " ").toUpperCase()}</span></div>
+    <div class="row"><span class="label">Date Submitted</span><span class="value">${decl.submittedAt ? new Date(decl.submittedAt).toLocaleDateString("en-GB") : "N/A"}</span></div>
+    <div class="row"><span class="label">Date Cleared</span><span class="value">${clearedDate}</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Goods Information</div>
+    <div class="row"><span class="label">Goods Description</span><span class="value">${decl.goodsDescription ?? "N/A"}</span></div>
+    <div class="row"><span class="label">HS Code</span><span class="value">${decl.hsCode ?? "N/A"}</span></div>
+    <div class="row"><span class="label">Country of Origin</span><span class="value">${decl.countryOfOrigin ?? "N/A"}</span></div>
+    <div class="row"><span class="label">Port of Entry</span><span class="value">${decl.portOfEntry ?? "N/A"}</span></div>
+    <div class="row"><span class="label">Number of Packages</span><span class="value">${decl.numberOfPackages ?? "N/A"}</span></div>
+    <div class="row"><span class="label">Gross Weight</span><span class="value">${decl.grossWeight ? `${decl.grossWeight} kg` : "N/A"}</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Duties & Taxes</div>
+    <div class="row"><span class="label">Invoice Value</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.invoiceValue ?? "N/A"}</span></div>
+    <div class="row"><span class="label">Duty Amount</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.dutyAmount ?? "0.00"}</span></div>
+    <div class="row"><span class="label">VAT Amount</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.vatAmount ?? "0.00"}</span></div>
+    <div class="row"><span class="label">Total Paid</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.totalDue ?? "0.00"}</span></div>
+  </div>
+
+  <div class="signature">
+    <div class="sig-block">
+      <div style="height:50px"></div>
+      <div class="sig-line">Customs Officer<br>National Trade Gateway</div>
+    </div>
+    <div class="sig-block">
+      <div style="height:50px"></div>
+      <div class="sig-line">Commissioner of Customs<br>National Trade Authority</div>
+    </div>
+    <div class="sig-block">
+      <div style="height:50px"></div>
+      <div class="sig-line">Official Stamp<br>&nbsp;</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    This certificate is issued electronically by the National Trade Gateway Single Window Platform.<br>
+    Verify authenticity at: tradegateway.gov | Certificate No: CERT-${decl.declarationNumber}
+  </div>
+</body>
+</html>`;
+
+      // Convert HTML to PDF buffer using puppeteer-free approach: store HTML as PDF via weasyprint-style
+      // We'll use the built-in node approach: write to temp file, convert, upload to S3
+      const { storagePut } = await import("../storage");
+      const { nanoid: nanoId } = await import("nanoid");
+      const { execSync } = await import("child_process");
+      const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
+      const { tmpdir } = await import("os");
+      const { join } = await import("path");
+
+      const tmpHtml = join(tmpdir(), `cert-${nanoId(8)}.html`);
+      const tmpPdf = join(tmpdir(), `cert-${nanoId(8)}.pdf`);
+
+      try {
+        writeFileSync(tmpHtml, htmlContent, "utf-8");
+        execSync(`manus-md-to-pdf "${tmpHtml}" "${tmpPdf}" 2>/dev/null || wkhtmltopdf "${tmpHtml}" "${tmpPdf}" 2>/dev/null || chromium-browser --headless --no-sandbox --print-to-pdf="${tmpPdf}" "${tmpHtml}" 2>/dev/null || true`, { timeout: 30_000 });
+
+        let pdfBuffer: Buffer;
+        try {
+          pdfBuffer = readFileSync(tmpPdf);
+        } catch {
+          // Fallback: return the HTML as a downloadable file if PDF conversion fails
+          const htmlBuffer = readFileSync(tmpHtml);
+          const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.html`;
+          const { url } = await storagePut(fileKey, htmlBuffer, "text/html");
+          return { url, format: "html" as const, declarationNumber: decl.declarationNumber };
+        }
+
+        const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.pdf`;
+        const { url } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+        return { url, format: "pdf" as const, declarationNumber: decl.declarationNumber };
+      } finally {
+        try { unlinkSync(tmpHtml); } catch { /* ignore */ }
+        try { unlinkSync(tmpPdf); } catch { /* ignore */ }
+      }
+    }),
 });

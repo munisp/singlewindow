@@ -9,8 +9,10 @@ import { trpc } from "@/lib/trpc";
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
-  DollarSign, Building2, Anchor, Plane, Train
+  DollarSign, Building2, Anchor, Plane, Train, Download, Loader2
 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
 
 // ─── STATUS CONFIG ────────────────────────────────────────────────────────────
@@ -212,6 +214,7 @@ export default function DeclarationDetail() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const [certLoading, setCertLoading] = useState(false);
 
   const declarationId = parseInt(id ?? "0", 10);
 
@@ -219,6 +222,31 @@ export default function DeclarationDetail() {
     { id: declarationId },
     { enabled: !!declarationId && !isNaN(declarationId) }
   );
+
+  const { data: timeline, isLoading: timelineLoading } = trpc.declarations.getTimeline.useQuery(
+    { id: declarationId },
+    { enabled: !!declarationId && !isNaN(declarationId) }
+  );
+
+  const certMutation = trpc.declarations.generateClearanceCertificate.useMutation({
+    onSuccess: (result) => {
+      setCertLoading(false);
+      // Open the certificate in a new tab
+      window.open(result.url, "_blank");
+      toast.success("Clearance certificate ready", {
+        description: `Certificate for ${result.declarationNumber} opened in a new tab.`,
+      });
+    },
+    onError: (err) => {
+      setCertLoading(false);
+      toast.error("Failed to generate certificate", { description: err.message });
+    },
+  });
+
+  const handleDownloadCert = () => {
+    setCertLoading(true);
+    certMutation.mutate({ id: declarationId });
+  };
 
   // Cast to any for fields that may not be in the inferred type but exist at runtime
   const decl = declaration as any;
@@ -277,14 +305,100 @@ export default function DeclarationDetail() {
             {/* Clearance Timeline */}
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-primary" />
-                  Clearance Progress
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-semibold flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4 text-primary" />
+                    Clearance Progress
+                  </CardTitle>
+                  {decl.status === "cleared" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleDownloadCert}
+                      disabled={certLoading}
+                      className="gap-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                    >
+                      {certLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                      {certLoading ? "Generating..." : "Download Clearance Certificate"}
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
-                <ClearanceTimeline currentStatus={decl.status} />
-                {statusConf && (
+                {/* Rich tRPC-backed timeline */}
+                {timelineLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="flex items-start gap-3">
+                        <Skeleton className="w-8 h-8 rounded-full shrink-0" />
+                        <div className="flex-1 space-y-1">
+                          <Skeleton className="h-4 w-40" />
+                          <Skeleton className="h-3 w-64" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : timeline ? (
+                  <div className="relative">
+                    {/* Vertical connector line */}
+                    <div className="absolute left-4 top-4 bottom-4 w-0.5 bg-muted" />
+                    <div className="space-y-0">
+                      {timeline.steps.map((step, idx) => {
+                        const isCompleted = step.status === "completed";
+                        const isCurrent = step.status === "current";
+                        const isPending = step.status === "pending";
+                        const isSkipped = step.status === "skipped";
+                        return (
+                          <div key={step.key} className="relative flex items-start gap-4 pb-6 last:pb-0">
+                            {/* Step circle */}
+                            <div className={`relative z-10 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${
+                              isCompleted ? "bg-emerald-500 border-emerald-500 text-white" :
+                              isCurrent ? "bg-primary border-primary text-white shadow-md shadow-primary/30" :
+                              isSkipped ? "bg-muted border-muted-foreground/20 text-muted-foreground" :
+                              "bg-background border-muted text-muted-foreground"
+                            }`}>
+                              {isCompleted ? (
+                                <CheckCircle2 className="h-4 w-4" />
+                              ) : isCurrent ? (
+                                <Clock className="h-4 w-4" />
+                              ) : (
+                                <span className="text-xs font-bold">{idx + 1}</span>
+                              )}
+                            </div>
+                            {/* Step content */}
+                            <div className="flex-1 min-w-0 pt-0.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={`text-sm font-semibold ${
+                                  isCompleted ? "text-emerald-700" :
+                                  isCurrent ? "text-primary" :
+                                  isPending ? "text-muted-foreground" :
+                                  "text-muted-foreground/50 line-through"
+                                }`}>{step.label}</p>
+                                {step.timestamp && (
+                                  <span className="text-xs text-muted-foreground shrink-0">
+                                    {new Date(step.timestamp).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5">{step.description}</p>
+                              {step.notes && (
+                                <p className="text-xs text-amber-600 mt-1 italic">“{step.notes}”</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  // Fallback to simple static timeline if tRPC query fails
+                  <ClearanceTimeline currentStatus={decl.status} />
+                )}
+                {statusConf && !timeline && (
                   <p className="text-xs text-muted-foreground text-center mt-3">
                     {statusConf.description}
                   </p>

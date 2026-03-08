@@ -55,7 +55,10 @@ export default function AdminKYCReview() {
 
   const reviewMutation = trpc.kyc.reviewVerification.useMutation({
     onSuccess: (result) => {
-      toast.success(`Verification ${result.status.toLowerCase().replace(/_/g, " ")}`);
+      const statusLabel = result.status === "APPROVED" ? "approved" : result.status === "REJECTED" ? "rejected" : "updated";
+      toast.success(`Verification ${statusLabel}`, {
+        description: result.notificationSent ? "A notification has been sent to the platform owner." : undefined,
+      });
       utils.kyc.listPendingVerifications.invalidate();
       setReviewDialogOpen(false);
       setReviewNotes("");
@@ -67,11 +70,14 @@ export default function AdminKYCReview() {
 
   const handleReview = (decision: "APPROVED" | "REJECTED" | "MORE_INFO_REQUIRED") => {
     if (!selectedVerification) return;
+    const selectedRecord = verifications?.find(v => v.id === selectedVerification);
     reviewMutation.mutate({
       verificationId: selectedVerification,
       decision,
       notes: reviewNotes || undefined,
       rejectionReason: decision === "REJECTED" ? rejectionReason || undefined : undefined,
+      applicantName: selectedRecord ? `User #${selectedRecord.userId}` : undefined,
+      applicantType: selectedRecord?.verificationType === "BUSINESS" ? "BUSINESS" : "INDIVIDUAL",
     });
   };
 

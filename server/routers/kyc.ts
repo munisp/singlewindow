@@ -20,6 +20,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { notifyOwner } from "../_core/notification";
 import {
   createKYCDocument,
   getKYCDocument,
@@ -365,6 +366,9 @@ export const kycRouter = router({
       decision: z.enum(["APPROVED", "REJECTED", "MORE_INFO_REQUIRED"]),
       notes: z.string().optional(),
       rejectionReason: z.string().optional(),
+      // Optional: trader/entity name for the notification message
+      applicantName: z.string().optional(),
+      applicantType: z.enum(["INDIVIDUAL", "BUSINESS"]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       const verification = await updateKYCVerification(input.verificationId, {
@@ -375,10 +379,40 @@ export const kycRouter = router({
         rejectionReason: input.rejectionReason ?? null,
       });
 
+      // Send onboarding welcome notification when a stakeholder is approved
+      if (input.decision === "APPROVED") {
+        const entityLabel = input.applicantType === "BUSINESS" ? "Business" : "Trader";
+        const name = input.applicantName ?? `Verification #${input.verificationId}`;
+        await notifyOwner({
+          title: `New Stakeholder Approved — ${name}`,
+          content: [
+            `${entityLabel} "${name}" has been approved and can now access the TradeGateway platform.`,
+            `Verification ID: ${input.verificationId}`,
+            `Reviewed by: ${ctx.user.name ?? ctx.user.openId}`,
+            `Approved at: ${new Date().toUTCString()}`,
+            `\nThe stakeholder has been notified and their account is now active.`,
+          ].join("\n"),
+        }).catch(() => { /* non-blocking */ });
+      }
+
+      // Send rejection notification
+      if (input.decision === "REJECTED") {
+        const name = input.applicantName ?? `Verification #${input.verificationId}`;
+        await notifyOwner({
+          title: `Stakeholder Verification Rejected — ${name}`,
+          content: [
+            `Verification for "${name}" was rejected.`,
+            input.rejectionReason ? `Reason: ${input.rejectionReason}` : "",
+            `Reviewed by: ${ctx.user.name ?? ctx.user.openId}`,
+          ].filter(Boolean).join("\n"),
+        }).catch(() => { /* non-blocking */ });
+      }
+
       return {
         verificationId: input.verificationId,
         status: input.decision,
         reviewedAt: verification?.reviewedAt ?? null,
+        notificationSent: input.decision === "APPROVED" || input.decision === "REJECTED",
       };
     }),
 

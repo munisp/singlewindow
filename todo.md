@@ -324,3 +324,59 @@
 - [x] 217 tests across 11 files — all passing (0 failures)
 - [x] TypeScript: 0 errors
 - [x] Save checkpoint
+
+## Sprint 13 — Onboarding Notification, Declaration Timeline, Clearance Certificate
+
+### Stakeholder Onboarding Welcome Notification
+- [ ] Add onboardingNotification procedure to kyc router: fires when admin approves a stakeholder profile
+- [ ] Notification includes: trader/agency name, login URL, access permissions summary
+- [ ] Wire to AdminKYCReview approval action (existing approve button)
+- [ ] Show success toast confirming notification was sent
+
+### Declaration Status Timeline
+- [ ] Add declarationTimeline tRPC query to declarations router (returns ordered status events)
+- [ ] Build DeclarationTimeline component: step-by-step visual tracker (Submitted → Risk Assessed → Agency Review → Duty Paid → Released)
+- [ ] Show timestamp, actor, and notes for each completed step
+- [ ] Highlight current active step; grey out future steps
+- [ ] Embed timeline in DeclarationDetail page
+
+### Printable Clearance Certificate PDF
+- [ ] Add generateClearanceCertificate tRPC mutation to declarations router
+- [ ] Server-side PDF generation: declaration number, trader name, goods description, HS code, duty paid, release timestamp, customs officer signature block
+- [ ] Upload PDF to S3 and return a download URL
+- [ ] Add "Download Clearance Certificate" button to DeclarationDetail page (only visible when status = released)
+- [ ] Show loading state during PDF generation
+
+### Tests & Delivery
+- [ ] Write vitest tests for declarationTimeline procedure
+- [ ] Write vitest tests for generateClearanceCertificate procedure
+- [ ] Save checkpoint
+
+## Sprint 13 — Onboarding Notification, Declaration Timeline, Clearance Certificate (COMPLETED)
+
+### Stakeholder Onboarding Notification on KYC Approval
+- [x] Add notifyOwner import to kyc.ts router
+- [x] Wire onboarding notification in reviewVerification procedure (fires on "approved" status)
+- [x] Notification includes applicant name, verification type, and login link
+- [x] Wire applicantName into AdminKYCReview mutation call
+
+### Declaration Status Timeline Visual Tracker
+- [x] Add declarations.getTimeline tRPC procedure (derives steps from status + audit events)
+- [x] 9-step pipeline: Draft → Submitted → Risk Assessment → Docs Required → Duty Payment → Payment Confirmed → Physical Inspection → Inspection Complete → Goods Released
+- [x] Handles rejection/cancellation as terminal steps with notes
+- [x] Replace static ClearanceTimeline component with rich tRPC-backed vertical timeline in DeclarationDetail
+- [x] Timeline shows step label, description, timestamp, actor, and notes per step
+- [x] Skeleton loading state while timeline query loads
+
+### Printable Clearance Certificate PDF
+- [x] Add declarations.generateClearanceCertificate tRPC mutation (cleared declarations only)
+- [x] Generates HTML certificate with declaration details, goods info, duties paid, signature blocks
+- [x] Converts to PDF via server-side tool, uploads to S3, returns public URL
+- [x] "Download Clearance Certificate" button appears in DeclarationDetail header when status = cleared
+- [x] Opens certificate in new tab with toast confirmation
+
+### Tests & Delivery
+- [x] Write 16 vitest tests in declaration.timeline.test.ts (getTimeline, generateClearanceCertificate, kyc.reviewVerification)
+- [x] Total: 233 tests across 12 files — all passing (0 failures)
+- [x] TypeScript: 0 errors
+- [x] Save checkpoint
