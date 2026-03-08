@@ -41,6 +41,12 @@ export default function MobileDrawer() {
     { label: t.nav_payment, href: "#mojaloop-demo", group: "Interactive" },
     { label: t.nav_k8s, href: "#k8s-map", group: "Infrastructure" },
     { label: t.nav_security, href: "#security", group: "Infrastructure" },
+    { label: "Auth Flow", href: "#keycloak-login", group: "Infrastructure" },
+    { label: "Compliance", href: "#compliance-scorecard", group: "Infrastructure" },
+    { label: "Cost Drill-Down", href: "#kubecost-drilldown", group: "Infrastructure" },
+    { label: "AIS Stream", href: "#fluvio-stream", group: "Interactive" },
+    { label: "OGA Workflow", href: "#multi-agency", group: "Interactive" },
+    { label: "Onboarding", href: "#stakeholder-onboarding", group: "Interactive" },
   ];
 
   const groups = Array.from(new Set(navItems.map((i) => i.group)));

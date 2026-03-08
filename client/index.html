@@ -2,8 +2,34 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5" />
     <title>TradeGateway™ NGSWTP — Revised Technical Specification</title>
+
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="Next Generation Single Window Trade Platform — End-to-End Implementation Specification built on Go, Python, Rust, Mojaloop, TigerBeetle, and Kubernetes." />
+    <meta name="theme-color" content="#D4A017" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TradeGateway" />
+    <meta name="application-name" content="TradeGateway NGSWTP" />
+    <meta name="msapplication-TileColor" content="#0A1628" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="TradeGateway™ NGSWTP — Next Generation Single Window Trade Platform" />
+    <meta property="og:description" content="End-to-end implementation specification synthesized from Singapore NTP, Ghana ICUMS, and Rwanda ReSW — rebuilt on Go, Python, Mojaloop, TigerBeetle, and a comprehensive open-source cloud-native stack." />
+    <meta property="og:site_name" content="TradeGateway NGSWTP" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TradeGateway™ NGSWTP" />
+    <meta name="twitter:description" content="Next Generation Single Window Trade Platform — End-to-End Implementation" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -11,6 +37,14 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
     <script
       defer
       src="%VITE_ANALYTICS_ENDPOINT%/umami"

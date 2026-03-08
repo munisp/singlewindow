@@ -253,3 +253,97 @@
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: oklch(0.94 0.01 240); }
 ::-webkit-scrollbar-thumb { background: oklch(0.72 0.14 75 / 0.5); border-radius: 3px; }
+
+/* ── Mobile & PWA Enhancements ─────────────────────────────────────────── */
+
+/* Smooth scrolling for anchor nav */
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 4rem;
+}
+
+/* Touch-friendly tap targets */
+@media (max-width: 768px) {
+  button, a, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Prevent horizontal overflow on mobile */
+  body {
+    overflow-x: hidden;
+  }
+  /* Better table scrolling on mobile */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Reduce hero text on mobile */
+  .font-display {
+    word-break: break-word;
+  }
+}
+
+/* PWA standalone mode adjustments */
+@media (display-mode: standalone) {
+  /* Add safe area insets for notched phones */
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Sticky nav offset for standalone mode */
+  html {
+    scroll-padding-top: 5rem;
+  }
+}
+
+/* Responsive typography scale */
+@media (max-width: 640px) {
+  .text-5xl { font-size: 2.25rem; }
+  .text-6xl { font-size: 2.75rem; }
+  .text-7xl { font-size: 3rem; }
+  .text-8xl { font-size: 3.5rem; }
+}
+
+/* Mobile-friendly code blocks */
+pre, code {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+/* Horizontal scroll snap for mobile card rows */
+.mobile-scroll-snap {
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.mobile-scroll-snap > * {
+  scroll-snap-align: start;
+}
+
+/* Focus visible for keyboard navigation */
+:focus-visible {
+  outline: 2px solid oklch(0.72 0.14 75);
+  outline-offset: 2px;
+}
+
+/* Print styles for PDF export */
+@media print {
+  .no-print, nav, .sticky, [role="dialog"] {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .print-break-before {
+    page-break-before: always;
+  }
+  a[href]:after {
+    content: " (" attr(href) ")";
+    font-size: 0.75em;
+    color: #666;
+  }
+}

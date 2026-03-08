@@ -28,6 +28,9 @@ import TemporalWorkflow from "@/components/TemporalWorkflow";
 import KeycloakLoginFlow from "@/components/KeycloakLoginFlow";
 import ComplianceScorecard from "@/components/ComplianceScorecard";
 import KubecostDrilldown from "@/components/KubecostDrilldown";
+import FluvioStreamPanel from "@/components/FluvioStreamPanel";
+import MultiAgencyWorkflow from "@/components/MultiAgencyWorkflow";
+import StakeholderOnboarding from "@/components/StakeholderOnboarding";
 import { I18nProvider } from "@/contexts/I18nContext";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -1152,6 +1155,12 @@ export default function Home() {
       <ComplianceScorecard />
       {/* ── KUBECOST DRILL-DOWN ──────────────────────────────────────────── */}
       <KubecostDrilldown />
+      {/* ── FLUVIO AIS STREAM ─────────────────────────────────────────────── */}
+      <FluvioStreamPanel />
+      {/* ── MULTI-AGENCY WORKFLOW ────────────────────────────────────────── */}
+      <MultiAgencyWorkflow />
+      {/* ── STAKEHOLDER ONBOARDING ───────────────────────────────────────── */}
+      <StakeholderOnboarding />
       {/* ── PDF EXPORT ───────────────────────────────────────────────────── */}
       <PDFExport />
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
