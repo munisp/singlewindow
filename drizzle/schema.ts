@@ -480,3 +480,88 @@ export const vesselTrackingEvents = pgTable("vessel_tracking_events", {
 export type PortLocation = typeof portLocations.$inferSelect;
 export type PortCongestionEvent = typeof portCongestionEvents.$inferSelect;
 export type VesselTrackingEvent = typeof vesselTrackingEvents.$inferSelect;
+
+// ─── POST-CLEARANCE AUDIT ─────────────────────────────────────────────────────
+export const auditStatusEnum = pgEnum("audit_status", [
+  "scheduled", "in_progress", "completed", "escalated", "closed"
+]);
+export const auditOutcomeEnum = pgEnum("audit_outcome", [
+  "compliant", "minor_discrepancy", "major_discrepancy", "fraud_suspected", "pending"
+]);
+export const postClearanceAudits = pgTable("post_clearance_audits", {
+  id: serial("id").primaryKey(),
+  auditNumber: varchar("audit_number", { length: 32 }).notNull().unique(),
+  declarationId: integer("declaration_id").notNull(),
+  declarationNumber: varchar("declaration_number", { length: 32 }).notNull(),
+  traderId: integer("trader_id").notNull(),
+  assignedOfficerId: integer("assigned_officer_id"),
+  status: auditStatusEnum("status").default("scheduled").notNull(),
+  outcome: auditOutcomeEnum("outcome").default("pending").notNull(),
+  triggerReason: text("trigger_reason"),
+  declaredValue: decimal("declared_value", { precision: 15, scale: 2 }),
+  auditedValue: decimal("audited_value", { precision: 15, scale: 2 }),
+  valueDifference: decimal("value_difference", { precision: 15, scale: 2 }),
+  additionalDutyAssessed: decimal("additional_duty_assessed", { precision: 15, scale: 2 }),
+  penaltyAmount: decimal("penalty_amount", { precision: 15, scale: 2 }),
+  findings: text("findings"),
+  officerNotes: text("officer_notes"),
+  supportingDocuments: json("supporting_documents"),
+  scheduledDate: timestamp("scheduled_date"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pca_declaration_id").on(t.declarationId),
+  index("idx_pca_trader_id").on(t.traderId),
+  index("idx_pca_status").on(t.status),
+  index("idx_pca_outcome").on(t.outcome),
+]);
+export type PostClearanceAudit = typeof postClearanceAudits.$inferSelect;
+export type InsertPostClearanceAudit = typeof postClearanceAudits.$inferInsert;
+
+// ─── DUTY DRAWBACK ────────────────────────────────────────────────────────────
+export const drawbackStatusEnum = pgEnum("drawback_status", [
+  "draft", "submitted", "under_review", "approved", "rejected", "paid"
+]);
+export const drawbackTypeEnum = pgEnum("drawback_type", [
+  "manufacturing", "unused_merchandise", "rejected_merchandise", "substitution"
+]);
+export const dutyDrawbackClaims = pgTable("duty_drawback_claims", {
+  id: serial("id").primaryKey(),
+  claimNumber: varchar("claim_number", { length: 32 }).notNull().unique(),
+  traderId: integer("trader_id").notNull(),
+  importDeclarationId: integer("import_declaration_id").notNull(),
+  importDeclarationNumber: varchar("import_declaration_number", { length: 32 }).notNull(),
+  exportDeclarationId: integer("export_declaration_id"),
+  exportDeclarationNumber: varchar("export_declaration_number", { length: 32 }),
+  drawbackType: drawbackTypeEnum("drawback_type").notNull(),
+  status: drawbackStatusEnum("status").default("draft").notNull(),
+  originalDutyPaid: decimal("original_duty_paid", { precision: 15, scale: 2 }).notNull(),
+  claimedAmount: decimal("claimed_amount", { precision: 15, scale: 2 }).notNull(),
+  approvedAmount: decimal("approved_amount", { precision: 15, scale: 2 }),
+  paidAmount: decimal("paid_amount", { precision: 15, scale: 2 }),
+  hsCode: varchar("hs_code", { length: 12 }),
+  goodsDescription: text("goods_description"),
+  importQuantity: decimal("import_quantity", { precision: 12, scale: 3 }),
+  exportQuantity: decimal("export_quantity", { precision: 12, scale: 3 }),
+  quantityUnit: varchar("quantity_unit", { length: 16 }),
+  reExportEvidence: json("re_export_evidence"),
+  manufacturingEvidence: json("manufacturing_evidence"),
+  reviewerNotes: text("reviewer_notes"),
+  rejectionReason: text("rejection_reason"),
+  reviewedBy: integer("reviewed_by"),
+  importDate: timestamp("import_date"),
+  exportDate: timestamp("export_date"),
+  submittedAt: timestamp("submitted_at"),
+  reviewedAt: timestamp("reviewed_at"),
+  paidAt: timestamp("paid_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ddc_trader_id").on(t.traderId),
+  index("idx_ddc_status").on(t.status),
+  index("idx_ddc_import_decl").on(t.importDeclarationId),
+]);
+export type DutyDrawbackClaim = typeof dutyDrawbackClaims.$inferSelect;
+export type InsertDutyDrawbackClaim = typeof dutyDrawbackClaims.$inferInsert;

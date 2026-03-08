@@ -1,0 +1,57 @@
+[package]
+name = "graph_risk"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance GNN risk propagation and graph traversal engine for TradeGateway NGSWTP"
+
+[[bin]]
+name = "graph_risk"
+path = "src/main.rs"
+
+[lib]
+name = "graph_risk_lib"
+path = "src/lib.rs"
+
+[dependencies]
+# HTTP server
+actix-web = "4"
+actix-cors = "0.7"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Graph algorithms
+petgraph = { version = "0.6", features = ["serde-1"] }
+
+# Redis client (for caching risk scores)
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+
+# HTTP client (for calling Python AI service)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Configuration
+dotenvy = "0.15"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

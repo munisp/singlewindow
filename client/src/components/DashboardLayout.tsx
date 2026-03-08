@@ -52,6 +52,9 @@ import {
   Workflow,
   UserCheck,
   Package,
+  ClipboardCheck,
+  RotateCcw,
+  Network,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -101,6 +104,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
           { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
           { icon: Workflow, label: "Workflow Traces", path: "/app/customs/workflows" },
+          { icon: ClipboardCheck, label: "Post-Clearance Audit", path: "/app/customs/audit" },
         ],
       },
       {
@@ -120,6 +124,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "AI Tools",
         items: [
           { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
+          { icon: Network, label: "Knowledge Graph", path: "/app/knowledge-graph" },
         ],
       },
       {
@@ -141,6 +146,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: AlertTriangle, label: "Risk Assessment", path: "/app/customs/risk" },
           { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
           { icon: Package, label: "OGA Permits", path: "/app/oga" },
+          { icon: ClipboardCheck, label: "Post-Clearance Audit", path: "/app/customs/audit" },
         ],
       },
       {
@@ -153,6 +159,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "AI Tools",
         items: [
           { icon: Sparkles, label: "AI Trade Assistant", path: "/app/ai-assistant" },
+          { icon: Network, label: "Knowledge Graph", path: "/app/knowledge-graph" },
         ],
       },
       common,
@@ -185,6 +192,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: LayoutDashboard, label: "Finance Dashboard", path: "/app/finance" },
           { icon: CreditCard, label: "Payment Flows", path: "/app/customs/payments" },
           { icon: BarChart3, label: "Revenue Analytics", path: "/app/finance" },
+          { icon: RotateCcw, label: "Duty Drawback", path: "/app/finance/drawback" },
           { icon: Map, label: "Port Heatmap", path: "/app/geo/heatmap" },
         ],
       },
@@ -201,6 +209,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: FileText, label: "My Declarations", path: "/app/trader/declarations" },
         { icon: Building2, label: "My Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "AEO Application", path: "/app/trader/aeo" },
+        { icon: RotateCcw, label: "Duty Drawback", path: "/app/trader/drawback" },
         { icon: Fingerprint, label: "KYC Verification", path: "/app/trader/kyc" },
       ],
     },

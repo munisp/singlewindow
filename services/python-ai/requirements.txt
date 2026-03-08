@@ -1,0 +1,53 @@
+# ─── Core ────────────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+python-dotenv==1.0.1
+httpx==0.28.1
+redis==5.2.1
+
+# ─── FalkorDB / Neo4j ────────────────────────────────────────────────────────
+# FalkorDB is Redis-compatible; we use the official Python client
+falkordb==1.0.8
+# Neo4j official driver (Bolt protocol)
+neo4j==5.27.0
+
+# ─── GNN / Graph ML ──────────────────────────────────────────────────────────
+# PyTorch Geometric for GNN training (GraphSAGE, GAT, GCN)
+torch==2.5.1
+torch-geometric==2.6.1
+# NetworkX for graph construction before loading into PyG
+networkx==3.4.2
+# scikit-learn for feature preprocessing and evaluation
+scikit-learn==1.5.2
+numpy==2.1.3
+pandas==2.2.3
+
+# ─── CocoIndex ───────────────────────────────────────────────────────────────
+# CocoIndex: incremental document indexing and knowledge graph construction
+cocoindex==0.1.22
+
+# ─── EPR-KGQA ────────────────────────────────────────────────────────────────
+# EPR-KGQA uses sentence-transformers for entity/relation embedding
+sentence-transformers==3.3.1
+transformers==4.47.1
+# SPARQL / graph query execution
+SPARQLWrapper==2.0.0
+
+# ─── Ollama ──────────────────────────────────────────────────────────────────
+# Ollama Python client for local LLM inference
+ollama==0.4.4
+
+# ─── ART (Adaptive Retrieval-augmented Thinking) ─────────────────────────────
+# ART uses LangChain for the retrieval-augmented reasoning chain
+langchain==0.3.13
+langchain-community==0.3.13
+langchain-core==0.3.28
+# FAISS for dense vector retrieval
+faiss-cpu==1.9.0.post1
+# OpenAI-compatible client (used for Manus built-in LLM)
+openai==1.58.1
+
+# ─── Observability ───────────────────────────────────────────────────────────
+prometheus-client==0.21.1
+structlog==24.4.0

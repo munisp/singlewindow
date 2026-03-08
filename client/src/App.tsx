@@ -34,6 +34,9 @@ const CustomsRisk = lazy(() => import("./pages/app/CustomsRisk"));
 const TraderDeclarations = lazy(() => import("./pages/app/TraderDeclarations"));
 const Notifications = lazy(() => import("./pages/app/Notifications"));
 const Finance = lazy(() => import("./pages/app/Finance"));
+const PostClearanceAudit = lazy(() => import("./pages/app/PostClearanceAudit"));
+const DutyDrawback = lazy(() => import('./pages/app/DutyDrawback'));
+const KnowledgeGraph = lazy(() => import('./pages/app/KnowledgeGraph'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -121,6 +124,24 @@ function Router() {
       <Route path="/app/finance">
         <Suspense fallback={<LazyFallback />}><Finance /></Suspense>
       </Route>
+      {/* Post-Clearance Audit */}
+      <Route path="/app/customs/audit">
+        <Suspense fallback={<LazyFallback />}><PostClearanceAudit /></Suspense>
+      </Route>
+
+      {/* Duty Drawback */}
+      <Route path="/app/trader/drawback">
+        <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
+      </Route>
+      <Route path="/app/finance/drawback">
+        <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
+      </Route>
+
+      {/* Knowledge Graph Explorer */}
+      <Route path="/app/knowledge-graph">
+        <Suspense fallback={<LazyFallback />}><KnowledgeGraph /></Suspense>
+      </Route>
+
       {/* AI Assistant */}
       <Route path="/app/ai-assistant" component={AIAssistant} />
 
