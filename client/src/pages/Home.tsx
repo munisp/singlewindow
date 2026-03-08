@@ -34,6 +34,9 @@ import StakeholderOnboarding from "@/components/StakeholderOnboarding";
 import NotificationFeed from "@/components/NotificationFeed";
 import TraderRegistration from "@/components/TraderRegistration";
 import PerformanceDashboard from "@/components/PerformanceDashboard";
+import SanctionsScreening from "@/components/SanctionsScreening";
+import WazuhSIEM from "@/components/WazuhSIEM";
+import DeploymentConfigurator from "@/components/DeploymentConfigurator";
 import { I18nProvider } from "@/contexts/I18nContext";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -1170,6 +1173,12 @@ export default function Home() {
       <TraderRegistration />
       <PerformanceDashboard />
       <NotificationFeed />
+      {/* ── SANCTIONS & RESTRICTED PARTY SCREENING ───────────────────────── */}
+      <SanctionsScreening />
+      {/* ── WAZUH SIEM ALERT FEED ────────────────────────────────────────── */}
+      <WazuhSIEM />
+      {/* ── MULTI-COUNTRY DEPLOYMENT CONFIGURATOR ────────────────────────── */}
+      <DeploymentConfigurator />
       <PDFExport />
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
       <footer className="py-12 bg-navy-950 border-t border-white/10">

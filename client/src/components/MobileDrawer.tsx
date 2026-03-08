@@ -49,6 +49,10 @@ export default function MobileDrawer() {
     { label: "Onboarding", href: "#stakeholder-onboarding", group: "Interactive" },
     { label: "Register Trader", href: "#trader-registration", group: "Onboarding" },
     { label: "Performance", href: "#performance", group: "Monitoring" },
+    { label: "Notifications", href: "#notification-feed", group: "Monitoring" },
+    { label: "Sanctions Screening", href: "#sanctions-screening", group: "Security" },
+    { label: "SIEM Alert Feed", href: "#wazuh-siem", group: "Security" },
+    { label: "Deployment Config", href: "#deployment-configurator", group: "Infrastructure" },
   ];
 
   const groups = Array.from(new Set(navItems.map((i) => i.group)));
