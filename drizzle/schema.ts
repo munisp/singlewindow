@@ -696,3 +696,35 @@ export const notificationPreferences = pgTable("notification_preferences", {
   // Each user can have at most one preference row per notification type
 ]);
 export type NotificationPreference = typeof notificationPreferences.$inferSelect;
+
+// ─── NOTIFICATION DIGEST SETTINGS ─────────────────────────────────────────────
+// One row per user; stores their preferred digest frequency.
+// digestFrequency: "none" = no digest, "daily" = every day at 08:00 UTC,
+//                  "weekly" = every Monday at 08:00 UTC
+export const digestFrequencyEnum = pgEnum("digest_frequency", ["none", "daily", "weekly"]);
+export const notificationDigestSettings = pgTable("notification_digest_settings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  digestFrequency: digestFrequencyEnum("digest_frequency").default("none").notNull(),
+  lastDigestSentAt: timestamp("last_digest_sent_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_nds_user_id").on(t.userId),
+  index("idx_nds_frequency").on(t.digestFrequency),
+]);
+export type NotificationDigestSettings = typeof notificationDigestSettings.$inferSelect;
+
+// ─── PORT CONGESTION ALERT TRACKING ───────────────────────────────────────────
+// Tracks the last-notified congestion status per port to avoid duplicate alerts.
+// When a port transitions to "critical" and the last-notified status was not
+// "critical", a notification is fired for all admin/customs_officer users.
+export const portCongestionAlerts = pgTable("port_congestion_alerts", {
+  id: serial("id").primaryKey(),
+  portCode: varchar("port_code", { length: 16 }).notNull().unique(),
+  lastNotifiedStatus: portCongestionStatusEnum("last_notified_status").default("clear").notNull(),
+  lastAlertSentAt: timestamp("last_alert_sent_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pca_port_code").on(t.portCode),
+]);
+export type PortCongestionAlert = typeof portCongestionAlerts.$inferSelect;

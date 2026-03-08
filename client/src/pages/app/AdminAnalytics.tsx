@@ -4,14 +4,48 @@ import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from "recharts";
 import {
   BarChart3, TrendingUp, FileText, Clock, CheckCircle,
-  DollarSign, Package, AlertTriangle,
+  DollarSign, Package, AlertTriangle, Download,
 } from "lucide-react";
+
+// ─── CSV Export Utility ───────────────────────────────────────────────────────
+function exportToCsv(filename: string, rows: Record<string, unknown>[]) {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const csvContent = [
+    headers.join(","),
+    ...rows.map((row) =>
+      headers.map((h) => {
+        const val = row[h];
+        const str = val == null ? "" : String(val);
+        return str.includes(",") || str.includes('"') || str.includes("\n")
+          ? `"${str.replace(/"/g, '""')}"`
+          : str;
+      }).join(",")
+    ),
+  ].join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function DownloadCsvButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <Button variant="ghost" size="sm" onClick={onClick} disabled={disabled} className="gap-1.5 h-8 text-xs text-muted-foreground hover:text-foreground">
+      <Download className="h-3.5 w-3.5" />CSV
+    </Button>
+  );
+}
 
 const LANE_COLORS: Record<string, string> = {
   green: "#22c55e", yellow: "#eab308", red: "#ef4444", blue: "#3b82f6", unknown: "#94a3b8",
@@ -75,6 +109,11 @@ export default function AdminAnalytics() {
               <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4" />Declaration Throughput</CardTitle>
               <CardDescription className="text-xs mt-0.5">Declarations submitted per day</CardDescription>
             </div>
+            <div className="flex items-center gap-1">
+              <DownloadCsvButton
+                disabled={!throughput?.length}
+                onClick={() => exportToCsv(`throughput_last_${throughputDays}_days.csv`, throughput ?? [])}
+              />
             <Select value={throughputDays} onValueChange={setThroughputDays}>
               <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -83,7 +122,7 @@ export default function AdminAnalytics() {
                 <SelectItem value="60">Last 60 days</SelectItem>
                 <SelectItem value="90">Last 90 days</SelectItem>
               </SelectContent>
-            </Select>
+            </Select></div>
           </CardHeader>
           <CardContent>
             {throughputLoading ? <Skeleton className="h-52 w-full" /> : !throughput?.length ? (
@@ -128,10 +167,16 @@ export default function AdminAnalytics() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div>
               <CardTitle className="text-base flex items-center gap-2"><Package className="h-4 w-4" />Status Distribution</CardTitle>
               <CardDescription className="text-xs">All declarations by current status</CardDescription>
-            </CardHeader>
+            </div>
+            <DownloadCsvButton
+              disabled={!statusDist?.length}
+              onClick={() => exportToCsv("declaration_status_distribution.csv", statusDist ?? [])}
+            />
+          </CardHeader>
             <CardContent>
               {statusLoading ? <Skeleton className="h-48 w-full" /> : !statusDist?.length ? (
                 <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">No declaration data</div>
@@ -158,6 +203,11 @@ export default function AdminAnalytics() {
               <CardTitle className="text-base flex items-center gap-2"><DollarSign className="h-4 w-4" />Duty Revenue Trend</CardTitle>
               <CardDescription className="text-xs mt-0.5">Total duty collected per day (completed payments)</CardDescription>
             </div>
+            <div className="flex items-center gap-1">
+              <DownloadCsvButton
+                disabled={!revenueTrend?.length}
+                onClick={() => exportToCsv(`duty_revenue_last_${revenueDays}_days.csv`, revenueTrend ?? [])}
+              />
             <Select value={revenueDays} onValueChange={setRevenueDays}>
               <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -166,7 +216,7 @@ export default function AdminAnalytics() {
                 <SelectItem value="60">Last 60 days</SelectItem>
                 <SelectItem value="90">Last 90 days</SelectItem>
               </SelectContent>
-            </Select>
+            </Select></div>
           </CardHeader>
           <CardContent>
             {revenueLoading ? <Skeleton className="h-52 w-full" /> : !revenueTrend?.length ? (
@@ -186,9 +236,15 @@ export default function AdminAnalytics() {
         </Card>
 
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Top HS Chapters by Volume</CardTitle>
-            <CardDescription className="text-xs">Most frequently declared commodity chapters</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Top HS Chapters by Volume</CardTitle>
+              <CardDescription className="text-xs">Most frequently declared commodity chapters</CardDescription>
+            </div>
+            <DownloadCsvButton
+              disabled={!topChapters?.length}
+              onClick={() => exportToCsv("top_hs_chapters.csv", topChapters ?? [])}
+            />
           </CardHeader>
           <CardContent>
             {chaptersLoading ? <Skeleton className="h-48 w-full" /> : !topChapters?.length ? (

@@ -10,7 +10,8 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Bell, RotateCcw, CheckCircle } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Bell, RotateCcw, CheckCircle, Mail, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 export default function NotificationPreferences() {
@@ -47,6 +48,17 @@ export default function NotificationPreferences() {
       toast.success(data.message);
     },
     onError: (err) => toast.error(`Failed to reset: ${err.message}`),
+  });
+
+  const { data: digestSettings, isLoading: digestLoading } = trpc.notificationPreferences.getDigestSettings.useQuery();
+
+  const updateDigest = trpc.notificationPreferences.updateDigestSettings.useMutation({
+    onSuccess: (data) => {
+      utils.notificationPreferences.getDigestSettings.invalidate();
+      const labels: Record<string, string> = { none: "disabled", daily: "daily at 08:00 UTC", weekly: "weekly on Mondays" };
+      toast.success(`Digest email ${labels[data.digestFrequency] ?? data.digestFrequency}`);
+    },
+    onError: (err) => toast.error(`Failed to update digest: ${err.message}`),
   });
 
   // Group preferences by category
@@ -164,6 +176,56 @@ export default function NotificationPreferences() {
               ))}
           </div>
         )}
+
+        {/* Digest Email Settings */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Mail className="h-4 w-4" />Email Digest
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Receive a summary of unread notifications by email instead of individual alerts.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">Digest frequency</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {digestSettings?.lastDigestSentAt
+                    ? `Last sent: ${new Date(digestSettings.lastDigestSentAt).toLocaleString()}`
+                    : "No digest sent yet"}
+                </p>
+              </div>
+              {digestLoading ? (
+                <Skeleton className="h-9 w-36" />
+              ) : (
+                <Select
+                  value={digestSettings?.digestFrequency ?? "none"}
+                  onValueChange={(val) =>
+                    updateDigest.mutate({ digestFrequency: val as "none" | "daily" | "weekly" })
+                  }
+                  disabled={updateDigest.isPending}
+                >
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No digest</SelectItem>
+                    <SelectItem value="daily">Daily (08:00 UTC)</SelectItem>
+                    <SelectItem value="weekly">Weekly (Mon 08:00)</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            {digestSettings?.digestFrequency !== "none" && (
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-500">
+                <Clock className="h-3 w-3" />
+                Digest emails are batched and sent via the platform owner notification channel.
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Footer info */}
         <p className="text-xs text-muted-foreground text-center pb-4">

@@ -638,3 +638,39 @@
 - [x] Write vitest tests for adminAnalytics router (5 tests) + port heatmap logic (4 tests)
 - [x] Run full test suite — 292/292 tests passing (15 test files)
 - [x] Save checkpoint
+
+## Sprint 20 — Notification Digest Email, Analytics CSV Export, Port Congestion Alerts
+
+### Notification Digest Email
+- [x] Add notification_digest_settings table to Drizzle schema (userId, digestFrequency, lastDigestSentAt)
+- [x] Run pnpm db:push to migrate schema (migration 0009 applied)
+- [x] Add getDigestSettings and updateDigestSettings procedures to notificationPreferences router
+- [x] Add Email Digest card to NotificationPreferences page with none/daily/weekly selector
+- [x] Add daily (08:00 UTC) and weekly (Mon 08:00 UTC) cron jobs for digest sending
+- [x] Digest batches up to 10 unread notifications and sends via notifyOwner helper
+
+### Analytics CSV Export
+- [x] Add exportToCsv() utility function to AdminAnalytics page (client-side, no server needed)
+- [x] Add DownloadCsvButton component with Download icon
+- [x] Add Download CSV button to Declaration Throughput chart
+- [x] Add Download CSV button to Duty Revenue Trend chart
+- [x] Add Download CSV button to Top HS Chapters chart
+- [x] Add Download CSV button to Status Distribution chart
+- [x] Filename includes data type and date range (e.g., declaration_throughput_2026-03-08.csv)
+
+### Port Congestion Critical Alerts
+- [x] Add portCongestionAlerts tracking table to Drizzle schema
+- [x] Run pnpm db:push (migration 0009 applied)
+- [x] Add runPortCongestionAlertScan() cron function to server/_core/index.ts
+- [x] Schedule scan every 15 minutes (0 */15 * * * *)
+- [x] Alert fires only on transition TO critical (deduplication via portCongestionAlerts table)
+- [x] Notifies all admin + customs_officer users via security_alert notification
+- [x] Also notifies owner via notifyOwner helper
+
+### Tests & Delivery
+- [x] Write vitest tests for digest settings logic (3 tests)
+- [x] Write vitest tests for CSV export utility (6 tests)
+- [x] Write vitest tests for port congestion alert transition logic (6 tests)
+- [x] Fixed pre-existing sprint15 test failure (wrong parameter name: unreadOnly → onlyUnread)
+- [x] Run full test suite — 309/309 tests passing (16 test files)
+- [x] Save checkpoint

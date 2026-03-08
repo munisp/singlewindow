@@ -62,18 +62,16 @@ describe("userNotifications.getMyNotifications", () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.userNotifications.getMyNotifications({
       limit: 10,
-      offset: 0,
-      unreadOnly: false,
+      onlyUnread: false,
     });
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it("accepts unreadOnly filter", async () => {
+  it("accepts onlyUnread filter", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.userNotifications.getMyNotifications({
       limit: 5,
-      offset: 0,
-      unreadOnly: true,
+      onlyUnread: true,
     });
     expect(Array.isArray(result)).toBe(true);
     // All returned items should be unread
@@ -86,8 +84,7 @@ describe("userNotifications.getMyNotifications", () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.userNotifications.getMyNotifications({
       limit: 3,
-      offset: 0,
-      unreadOnly: false,
+      onlyUnread: false,
     });
     expect(result.length).toBeLessThanOrEqual(3);
   });

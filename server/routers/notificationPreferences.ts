@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { notificationPreferences } from "../../drizzle/schema";
+import { notificationPreferences, notificationDigestSettings } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import type { NotificationPreference } from "../../drizzle/schema";
 
@@ -146,4 +146,54 @@ export const notificationPreferencesRouter = router({
     }
     return { success: true, message: "All notification preferences reset to defaults (all enabled)." };
   }),
+
+  /**
+   * Get the current user's notification digest frequency setting.
+   * Returns "none" if no row exists (default = no digest).
+   */
+  getDigestSettings: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return { digestFrequency: "none" as const, lastDigestSentAt: null as Date | null };
+    const rows = await db
+      .select()
+      .from(notificationDigestSettings)
+      .where(eq(notificationDigestSettings.userId, ctx.user.id))
+      .limit(1);
+    if (rows.length === 0) return { digestFrequency: "none" as const, lastDigestSentAt: null as Date | null };
+    return {
+      digestFrequency: rows[0].digestFrequency,
+      lastDigestSentAt: rows[0].lastDigestSentAt,
+    };
+  }),
+
+  /**
+   * Update the current user's notification digest frequency.
+   * Uses upsert (insert on conflict update).
+   */
+  updateDigestSettings: protectedProcedure
+    .input(z.object({
+      digestFrequency: z.enum(["none", "daily", "weekly"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return { success: false, digestFrequency: input.digestFrequency };
+      const existing = await db
+        .select({ id: notificationDigestSettings.id })
+        .from(notificationDigestSettings)
+        .where(eq(notificationDigestSettings.userId, ctx.user.id))
+        .limit(1);
+      if (existing.length > 0) {
+        await db
+          .update(notificationDigestSettings)
+          .set({ digestFrequency: input.digestFrequency, updatedAt: new Date() })
+          .where(eq(notificationDigestSettings.userId, ctx.user.id));
+      } else {
+        await db.insert(notificationDigestSettings).values({
+          userId: ctx.user.id,
+          digestFrequency: input.digestFrequency,
+          updatedAt: new Date(),
+        });
+      }
+      return { success: true, digestFrequency: input.digestFrequency };
+    }),
 });

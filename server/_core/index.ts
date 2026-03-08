@@ -214,9 +214,197 @@ async function runNightlyJobs() {
   await runSLABreachScan();
 }
 
+// ── Port congestion critical alert scan ────────────────────────────────────────
+// Runs every 15 minutes. Checks the latest congestion status for each active port.
+// When a port transitions TO "critical" from a non-critical status, it fires a
+// security_alert notification to all admin and customs_officer users.
+// Stores the last-notified status in port_congestion_alerts to avoid duplicates.
+async function runPortCongestionAlertScan() {
+  try {
+    const { getDb } = await import("../db");
+    const { portLocations, portCongestionEvents, portCongestionAlerts, users } = await import("../../drizzle/schema");
+    const { eq, desc, inArray, sql } = await import("drizzle-orm");
+    const { createUserNotification } = await import("../db");
+    const db = await getDb();
+    if (!db) return;
+
+    // Get all active ports
+    const activePorts = await db
+      .select({ portCode: portLocations.portCode, portName: portLocations.portName })
+      .from(portLocations)
+      .where(eq(portLocations.isActive, true));
+
+    if (!activePorts.length) return;
+
+    // Get the latest congestion event per port using a subquery
+    const latestEvents = await db
+      .select()
+      .from(portCongestionEvents)
+      .where(
+        inArray(
+          portCongestionEvents.portCode,
+          activePorts.map((p) => p.portCode)
+        )
+      )
+      .orderBy(desc(portCongestionEvents.recordedAt))
+      .limit(activePorts.length * 3); // fetch recent events, we'll pick latest per port
+
+    // Build map: portCode -> latest event
+    const latestByPort = new Map<string, typeof latestEvents[0]>();
+    for (const ev of latestEvents) {
+      if (!latestByPort.has(ev.portCode)) latestByPort.set(ev.portCode, ev);
+    }
+
+    // Get existing alert tracking rows
+    const alertRows = await db.select().from(portCongestionAlerts);
+    const alertMap = new Map(alertRows.map((r) => [r.portCode, r]));
+
+    // Get all admin + customs_officer user IDs to notify
+    const staffUsers = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(inArray(users.role, ["admin", "customs_officer"]));
+    const staffIds = staffUsers.map((u) => u.id);
+
+    let alertsFired = 0;
+
+    for (const port of activePorts) {
+      const latest = latestByPort.get(port.portCode);
+      if (!latest) continue;
+
+      const currentStatus = latest.congestionStatus;
+      const existingAlert = alertMap.get(port.portCode);
+      const lastNotified = existingAlert?.lastNotifiedStatus ?? "clear";
+
+      // Only fire if transitioning TO critical from a non-critical status
+      if (currentStatus === "critical" && lastNotified !== "critical") {
+        // Notify all staff users
+        for (const staffUser of staffIds) {
+          try {
+            await createUserNotification({
+              userId: staffUser,
+              type: "security_alert",
+              title: `Port Congestion CRITICAL: ${port.portName}`,
+              body: `Port ${port.portName} (${port.portCode}) has reached CRITICAL congestion status. Vessel count: ${latest.vesselCount ?? "N/A"}, wait time: ${latest.waitTimeHours ?? 0}h, declaration backlog: ${latest.declarationBacklog ?? 0}. Immediate action may be required.`,
+            });
+          } catch { /* non-fatal */ }
+        }
+
+        // Also notify the owner
+        try {
+          const { notifyOwner } = await import("./notification");
+          await notifyOwner({
+            title: `[Port Alert] ${port.portName} reached CRITICAL congestion`,
+            content: `Port ${port.portCode} transitioned to CRITICAL at ${new Date().toUTCString()}. Vessel count: ${latest.vesselCount}, wait time: ${latest.waitTimeHours}h, backlog: ${latest.declarationBacklog} declarations.`,
+          });
+        } catch { /* non-fatal */ }
+
+        alertsFired++;
+      }
+
+      // Upsert the alert tracking row
+      if (existingAlert) {
+        await db
+          .update(portCongestionAlerts)
+          .set({ lastNotifiedStatus: currentStatus, lastAlertSentAt: currentStatus === "critical" && lastNotified !== "critical" ? new Date() : existingAlert.lastAlertSentAt, updatedAt: new Date() })
+          .where(eq(portCongestionAlerts.portCode, port.portCode));
+      } else {
+        await db.insert(portCongestionAlerts).values({
+          portCode: port.portCode,
+          lastNotifiedStatus: currentStatus,
+          lastAlertSentAt: currentStatus === "critical" ? new Date() : null,
+          updatedAt: new Date(),
+        });
+      }
+    }
+
+    if (alertsFired > 0) {
+      console.log(`[Cron] Port congestion scan — ${alertsFired} CRITICAL alert(s) fired`);
+    }
+  } catch (err) {
+    console.error("[Cron] Port congestion alert scan failed:", err);
+  }
+}
+
+// ── Notification digest sender ─────────────────────────────────────────────────
+// Runs daily at 08:00 UTC. Sends a batched digest of unread notifications to users
+// who have opted into daily or weekly digests.
+async function runNotificationDigest(mode: "daily" | "weekly") {
+  try {
+    const { getDb } = await import("../db");
+    const { notificationDigestSettings, userNotifications, users } = await import("../../drizzle/schema");
+    const { eq, and, isNull } = await import("drizzle-orm");
+    const { notifyOwner } = await import("./notification");
+    const db = await getDb();
+    if (!db) return;
+
+    const digestRows = await db
+      .select()
+      .from(notificationDigestSettings)
+      .where(eq(notificationDigestSettings.digestFrequency, mode));
+
+    let sent = 0;
+    for (const setting of digestRows) {
+      // Get unread notifications since last digest
+      const since = setting.lastDigestSentAt ?? new Date(0);
+      const unread = await db
+        .select()
+        .from(userNotifications)
+        .where(
+          and(
+            eq(userNotifications.userId, setting.userId),
+            eq(userNotifications.isRead, false)
+          )
+        )
+        .limit(50);
+
+      if (!unread.length) continue;
+
+      // Get user info
+      const userRows = await db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, setting.userId)).limit(1);
+      const userName = userRows[0]?.name ?? `User #${setting.userId}`;
+
+      const summary = unread
+        .slice(0, 10)
+        .map((n) => `• ${n.title}: ${n.body?.slice(0, 80) ?? ""}${(n.body?.length ?? 0) > 80 ? "…" : ""}`)
+        .join("\n");
+      const extra = unread.length > 10 ? `\n…and ${unread.length - 10} more unread notification(s).` : "";
+
+      try {
+        await notifyOwner({
+          title: `[${mode === "daily" ? "Daily" : "Weekly"} Digest] ${unread.length} unread notification(s) for ${userName}`,
+          content: `${userName} has ${unread.length} unread notification(s):\n\n${summary}${extra}\n\nLog in to TradeGateway to view and manage your notifications.`,
+        });
+        // Update lastDigestSentAt
+        await db
+          .update(notificationDigestSettings)
+          .set({ lastDigestSentAt: new Date(), updatedAt: new Date() })
+          .where(eq(notificationDigestSettings.userId, setting.userId));
+        sent++;
+      } catch { /* non-fatal */ }
+    }
+
+    if (sent > 0) console.log(`[Cron] ${mode} digest sent to ${sent} user(s)`);
+  } catch (err) {
+    console.error(`[Cron] Notification digest (${mode}) failed:`, err);
+  }
+}
+
 // Schedule: second(0) minute(0) hour(2) day(*) month(*) weekday(*) = 02:00 UTC daily
 cron.schedule("0 0 2 * * *", runNightlyJobs, { timezone: "UTC" });
 console.log("[Cron] Nightly jobs scheduled at 02:00 UTC daily (risk scan + permit expiry check + SLA breach scan)");
+
+// Port congestion alert scan — every 15 minutes
+cron.schedule("0 */15 * * * *", runPortCongestionAlertScan, { timezone: "UTC" });
+console.log("[Cron] Port congestion alert scan scheduled every 15 minutes");
+
+// Daily digest — every day at 08:00 UTC
+cron.schedule("0 0 8 * * *", () => runNotificationDigest("daily"), { timezone: "UTC" });
+console.log("[Cron] Daily notification digest scheduled at 08:00 UTC");
+
+// Weekly digest — every Monday at 08:00 UTC
+cron.schedule("0 0 8 * * 1", () => runNotificationDigest("weekly"), { timezone: "UTC" });
+console.log("[Cron] Weekly notification digest scheduled at 08:00 UTC every Monday");
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
