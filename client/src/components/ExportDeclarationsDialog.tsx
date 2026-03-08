@@ -61,7 +61,7 @@ export function ExportDeclarationsDialog({
   traderId,
 }: ExportDeclarationsDialogProps) {
   const [open, setOpen] = useState(false);
-  const [format, setFormat] = useState<"csv" | "json">("csv");
+  const [format, setFormat] = useState<"csv" | "json" | "xlsx">("csv");
   const [status, setStatus] = useState("all");
   const [riskLane, setRiskLane] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -86,7 +86,9 @@ export function ExportDeclarationsDialog({
   const exportMutation = trpc.bulkExport.exportDeclarations.useMutation({
     onSuccess: (result) => {
       const mimeType =
-        result.format === "json" ? "application/json" : "text/csv;charset=utf-8;";
+        result.format === "json" ? "application/json" :
+        result.format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" :
+        "text/csv;charset=utf-8;";
       downloadFile(result.filename, result.content, mimeType);
       toast.success(
         `Exported ${result.rowCount} declaration${result.rowCount !== 1 ? "s" : ""} as ${result.format.toUpperCase()}`
@@ -121,7 +123,7 @@ export function ExportDeclarationsDialog({
             Export Declarations
           </DialogTitle>
           <DialogDescription>
-            Configure filters and download declarations as CSV or JSON.
+            Configure filters and download declarations as CSV, JSON, or Excel (XLSX).
           </DialogDescription>
         </DialogHeader>
 
@@ -153,6 +155,18 @@ export function ExportDeclarationsDialog({
               >
                 <FileJson className="h-4 w-4" />
                 JSON
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormat("xlsx")}
+                className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                  format === "xlsx"
+                    ? "border-primary bg-primary/10 text-primary font-medium"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <FileText className="h-4 w-4 text-emerald-600" />
+                Excel
               </button>
             </div>
           </div>

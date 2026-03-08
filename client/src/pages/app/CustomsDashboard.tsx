@@ -19,6 +19,26 @@ import {
 import { useState } from "react";
 import { useLocation } from "wouter";
 
+// SLA thresholds in hours by risk lane
+const SLA_HOURS: Record<string, number> = {
+  green_lane: 4,
+  yellow_lane: 24,
+  red_lane: 72,
+  submitted: 24,
+};
+
+function getSLAStatus(d: any): { label: string; hoursElapsed: number; isBreached: boolean; isWarning: boolean } {
+  const submittedAt = d.submittedAt ? new Date(d.submittedAt).getTime() : d.createdAt ? new Date(d.createdAt).getTime() : null;
+  if (!submittedAt) return { label: "—", hoursElapsed: 0, isBreached: false, isWarning: false };
+  const hoursElapsed = (Date.now() - submittedAt) / 3_600_000;
+  const threshold = SLA_HOURS[d.riskLane ?? d.status] ?? 24;
+  const isBreached = hoursElapsed > threshold;
+  const isWarning = !isBreached && hoursElapsed > threshold * 0.75;
+  const h = Math.floor(hoursElapsed);
+  const label = h < 1 ? "< 1h" : h < 24 ? `${h}h` : `${Math.floor(h / 24)}d ${h % 24}h`;
+  return { label, hoursElapsed, isBreached, isWarning };
+}
+
 const LANE_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
   green_lane: { label: "Green", color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200", icon: <CheckCircle className="h-4 w-4 text-emerald-600" /> },
   yellow_lane: { label: "Yellow", color: "text-amber-700", bg: "bg-amber-50 border-amber-200", icon: <Clock className="h-4 w-4 text-amber-600" /> },
@@ -157,6 +177,7 @@ export default function CustomsDashboard() {
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">Value</th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">Risk Score</th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">Lane / Status</th>
+                      <th className="text-left px-4 py-3 font-medium text-muted-foreground">SLA</th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">Actions</th>
                     </tr>
                   </thead>
@@ -203,6 +224,23 @@ export default function CustomsDashboard() {
                               {lane.icon}
                               {lane.label}
                             </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            {(() => {
+                              const sla = getSLAStatus(d);
+                              if (sla.label === "—") return <span className="text-xs text-muted-foreground">—</span>;
+                              return (
+                                <span className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded ${
+                                  sla.isBreached ? "bg-red-100 text-red-700" :
+                                  sla.isWarning ? "bg-amber-100 text-amber-700" :
+                                  "bg-muted text-muted-foreground"
+                                }`}>
+                                  {sla.isBreached && <AlertTriangle className="h-3 w-3" />}
+                                  {sla.label}
+                                  {sla.isBreached && " OVERDUE"}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-3">
                             <Button

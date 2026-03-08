@@ -30,13 +30,13 @@ function rowsToCsv(headers: string[], rows: Record<string, unknown>[]): string {
 
 export const bulkExportRouter = router({
   // ── EXPORT DECLARATIONS ──────────────────────────────────────────────────────
-  // Returns a CSV (base64) of declarations matching the given filters.
+  // Returns a CSV/JSON/XLSX (base64) of declarations matching the given filters.
   // Traders can only export their own declarations.
   // Admins/officers can export all or filter by traderId.
   exportDeclarations: protectedProcedure
     .input(
       z.object({
-        format: z.enum(["csv", "json"]).default("csv"),
+        format: z.enum(["csv", "json", "xlsx"]).default("csv"),
         status: z
           .enum([
             "all",
@@ -163,7 +163,6 @@ export const bulkExportRouter = router({
         };
       }
 
-      // CSV export
       const CSV_HEADERS = [
         "id",
         "declarationNumber",
@@ -193,14 +192,36 @@ export const bulkExportRouter = router({
         "createdAt",
       ];
 
-      const csvRows = rows.map((r) => ({
+      const normalizedRows = rows.map((r) => ({
         ...r,
         submittedAt: r.submittedAt?.toISOString() ?? "",
         clearedAt: r.clearedAt?.toISOString() ?? "",
         createdAt: r.createdAt.toISOString(),
       }));
 
-      const csv = rowsToCsv(CSV_HEADERS, csvRows as any);
+      // ── XLSX export ──────────────────────────────────────────────────────────
+      if (input.format === "xlsx") {
+        const XLSX = await import("xlsx");
+        const wsData = [
+          CSV_HEADERS,
+          ...normalizedRows.map((r) => CSV_HEADERS.map((h) => (r as any)[h] ?? "")),
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        // Auto-width columns
+        ws["!cols"] = CSV_HEADERS.map((h) => ({ wch: Math.max(h.length + 2, 12) }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Declarations");
+        const xlsxBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+        return {
+          format: "xlsx" as const,
+          filename: `declarations-export-${new Date().toISOString().slice(0, 10)}.xlsx`,
+          content: xlsxBuffer.toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
+      // ── CSV export ───────────────────────────────────────────────────────────
+      const csv = rowsToCsv(CSV_HEADERS, normalizedRows as any);
 
       return {
         format: "csv" as const,

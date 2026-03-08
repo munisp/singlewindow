@@ -3,8 +3,8 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
-  getAllDeclarations, updateDeclaration, getDeclarationStats,
-  logAuditEvent, createNotification, getProfileByUserId
+  getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
+  logAuditEvent, createNotification, createUserNotification, getProfileByUserId
 } from "../db";
 import { clearanceCertificates } from "../../drizzle/schema";
 import { invokeLLM } from "../_core/llm";
@@ -225,17 +225,19 @@ export const declarationsRouter = router({
     .query(async ({ ctx, input }) => {
       const decl = await getDeclarationById(input.id);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
-      if (decl.traderId !== ctx.user.id && ctx.user.role !== "admin") {
+      const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
+      if (decl.traderId !== ctx.user.id && !officerRoles.includes(ctx.user.role)) {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       return decl;
     }),
 
-  // Get all declarations (customs officers / admin)
+  // Get all declarations (customs officers / admin / finance / inspector / oga_officer)
   all: protectedProcedure
-    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
+    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0), status: z.string().optional(), riskLane: z.string().optional() }))
     .query(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
+      if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       return getAllDeclarations(input.limit, input.offset);
     }),
 
@@ -247,7 +249,8 @@ export const declarationsRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      const allowedRoles = ["admin", "customs_officer", "inspector"];
+      if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       const decl = await getDeclarationById(input.id);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -267,7 +270,7 @@ export const declarationsRouter = router({
         metadata: { notes: input.notes },
       });
 
-      // Notify trader
+      // Notify trader via legacy notifications table
       const notifType = input.status === "cleared" ? "declaration_cleared" :
         input.status === "rejected" ? "declaration_rejected" : "declaration_submitted";
       await createNotification({
@@ -279,13 +282,37 @@ export const declarationsRouter = router({
         entityId: input.id,
       });
 
+      // Also create a user_notification for the Notification Centre
+      const statusMessages: Record<string, string> = {
+        cleared: `Your declaration ${decl.declarationNumber} has been cleared. Goods may be released.`,
+        rejected: `Your declaration ${decl.declarationNumber} has been rejected. ${input.notes ? `Reason: ${input.notes}` : "Please review and resubmit."}`,
+        docs_required: `Additional documents required for ${decl.declarationNumber}. ${input.notes ?? "Please upload the requested documents."}`,
+        payment_pending: `Payment required for ${decl.declarationNumber}. Please complete payment to proceed.`,
+        under_examination: `${decl.declarationNumber} has been selected for physical examination.`,
+        examination_complete: `Physical examination of ${decl.declarationNumber} is complete. Awaiting final clearance.`,
+      };
+      const userNotifType = input.status === "cleared" ? "declaration_cleared" :
+        input.status === "rejected" ? "declaration_rejected" :
+        input.status === "docs_required" ? "docs_required" : "status_update";
+      await createUserNotification({
+        userId: decl.traderId,
+        type: userNotifType,
+        title: `Declaration ${input.status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}`,
+        body: statusMessages[input.status] ?? `Declaration ${decl.declarationNumber} status: ${input.status}.`,
+        declarationId: input.id,
+      });
+
       return updated;
     }),
 
-  // Dashboard stats
+  // Dashboard stats (admin/officers get platform-wide stats; traders get their own stats)
   stats: protectedProcedure.query(async ({ ctx }) => {
-    if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
-    return getDeclarationStats();
+    const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
+    if (officerRoles.includes(ctx.user.role)) {
+      return getDeclarationStats();
+    }
+    // Trader: return their own stats
+    return getDeclarationStatsByTrader(ctx.user.id);
   }),
 
   /**

@@ -220,6 +220,25 @@ export async function getDeclarationStats() {
   };
 }
 
+export async function getDeclarationStatsByTrader(traderId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [total, cleared, pending, rejected, submitted] = await Promise.all([
+    db.select({ count: count() }).from(declarations).where(eq(declarations.traderId, traderId)),
+    db.select({ count: count() }).from(declarations).where(and(eq(declarations.traderId, traderId), eq(declarations.status, "cleared"))),
+    db.select({ count: count() }).from(declarations).where(and(eq(declarations.traderId, traderId), eq(declarations.status, "payment_pending"))),
+    db.select({ count: count() }).from(declarations).where(and(eq(declarations.traderId, traderId), eq(declarations.status, "rejected"))),
+    db.select({ count: count() }).from(declarations).where(and(eq(declarations.traderId, traderId), eq(declarations.status, "submitted"))),
+  ]);
+  return {
+    total: total[0]?.count ?? 0,
+    cleared: cleared[0]?.count ?? 0,
+    pending: pending[0]?.count ?? 0,
+    rejected: rejected[0]?.count ?? 0,
+    submitted: submitted[0]?.count ?? 0,
+  };
+}
+
 // ─── DOCUMENT QUERIES ────────────────────────────────────────────────────────
 
 export async function addDocument(data: typeof declarationDocuments.$inferInsert) {

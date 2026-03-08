@@ -9,9 +9,11 @@ import { trpc } from "@/lib/trpc";
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
-  DollarSign, Building2, Anchor, Plane, Train, Download, Loader2
+  DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield
 } from "lucide-react";
 import { useState } from "react";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useLocation, useParams } from "wouter";
 
@@ -215,10 +217,13 @@ export default function DeclarationDetail() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const [certLoading, setCertLoading] = useState(false);
+  const [statusNotes, setStatusNotes] = useState("");
+  const [selectedStatus, setSelectedStatus] = useState("");
 
   const declarationId = parseInt(id ?? "0", 10);
+  const isOfficer = ["admin", "customs_officer", "inspector"].includes(user?.role ?? "");
 
-  const { data: declaration, isLoading, error } = trpc.declarations.byId.useQuery(
+  const { data: declaration, isLoading, error, refetch } = trpc.declarations.byId.useQuery(
     { id: declarationId },
     { enabled: !!declarationId && !isNaN(declarationId) }
   );
@@ -227,6 +232,19 @@ export default function DeclarationDetail() {
     { id: declarationId },
     { enabled: !!declarationId && !isNaN(declarationId) }
   );
+
+  const utils = trpc.useUtils();
+  const updateStatusMutation = trpc.declarations.updateStatus.useMutation({
+    onSuccess: () => {
+      toast.success("Declaration status updated");
+      setStatusNotes("");
+      setSelectedStatus("");
+      utils.declarations.byId.invalidate({ id: declarationId });
+      utils.declarations.getTimeline.invalidate({ id: declarationId });
+      refetch();
+    },
+    onError: (err) => toast.error("Failed to update status", { description: err.message }),
+  });
 
   const certMutation = trpc.declarations.generateClearanceCertificate.useMutation({
     onSuccess: (result) => {
@@ -613,6 +631,55 @@ export default function DeclarationDetail() {
                     </CardHeader>
                     <CardContent>
                       <p className="text-sm text-amber-800">{decl.notes}</p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Officer Action Panel */}
+                {isOfficer && !(["cleared", "rejected", "cancelled"] as string[]).includes(decl.status) && (
+                  <Card className="border-primary/30 bg-primary/5">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base font-semibold flex items-center gap-2">
+                        <Shield className="h-4 w-4 text-primary" />
+                        Officer Actions
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select new status..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="docs_required">Request Documents</SelectItem>
+                          <SelectItem value="payment_pending">Assess Duties (Payment Pending)</SelectItem>
+                          <SelectItem value="under_examination">Send for Physical Examination</SelectItem>
+                          <SelectItem value="examination_complete">Mark Examination Complete</SelectItem>
+                          <SelectItem value="cleared">Clear Declaration</SelectItem>
+                          <SelectItem value="rejected">Reject Declaration</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Textarea
+                        placeholder="Officer notes (optional)..."
+                        value={statusNotes}
+                        onChange={(e) => setStatusNotes(e.target.value)}
+                        rows={2}
+                        className="text-sm"
+                      />
+                      <Button
+                        className="w-full"
+                        disabled={!selectedStatus || updateStatusMutation.isPending}
+                        onClick={() => {
+                          if (!selectedStatus) return;
+                          updateStatusMutation.mutate({
+                            id: declarationId,
+                            status: selectedStatus as any,
+                            notes: statusNotes || undefined,
+                          });
+                        }}
+                      >
+                        {updateStatusMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                        Update Status
+                      </Button>
                     </CardContent>
                   </Card>
                 )}

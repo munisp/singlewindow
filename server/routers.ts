@@ -3,7 +3,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { getAllUsers } from "./db";
+import { getAllUsers, getUserById } from "./db";
+import { z } from "zod";
 import { declarationsRouter } from "./routers/declarations";
 import { profilesRouter } from "./routers/profiles";
 import { paymentsRouter } from "./routers/payments";
@@ -44,6 +45,22 @@ export const appRouter = router({
       if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
       return getAllUsers(200, 0);
     }),
+    changeRole: protectedProcedure
+      .input(z.object({
+        userId: z.number().int().positive(),
+        role: z.enum(["user", "admin", "customs_officer", "oga_officer", "inspector", "finance"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+        if (input.userId === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot change your own role" });
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { users } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const result = await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId)).returning();
+        if (!result[0]) throw new TRPCError({ code: "NOT_FOUND" });
+        return result[0];
+      }),
   }),
 
   declarations: declarationsRouter,

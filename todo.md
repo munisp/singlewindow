@@ -523,3 +523,39 @@
 - [x] Total: 277 tests across 14 files — all passing (0 failures)
 - [x] TypeScript: 0 errors
 - [x] Save checkpoint
+
+## Sprint 16 — Next Steps Implementation + Audit
+
+### Real-time Notifications on Declaration Status Change
+- [x] Wire createUserNotification into declarations.updateStatus procedure (trader notified on each status transition)
+- [ ] Wire createUserNotification into declarations.submitDeclaration (confirmation notification)
+- [ ] Wire createUserNotification into kyc.reviewVerification (trader notified on KYC approval/rejection)
+- [ ] Wire createUserNotification into payments.confirmPayment (trader notified on payment confirmation)
+
+### SLA Badge in Customs Dashboard Queue
+- [x] Add SLA breach indicator (red clock + "OVERDUE" badge) to CustomsDashboard declaration queue rows
+- [ ] Show hours overdue tooltip on hover
+- [x] Add SLA column to the queue table with colour-coded status
+
+### XLSX Export Format
+- [x] Install xlsx (SheetJS) package
+- [x] Add xlsx format option to bulkExport.exportDeclarations procedure
+- [x] Update ExportDeclarationsDialog to include XLSX as a format option
+
+### Comprehensive Audit — Fixes Applied
+- [x] Fix declarations.stats to allow all officer roles (was admin-only)
+- [x] Fix declarations.all to allow customs_officer, inspector, finance, oga_officer roles
+- [x] Fix declarations.updateStatus to allow customs_officer and inspector roles
+- [x] Add getDeclarationStatsByTrader for trader-specific dashboard stats
+- [x] Add auth.changeRole procedure for admin user management
+- [x] Add officer action panel to DeclarationDetail page (status update for customs officers)
+- [x] Rewrite TraderProfile with full edit form and upsert mutation
+- [x] Upgrade AdminUsers with role-change dropdown (live role management)
+- [x] Audit all tRPC routers registered in appRouter — all 20 routers confirmed
+- [x] Audit all client pages have corresponding API endpoints — 17 issues found and fixed
+- [x] Audit all DB tables have CRUD operations — 25 tables confirmed
+- [x] Audit all TODO/FIXME/mock data in codebase — geospatial uses real DB data
+- [x] Generate audit report (see AUDIT_REPORT_SPRINT16.md)
+
+### Archive
+- [x] Generate comprehensive archive of entire project (tradegateway-sprint16-archive.zip — 467 files, 1.1MB)
