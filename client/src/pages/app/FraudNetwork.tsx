@@ -44,6 +44,7 @@ import {
   BarChart2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -144,6 +145,23 @@ export default function FraudNetwork() {
     { traderId: investigationTraderId ?? "", months: 12 },
     { enabled: !!investigationTraderId, refetchOnWindowFocus: false }
   );
+
+  const [, setLocation] = useLocation();
+
+  // Create fraud case mutation
+  const createCaseMutation = trpc.fraudCases.createCase.useMutation({
+    onSuccess: (newCase) => {
+      toast.success(`Case #${newCase.caseNumber} opened`, {
+        description: `"${newCase.title}" — navigate to Fraud Cases to add notes.`,
+        action: {
+          label: "View Case",
+          onClick: () => setLocation("/app/admin/fraud-cases"),
+        },
+      });
+    },
+    onError: (err: { message: string }) =>
+      toast.error("Failed to open case", { description: err.message }),
+  });
 
   // Post-clearance audit mutation to flag a trader
   const scheduleAuditMutation = trpc.postAudit.schedule.useMutation({
@@ -829,8 +847,41 @@ export default function FraudNetwork() {
                           );
                         })()}
 
-                        {/* Flag for Audit action */}
-                        <div className="flex items-center gap-2 pt-1 border-t">
+                        {/* Open Fraud Case + Flag for Audit actions */}
+                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1 text-xs border-amber-500/50 text-amber-400 hover:bg-amber-500/10"
+                            disabled={createCaseMutation.isPending}
+                            onClick={() => {
+                              const traderName =
+                                inv.trader?.companyName ||
+                                `Trader ${investigationTraderId}`;
+                              const avgRisk = (inv.summary.avgRiskScore * 100).toFixed(1);
+                              createCaseMutation.mutate({
+                                traderId: parseInt(investigationTraderId!, 10),
+                                title: `Fraud Investigation — ${traderName}`,
+                                priority:
+                                  inv.summary.avgRiskScore >= 0.75
+                                    ? "critical"
+                                    : inv.summary.avgRiskScore >= 0.55
+                                    ? "high"
+                                    : "medium",
+                                description:
+                                  `Auto-opened from Fraud Network. Avg risk score: ${avgRisk}%. ` +
+                                  `Red-lane declarations (12 mo): ${inv.summary.redLaneCount}. ` +
+                                  `Total declarations: ${inv.summary.totalDeclarations}.`,
+                              });
+                            }}
+                          >
+                            {createCaseMutation.isPending ? (
+                              <RefreshCw size={12} className="animate-spin" />
+                            ) : (
+                              <FileText size={12} />
+                            )}
+                            Open Fraud Case
+                          </Button>
                           <Button
                             variant="destructive"
                             size="sm"

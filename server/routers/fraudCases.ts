@@ -347,4 +347,53 @@ export const fraudCasesRouter = router({
 
       return { total, byStatus, byPriority };
     }),
+
+  // ── UPLOAD EVIDENCE FILE (server-side S3) ───────────────────────────────────────
+  // Accepts a base64-encoded file from the client, uploads to S3 via storagePut,
+  // and returns the public URL + key. Persists the evidence record in DB.
+  uploadEvidenceFile: protectedProcedure
+    .input(
+      z.object({
+        caseId: z.number().int().positive(),
+        fileName: z.string().min(1).max(255),
+        mimeType: z.string().max(128).default("application/octet-stream"),
+        base64Data: z.string().min(1),
+        description: z.string().max(1000).optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      requireInvestigator(ctx.user.role);
+      const { storagePut } = await import("../storage");
+      const { getDb } = await import("../db");
+      const { fraudCases, fraudCaseEvidence } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const [caseRow] = await db.select().from(fraudCases).where(eq(fraudCases.id, input.caseId)).limit(1);
+      if (!caseRow) throw new TRPCError({ code: "NOT_FOUND", message: `Case ${input.caseId} not found` });
+      // Decode base64 and upload to S3
+      const buffer = Buffer.from(input.base64Data, "base64");
+      if (buffer.length > 16 * 1024 * 1024) {
+        throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "File exceeds 16 MB limit" });
+      }
+      const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileKey = `fraud-evidence/case-${input.caseId}/${Date.now()}-${safeName}`;
+      const { key, url } = await storagePut(fileKey, buffer, input.mimeType);
+      // Persist evidence record
+      const [ev] = await db
+        .insert(fraudCaseEvidence)
+        .values({
+          caseId: input.caseId,
+          uploadedBy: ctx.user.id,
+          fileKey: key,
+          fileUrl: url,
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          fileSizeBytes: buffer.length,
+          description: input.description ?? null,
+        })
+        .returning();
+      await db.update(fraudCases).set({ updatedAt: new Date() }).where(eq(fraudCases.id, input.caseId));
+      return ev;
+    }),
 });

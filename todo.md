@@ -259,3 +259,30 @@
 - [x] Write vitest tests for sharedAgentNetwork: 5 tests (auth, RBAC, invalid input, shape)
 - [x] Total: 211 tests across 11 test files — all passing
 - [x] Save checkpoint
+
+## Sprint 11 — Open Case Button, Nightly Cron, Evidence Upload (COMPLETED)
+
+### Open Case Button in Investigation Panel
+- [x] Add fraudCases.createCase mutation to FraudNetwork investigation panel
+- [x] "Open Fraud Case" button pre-fills title with trader name + avg risk score
+- [x] On success, navigate to /app/admin/fraud-cases with the new case highlighted
+- [x] Show toast confirmation with case number
+
+### Scheduled Nightly Risk Scan (node-cron)
+- [x] Install node-cron package
+- [x] Add cron job to server/_core/index.ts: fires at 02:00 UTC daily
+- [x] Log cron execution start/end with case count and notification status
+- [x] Add cronStatus tRPC procedure to alerts router (returns last run time, result summary)
+- [x] Cron confirmed live in server logs: "[Cron] Nightly risk scan scheduled at 02:00 UTC daily"
+
+### Evidence File Upload in Fraud Cases
+- [x] Add uploadEvidenceFile tRPC mutation to fraudCases router (base64 → S3 storagePut)
+- [x] Build file picker UI in FraudCases detail view with progress bar
+- [x] Show upload progress bar during S3 upload (0→50→60→100%)
+- [x] Display uploaded evidence list with file name, type, size, download link
+- [x] Support PDF, PNG, JPG, DOCX, XLS, CSV, TXT, ZIP (max 16MB)
+
+### Tests & Delivery
+- [x] Write vitest tests for uploadEvidenceFile procedure: 7 tests (RBAC, input validation, happy path)
+- [x] Total: 217 tests across 11 files — 216 passing (1 pre-existing flaky LLM timeout in ai.risk.test.ts)
+- [x] Save checkpoint

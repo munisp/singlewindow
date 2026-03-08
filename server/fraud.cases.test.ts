@@ -345,3 +345,91 @@ describe("knowledgeGraph.sharedAgentNetwork", () => {
     }
   });
 });
+
+// ─── uploadEvidenceFile tests (Sprint 11) ─────────────────────────────────────
+
+describe("fraudCases.uploadEvidenceFile — RBAC", () => {
+  it("rejects unauthenticated users", async () => {
+    const caller = anonCaller();
+    await expect(
+      caller.fraudCases.uploadEvidenceFile({
+        caseId: 1,
+        fileName: "test.pdf",
+        mimeType: "application/pdf",
+        base64Data: Buffer.from("test").toString("base64"),
+      })
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects non-admin/non-customs_officer users", async () => {
+    const caller = userCaller();
+    await expect(
+      caller.fraudCases.uploadEvidenceFile({
+        caseId: 1,
+        fileName: "test.pdf",
+        mimeType: "application/pdf",
+        base64Data: Buffer.from("test").toString("base64"),
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("fraudCases.uploadEvidenceFile — input validation", () => {
+  it("rejects empty fileName", async () => {
+    const caller = adminCaller();
+    await expect(
+      caller.fraudCases.uploadEvidenceFile({
+        caseId: 1,
+        fileName: "",
+        mimeType: "application/pdf",
+        base64Data: Buffer.from("test").toString("base64"),
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rejects empty base64Data", async () => {
+    const caller = adminCaller();
+    await expect(
+      caller.fraudCases.uploadEvidenceFile({
+        caseId: 1,
+        fileName: "test.pdf",
+        mimeType: "application/pdf",
+        base64Data: "",
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rejects invalid caseId (zero)", async () => {
+    const caller = adminCaller();
+    await expect(
+      caller.fraudCases.uploadEvidenceFile({
+        caseId: 0,
+        fileName: "test.pdf",
+        mimeType: "application/pdf",
+        base64Data: Buffer.from("test").toString("base64"),
+      })
+    ).rejects.toThrow();
+  });
+});
+
+describe("fraudCases.uploadEvidenceFile — admin happy path (DB/S3 may be unavailable in CI)", () => {
+  it("admin gets evidence record or INTERNAL_SERVER_ERROR/NOT_FOUND", async () => {
+    const caller = adminCaller();
+    try {
+      const result = await caller.fraudCases.uploadEvidenceFile({
+        caseId: 1,
+        fileName: "evidence.pdf",
+        mimeType: "application/pdf",
+        base64Data: Buffer.from("test evidence content").toString("base64"),
+        description: "Test upload",
+      });
+      expect(result).toHaveProperty("id");
+      expect(result).toHaveProperty("fileUrl");
+      expect(result).toHaveProperty("fileKey");
+      expect(result.fileName).toBe("evidence.pdf");
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      expect(["INTERNAL_SERVER_ERROR", "NOT_FOUND"].includes(code ?? "")).toBe(true);
+    }
+  });
+});

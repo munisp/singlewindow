@@ -233,4 +233,42 @@ export const alertsRouter = router({
         })),
       };
     }),
+
+  // ── CRON STATUS ─────────────────────────────────────────────────────────────
+  // Returns the last cron run time and result summary for the RiskAlerts page.
+  cronStatus: protectedProcedure.query(async ({ ctx }) => {
+    if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Admin or customs officer role required" });
+    }
+    const { getDb } = await import("../db");
+    const { riskScanResults } = await import("../../drizzle/schema");
+    const { desc } = await import("drizzle-orm");
+    const db = await getDb();
+    if (!db) {
+      return { lastRun: null, lastResult: null, nextRun: "02:00 UTC daily" };
+    }
+    const [latest] = await db
+      .select()
+      .from(riskScanResults)
+      .orderBy(desc(riskScanResults.scanRunAt))
+      .limit(1);
+    // Compute next 02:00 UTC
+    const now = new Date();
+    const next = new Date();
+    next.setUTCHours(2, 0, 0, 0);
+    if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+    return {
+      lastRun: latest?.scanRunAt?.toISOString() ?? null,
+      lastResult: latest
+        ? {
+            highRiskCount: latest.highRiskCount ?? 0,
+            newCasesCreated: latest.newCasesCreated ?? 0,
+            notificationSent: latest.notificationSent ?? false,
+            threshold: Number(latest.thresholdUsed ?? 0.8),
+            periodHours: latest.scanPeriodHours ?? 24,
+          }
+        : null,
+      nextRun: next.toISOString(),
+    };
+  }),
 });

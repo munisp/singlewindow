@@ -9,7 +9,7 @@
  *   - Add investigator notes
  */
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -42,9 +42,11 @@ import {
   Gavel,
   Loader2,
   MessageSquare,
+  Paperclip,
   Plus,
   RefreshCw,
   Shield,
+  Upload,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -224,6 +226,9 @@ function CaseDetailPanel({
 }) {
   const [noteContent, setNoteContent] = useState("");
   const [newStatus, setNewStatus] = useState<CaseStatus | "">("");
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.fraudCases.getCase.useQuery({ caseId });
@@ -247,6 +252,43 @@ function CaseDetailPanel({
     },
     onError: (err) => toast.error(`Failed to update status: ${err.message}`),
   });
+
+  const uploadEvidence = trpc.fraudCases.uploadEvidenceFile.useMutation({
+    onSuccess: () => {
+      toast.success("Evidence file uploaded");
+      utils.fraudCases.getCase.invalidate({ caseId });
+      setUploadDescription("");
+      setUploadProgress(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    onError: (err) => {
+      toast.error(`Upload failed: ${err.message}`);
+      setUploadProgress(null);
+    },
+  });
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 16 * 1024 * 1024) {
+      toast.error("File exceeds 16 MB limit");
+      return;
+    }
+    setUploadProgress(0);
+    const reader = new FileReader();
+    reader.onprogress = (ev) => {
+      if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 50));
+    };
+    reader.onload = () => {
+      setUploadProgress(60);
+      const base64Data = (reader.result as string).split(",")[1];
+      uploadEvidence.mutate(
+        { caseId, fileName: file.name, mimeType: file.type || "application/octet-stream", base64Data, description: uploadDescription || undefined },
+        { onSettled: () => setUploadProgress(100) }
+      );
+    };
+    reader.readAsDataURL(file);
+  }
 
   if (isLoading) {
     return (
@@ -396,36 +438,93 @@ function CaseDetailPanel({
           </div>
 
           {/* Evidence */}
-          {data.evidence && data.evidence.length > 0 && (
-            <>
-              <Separator className="bg-white/10" />
-              <div>
-                <div className="text-xs font-mono tracking-widest text-gold uppercase mb-3 flex items-center gap-2">
-                  <FileText size={12} />
-                  Evidence Files ({data.evidence.length})
-                </div>
-                <div className="space-y-2">
-                  {data.evidence.map((ev) => (
-                    <a
-                      key={ev.id}
-                      href={ev.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 bg-navy-800/60 border border-white/10 rounded-lg px-3 py-2"
-                    >
-                      <FileText size={12} />
-                      <span className="truncate">{ev.fileName}</span>
-                      {ev.fileSizeBytes && (
-                        <span className="text-slate-500 ml-auto shrink-0">
-                          {(ev.fileSizeBytes / 1024).toFixed(0)} KB
-                        </span>
-                      )}
-                    </a>
-                  ))}
-                </div>
+          <Separator className="bg-white/10" />
+          <div>
+            <div className="text-xs font-mono tracking-widest text-gold uppercase mb-3 flex items-center gap-2">
+              <Paperclip size={12} />
+              Evidence Files ({data.evidence?.length ?? 0})
+            </div>
+
+            {/* Existing evidence list */}
+            {data.evidence && data.evidence.length > 0 && (
+              <div className="space-y-2 mb-4">
+                {data.evidence.map((ev) => (
+                  <a
+                    key={ev.id}
+                    href={ev.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-xs text-blue-400 hover:text-blue-300 bg-navy-800/60 border border-white/10 rounded-lg px-3 py-2 transition-colors"
+                  >
+                    <FileText size={12} className="shrink-0" />
+                    <span className="truncate flex-1">{ev.fileName}</span>
+                    {ev.description && (
+                      <span className="text-slate-500 truncate max-w-[100px]">{ev.description}</span>
+                    )}
+                    {ev.fileSizeBytes && (
+                      <span className="text-slate-500 ml-auto shrink-0">
+                        {ev.fileSizeBytes >= 1024 * 1024
+                          ? `${(ev.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB`
+                          : `${(ev.fileSizeBytes / 1024).toFixed(0)} KB`}
+                      </span>
+                    )}
+                  </a>
+                ))}
               </div>
-            </>
-          )}
+            )}
+
+            {/* Upload new evidence */}
+            <div className="bg-navy-800/40 border border-white/10 rounded-lg p-3 space-y-2">
+              <div className="text-xs text-slate-400 mb-1">Attach Evidence File (max 16 MB)</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip"
+                onChange={handleFileChange}
+                disabled={uploadProgress !== null && uploadProgress < 100}
+                className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-medium file:bg-gold/20 file:text-gold hover:file:bg-gold/30 cursor-pointer disabled:opacity-50"
+              />
+              <Input
+                value={uploadDescription}
+                onChange={(e) => setUploadDescription(e.target.value)}
+                placeholder="Optional description…"
+                className="h-7 text-xs bg-navy-900/60 border-white/10 text-white placeholder:text-slate-500"
+                disabled={uploadProgress !== null && uploadProgress < 100}
+              />
+              {/* Progress bar */}
+              {uploadProgress !== null && (
+                <div className="space-y-1">
+                  <div className="h-1.5 bg-navy-900 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gold transition-all duration-300 rounded-full"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-slate-500 text-right">
+                    {uploadProgress < 100 ? (
+                      <span className="flex items-center gap-1 justify-end">
+                        <Loader2 size={10} className="animate-spin" /> Uploading… {uploadProgress}%
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 flex items-center gap-1 justify-end">
+                        <CheckCircle2 size={10} /> Upload complete
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {uploadProgress === null && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-7 text-xs border-white/10 text-slate-400 hover:text-white hover:border-gold/50"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload size={12} className="mr-1" /> Choose File to Upload
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </ScrollArea>
     </div>
