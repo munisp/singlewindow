@@ -1,0 +1,21 @@
+# Core framework
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+httpx==0.28.1
+pydantic==2.10.4
+
+# OCR — PaddleOCR (CPU build; use paddlepaddle-gpu for GPU)
+paddlepaddle==2.6.2
+paddleocr==2.9.1
+
+# Document understanding — IBM DocLing
+docling==2.15.1
+
+# Image processing
+Pillow==11.1.0
+numpy==2.2.3
+
+# PDF processing
+pypdf==5.1.0
+pdf2image==1.17.0

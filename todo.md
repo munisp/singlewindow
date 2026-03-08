@@ -67,6 +67,45 @@
 - [x] Comparative analysis report written (COMPARATIVE_ANALYSIS.md)
 
 ## Testing & Delivery
-- [ ] Write vitest tests for all routers
-- [ ] Save checkpoint
-- [ ] Deliver final result
+- [x] Write vitest tests for all routers (40 tests, 4 files, all passing)
+- [x] Save checkpoint
+- [x] Deliver final result
+
+## Sprint 3 — Local AI, KYC/KYB, Computer Vision
+
+### Mojaloop + Temporal Frontend Integration
+- [x] tRPC mojaloop router: getSupportedFSPs, initiatePayment, getPaymentStatus, getExchangeRate, listPaymentsByDeclaration
+- [x] tRPC temporal router: getSystemStatus, listWorkflows, triggerClearanceWorkflow, getWorkflowStatus
+- [ ] MojaloopDemo component upgraded from simulation to real tRPC calls
+- [ ] TemporalWorkflow component upgraded from simulation to real tRPC calls
+
+### Local Ollama LLM Stack
+- [x] services/python/ollama-proxy/main.py — FastAPI Ollama proxy (663 lines)
+- [x] server/routers/ai.ts — AI router: models, chat, scoreRisk, classifyHS, explainRisk, extractManifest
+- [ ] Ollama service Docker container with Qwen3:8b + DeepSeek-R1:8b models
+- [ ] AI Chat page upgraded to support local Ollama model selection
+- [ ] Risk scoring updated to use local DeepSeek-R1 for reasoning
+- [ ] HS code classification updated to use local Qwen3 for structured output
+
+### KYC/KYB Document Analysis
+- [x] services/python/kyc-service/main.py — FastAPI service (899 lines)
+- [x] PaddleOCR pipeline for text extraction from scanned documents
+- [x] DocLing pipeline for structured document parsing (PDF, DOCX, images)
+- [x] VLM (Qwen2-VL via Ollama) for document understanding
+- [x] KYC entity extraction: name, DOB, ID number, address, expiry
+- [x] KYB entity extraction: company name, TIN, registration number, directors
+- [x] Document authenticity scoring (tamper detection, font consistency)
+- [x] tRPC kyc router: uploadDocument, listDocuments, getDocument, submitVerification, getVerification, adminReviewVerification
+- [x] KYC Portal UI page (client/src/pages/app/KYCPortal.tsx)
+- [x] KYC Verification nav item added to trader sidebar
+
+### Computer Vision Service
+- [x] services/python/vision-service/main.py — FastAPI service (835 lines)
+- [x] YOLOv8 container seal and cargo detection
+- [x] OpenCV container/plate number OCR (LPR)
+- [x] SAM2 segmentation for cargo manifest comparison
+- [x] Dangerous goods label detection (IMDG class symbols)
+- [x] tRPC vision router: submitInspection, getReport, listByDeclaration, listMyReports, verifyContainerSeal, matchManifest
+- [x] Vision Analysis UI page (client/src/pages/app/VisionAnalysis.tsx)
+- [x] Vision Analysis nav item added to customs officer sidebar
+- [ ] Port congestion heatmap generation (future sprint)

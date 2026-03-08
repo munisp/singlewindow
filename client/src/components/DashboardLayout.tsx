@@ -32,9 +32,11 @@ import {
   Bell,
   BookOpen,
   Building2,
+  Camera,
   CheckCircle,
   ClipboardList,
   FileText,
+  Fingerprint,
   Globe,
   LayoutDashboard,
   LogOut,
@@ -88,6 +90,7 @@ function getNavGroups(role: string): NavGroup[] {
         items: [
           { icon: FileText, label: "Declaration Queue", path: "/app/customs" },
           { icon: AlertTriangle, label: "Risk Assessment", path: "/app/customs/risk" },
+          { icon: Camera, label: "Vision Analysis", path: "/app/customs/vision" },
         ],
       },
       {
@@ -116,6 +119,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: FileText, label: "My Declarations", path: "/app/trader/declarations" },
         { icon: Building2, label: "My Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "AEO Application", path: "/app/trader/aeo" },
+        { icon: Fingerprint, label: "KYC Verification", path: "/app/trader/kyc" },
       ],
     },
     {

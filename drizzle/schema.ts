@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, bigint, index, unique
+  integer, decimal, boolean, json, bigint, index, unique, real
 } from "drizzle-orm/pg-core";
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
@@ -325,4 +325,102 @@ export const notifications = pgTable("notifications", {
 }, (t) => [
   index("idx_notif_user_id").on(t.userId),
   index("idx_notif_read").on(t.read),
+]);
+
+// ─── KYC / KYB ───────────────────────────────────────────────────────────────
+
+export const kycDocumentTypeEnum = pgEnum("kyc_document_type", [
+  "national_id", "passport", "drivers_license",
+  "business_registration", "tax_certificate",
+  "bank_statement", "utility_bill", "certificate_of_incorporation",
+  "memorandum_of_association", "board_resolution", "other",
+]);
+
+export const kycDocumentStatusEnum = pgEnum("kyc_document_status", [
+  "PENDING_ANALYSIS", "ANALYSED", "REJECTED", "EXPIRED",
+]);
+
+export const kycVerificationTypeEnum = pgEnum("kyc_verification_type", [
+  "INDIVIDUAL", "BUSINESS",
+]);
+
+export const kycVerificationStatusEnum = pgEnum("kyc_verification_status", [
+  "PENDING_REVIEW", "APPROVED", "REJECTED", "MORE_INFO_REQUIRED", "EXPIRED",
+]);
+
+export const kycDocuments = pgTable("kyc_documents", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  documentType: kycDocumentTypeEnum("document_type").notNull(),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  fileKey: varchar("file_key", { length: 512 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileSize: integer("file_size").notNull(),
+  contentType: varchar("content_type", { length: 100 }).notNull(),
+  status: kycDocumentStatusEnum("status").default("PENDING_ANALYSIS").notNull(),
+  analysisResult: json("analysis_result"),
+  ocrConfidence: real("ocr_confidence"),
+  authenticityScore: real("authenticity_score"),
+  authenticityVerdict: varchar("authenticity_verdict", { length: 32 }),
+  analysedAt: timestamp("analysed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kyc_doc_user_id").on(t.userId),
+  index("idx_kyc_doc_status").on(t.status),
+]);
+
+export const kycVerifications = pgTable("kyc_verifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  verificationType: kycVerificationTypeEnum("verification_type").notNull(),
+  primaryDocumentId: integer("primary_document_id").references(() => kycDocuments.id),
+  secondaryDocumentId: integer("secondary_document_id").references(() => kycDocuments.id),
+  selfieDocumentId: integer("selfie_document_id").references(() => kycDocuments.id),
+  status: kycVerificationStatusEnum("status").default("PENDING_REVIEW").notNull(),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
+  rejectionReason: text("rejection_reason"),
+  metadata: json("metadata"),
+  submittedAt: timestamp("submitted_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kyc_ver_user_id").on(t.userId),
+  index("idx_kyc_ver_status").on(t.status),
+]);
+
+// ─── VISION ANALYSIS ─────────────────────────────────────────────────────────
+
+export const visionAnalysisTypeEnum = pgEnum("vision_analysis_type", [
+  "container_inspection", "seal_verification", "cargo_manifest_match",
+  "damage_assessment", "prohibited_goods_screening",
+]);
+
+export const visionRiskLevelEnum = pgEnum("vision_risk_level", [
+  "GREEN", "YELLOW", "RED",
+]);
+
+export const visionAnalyses = pgTable("vision_analyses", {
+  id: serial("id").primaryKey(),
+  reportId: varchar("report_id", { length: 64 }).notNull().unique(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  requestedBy: integer("requested_by").notNull().references(() => users.id),
+  analysisType: visionAnalysisTypeEnum("analysis_type").notNull(),
+  imageUrl: text("image_url").notNull(),
+  imageKey: varchar("image_key", { length: 512 }).notNull(),
+  detections: json("detections"),
+  containerAnalysis: json("container_analysis"),
+  manifestMatch: json("manifest_match"),
+  riskScore: integer("risk_score"),
+  riskLevel: visionRiskLevelEnum("risk_level"),
+  recommendedAction: varchar("recommended_action", { length: 32 }),
+  vlmDescription: text("vlm_description"),
+  processingTimeMs: integer("processing_time_ms"),
+  modelVersions: json("model_versions"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_va_declaration_id").on(t.declarationId),
+  index("idx_va_risk_level").on(t.riskLevel),
+  index("idx_va_requested_by").on(t.requestedBy),
 ]);

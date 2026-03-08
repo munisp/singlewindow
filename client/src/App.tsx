@@ -12,8 +12,9 @@ import OGAPortal from "./pages/app/OGAPortal";
 import AdminConsole from "./pages/app/AdminConsole";
 import SecurityOps from "./pages/app/SecurityOps";
 import DeclarationDetail from "./pages/app/DeclarationDetail";
-
-// Lazy-load the specification page (it's large)
+import KYCPortal from "./pages/app/KYCPortal";
+import VisionAnalysis from "./pages/app/VisionAnalysis";
+// Lazy-load the specification page (it's large))
 import { lazy, Suspense } from "react";
 const Specification = lazy(() => import("./pages/Specification"));
 
@@ -48,7 +49,10 @@ function Router() {
 
       {/* Security Operations Center */}
       <Route path="/app/security" component={SecurityOps} />
-
+      {/* KYC/KYB Verification Portal */}
+      <Route path="/app/trader/kyc" component={KYCPortal} />
+      {/* Vision Analysis (Customs) */}
+      <Route path="/app/customs/vision" component={VisionAnalysis} />
       {/* 404 */}
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

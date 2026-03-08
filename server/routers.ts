@@ -9,7 +9,11 @@ import { ogaRouter } from "./routers/oga";
 import { securityRouter } from "./routers/security";
 import { aeoRouter } from "./routers/aeo";
 import { notificationsRouter } from "./routers/notifications";
-
+import { kycRouter } from "./routers/kyc";
+import { visionRouter } from "./routers/vision";
+import { aiRouter } from "./routers/ai";
+import { mojaloopRouter } from "./routers/mojaloop";
+import { temporalRouter } from "./routers/temporal";
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
@@ -31,6 +35,11 @@ export const appRouter = router({
   security: securityRouter,
   aeo: aeoRouter,
   notifications: notificationsRouter,
+  kyc: kycRouter,
+  vision: visionRouter,
+  ai: aiRouter,
+  mojaloop: mojaloopRouter,
+  temporal: temporalRouter,
 });
 
 export type AppRouter = typeof appRouter;

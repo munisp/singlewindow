@@ -4,7 +4,8 @@ import { Pool } from "pg";
 import {
   InsertUser, users, stakeholderProfiles, declarations,
   declarationDocuments, ogaPermits, payments, auditEvents,
-  securityAlerts, sanctionsChecks, aeoApplications, notifications
+  securityAlerts, sanctionsChecks, aeoApplications, notifications,
+  kycDocuments, kycVerifications, visionAnalyses,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -405,4 +406,126 @@ export async function markAllNotificationsRead(userId: number) {
   const db = await getDb();
   if (!db) return;
   await db.update(notifications).set({ read: true }).where(eq(notifications.userId, userId));
+}
+
+// ─── KYC DOCUMENT QUERIES ─────────────────────────────────────────────────────────
+
+export async function createKYCDocument(data: typeof kycDocuments.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(kycDocuments).values(data).returning();
+  return result[0];
+}
+
+export async function getKYCDocument(id: string | number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const numId = typeof id === "string" ? parseInt(id, 10) : id;
+  if (isNaN(numId)) return undefined;
+  const result = await db.select().from(kycDocuments).where(eq(kycDocuments.id, numId)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function updateKYCDocument(id: string | number, data: Partial<typeof kycDocuments.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const numId = typeof id === "string" ? parseInt(id, 10) : id;
+  const result = await db.update(kycDocuments).set(data).where(eq(kycDocuments.id, numId)).returning();
+  return result[0];
+}
+
+export async function listKYCDocuments(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(kycDocuments)
+    .where(eq(kycDocuments.userId, userId))
+    .orderBy(desc(kycDocuments.createdAt));
+}
+
+// ─── KYC VERIFICATION QUERIES ───────────────────────────────────────────────────
+
+export async function createKYCVerification(data: typeof kycVerifications.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(kycVerifications).values(data).returning();
+  return result[0];
+}
+
+export async function getLatestKYCVerification(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(kycVerifications)
+    .where(eq(kycVerifications.userId, userId))
+    .orderBy(desc(kycVerifications.createdAt))
+    .limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function updateKYCVerification(id: string | number, data: Partial<typeof kycVerifications.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const numId = typeof id === "string" ? parseInt(id, 10) : id;
+  const result = await db.update(kycVerifications)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(kycVerifications.id, numId))
+    .returning();
+  return result[0];
+}
+
+export async function listKYCVerifications(opts: {
+  status?: string;
+  verificationType?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: ReturnType<typeof eq>[] = [];
+  if (opts.status) conditions.push(eq(kycVerifications.status, opts.status as any));
+  if (opts.verificationType) conditions.push(eq(kycVerifications.verificationType, opts.verificationType as any));
+  let q = db.select().from(kycVerifications).$dynamic();
+  if (conditions.length > 0) q = q.where(and(...conditions));
+  return q.orderBy(desc(kycVerifications.createdAt)).limit(opts.limit ?? 20).offset(opts.offset ?? 0);
+}
+
+// ─── VISION ANALYSIS QUERIES ───────────────────────────────────────────────────
+
+export async function createVisionAnalysis(data: typeof visionAnalyses.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(visionAnalyses).values(data).returning();
+  return result[0];
+}
+
+export async function getVisionAnalysis(reportId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(visionAnalyses)
+    .where(eq(visionAnalyses.reportId, reportId)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function updateVisionAnalysis(reportId: string, data: Partial<typeof visionAnalyses.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.update(visionAnalyses).set(data)
+    .where(eq(visionAnalyses.reportId, reportId)).returning();
+  return result[0];
+}
+
+export async function listVisionAnalyses(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(visionAnalyses)
+    .where(eq(visionAnalyses.declarationId, declarationId))
+    .orderBy(desc(visionAnalyses.createdAt));
+}
+
+export async function listVisionAnalysesByUser(userId: number, limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(visionAnalyses)
+    .where(eq(visionAnalyses.requestedBy, userId))
+    .orderBy(desc(visionAnalyses.createdAt))
+    .limit(limit);
 }
