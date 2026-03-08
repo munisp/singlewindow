@@ -47,6 +47,8 @@ export default function MobileDrawer() {
     { label: "AIS Stream", href: "#fluvio-stream", group: "Interactive" },
     { label: "OGA Workflow", href: "#multi-agency", group: "Interactive" },
     { label: "Onboarding", href: "#stakeholder-onboarding", group: "Interactive" },
+    { label: "Register Trader", href: "#trader-registration", group: "Onboarding" },
+    { label: "Performance", href: "#performance", group: "Monitoring" },
   ];
 
   const groups = Array.from(new Set(navItems.map((i) => i.group)));

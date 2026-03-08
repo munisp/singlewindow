@@ -31,6 +31,9 @@ import KubecostDrilldown from "@/components/KubecostDrilldown";
 import FluvioStreamPanel from "@/components/FluvioStreamPanel";
 import MultiAgencyWorkflow from "@/components/MultiAgencyWorkflow";
 import StakeholderOnboarding from "@/components/StakeholderOnboarding";
+import NotificationFeed from "@/components/NotificationFeed";
+import TraderRegistration from "@/components/TraderRegistration";
+import PerformanceDashboard from "@/components/PerformanceDashboard";
 import { I18nProvider } from "@/contexts/I18nContext";
 import {
   BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis,
@@ -493,6 +496,8 @@ export default function Home() {
                 { label: "Auth Flow", href: "#keycloak-login" },
                 { label: "Compliance", href: "#compliance-scorecard" },
                 { label: "Cost Drill-Down", href: "#kubecost-drilldown" },
+                { label: "Register", href: "#trader-registration" },
+                { label: "Performance", href: "#performance" },
               ].map((item) => (
                 <a
                   key={item.label}
@@ -1162,6 +1167,9 @@ export default function Home() {
       {/* ── STAKEHOLDER ONBOARDING ───────────────────────────────────────── */}
       <StakeholderOnboarding />
       {/* ── PDF EXPORT ───────────────────────────────────────────────────── */}
+      <TraderRegistration />
+      <PerformanceDashboard />
+      <NotificationFeed />
       <PDFExport />
       {/* ── FOOTER ───────────────────────────────────────────────────────── */}
       <footer className="py-12 bg-navy-950 border-t border-white/10">
