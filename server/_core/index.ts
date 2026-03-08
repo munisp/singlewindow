@@ -402,9 +402,106 @@ console.log("[Cron] Port congestion alert scan scheduled every 15 minutes");
 cron.schedule("0 0 8 * * *", () => runNotificationDigest("daily"), { timezone: "UTC" });
 console.log("[Cron] Daily notification digest scheduled at 08:00 UTC");
 
-// Weekly digest — every Monday at 08:00 UTC
-cron.schedule("0 0 8 * * 1", () => runNotificationDigest("weekly"), { timezone: "UTC" });
-console.log("[Cron] Weekly notification digest scheduled at 08:00 UTC every Monday");
+// ── Weekly admin analytics KPI report ───────────────────────────────────────────────
+// Sends a weekly KPI summary to the owner every Monday at 08:00 UTC.
+async function runWeeklyAnalyticsReport() {
+  try {
+    const { getDb } = await import("../db");
+    const { declarations, payments } = await import("../../drizzle/schema");
+    const { sql, gte, and, isNotNull } = await import("drizzle-orm");
+    const { notifyOwner } = await import("./notification");
+    const db = await getDb();
+    if (!db) return;
+
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // 7-day declaration count + clearance stats
+    const [declStats] = await db
+      .select({
+        total7d: sql<number>`COUNT(*)::int`.as("total_7d"),
+        cleared7d: sql<number>`COUNT(*) FILTER (WHERE ${declarations.status} = 'cleared')::int`.as("cleared_7d"),
+        avgHours: sql<number>`
+          AVG(EXTRACT(EPOCH FROM (${declarations.clearedAt} - ${declarations.submittedAt})) / 3600)
+          FILTER (WHERE ${declarations.clearedAt} IS NOT NULL AND ${declarations.submittedAt} IS NOT NULL)
+        `.as("avg_hours"),
+      })
+      .from(declarations)
+      .where(gte(declarations.createdAt, since7d));
+
+    // 7-day duty revenue
+    const [payStats] = await db
+      .select({
+        revenue7d: sql<number>`COALESCE(SUM(${payments.amount}), 0)::numeric(18,2)`.as("revenue_7d"),
+      })
+      .from(payments)
+      .where(
+        and(
+          sql`${payments.status} = 'completed'`,
+          gte(payments.createdAt, since7d)
+        )
+      );
+
+    // SLA breach count (declarations still in processing beyond SLA)
+    const processingRows = await db
+      .select({ submittedAt: declarations.submittedAt, riskLane: declarations.riskLane })
+      .from(declarations)
+      .where(
+        and(
+          sql`${declarations.status} IN ('submitted','under_review','inspection_required','payment_pending')`,
+          isNotNull(declarations.submittedAt)
+        )
+      )
+      .limit(1000);
+
+    const SLA_MS: Record<string, number> = {
+      green: 4 * 3600 * 1000, yellow: 24 * 3600 * 1000, red: 72 * 3600 * 1000, blue: 48 * 3600 * 1000,
+    };
+    const now = Date.now();
+    const slaBreaches = processingRows.filter((r) => {
+      if (!r.submittedAt) return false;
+      const elapsed = now - new Date(r.submittedAt).getTime();
+      return elapsed > (SLA_MS[r.riskLane ?? "green"] ?? SLA_MS.green);
+    }).length;
+
+    const total7d = declStats?.total7d ?? 0;
+    const cleared7d = declStats?.cleared7d ?? 0;
+    const clearanceRate = total7d > 0 ? Math.round((cleared7d / total7d) * 100) : 0;
+    const avgHours = declStats?.avgHours != null ? Number(Number(declStats.avgHours).toFixed(1)) : null;
+    const revenue7d = Number(payStats?.revenue7d ?? 0);
+
+    await notifyOwner({
+      title: `[Weekly Analytics] TradeGateway KPI Report — ${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}`,
+      content: [
+        "TradeGateway Weekly KPI Summary",
+        `Period: Last 7 days (ending ${new Date().toUTCString()})`,
+        "",
+        "Declarations",
+        `  Total submitted: ${total7d}`,
+        `  Cleared: ${cleared7d} (${clearanceRate}% clearance rate)`,
+        avgHours != null ? `  Avg clearance time: ${avgHours}h` : "  Avg clearance time: N/A",
+        "",
+        "Revenue",
+        `  Duty collected: $${revenue7d.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        "",
+        "Compliance",
+        `  Active SLA breaches: ${slaBreaches}`,
+        "",
+        "Log in to the Admin Analytics Dashboard for full charts and drill-down.",
+      ].join("\n"),
+    });
+
+    console.log(`[Cron] Weekly analytics report sent (${total7d} declarations, $${revenue7d.toFixed(2)} revenue, ${slaBreaches} SLA breaches)`);
+  } catch (err) {
+    console.error("[Cron] Weekly analytics report failed:", err);
+  }
+}
+
+// Weekly digest + analytics report — every Monday at 08:00 UTC
+cron.schedule("0 0 8 * * 1", async () => {
+  await runNotificationDigest("weekly");
+  await runWeeklyAnalyticsReport();
+}, { timezone: "UTC" });
+console.log("[Cron] Weekly digest + analytics report scheduled at 08:00 UTC every Monday");
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {

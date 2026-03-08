@@ -71,6 +71,13 @@
       "when": 1773012341064,
       "tag": "0009_funny_annihilus",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1773013528150,
+      "tag": "0010_glamorous_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

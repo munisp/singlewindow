@@ -51,10 +51,12 @@ export default function NotificationPreferences() {
   });
 
   const { data: digestSettings, isLoading: digestLoading } = trpc.notificationPreferences.getDigestSettings.useQuery();
+  const { data: digestPreview, isLoading: previewLoading } = trpc.notificationPreferences.previewDigest.useQuery();
 
   const updateDigest = trpc.notificationPreferences.updateDigestSettings.useMutation({
     onSuccess: (data) => {
       utils.notificationPreferences.getDigestSettings.invalidate();
+      utils.notificationPreferences.previewDigest.invalidate();
       const labels: Record<string, string> = { none: "disabled", daily: "daily at 08:00 UTC", weekly: "weekly on Mondays" };
       toast.success(`Digest email ${labels[data.digestFrequency] ?? data.digestFrequency}`);
     },
@@ -217,6 +219,36 @@ export default function NotificationPreferences() {
                   </SelectContent>
                 </Select>
               )}
+            </div>
+            {/* Digest preview — live unread count */}
+            <div className="mt-4 rounded-lg border border-dashed border-border bg-muted/30 p-3">
+              {previewLoading ? (
+                <Skeleton className="h-4 w-48" />
+              ) : digestPreview ? (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium flex items-center gap-1.5">
+                    <Clock className="h-3 w-3 text-muted-foreground" />
+                    {digestPreview.count === 0
+                      ? "No unread notifications — your next digest will be empty."
+                      : `Your next digest will contain ${digestPreview.count} unread notification${digestPreview.count !== 1 ? "s" : ""}.`}
+                  </p>
+                  {digestPreview.sampleTitles.length > 0 && (
+                    <ul className="space-y-0.5 pl-4">
+                      {digestPreview.sampleTitles.map((title, i) => (
+                        <li key={i} className="text-xs text-muted-foreground list-disc">{title}</li>
+                      ))}
+                      {digestPreview.count > 5 && (
+                        <li className="text-xs text-muted-foreground list-disc">…and {digestPreview.count - 5} more</li>
+                      )}
+                    </ul>
+                  )}
+                  {digestPreview.nextDigestLabel && (
+                    <p className="text-xs text-muted-foreground">
+                      Next send: <span className="font-medium text-foreground">{digestPreview.nextDigestLabel}</span>
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </div>
             {digestSettings?.digestFrequency !== "none" && (
               <div className="mt-3 flex items-center gap-1.5 text-xs text-amber-500">

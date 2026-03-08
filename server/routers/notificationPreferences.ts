@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { notificationPreferences, notificationDigestSettings } from "../../drizzle/schema";
+import { notificationPreferences, notificationDigestSettings, userNotifications } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import type { NotificationPreference } from "../../drizzle/schema";
 
@@ -196,4 +196,55 @@ export const notificationPreferencesRouter = router({
       }
       return { success: true, digestFrequency: input.digestFrequency };
     }),
+
+  /**
+   * Preview what the next digest would contain for the current user.
+   * Returns the count of unread notifications and the first 5 titles as a sample.
+   * Does NOT send anything — purely informational.
+   */
+  previewDigest: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return { count: 0, sampleTitles: [] as string[], nextDigestLabel: "" };
+
+    // Get unread notifications
+    const unread = await db
+      .select({ id: userNotifications.id, title: userNotifications.title, createdAt: userNotifications.createdAt })
+      .from(userNotifications)
+      .where(
+        and(
+          eq(userNotifications.userId, ctx.user.id),
+          eq(userNotifications.isRead, false)
+        )
+      )
+      .limit(50);
+
+    // Get digest frequency to compute next send label
+    const digestRows = await db
+      .select({ digestFrequency: notificationDigestSettings.digestFrequency, lastDigestSentAt: notificationDigestSettings.lastDigestSentAt })
+      .from(notificationDigestSettings)
+      .where(eq(notificationDigestSettings.userId, ctx.user.id))
+      .limit(1);
+
+    const freq = digestRows[0]?.digestFrequency ?? "none";
+    let nextDigestLabel = "";
+    if (freq === "daily") {
+      nextDigestLabel = "Tomorrow at 08:00 UTC";
+    } else if (freq === "weekly") {
+      // Next Monday
+      const now = new Date();
+      const daysUntilMonday = (8 - now.getUTCDay()) % 7 || 7;
+      const nextMonday = new Date(now);
+      nextMonday.setUTCDate(now.getUTCDate() + daysUntilMonday);
+      nextMonday.setUTCHours(8, 0, 0, 0);
+      nextDigestLabel = `Monday ${nextMonday.toLocaleDateString("en-GB", { month: "short", day: "numeric" })} at 08:00 UTC`;
+    } else {
+      nextDigestLabel = "Digest is disabled";
+    }
+
+    return {
+      count: unread.length,
+      sampleTitles: unread.slice(0, 5).map((n) => n.title),
+      nextDigestLabel,
+    };
+  }),
 });

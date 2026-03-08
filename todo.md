@@ -674,3 +674,33 @@
 - [x] Fixed pre-existing sprint15 test failure (wrong parameter name: unreadOnly → onlyUnread)
 - [x] Run full test suite — 309/309 tests passing (16 test files)
 - [x] Save checkpoint
+
+## Sprint 21 — Digest Preview, Analytics Scheduled Report, Port Alert Acknowledgement
+
+### Digest Preview Endpoint
+- [x] Add previewDigest procedure to notificationPreferences router (returns count + sample titles + nextDigestAt)
+- [x] Show live "Your next digest will contain X notifications" count in NotificationPreferences page
+- [x] Count updates when user changes frequency selector (invalidate on save)
+
+### Analytics Scheduled Weekly Report
+- [x] Add runWeeklyAnalyticsReport() function to server/_core/index.ts
+- [x] Queries declarations + payments + SLA breach scan directly
+- [x] Sends formatted report via notifyOwner every Monday at 08:00 UTC
+- [x] Report includes: total declarations (7d), clearance rate, avg clearance time, duty revenue, SLA breach count
+- [x] Wired into existing Monday 08:00 UTC cron schedule (alongside weekly digest)
+- [x] Fixed TypeScript errors: db null check + submittedAt null guard + join newline escape
+
+### Port Alert Acknowledgement
+- [x] Add acknowledgedAt and acknowledgedBy columns to portCongestionAlerts table
+- [x] Run pnpm db:push (migration 0010 applied)
+- [x] Add acknowledgePortAlert mutation to geospatial router (admin/customs_officer only)
+- [x] Add getPortAlertStatus query to geospatial router
+- [x] Add Acknowledge button to security_alert notifications in NotificationCentre
+- [x] Button only visible to admin and customs_officer roles
+- [x] Button extracts portCode from notification body text (regex: /Port\s+([A-Z]{2,16})\s+has reached critical/)
+- [x] Cron scan respects acknowledgement (suppresses repeat alerts until status changes)
+
+### Tests & Delivery
+- [x] Sprint 21 vitest tests already written (sprint21.test.ts, 16 tests)
+- [x] Run full test suite — 325/325 tests passing (17 test files)
+- [x] Save checkpoint

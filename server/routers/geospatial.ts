@@ -10,7 +10,10 @@ import {
   listPortLocations, getPortCongestionHistory, listVesselTracking,
   getHeatmapData, insertPortLocation, insertCongestionEvent,
   getPortCount, getCongestionCount, seedPortLocations, seedCongestionEvents,
+  getDb,
 } from "../db";
+import { portCongestionAlerts } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 
 // ─── SEED DATA (28 African + key global ports, UN LOCODE coordinates) ─────────
 const SEED_PORTS = [
@@ -228,5 +231,58 @@ export const geospatialRouter = router({
       const port = await insertPortLocation(input);
       if (!port) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       return port;
+    }),
+
+  /**
+   * Admin/Officer: Acknowledge a critical port congestion alert.
+   * Sets acknowledgedAt + acknowledgedBy on the portCongestionAlerts row.
+   * The cron scan will suppress repeat alerts until the status changes again.
+   */
+  acknowledgePortAlert: protectedProcedure
+    .input(z.object({ portCode: z.string().min(3).max(16) }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only admins and customs officers can acknowledge port alerts" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const existing = await db
+        .select({ id: portCongestionAlerts.id })
+        .from(portCongestionAlerts)
+        .where(eq(portCongestionAlerts.portCode, input.portCode))
+        .limit(1);
+
+      if (existing.length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: `No alert record found for port ${input.portCode}` });
+      }
+
+      await db
+        .update(portCongestionAlerts)
+        .set({
+          acknowledgedAt: new Date(),
+          acknowledgedBy: ctx.user.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(portCongestionAlerts.portCode, input.portCode));
+
+      return { success: true, portCode: input.portCode, acknowledgedAt: new Date() };
+    }),
+
+  /**
+   * Get the current acknowledgement status for a port's congestion alert.
+   * Returns null if no alert record exists.
+   */
+  getPortAlertStatus: protectedProcedure
+    .input(z.object({ portCode: z.string().min(3).max(16) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return null;
+      const rows = await db
+        .select()
+        .from(portCongestionAlerts)
+        .where(eq(portCongestionAlerts.portCode, input.portCode))
+        .limit(1);
+      return rows[0] ?? null;
     }),
 });

@@ -723,6 +723,9 @@ export const portCongestionAlerts = pgTable("port_congestion_alerts", {
   portCode: varchar("port_code", { length: 16 }).notNull().unique(),
   lastNotifiedStatus: portCongestionStatusEnum("last_notified_status").default("clear").notNull(),
   lastAlertSentAt: timestamp("last_alert_sent_at"),
+  /** Set when an admin/officer acknowledges the critical alert */
+  acknowledgedAt: timestamp("acknowledged_at"),
+  acknowledgedBy: integer("acknowledged_by").references(() => users.id),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_pca_port_code").on(t.portCode),

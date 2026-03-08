@@ -1,11 +1,13 @@
 /**
- * Notification Centre — Sprint 15
+ * Notification Centre — Sprint 15 / Sprint 21
  * In-app inbox for traders and all platform users.
  * Backed by the user_notifications table via userNotifications tRPC router.
+ * Sprint 21: Added Acknowledge button for security_alert port congestion notifications.
  */
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Bell, CheckCheck, RefreshCw, FileText, AlertTriangle,
-  CheckCircle, Clock, Shield, Info, Package
+  CheckCircle, Clock, Shield, Info, Package, ShieldCheck
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -55,8 +57,19 @@ function timeAgo(isoString: string): string {
   return `${days}d ago`;
 }
 
+/** Extract port code from port congestion alert body text.
+ *  Expected format: "Port XXXX has reached critical congestion..."
+ */
+function extractPortCodeFromAlert(body: string | null | undefined): string | null {
+  if (!body) return null;
+  const match = body.match(/Port\s+([A-Z]{2,16})\s+has reached critical/);
+  return match?.[1] ?? null;
+}
+
 export default function NotificationCentre() {
   const utils = trpc.useUtils();
+  const { user } = useAuth();
+  const canAcknowledge = user?.role === "admin" || user?.role === "customs_officer";
   const [tab, setTab] = useState<"all" | "unread">("all");
 
   const { data, isLoading, refetch } = trpc.userNotifications.getMyNotifications.useQuery({
@@ -82,6 +95,14 @@ export default function NotificationCentre() {
       toast.success("All notifications marked as read");
     },
     onError: () => toast.error("Failed to mark all as read"),
+  });
+
+  const acknowledgePortAlert = trpc.geospatial.acknowledgePortAlert.useMutation({
+    onSuccess: (result) => {
+      toast.success(`Port ${result.portCode} alert acknowledged — cron scan will suppress repeat alerts until status changes again`);
+      utils.userNotifications.getMyNotifications.invalidate();
+    },
+    onError: (err) => toast.error(err.message ?? "Failed to acknowledge alert"),
   });
 
   const notifications = data ?? [];
@@ -171,6 +192,10 @@ export default function NotificationCentre() {
                     {notifications.map((n) => {
                       const meta = getTypeMeta(n.type);
                       const Icon = meta.icon;
+                      // For security_alert port congestion notifications, extract the port code
+                      const portCode = n.type === "security_alert"
+                        ? extractPortCodeFromAlert(n.body)
+                        : null;
                       return (
                         <div
                           key={n.id}
@@ -208,17 +233,34 @@ export default function NotificationCentre() {
                                 </Badge>
                               </div>
                             </div>
-                            {!n.isRead && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 text-xs mt-1 px-2 text-muted-foreground hover:text-foreground"
-                                onClick={() => markAsRead.mutate({ id: n.id })}
-                                disabled={markAsRead.isPending}
-                              >
-                                Mark as read
-                              </Button>
-                            )}
+                            {/* Action buttons row */}
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {!n.isRead && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground"
+                                  onClick={() => markAsRead.mutate({ id: n.id })}
+                                  disabled={markAsRead.isPending}
+                                >
+                                  Mark as read
+                                </Button>
+                              )}
+                              {/* Acknowledge button for port congestion critical alerts */}
+                              {portCode && canAcknowledge && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 text-xs px-2 gap-1 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
+                                  onClick={() => acknowledgePortAlert.mutate({ portCode })}
+                                  disabled={acknowledgePortAlert.isPending}
+                                  title={`Acknowledge critical congestion alert for port ${portCode}`}
+                                >
+                                  <ShieldCheck className="h-3 w-3" />
+                                  Acknowledge {portCode}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
