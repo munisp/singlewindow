@@ -34,6 +34,8 @@ import { adminAnalyticsRouter } from "./routers/adminAnalytics";
 import { ledgerRouter } from "./routers/ledger";
 import { keycloakRouter } from "./routers/keycloak";
 import { streamRouter } from "./routers/stream";
+import { warehouseRouter } from "./routers/warehouse";
+import { aseanSwRouter } from "./routers/aseanSw";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -106,6 +108,8 @@ export const appRouter = router({
   ledger: ledgerRouter,
   keycloak: keycloakRouter,
   stream: streamRouter,
+  warehouse: warehouseRouter,
+  aseanSw: aseanSwRouter,
 });
 
 export type AppRouter = typeof appRouter;

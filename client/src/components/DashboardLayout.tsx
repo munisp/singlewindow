@@ -62,6 +62,7 @@ import {
   FolderLock,
   KeyRound,
   Coins,
+  Warehouse,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -149,6 +150,13 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Identity & Security",
         items: [
           { icon: KeyRound, label: "Identity Provider (Keycloak)", path: "/app/admin/identity-provider" },
+          { icon: Globe, label: "ASEAN Single Window (G2G)", path: "/app/admin/asean-sw" },
+        ],
+      },
+      {
+        label: "Port Operations",
+        items: [
+          { icon: Warehouse, label: "Bonded Warehouse", path: "/app/port/bonded-warehouse" },
         ],
       },
       {

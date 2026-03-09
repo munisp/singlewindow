@@ -50,6 +50,8 @@ const SLABreachDashboard = lazy(() => import('./pages/app/SLABreachDashboard'));
 const NotificationPreferences = lazy(() => import('./pages/app/NotificationPreferences'));
 const FinanceLedger = lazy(() => import('./pages/FinanceLedger'));
 const IdentityProvider = lazy(() => import('./pages/IdentityProvider'));
+const BondedWarehouse = lazy(() => import('./pages/app/BondedWarehouse'));
+const AseanSingleWindow = lazy(() => import('./pages/app/AseanSingleWindow'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -208,6 +210,16 @@ function Router() {
       {/* Sprint 32 — Identity Provider (Keycloak) */}
       <Route path="/app/admin/identity-provider">
         <Suspense fallback={<LazyFallback />}><IdentityProvider /></Suspense>
+      </Route>
+
+      {/* Sprint 37 — Bonded Warehouse Management */}
+      <Route path="/app/port/bonded-warehouse">
+        <Suspense fallback={<LazyFallback />}><BondedWarehouse /></Suspense>
+      </Route>
+
+      {/* Sprint 38 — ASEAN Single Window G2G */}
+      <Route path="/app/admin/asean-sw">
+        <Suspense fallback={<LazyFallback />}><AseanSingleWindow /></Suspense>
       </Route>
 
       {/* 404 */}

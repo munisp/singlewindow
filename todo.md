@@ -983,3 +983,40 @@
 - [x] Compliance scoring: 4-flag boolean scoring (25pts each) + security/financial sub-scores
 - [x] Green-lane trigger: isGreenLaneEligible() checks AEO status + certificate expiry
 - [x] Vitest tests for AEO router (sprint33-35.test.ts — 61 tests)
+
+## Sprint 36 — Post-Clearance Audit
+
+- [x] DB schema: post_clearance_audits, audit_findings, audit_penalties tables (pre-existing)
+- [x] Go audit-service: cmd/main.go with Gin HTTP server
+- [x] Go audit-service: internal/selection/algorithm.go (risk-weighted random selection)
+- [x] Go audit-service: internal/discrepancy/calculator.go (duty discrepancy computation)
+- [x] Go audit-service: internal/penalty/issuer.go (penalty notice generation)
+- [x] Go audit-service: Dockerfile
+- [x] tRPC audit router: selectForAudit, getAudit, listAudits, recordFinding, issuePenalty, closeAudit (pre-existing)
+- [x] Customs audit UI: /app/customs/audit (PostClearanceAudit.tsx — 423 lines, pre-existing)
+- [x] Vitest tests for audit router (sprint36-38.test.ts — 45 tests)
+
+## Sprint 37 — Bonded Warehouse Management
+
+- [x] DB schema: bonded_warehouses, warehouse_inventory, duty_suspension_bonds tables
+- [x] Go warehouse-service: cmd/main.go with Gin HTTP server
+- [x] Go warehouse-service: internal/inventory/tracker.go (stock in/out with UCR tracking)
+- [x] Go warehouse-service: internal/bond/manager.go (duty suspension bond lifecycle)
+- [x] Go warehouse-service: internal/release/handler.go (goods release with duty payment trigger)
+- [x] Go warehouse-service: Dockerfile
+- [x] tRPC warehouse router: register, deposit, listInventory, release, stats procedures
+- [x] Port Operator warehouse UI: /app/port/bonded-warehouse (BondedWarehouse.tsx)
+- [x] Vitest tests for warehouse router (sprint36-38.test.ts — 45 tests)
+
+## Sprint 38 — ASEAN Single Window G2G Connectivity
+
+- [x] DB schema: asean_sw_connections, asean_sw_messages, asean_sw_acknowledgements tables
+- [x] Go asean-sw-service: cmd/main.go with Gin HTTP server
+- [x] Go asean-sw-service: internal/wco/xml.go (WCO XML message formatting per WCO DM v3.10)
+- [x] Go asean-sw-service: internal/gateway/sender.go (outbound message dispatch with retry)
+- [x] Go asean-sw-service: internal/gateway/receiver.go (inbound acknowledgement handler)
+- [x] Go asean-sw-service: internal/registry/countries.go (10 ASEAN member states)
+- [x] Go asean-sw-service: Dockerfile
+- [x] tRPC aseanSw router: getConnections, sendMessage, getMessageStatus, listMessages, testConnection, receiveAck, getStats
+- [x] Admin bilateral connection status UI: /app/admin/asean-sw (AseanSingleWindow.tsx)
+- [x] Vitest tests for ASEAN SW router (sprint36-38.test.ts — 45 tests)
