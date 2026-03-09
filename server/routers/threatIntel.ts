@@ -137,4 +137,78 @@ export const threatIntelRouter = router({
       last_sync: string;
     }>("/stats");
   }),
+
+  // Sprint 52: Full STIX 2.1 enrichment procedures
+
+  enrichDeclaration: protectedProcedure
+    .input(z.object({
+      declarationId: z.string(),
+      traderName: z.string(),
+      shipperName: z.string(),
+      consigneeName: z.string(),
+      originCountry: z.string(),
+      destinationCountry: z.string(),
+      transshipmentPorts: z.array(z.string()).default([]),
+      hsCode: z.string(),
+      declaredValueUsd: z.number().nonnegative(),
+    }))
+    .mutation(async ({ input }) => {
+      return callOpenCTI<{
+        declaration_id: string;
+        enriched_at: string;
+        threat_level: string;
+        overall_risk_score: number;
+        origin_country_risk: Record<string, unknown>;
+        destination_country_risk: Record<string, unknown>;
+        sanctions_hits: unknown[];
+        sanctions_hit_count: number;
+        threat_actors: unknown[];
+        transshipment_risks: unknown[];
+        hs_chapter: string;
+        recommendations: string[];
+      }>("/enrich", "POST", {
+        declaration_id: input.declarationId,
+        trader_name: input.traderName,
+        shipper_name: input.shipperName,
+        consignee_name: input.consigneeName,
+        origin_country: input.originCountry,
+        destination_country: input.destinationCountry,
+        transshipment_ports: input.transshipmentPorts,
+        hs_code: input.hsCode,
+        declared_value_usd: input.declaredValueUsd,
+      });
+    }),
+
+  lookupThreatActor: protectedProcedure
+    .input(z.object({ country: z.string().optional() }))
+    .query(async ({ input }) => {
+      const path = input.country ? `/threat-actors?country=${input.country}` : "/threat-actors";
+      return callOpenCTI<unknown[]>(path);
+    }),
+
+  checkSanctions: protectedProcedure
+    .input(z.object({ entityName: z.string(), country: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      return callOpenCTI<{
+        entity_name: string;
+        hits: unknown[];
+        is_sanctioned: boolean;
+      }>("/sanctions/check", "POST", { entity_name: input.entityName, country: input.country });
+    }),
+
+  getCountryRisk: protectedProcedure
+    .input(z.object({ countryCode: z.string() }))
+    .query(async ({ input }) => {
+      return callOpenCTI<{
+        country: string;
+        score: number;
+        level: string;
+        factors: string[];
+        sources: string[];
+      }>(`/country-risk/${input.countryCode}`);
+    }),
+
+  getTTPs: protectedProcedure.query(async () => {
+    return callOpenCTI<Array<{ id: string; name: string; tactic: string; description: string }>>("/ttps");
+  }),
 });

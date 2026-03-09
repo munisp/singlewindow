@@ -1174,3 +1174,40 @@
 - [x] PRODUCTION-DEPLOY.md: Security hardening checklist (CIS benchmarks, network policies)
 - [x] Vitest tests for deployment config validation (sprint48-50.test.ts — 47 tests)
 - [x] Total vitest tests: 716 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 51 — Ray Distributed ML Risk Scoring
+
+- [x] Python ray-risk-svc: FastAPI service (port 8106) with Ray Serve gradient-boosting model
+- [x] Python ray-risk-svc: feature engineering (HS code risk, trader history, route risk, value anomaly, document completeness)
+- [x] Python ray-risk-svc: model training endpoint (fit on synthetic historical data)
+- [x] Python ray-risk-svc: model registry (version, accuracy, F1, precision, recall, created_at)
+- [x] Python ray-risk-svc: A/B test framework (champion vs challenger model routing)
+- [x] Python ray-risk-svc: prediction endpoint returning risk score 0-100 + lane assignment + feature importances
+- [x] Python ray-risk-svc: Dockerfile
+- [x] tRPC riskModelRouter: scoreDeclaration, getModelVersions, getModelMetrics, promoteModel, runABTest
+- [x] Risk Model Dashboard UI: /app/admin/risk-model — model version history, accuracy charts, A/B test results
+- [x] DashboardLayout: Risk Model Dashboard updated to show ML model status
+- [x] Vitest tests for risk scoring logic and model registry (sprint51-53.test.ts — 42 tests)
+
+## Sprint 52 — OpenCTI Threat Intelligence Feed Integration
+
+- [x] Python opencti-svc: FastAPI service (port 8107) with OpenCTI STIX 2.1 client
+- [x] Python opencti-svc: threat actor lookup by name/country
+- [x] Python opencti-svc: sanctioned entity check (OFAC, EU, UN lists via STIX indicators)
+- [x] Python opencti-svc: country risk score from threat intelligence feeds
+- [x] Python opencti-svc: TTP enrichment for CEP alerts (MITRE ATT&CK mapping)
+- [x] Python opencti-svc: Dockerfile
+- [x] tRPC threatIntelRouter: enrichDeclaration, lookupThreatActor, checkSanctions, getCountryRisk, getTTPs
+- [x] Threat Intelligence UI: /app/security/threat-intel — enriched alert view with STIX indicator panel
+- [x] Vitest tests for enrichment logic and STIX parsing (sprint51-53.test.ts)
+
+## Sprint 53 — Trader Self-Service API Portal
+
+- [x] DB schema: api_keys table (id, user_id, name, key_hash, key_prefix, scopes, rate_limit, sandbox_mode, status, expires_at, created_at, last_used_at)
+- [x] tRPC devPortalRouter: createApiKey, listApiKeys, revokeApiKey, rotateApiKey, toggleSandbox, setRateLimit, getUsageStats, checkRateLimit, getAvailableScopes, getApiCatalogue, getPlaygroundEndpoints
+- [x] API key generation: cryptographically secure, prefix-based (tg_live_xxx, tg_sandbox_xxx), stored as HMAC-SHA256 hash
+- [x] Developer Portal UI: /app/developer — API key management with rotate/revoke, rate limit display, OpenAPI spec browser
+- [x] API Playground tab: interactive endpoint tester with JSON input editor, run button, and response viewer
+- [x] Rate limit tracking: sliding window counter using api_usage_logs table
+- [x] Vitest tests for API key generation, hashing, and scope validation (sprint51-53.test.ts — 42 tests)
+- [x] Total vitest tests: 758 passing (20 pre-existing DB-connection failures unchanged)

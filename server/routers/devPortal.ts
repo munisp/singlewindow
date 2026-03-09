@@ -251,6 +251,105 @@ export const devPortalRouter = router({
       ];
     }),
 
+  // Rotate an API key (revoke old, issue new with same settings)
+  rotateApiKey: protectedProcedure
+    .input(z.object({ keyId: z.number().int() }))
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const db = (await getDb())!;
+        const [existing] = await db.select().from(apiKeys)
+          .where(and(eq(apiKeys.id, input.keyId), eq(apiKeys.userId, ctx.user.id)));
+        if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "API key not found" });
+        // Revoke old key
+        await db.update(apiKeys).set({ status: "revoked" }).where(eq(apiKeys.id, input.keyId));
+        // Issue new key with same settings
+        const prefix = existing.sandboxMode ? "tg_sandbox" : "tg_live";
+        const { key, keyHash, keyPrefix } = generateApiKey(prefix);
+        const [created] = await db.insert(apiKeys).values({
+          userId: ctx.user.id,
+          name: `${existing.name} (rotated)`,
+          keyHash,
+          keyPrefix,
+          scopes: existing.scopes,
+          rateLimit: existing.rateLimit,
+          sandboxMode: existing.sandboxMode,
+          status: "active",
+          expiresAt: existing.expiresAt,
+          createdAt: new Date(),
+          lastUsedAt: null,
+        }).returning();
+        return { ...created, rawKey: key };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to rotate key" });
+      }
+    }),
+
+  // Get playground endpoint definitions for the API Playground UI
+  getPlaygroundEndpoints: protectedProcedure
+    .query(() => [
+      {
+        id: "declarations-list",
+        group: "Declarations",
+        name: "List Declarations",
+        procedure: "declarations.list",
+        type: "query",
+        scope: "declarations:read",
+        description: "List trade declarations with optional status and date filters.",
+        sampleInput: JSON.stringify({ status: "PENDING", limit: 10 }, null, 2),
+      },
+      {
+        id: "declarations-submit",
+        group: "Declarations",
+        name: "Submit Declaration",
+        procedure: "declarations.submit",
+        type: "mutation",
+        scope: "declarations:write",
+        description: "Submit a new trade declaration for processing.",
+        sampleInput: JSON.stringify({ hsCode: "8471.30", originCountry: "CN", declaredValueUsd: 5000, weightKg: 120, documentCount: 4 }, null, 2),
+      },
+      {
+        id: "payments-list",
+        group: "Payments",
+        name: "List Payments",
+        procedure: "payments.list",
+        type: "query",
+        scope: "payments:read",
+        description: "List payment records with date range filters.",
+        sampleInput: JSON.stringify({ days: 30 }, null, 2),
+      },
+      {
+        id: "risk-score",
+        group: "Risk",
+        name: "Score Declaration",
+        procedure: "riskModel.scoreDeclaration",
+        type: "mutation",
+        scope: "declarations:read",
+        description: "Get ML risk score and lane assignment for a declaration.",
+        sampleInput: JSON.stringify({ declarationId: "DCL-001", traderId: "T-001", hsCode: "8471", originCountry: "CN", destinationCountry: "GH", declaredValueUsd: 15000, weightKg: 500, documentCount: 3 }, null, 2),
+      },
+      {
+        id: "oga-permits",
+        group: "OGA",
+        name: "List OGA Permits",
+        procedure: "oga.listPermits",
+        type: "query",
+        scope: "declarations:read",
+        description: "List Other Government Agency permits for a declaration.",
+        sampleInput: JSON.stringify({ declarationId: "DCL-001" }, null, 2),
+      },
+      {
+        id: "aeo-status",
+        group: "AEO",
+        name: "Get AEO Status",
+        procedure: "aeo.getStatus",
+        type: "query",
+        scope: "declarations:read",
+        description: "Get Authorised Economic Operator certification status.",
+        sampleInput: JSON.stringify({ traderId: "T-001" }, null, 2),
+      },
+    ]),
+
   // Get OpenAPI spec summary (endpoint catalogue)
   getApiCatalogue: protectedProcedure
     .query(() => {

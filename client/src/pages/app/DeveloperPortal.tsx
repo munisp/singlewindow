@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import {
   Code2, Key, Zap, Globe, Copy, Eye, EyeOff, Plus,
-  RefreshCw, Trash2, BarChart2, Shield, BookOpen, Settings
+  RefreshCw, Trash2, BarChart2, Shield, BookOpen, Settings, Play, RotateCcw
 } from "lucide-react";
 
 export default function DeveloperPortal() {
@@ -55,6 +55,31 @@ export default function DeveloperPortal() {
     onSuccess: () => { toast.success("API key revoked"); refetchKeys(); },
     onError: (err: any) => toast.error(err.message),
   });
+
+  const rotateMutation = trpc.devPortal.rotateApiKey.useMutation({
+    onSuccess: () => { toast.success("API key rotated — copy your new key"); refetchKeys(); },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const { data: playgroundEndpoints } = trpc.devPortal.getPlaygroundEndpoints.useQuery();
+  const [playgroundInput, setPlaygroundInput] = useState<Record<string, string>>({});
+  const [playgroundResponse, setPlaygroundResponse] = useState<Record<string, string>>({});
+  const [playgroundLoading, setPlaygroundLoading] = useState<Record<string, boolean>>({});
+
+  const runPlayground = async (endpointId: string, procedure: string, sampleInput: string) => {
+    setPlaygroundLoading(l => ({ ...l, [endpointId]: true }));
+    try {
+      const input = JSON.parse(playgroundInput[endpointId] ?? sampleInput);
+      // Simulate a response for demo purposes
+      await new Promise(r => setTimeout(r, 600));
+      const mockResponse = { status: "ok", procedure, input, result: { message: "Playground response (live calls require authentication)", timestamp: new Date().toISOString() } };
+      setPlaygroundResponse(r => ({ ...r, [endpointId]: JSON.stringify(mockResponse, null, 2) }));
+    } catch (err: any) {
+      setPlaygroundResponse(r => ({ ...r, [endpointId]: JSON.stringify({ error: err.message }, null, 2) }));
+    } finally {
+      setPlaygroundLoading(l => ({ ...l, [endpointId]: false }));
+    }
+  };
 
   const handleCreate = () => {
     if (!createForm.name) {
@@ -187,6 +212,7 @@ export default function DeveloperPortal() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="keys"><Key className="w-3.5 h-3.5 mr-1.5" />API Keys</TabsTrigger>
+            <TabsTrigger value="playground"><Play className="w-3.5 h-3.5 mr-1.5" />Playground</TabsTrigger>
             <TabsTrigger value="docs"><BookOpen className="w-3.5 h-3.5 mr-1.5" />API Reference</TabsTrigger>
             <TabsTrigger value="usage"><BarChart2 className="w-3.5 h-3.5 mr-1.5" />Usage</TabsTrigger>
           </TabsList>
@@ -239,20 +265,83 @@ export default function DeveloperPortal() {
                             </div>
                           </div>
                           {key.status === "active" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-red-500 hover:text-red-700"
-                              onClick={() => revokeMutation.mutate({ keyId: key.id })}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-blue-500 hover:text-blue-700"
+                                title="Rotate key"
+                                onClick={() => rotateMutation.mutate({ keyId: key.id })}
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-red-500 hover:text-red-700"
+                                title="Revoke key"
+                                onClick={() => revokeMutation.mutate({ keyId: key.id })}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
                           )}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="playground" className="mt-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Play className="w-4 h-4 text-violet-600" />
+                  API Playground
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Test API endpoints interactively. Responses are simulated — live calls require a valid API key.</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(playgroundEndpoints ?? []).map((ep: any) => (
+                  <div key={ep.id} className="border border-border rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-3 p-3 bg-muted/30">
+                      <Badge className={`text-xs ${ep.type === 'query' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                        {ep.type.toUpperCase()}
+                      </Badge>
+                      <span className="font-mono text-xs font-semibold text-foreground">{ep.procedure}</span>
+                      <span className="text-xs text-muted-foreground flex-1 hidden md:block">{ep.description}</span>
+                      <Badge variant="outline" className="text-xs">{ep.scope}</Badge>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1 block">Request Body (JSON)</Label>
+                        <textarea
+                          className="w-full font-mono text-xs bg-muted/50 border border-border rounded p-2 resize-y min-h-[80px] text-foreground"
+                          value={playgroundInput[ep.id] ?? ep.sampleInput}
+                          onChange={e => setPlaygroundInput(i => ({ ...i, [ep.id]: e.target.value }))}
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        className="bg-violet-600 hover:bg-violet-700 text-white"
+                        onClick={() => runPlayground(ep.id, ep.procedure, ep.sampleInput)}
+                        disabled={playgroundLoading[ep.id]}
+                      >
+                        <Play className="w-3.5 h-3.5 mr-1.5" />
+                        {playgroundLoading[ep.id] ? 'Running...' : 'Run'}
+                      </Button>
+                      {playgroundResponse[ep.id] && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1 block">Response</Label>
+                          <pre className="w-full font-mono text-xs bg-muted/50 border border-border rounded p-2 overflow-auto max-h-[160px] text-foreground">{playgroundResponse[ep.id]}</pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
           </TabsContent>
