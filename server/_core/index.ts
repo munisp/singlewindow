@@ -10,6 +10,30 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
+import rateLimit from "express-rate-limit";
+
+// ── Rate limiting ─────────────────────────────────────────────────────────────
+// General tRPC API: 200 requests per minute per IP
+const trpcRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please slow down and try again in a minute." },
+  skip: (req) => {
+    // Skip rate limiting for health checks and static assets
+    return req.path === "/health" || req.path === "/ping";
+  },
+});
+
+// Auth endpoints: stricter — 20 requests per minute per IP
+const authRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many authentication attempts. Please wait a minute before trying again." },
+});
 
 // ── Nightly risk scan cron job ────────────────────────────────────────────────
 // Fires at 02:00 UTC every day. Scans declarations with riskScore >= 0.8 in the
@@ -528,9 +552,11 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  // OAuth callback under /api/oauth/callback
+  // OAuth callback under /api/oauth/callback — apply strict rate limiting
+  app.use("/api/oauth", authRateLimit);
   registerOAuthRoutes(app);
-  // tRPC API
+  // tRPC API — apply general rate limiting
+  app.use("/api/trpc", trpcRateLimit);
   app.use(
     "/api/trpc",
     createExpressMiddleware({

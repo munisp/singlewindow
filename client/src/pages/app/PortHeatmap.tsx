@@ -13,7 +13,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor, Wifi, WifiOff } from "lucide-react";
+import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor, Wifi, WifiOff, Navigation, Flag } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 
 type CongestionStatus = "clear" | "moderate" | "congested" | "critical";
 
@@ -30,6 +32,120 @@ const STATUS_LABELS: Record<CongestionStatus, string> = {
   congested: "Congested",
   critical: "Critical",
 };
+
+function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) {
+  const [search, setSearch] = useState("");
+  const [portFilter, setPortFilter] = useState(selectedPort ?? "");
+
+  // Sync portFilter when selectedPort changes
+  useEffect(() => {
+    if (selectedPort) setPortFilter(selectedPort);
+  }, [selectedPort]);
+
+  const { data: vessels, isLoading } = trpc.geospatial.getVesselTrack.useQuery(
+    { portCode: portFilter || undefined, limit: 100 },
+    { refetchInterval: 30_000 }
+  );
+
+  const filtered = (vessels ?? []).filter(v =>
+    !search ||
+    v.vesselName?.toLowerCase().includes(search.toLowerCase()) ||
+    v.mmsi?.includes(search) ||
+    v.imoNumber?.includes(search)
+  );
+
+  const cargoColor: Record<string, string> = {
+    Container: "text-blue-400",
+    Bulk: "text-amber-400",
+    Tanker: "text-orange-400",
+    "General Cargo": "text-emerald-400",
+    RoRo: "text-purple-400",
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Navigation className="h-4 w-4 text-primary" />
+            Vessel Tracking Timeline
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">{filtered.length} events</span>
+        </div>
+        <div className="flex gap-2 mt-2">
+          <Input
+            placeholder="Search vessel name, MMSI, or IMO..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="h-8 text-sm"
+          />
+          <Select value={portFilter} onValueChange={setPortFilter}>
+            <SelectTrigger className="h-8 w-48 text-sm">
+              <SelectValue placeholder="All ports" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">All ports</SelectItem>
+              {["GHTEM", "NGLAG", "KEMBA", "TZDAR", "CIABJ", "ZADRB", "EGPSD"].map(p => (
+                <SelectItem key={p} value={p}>{p}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="p-4 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
+        ) : filtered.length === 0 ? (
+          <div className="p-8 text-center text-muted-foreground text-sm">
+            <Ship className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            No vessel events found. Use the Admin Console to seed vessel data.
+          </div>
+        ) : (
+          <div className="divide-y max-h-80 overflow-y-auto">
+            {filtered.map((v, idx) => (
+              <div key={idx} className="p-3 hover:bg-muted/20 transition-colors">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <Ship className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{v.vesselName ?? v.mmsi}</span>
+                        {v.flagCountry && (
+                          <Badge variant="outline" className="text-xs px-1 py-0">
+                            <Flag className="h-2.5 w-2.5 mr-1" />{v.flagCountry}
+                          </Badge>
+                        )}
+                        {v.cargoType && (
+                          <span className={`text-xs font-medium ${cargoColor[v.cargoType] ?? "text-muted-foreground"}`}>
+                            {v.cargoType}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+                        <span>MMSI: {v.mmsi}</span>
+                        {v.imoNumber && <span>IMO: {v.imoNumber}</span>}
+                        {v.destinationPort && <span>Port: {v.destinationPort}</span>}
+                        <span>Speed: {v.speed?.toFixed(1) ?? "0"} kn</span>
+                        <span>Hdg: {v.heading ?? 0}&deg;</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right text-xs text-muted-foreground shrink-0">
+                    <div>{v.recordedAt ? new Date(v.recordedAt).toLocaleTimeString() : "—"}</div>
+                    <div className="text-[10px]">{v.recordedAt ? new Date(v.recordedAt).toLocaleDateString() : ""}</div>
+                    <div className="text-[10px] mt-0.5">
+                      {v.latitude?.toFixed(3)}&deg;N, {v.longitude?.toFixed(3)}&deg;E
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function CongestionBadge({ status }: { status: CongestionStatus }) {
   const colorMap: Record<CongestionStatus, string> = {
@@ -358,6 +474,9 @@ export default function PortHeatmap() {
             </span>
           ))}
         </div>
+
+        {/* Vessel Tracking Timeline */}
+        <VesselTrackingPanel selectedPort={selectedPort} />
       </div>
     </DashboardLayout>
   );

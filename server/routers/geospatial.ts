@@ -13,7 +13,8 @@ import {
   getDb,
 } from "../db";
 import { portCongestionAlerts } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { vesselTrackingEvents } from "../../drizzle/schema";
 
 // ─── SEED DATA (28 African + key global ports, UN LOCODE coordinates) ─────────
 const SEED_PORTS = [
@@ -284,5 +285,72 @@ export const geospatialRouter = router({
         .where(eq(portCongestionAlerts.portCode, input.portCode))
         .limit(1);
       return rows[0] ?? null;
+    }),
+
+  /**
+   * Get vessel track history — filter by port, MMSI, IMO, or date range.
+   */
+  getVesselTrack: protectedProcedure
+    .input(z.object({
+      portCode: z.string().optional(),
+      mmsi: z.string().optional(),
+      imoNumber: z.string().optional(),
+      fromDate: z.date().optional(),
+      toDate: z.date().optional(),
+      limit: z.number().min(1).max(500).default(100),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const conditions = [];
+      if (input.mmsi) conditions.push(eq(vesselTrackingEvents.mmsi, input.mmsi));
+      if (input.imoNumber) conditions.push(eq(vesselTrackingEvents.imoNumber, input.imoNumber));
+      if (input.portCode) conditions.push(eq(vesselTrackingEvents.destinationPort, input.portCode));
+      if (input.fromDate) conditions.push(gte(vesselTrackingEvents.recordedAt, input.fromDate));
+      if (input.toDate) conditions.push(lte(vesselTrackingEvents.recordedAt, input.toDate));
+      const rows = conditions.length > 0
+        ? await db.select().from(vesselTrackingEvents).where(and(...conditions)).orderBy(desc(vesselTrackingEvents.recordedAt)).limit(input.limit)
+        : await db.select().from(vesselTrackingEvents).orderBy(desc(vesselTrackingEvents.recordedAt)).limit(input.limit);
+      return rows;
+    }),
+
+  /**
+   * Admin: Seed realistic vessel tracking events for demo purposes.
+   */
+  seedVesselEvents: adminProcedure
+    .mutation(async () => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const existing = await db.select({ id: vesselTrackingEvents.id }).from(vesselTrackingEvents).limit(1);
+      if (existing.length > 0) return { seeded: false, message: "Vessel events already seeded" };
+      const vessels = [
+        { mmsi: "636091234", vesselName: "MV ABIDJAN STAR", imoNumber: "9876543", flagCountry: "CIV", cargoType: "General Cargo", portCode: "CIABJ", lat: 5.2773, lon: -4.0094 },
+        { mmsi: "566012345", vesselName: "COSCO ACCRA", imoNumber: "9765432", flagCountry: "SGP", cargoType: "Container", portCode: "GHTEM", lat: 5.6333, lon: -0.0167 },
+        { mmsi: "657001122", vesselName: "TEMA EXPRESS", imoNumber: "9654321", flagCountry: "GHA", cargoType: "Container", portCode: "GHTEM", lat: 5.6333, lon: -0.0167 },
+        { mmsi: "620123456", vesselName: "MOMBASA PIONEER", imoNumber: "9543210", flagCountry: "KEN", cargoType: "Bulk", portCode: "KEMBA", lat: -4.0435, lon: 39.6682 },
+        { mmsi: "677001234", vesselName: "DAR TRADER", imoNumber: "9432109", flagCountry: "TZA", cargoType: "Tanker", portCode: "TZDAR", lat: -6.8235, lon: 39.2895 },
+        { mmsi: "654321098", vesselName: "LAGOS BRIDGE", imoNumber: "9321098", flagCountry: "NGA", cargoType: "RoRo", portCode: "NGLAG", lat: 6.4474, lon: 3.3903 },
+      ];
+      const now = Date.now();
+      const events: (typeof vesselTrackingEvents.$inferInsert)[] = [];
+      for (const v of vessels) {
+        for (let i = 0; i < 8; i++) {
+          events.push({
+            mmsi: v.mmsi,
+            vesselName: v.vesselName,
+            imoNumber: v.imoNumber,
+            latitude: v.lat + (i * 0.01),
+            longitude: v.lon + (i * 0.01),
+            speed: i === 0 ? 0 : 8 + (i % 4),
+            heading: (45 * i) % 360,
+            destinationPort: v.portCode,
+            cargoType: v.cargoType,
+            flagCountry: v.flagCountry,
+            recordedAt: new Date(now - i * 3 * 3600 * 1000),
+          });
+        }
+      }
+      await db.insert(vesselTrackingEvents).values(events);
+      return { seeded: true, message: `Seeded ${events.length} vessel tracking events for ${vessels.length} vessels` };
     }),
 });

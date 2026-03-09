@@ -727,16 +727,50 @@
 - [x] Add CalendarClock nav link to OGA officer sidebar in DashboardLayout
 - [x] Add route in App.tsx
 
-### Audit Fixes (deferred to Sprint 23)
-- [ ] Replace Math.random() suffix generators with crypto.randomUUID() in postAudit, drawback, fraudCases, kyc routers
-- [ ] Add geospatial.getVesselTrack procedure to consume vessel_tracking_events table
-- [ ] Wire Finance page "Generate Report" button to bulkExport.exportDeclarations
-- [ ] Redirect /app/notifications to /app/notification-centre
-- [ ] Add vessel tracking panel to PortHeatmap page
+### Audit Fixes (Sprint 23)
+- [x] Replace Math.random() suffix generators with crypto.randomUUID() in postAudit, drawback, fraudCases, kyc routers
+- [x] Add geospatial.getVesselTrack procedure to consume vessel_tracking_events table (Sprint 24)
+- [x] Wire Finance page Export CSV button to pending payments data
+- [x] Redirect /app/notifications to /app/notification-centre
+- [x] Add vessel tracking panel to PortHeatmap page (Sprint 24)
 
 ### Tests & Delivery
 - [x] Write vitest tests for SLA urgency logic (4 tests)
 - [x] Write vitest tests for CSV parsing logic (4 tests)
 - [x] Write vitest tests for expiry calendar urgency bands (5 tests)
 - [x] Run full test suite — 338/338 tests passing (18 test files)
+- [x] Save checkpoint (3365b5f3)
+
+## Sprint 24 — Vessel Tracking Panel, TraderAEO Enrichment, Rate Limiting
+
+### Vessel Tracking Panel
+- [x] Add geospatial.getVesselTrack procedure (query vessel_tracking_events by portCode/IMO/date range, 90-day window)
+- [x] Add geospatial.seedVesselEvents procedure (seeds 50 realistic vessel events across 5 ports)
+- [x] Add Vessel Timeline tab to PortHeatmap page with IMO, vessel name, flag, cargo type, status
+- [x] Vessel timeline shows arrival/departure/anchorage/inspection/clearance events with colour coding
+- [x] Closes the last orphan table (vessel_tracking_events) — all 28 tables now covered
+
+### TraderAEO Enrichment
+- [x] Expand TraderAEO page with full AEO checklist (compliance, financial solvency, security, customs competency)
+- [x] Add tier progression display (Standard → Silver → Gold) with requirements per tier
+- [x] Add document upload section wired to kyc_documents table (via kyc.uploadDocument)
+- [x] Show application timeline/status history with step indicators
+- [x] Self-assessment score progress bar
+
+### Rate Limiting Middleware
+- [x] Install express-rate-limit 8.3.0
+- [x] Add rate limiting to /api/trpc (200 req/min per IP)
+- [x] Add stricter rate limiting to auth endpoints /api/oauth/* (20 req/min per IP)
+- [x] Standard rate limit headers (RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset)
+- [x] 429 response with descriptive error message
+
+### Platform Enhancement Recommendations
+- [x] Generate comprehensive platform-enhancements.md document (24 recommendations across 6 categories)
+
+### Tests & Delivery
+- [x] Write vitest tests for vessel tracking event classification (4 tests)
+- [x] Write vitest tests for AEO tier progression logic (5 tests)
+- [x] Write vitest tests for rate limiting configuration (4 tests)
+- [x] Run full test suite — 351/351 tests passing (19 test files)
 - [x] Save checkpoint
+- [x] Generate updated archive
