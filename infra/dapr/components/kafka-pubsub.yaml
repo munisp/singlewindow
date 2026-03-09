@@ -1,0 +1,64 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kafka-pubsub
+  namespace: tradegateway
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    # Kafka broker addresses (Kubernetes service DNS)
+    - name: brokers
+      value: "kafka-broker-0.kafka-headless.tradegateway.svc.cluster.local:9092,kafka-broker-1.kafka-headless.tradegateway.svc.cluster.local:9092,kafka-broker-2.kafka-headless.tradegateway.svc.cluster.local:9092"
+    # Consumer group ID per service (injected via env var)
+    - name: consumerGroup
+      value: "tradegateway-${APP_ID}"
+    # Authentication (SASL/SCRAM for production)
+    - name: authRequired
+      value: "true"
+    - name: saslUsername
+      secretKeyRef:
+        name: kafka-credentials
+        key: username
+    - name: saslPassword
+      secretKeyRef:
+        name: kafka-credentials
+        key: password
+    - name: saslMechanism
+      value: "SCRAM-SHA-512"
+    # TLS
+    - name: disableTls
+      value: "false"
+    - name: tlsCaCert
+      secretKeyRef:
+        name: kafka-tls
+        key: ca.crt
+    # Performance tuning
+    - name: maxMessageBytes
+      value: "1048576"  # 1 MB
+    - name: consumeRetryInterval
+      value: "200ms"
+    - name: initialOffset
+      value: "newest"
+    # Schema registry (Confluent-compatible)
+    - name: schemaRegistryURL
+      value: "http://schema-registry.tradegateway.svc.cluster.local:8081"
+    - name: schemaRegistryAPIKey
+      secretKeyRef:
+        name: schema-registry-credentials
+        key: api-key
+    - name: schemaRegistryAPISecret
+      secretKeyRef:
+        name: schema-registry-credentials
+        key: api-secret
+auth:
+  secretStore: kubernetes
+scopes:
+  - declaration-service
+  - payment-service
+  - oga-service
+  - profile-service
+  - risk-engine
+  - cargo-tracking-service
+  - analytics-service
+  - sanctions-service

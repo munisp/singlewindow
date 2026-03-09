@@ -1,0 +1,123 @@
+// payment-service — TradeGateway NGSWTP
+// Handles duty payment lifecycle: invoice creation, Mojaloop payment initiation,
+// TigerBeetle double-entry ledger recording, and payment confirmation events.
+// Communicates via Dapr pub/sub (Kafka) and exposes HTTP endpoints.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/tradegateway/payment-service/internal/handlers"
+	"github.com/tradegateway/payment-service/internal/pubsub"
+	"github.com/tradegateway/payment-service/internal/store"
+	"github.com/tradegateway/payment-service/internal/tigerbeetle"
+)
+
+func main() {
+	port := getEnv("PORT", "8082")
+	daprPort := getEnv("DAPR_HTTP_PORT", "3502")
+	dbURL := getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
+	tbAddr := getEnv("TIGERBEETLE_ADDRESS", "localhost:3000")
+	mojaloopURL := getEnv("MOJALOOP_URL", "http://localhost:3001")
+
+	log.Printf("[payment-service] Starting on port %s", port)
+
+	// Initialize store (PostgreSQL)
+	st, err := store.New(dbURL)
+	if err != nil {
+		log.Fatalf("[payment-service] DB connection failed: %v", err)
+	}
+	defer st.Close()
+
+	// Initialize TigerBeetle client (graceful degradation if unavailable)
+	tb, tbErr := tigerbeetle.New(tbAddr)
+	if tbErr != nil {
+		log.Printf("[payment-service] Warning: TigerBeetle unavailable (%v) — ledger operations will be simulated", tbErr)
+		tb = tigerbeetle.NewMock()
+	}
+
+	// Initialize Dapr pub/sub client
+	ps := pubsub.New(daprPort)
+
+	// Initialize handlers
+	h := handlers.New(st, ps, tb, mojaloopURL)
+
+	mux := http.NewServeMux()
+
+	// Health
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":              "ok",
+			"service":             "payment-service",
+			"version":             "1.0.0",
+			"tigerbeetleOnline":   tbErr == nil,
+			"time":                time.Now().UTC(),
+		})
+	})
+
+	// ── Payment endpoints ─────────────────────────────────────────────────────
+	mux.HandleFunc("POST /api/payments/invoices", h.CreateInvoice)
+	mux.HandleFunc("GET /api/payments/invoices/{id}", h.GetInvoice)
+	mux.HandleFunc("GET /api/payments/declarations/{declarationId}", h.GetPaymentsByDeclaration)
+	mux.HandleFunc("POST /api/payments/invoices/{id}/initiate", h.InitiatePayment)
+	mux.HandleFunc("POST /api/payments/invoices/{id}/confirm", h.ConfirmPayment)
+	mux.HandleFunc("POST /api/payments/invoices/{id}/refund", h.InitiateRefund)
+
+	// ── Mojaloop webhook ──────────────────────────────────────────────────────
+	mux.HandleFunc("POST /api/payments/mojaloop/callback", h.MojaloopCallback)
+
+	// ── TigerBeetle ledger queries ────────────────────────────────────────────
+	mux.HandleFunc("GET /api/payments/ledger/accounts/{id}", h.GetLedgerAccount)
+	mux.HandleFunc("GET /api/payments/ledger/transfers/{id}", h.GetLedgerTransfer)
+
+	// ── Dapr subscriptions ────────────────────────────────────────────────────
+	mux.HandleFunc("GET /dapr/subscribe", func(w http.ResponseWriter, r *http.Request) {
+		subs := []map[string]interface{}{
+			{"pubsubname": "kafka-pubsub", "topic": "declaration.submitted", "route": "/events/declaration-submitted"},
+			{"pubsubname": "kafka-pubsub", "topic": "declaration.cleared", "route": "/events/declaration-cleared"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(subs)
+	})
+	mux.HandleFunc("POST /events/declaration-submitted", h.OnDeclarationSubmitted)
+	mux.HandleFunc("POST /events/declaration-cleared", h.OnDeclarationCleared)
+
+	server := &http.Server{
+		Addr:         fmt.Sprintf(":%s", port),
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("[payment-service] Listening on :%s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[payment-service] Server error: %v", err)
+		}
+	}()
+
+	<-quit
+	log.Println("[payment-service] Shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	server.Shutdown(ctx)
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

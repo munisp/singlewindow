@@ -640,6 +640,9 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Sprint 68: OpenAPI spec endpoint
   registerOpenApiRoute(app);
+  // Sprint 74: OGA approval callback webhook (POST /api/webhooks/oga)
+  const { registerOgaWebhookRoute } = await import("../webhooks/oga");
+  registerOgaWebhookRoute(app);
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

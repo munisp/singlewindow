@@ -1,0 +1,244 @@
+# TradeGateway NGSWTP — Kafka Topic Definitions
+# All topics use 3 partitions and replication factor 3 for production HA.
+# Retention: 7 days for operational events, 90 days for audit/compliance events.
+# Schema format: Avro (via Confluent Schema Registry)
+
+topics:
+  # ── Declaration lifecycle ──────────────────────────────────────────────────
+  - name: declaration.submitted
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 604800000  # 7 days
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when a trader submits a new customs declaration"
+    producers: [declaration-service]
+    consumers: [payment-service, risk-engine, oga-service, analytics-service]
+
+  - name: declaration.risk-scored
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when risk engine completes scoring (GREEN/YELLOW/RED lane)"
+    producers: [risk-engine]
+    consumers: [declaration-service, analytics-service, cargo-tracking-service]
+
+  - name: declaration.under-review
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when declaration is assigned for officer review"
+    producers: [declaration-service]
+    consumers: [analytics-service]
+
+  - name: declaration.cleared
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days (compliance)
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when declaration receives final clearance"
+    producers: [declaration-service]
+    consumers: [payment-service, profile-service, cargo-tracking-service, analytics-service]
+
+  - name: declaration.rejected
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when declaration is rejected by customs or OGA"
+    producers: [declaration-service, oga-service]
+    consumers: [profile-service, analytics-service]
+
+  # ── Payment lifecycle ──────────────────────────────────────────────────────
+  - name: payment.invoice.created
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when a duty invoice is generated for a declaration"
+    producers: [payment-service]
+    consumers: [declaration-service, analytics-service]
+
+  - name: payment.initiated
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when Mojaloop transfer is initiated"
+    producers: [payment-service]
+    consumers: [analytics-service]
+
+  - name: payment.confirmed
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days (financial audit)
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when Mojaloop transfer is committed and TigerBeetle ledger updated"
+    producers: [payment-service]
+    consumers: [declaration-service, analytics-service]
+
+  - name: payment.failed
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when payment fails or is aborted"
+    producers: [payment-service]
+    consumers: [declaration-service, analytics-service]
+
+  - name: payment.refunded
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when a duty refund is processed"
+    producers: [payment-service]
+    consumers: [analytics-service]
+
+  # ── OGA permit lifecycle ───────────────────────────────────────────────────
+  - name: oga.permit.requested
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when OGA permit is requested for a declaration"
+    producers: [declaration-service, oga-service]
+    consumers: [oga-service, analytics-service]
+
+  - name: oga.permit.approved
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when an OGA approves a permit"
+    producers: [oga-service]
+    consumers: [declaration-service, analytics-service]
+
+  - name: oga.permit.rejected
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when an OGA rejects a permit"
+    producers: [oga-service]
+    consumers: [declaration-service, analytics-service]
+
+  - name: oga.sla.breach
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when an OGA permit exceeds its SLA deadline"
+    producers: [oga-service]
+    consumers: [analytics-service, notification-service]
+
+  # ── Risk & compliance ──────────────────────────────────────────────────────
+  - name: risk.score.computed
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when ML risk score is computed for a declaration"
+    producers: [risk-engine]
+    consumers: [declaration-service, analytics-service]
+
+  - name: sanctions.hit
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days (compliance)
+    description: "Emitted when a sanctions screening match is found"
+    producers: [sanctions-service]
+    consumers: [declaration-service, analytics-service, wazuh-connector]
+
+  - name: sanctions.clear
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when sanctions screening returns no match"
+    producers: [sanctions-service]
+    consumers: [declaration-service]
+
+  # ── Cargo tracking ─────────────────────────────────────────────────────────
+  - name: cargo.vessel.position
+    partitions: 12
+    replicationFactor: 3
+    retentionMs: 86400000  # 24 hours (high-frequency AIS data)
+    config:
+      cleanup.policy: delete
+      compression.type: snappy
+    description: "Real-time AIS vessel position updates"
+    producers: [cargo-tracking-service]
+    consumers: [analytics-service, port-operations-service]
+
+  - name: cargo.arrived
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Emitted when cargo vessel arrives at port"
+    producers: [cargo-tracking-service]
+    consumers: [declaration-service, analytics-service]
+
+  - name: cargo.released
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when cargo is released from port after clearance"
+    producers: [cargo-tracking-service]
+    consumers: [analytics-service, profile-service]
+
+  # ── Profile & KYC ─────────────────────────────────────────────────────────
+  - name: profile.kyc.verified
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when trader KYC verification is completed"
+    producers: [profile-service]
+    consumers: [analytics-service]
+
+  - name: profile.aeo.applied
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when trader applies for AEO certification"
+    producers: [profile-service]
+    consumers: [analytics-service]
+
+  - name: profile.aeo.granted
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Emitted when AEO certification is granted"
+    producers: [profile-service]
+    consumers: [declaration-service, analytics-service]
+
+  # ── Security & audit ──────────────────────────────────────────────────────
+  - name: audit.event
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 31536000000  # 365 days (regulatory requirement)
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Immutable audit trail for all system actions"
+    producers: [declaration-service, payment-service, oga-service, profile-service, risk-engine]
+    consumers: [opensearch-connector, analytics-service]
+
+  - name: security.alert
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000  # 90 days
+    description: "Security alerts from WAF, SIEM, and threat intel"
+    producers: [openappsec-connector, wazuh-connector, opencti-connector]
+    consumers: [analytics-service, notification-service]
+
+  # ── ASEAN Single Window G2G ────────────────────────────────────────────────
+  - name: asean.sw.outbound
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Outbound G2G messages to ASEAN Single Window"
+    producers: [declaration-service]
+    consumers: [asean-connector]
+
+  - name: asean.sw.inbound
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    description: "Inbound G2G messages from ASEAN Single Window"
+    producers: [asean-connector]
+    consumers: [declaration-service, analytics-service]

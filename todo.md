@@ -1429,3 +1429,100 @@
 ### Publish
 - [ ] Save checkpoint
 - [ ] Guide user to click Publish button in Management UI
+
+## Sprint 74 — Orchestration Layer + 30 Stakeholder Journeys
+
+### Phase 1: Suggested Next Steps
+- [ ] Add pnpm db:startup script (PostgreSQL start + migrate + seed)
+- [ ] Wire portCongestion.listPorts to Port Heatmap filter dropdown (dynamic)
+- [ ] Add POST /api/webhooks/oga endpoint for OGA approval callbacks
+
+### Phase 2: Orchestration Architecture Design
+- [ ] Document top 30 stakeholder journeys
+- [ ] Define Kafka topic schema for all journeys
+- [ ] Define Temporal workflow definitions
+- [ ] Define Permify RBAC schema for all roles
+
+### Phase 3: Go Microservices
+- [ ] declaration-service (Go + Dapr)
+- [ ] payment-service (Go + Dapr + TigerBeetle)
+- [ ] oga-service (Go + Dapr)
+- [ ] profile-service (Go + Dapr)
+- [ ] cargo-tracking-service (Go + Dapr)
+- [ ] risk-engine-service (Python + Dapr)
+- [ ] analytics-service (Python + Delta Lake)
+
+### Phase 4: Kafka + Fluvio Event Bus
+- [ ] Define all Kafka topics (declaration.*, payment.*, oga.*, cargo.*)
+- [ ] Implement producers in Go services
+- [ ] Implement consumers for notification/audit/analytics
+- [ ] Fluvio real-time stream for cargo tracking
+
+### Phase 5: Temporal Workflows
+- [ ] DeclarationLifecycleWorkflow
+- [ ] OGAApprovalWorkflow
+- [ ] PaymentClearingWorkflow
+- [ ] AEOOnboardingWorkflow
+- [ ] PostClearanceAuditWorkflow
+
+### Phase 6: Keycloak + Permify IAM
+- [ ] Keycloak realm config (TradeGateway)
+- [ ] Client configs for all services
+- [ ] Permify schema for all 30 stakeholder roles
+- [ ] RBAC policies for all procedures
+
+### Phase 7: Redis Caching
+- [ ] Session store migration to Redis
+- [ ] Rate limiting with Redis
+- [ ] Real-time pub/sub for notifications
+- [ ] Cache invalidation for declarations/payments
+
+### Phase 8: APISIX Gateway
+- [ ] Route config for all microservices
+- [ ] Auth plugin (JWT/OIDC)
+- [ ] Rate limiting plugin
+- [ ] WAF plugin (OpenAppSec)
+
+### Phase 9: TigerBeetle Ledger
+- [ ] Account creation for traders/customs
+- [ ] Transfer recording for duty payments
+- [ ] Double-entry bookkeeping
+- [ ] Balance queries
+
+### Phase 10: Lakehouse
+- [ ] Delta Lake setup (Python)
+- [ ] Ingestion pipelines from Kafka
+- [ ] Analytics queries (trade volume, revenue, risk)
+- [ ] Parquet export for reporting
+
+### Phase 11: Node.js Integration
+- [ ] Wire Go services as gRPC clients
+- [ ] Wire Temporal client
+- [ ] Wire Redis client
+- [ ] Wire TigerBeetle client
+
+### Phase 12: UI Updates
+- [ ] Real-time Temporal workflow status panel
+- [ ] Kafka event feed component
+- [ ] TigerBeetle ledger balance display
+- [ ] Keycloak login flow integration
+
+### Phase 13: Checkpoint + Archive
+- [ ] Save checkpoint
+- [ ] Generate updated archive
+
+## Orchestration Layer (Middleware Stack)
+
+- [x] Go payment-service: TigerBeetle + Mojaloop integration (cmd/main.go, handlers, store, pubsub)
+- [x] Go oga-service: OGA permit management with Dapr pub/sub (cmd/main.go, handlers, store, pubsub)
+- [x] Go profile-service: Trader profile management (cmd/main.go, handlers, store)
+- [x] Go temporal-worker: 10 Temporal workflow definitions (declaration clearance, AEO, duty drawback, post-clearance audit, ASEAN SW, sanctions screening, payment, cargo release, OGA SLA, risk assessment)
+- [x] Go temporal-worker: Activities package with 30+ activity implementations
+- [x] Dapr components: kafka-pubsub.yaml, redis-statestore.yaml, resiliency.yaml
+- [x] Kafka topics: 12 topics defined in infra/kafka/topics.yaml + provision script
+- [x] APISIX gateway: apisix.yaml with routes for all 7 microservices + auth plugin
+- [x] Python risk-engine: FastAPI ML risk scoring (WCO-based, HS chapter risk, country risk, trader compliance, AEO discount)
+- [x] Python sanctions-service: FastAPI Jaro-Winkler fuzzy matching against UN/OFAC/EU lists
+- [x] Lakehouse pipeline: Delta Lake + Flink ingestion config (10 tables, partitioned by year/month)
+- [x] Docker Compose: Full stack with PostgreSQL, Redis, Kafka, Temporal, Keycloak, MinIO, Jaeger, Prometheus, Grafana, OpenSearch
+- [x] Orchestration tests: 46 vitest tests covering all 10 middleware components (all passing)

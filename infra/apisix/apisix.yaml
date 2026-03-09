@@ -1,0 +1,346 @@
+# TradeGateway NGSWTP — Apache APISIX Gateway Configuration
+# Defines routes, upstreams, plugins, and consumers for all microservices.
+# Deploy with: apisix start -c /path/to/apisix.yaml
+
+apisix:
+  node_listen: 9080
+  enable_ipv6: false
+  ssl:
+    enable: true
+    listen_port: 9443
+
+# ── Upstreams ─────────────────────────────────────────────────────────────────
+upstreams:
+  - id: "1"
+    name: tradegateway-node-backend
+    type: roundrobin
+    nodes:
+      "tradegateway-backend.tradegateway.svc.cluster.local:3000": 1
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 10
+        healthy:
+          http_statuses: [200]
+          successes: 2
+        unhealthy:
+          http_statuses: [500, 502, 503]
+          http_failures: 3
+
+  - id: "2"
+    name: declaration-service
+    type: roundrobin
+    nodes:
+      "declaration-service.tradegateway.svc.cluster.local:8081": 1
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 10
+
+  - id: "3"
+    name: payment-service
+    type: roundrobin
+    nodes:
+      "payment-service.tradegateway.svc.cluster.local:8082": 1
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 10
+
+  - id: "4"
+    name: oga-service
+    type: roundrobin
+    nodes:
+      "oga-service.tradegateway.svc.cluster.local:8083": 1
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 10
+
+  - id: "5"
+    name: profile-service
+    type: roundrobin
+    nodes:
+      "profile-service.tradegateway.svc.cluster.local:8084": 1
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 10
+
+  - id: "6"
+    name: risk-engine
+    type: roundrobin
+    nodes:
+      "risk-engine.tradegateway.svc.cluster.local:8085": 1
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+
+  - id: "7"
+    name: cargo-tracking-service
+    type: roundrobin
+    nodes:
+      "cargo-tracking-service.tradegateway.svc.cluster.local:8086": 1
+
+  - id: "8"
+    name: analytics-service
+    type: roundrobin
+    nodes:
+      "analytics-service.tradegateway.svc.cluster.local:8087": 1
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+routes:
+  # ── tRPC (Node.js backend — primary API) ──────────────────────────────────
+  - id: "100"
+    name: trpc-api
+    uri: /api/trpc/*
+    upstream_id: "1"
+    plugins:
+      opentelemetry:
+        sampler:
+          name: always_on
+      limit-req:
+        rate: 1000
+        burst: 200
+        key: remote_addr
+      cors:
+        allow_origins: "https://tradegateway.gov.gh,https://app.tradegateway.gov.gh"
+        allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
+        allow_headers: "Content-Type,Authorization,X-Request-ID"
+        max_age: 3600
+      jwt-auth:
+        header: Authorization
+        query: token
+        cookie: session_token
+      request-id: {}
+
+  # ── OAuth endpoints (no auth required) ────────────────────────────────────
+  - id: "101"
+    name: oauth-endpoints
+    uri: /api/oauth/*
+    upstream_id: "1"
+    plugins:
+      limit-req:
+        rate: 20
+        burst: 5
+        key: remote_addr
+      cors:
+        allow_origins: "*"
+        allow_methods: "GET,POST"
+
+  # ── Declaration microservice ───────────────────────────────────────────────
+  - id: "200"
+    name: declarations-api
+    uri: /api/declarations/*
+    upstream_id: "2"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      opentelemetry:
+        sampler:
+          name: always_on
+      limit-req:
+        rate: 500
+        burst: 100
+        key: remote_addr
+      request-id: {}
+      response-rewrite:
+        headers:
+          X-Service: declaration-service
+
+  # ── Payment microservice ───────────────────────────────────────────────────
+  - id: "300"
+    name: payments-api
+    uri: /api/payments/*
+    upstream_id: "3"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      opentelemetry:
+        sampler:
+          name: always_on
+      limit-req:
+        rate: 200
+        burst: 50
+        key: remote_addr
+      request-id: {}
+      # IP allowlist for Mojaloop callback (FSP IPs only)
+      ip-restriction:
+        whitelist:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+
+  # Mojaloop callback — no JWT required (uses HMAC signature verification)
+  - id: "301"
+    name: mojaloop-callback
+    uri: /api/payments/mojaloop/callback
+    upstream_id: "3"
+    plugins:
+      hmac-auth: {}
+      limit-req:
+        rate: 100
+        burst: 20
+        key: remote_addr
+
+  # ── OGA microservice ───────────────────────────────────────────────────────
+  - id: "400"
+    name: oga-api
+    uri: /api/oga/*
+    upstream_id: "4"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      opentelemetry:
+        sampler:
+          name: always_on
+      limit-req:
+        rate: 300
+        burst: 60
+        key: remote_addr
+      request-id: {}
+
+  # OGA webhook — HMAC authenticated
+  - id: "401"
+    name: oga-webhooks
+    uri: /api/oga/webhooks/*
+    upstream_id: "4"
+    plugins:
+      hmac-auth: {}
+      limit-req:
+        rate: 100
+        burst: 20
+        key: remote_addr
+
+  # ── Profile microservice ───────────────────────────────────────────────────
+  - id: "500"
+    name: profiles-api
+    uri: /api/profiles/*
+    upstream_id: "5"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-req:
+        rate: 300
+        burst: 60
+        key: remote_addr
+      request-id: {}
+
+  # ── Risk engine ────────────────────────────────────────────────────────────
+  - id: "600"
+    name: risk-api
+    uri: /api/risk/*
+    upstream_id: "6"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-req:
+        rate: 200
+        burst: 40
+        key: remote_addr
+      request-id: {}
+
+  # ── Cargo tracking ─────────────────────────────────────────────────────────
+  - id: "700"
+    name: cargo-api
+    uri: /api/cargo/*
+    upstream_id: "7"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-req:
+        rate: 500
+        burst: 100
+        key: remote_addr
+
+  # ── Analytics ──────────────────────────────────────────────────────────────
+  - id: "800"
+    name: analytics-api
+    uri: /api/analytics/*
+    upstream_id: "8"
+    plugins:
+      jwt-auth:
+        header: Authorization
+      limit-req:
+        rate: 100
+        burst: 20
+        key: remote_addr
+
+  # ── Health check (no auth) ─────────────────────────────────────────────────
+  - id: "900"
+    name: health
+    uri: /health
+    upstream_id: "1"
+    plugins:
+      limit-req:
+        rate: 10
+        burst: 5
+        key: remote_addr
+
+# ── Global plugins ─────────────────────────────────────────────────────────────
+plugins:
+  # OpenAppSec WAF integration
+  - name: openappsec
+    config:
+      mode: prevent
+      log_level: info
+      # OpenAppSec agent endpoint
+      agent_endpoint: "http://openappsec-agent.tradegateway.svc.cluster.local:8090"
+
+  # Distributed tracing (OpenTelemetry → Jaeger)
+  - name: opentelemetry
+    config:
+      collector:
+        address: "jaeger-collector.observability.svc.cluster.local:4317"
+      resource:
+        service.name: apisix-gateway
+        service.version: "1.0.0"
+      sampler:
+        name: parent_base
+        options:
+          root:
+            name: trace_id_ratio
+            options:
+              fraction: "0.1"  # 10% sampling in production
+
+  # Prometheus metrics
+  - name: prometheus
+    config:
+      export_uri: /metrics
+      metric_prefix: tradegateway_apisix_
+
+  # Request ID propagation
+  - name: request-id
+    config:
+      header_name: X-Request-ID
+      include_in_response: true
+
+  # Keycloak JWT validation
+  - name: jwt-auth
+    config:
+      key_claim_name: kid
+      algorithm: RS256
+      # Keycloak JWKS endpoint
+      public_key_url: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/certs"
+
+# ── Rate limiting ──────────────────────────────────────────────────────────────
+# Global rate limits are applied per route above.
+# Additional rate limits can be applied per consumer (API key).
+
+# ── SSL/TLS ────────────────────────────────────────────────────────────────────
+ssl:
+  - id: "1"
+    cert: |
+      # TLS certificate (managed by cert-manager in production)
+    key: |
+      # TLS private key
+    snis:
+      - "api.tradegateway.gov.gh"
+      - "*.tradegateway.gov.gh"

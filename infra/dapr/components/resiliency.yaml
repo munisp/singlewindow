@@ -1,0 +1,80 @@
+apiVersion: dapr.io/v1alpha1
+kind: Resiliency
+metadata:
+  name: tradegateway-resiliency
+  namespace: tradegateway
+spec:
+  policies:
+    timeouts:
+      # Default timeout for all service invocations
+      defaultTimeout: 30s
+      # Extended timeout for risk scoring (ML inference)
+      riskScoringTimeout: 60s
+      # Payment operations need longer timeout for Mojaloop round-trips
+      paymentTimeout: 120s
+
+    retries:
+      # Standard retry with exponential backoff
+      defaultRetry:
+        policy: exponential
+        duration: 500ms
+        maxInterval: 10s
+        maxRetries: 3
+      # Critical operations (payment confirmation) — more retries
+      criticalRetry:
+        policy: exponential
+        duration: 1s
+        maxInterval: 30s
+        maxRetries: 5
+      # No retry for idempotency-sensitive operations
+      noRetry:
+        policy: constant
+        duration: 0
+        maxRetries: 0
+
+    circuitBreakers:
+      # Trip after 5 consecutive failures, recover after 30s
+      defaultCircuitBreaker:
+        maxRequests: 1
+        interval: 30s
+        timeout: 30s
+        trip: consecutiveFailures >= 5
+      # Tighter CB for payment service (financial safety)
+      paymentCircuitBreaker:
+        maxRequests: 1
+        interval: 60s
+        timeout: 60s
+        trip: consecutiveFailures >= 3
+
+  targets:
+    apps:
+      declaration-service:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      payment-service:
+        timeout: paymentTimeout
+        retry: criticalRetry
+        circuitBreaker: paymentCircuitBreaker
+      oga-service:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      risk-engine:
+        timeout: riskScoringTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      profile-service:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+
+    components:
+      kafka-pubsub:
+        outbound:
+          timeout: defaultTimeout
+          retry: defaultRetry
+      statestore:
+        outbound:
+          timeout: defaultTimeout
+          retry: defaultRetry

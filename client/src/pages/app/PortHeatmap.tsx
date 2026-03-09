@@ -42,6 +42,9 @@ function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) 
     if (selectedPort) setPortFilter(selectedPort);
   }, [selectedPort]);
 
+  // Dynamic port list from DB
+  const { data: portList } = trpc.portCongestion.listPorts.useQuery();
+
   const { data: vessels, isLoading } = trpc.geospatial.getVesselTrack.useQuery(
     { portCode: portFilter || undefined, limit: 100 },
     { refetchInterval: 30_000 }
@@ -85,8 +88,8 @@ function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) 
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">All ports</SelectItem>
-              {["GHTEM", "NGLAG", "KEMBA", "TZDAR", "CIABJ", "ZADRB", "EGPSD"].map(p => (
-                <SelectItem key={p} value={p}>{p}</SelectItem>
+              {(portList ?? []).map(p => (
+                <SelectItem key={p.portCode} value={p.portCode}>{p.portCode} — {p.portName}</SelectItem>
               ))}
             </SelectContent>
           </Select>
