@@ -126,7 +126,7 @@ export default function TraderAEO() {
 
         <div>
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />AEO Tier Progression</h2>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {TIERS.map((tier, idx) => {
               const isActive = currentTier === tier.id && appStatus === "approved";
               return (
@@ -187,7 +187,7 @@ export default function TraderAEO() {
               <Separator />
               <div>
                 <p className="text-sm font-semibold mb-3">Application Details</p>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1"><Label className="text-xs">Applicant Type</Label>
                     <select className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm" value={form.applicantType} onChange={e => setForm(f => ({ ...f, applicantType: e.target.value as typeof form.applicantType }))}>
                       <option value="importer">Importer</option><option value="exporter">Exporter</option><option value="customs_broker">Customs Broker</option><option value="freight_forwarder">Freight Forwarder</option><option value="warehouse_operator">Warehouse Operator</option>
@@ -208,7 +208,7 @@ export default function TraderAEO() {
           <Card>
             <CardHeader><CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" />Assessment Score Breakdown</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {[
                   { label: "Compliance Score", value: app.complianceScore ?? 0, icon: <Shield className="h-4 w-4 text-blue-400" />, color: "text-blue-400" },
                   { label: "Security Score", value: app.securityScore ?? 0, icon: <Lock className="h-4 w-4 text-purple-400" />, color: "text-purple-400" },

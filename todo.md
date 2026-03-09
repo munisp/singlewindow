@@ -1306,3 +1306,37 @@
 - [x] main.tsx: i18n imported before app renders to ensure translations are ready
 - [x] Vitest tests: 87 tests covering eligibility, scorecard, locale completeness, RTL detection (sprint60-62.test.ts)
 - [x] Total vitest tests: 927 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 63 — Notification Centre & Real-Time Alerts
+
+- [x] WebSocket server: server/_core/wsServer.ts — ws:// at /api/ws, session cookie auth, per-user connection registry
+- [x] broadcastToUser(userId, message): push notification events to all connected clients for a user
+- [x] tRPC notificationRouter: getNotifications, markRead, markAllRead, deleteNotification, getUnreadCount, getCategories
+- [x] Notification categories: declaration, payment, sla_breach, audit, cep_alert, system, risk, cargo
+- [x] Notification Centre UI: /app/notifications — category filter tabs, read/unread state, bulk-dismiss, real-time badge
+- [x] useNotificationSocket hook: client/src/hooks/useNotificationSocket.ts — auto-reconnect WebSocket with message dispatch
+- [x] DashboardLayout: Bell badge updated via useNotificationSocket hook
+- [x] Vitest tests for notification delivery logic and category filtering (sprint63-65.test.ts — 37 tests)
+
+## Sprint 64 — Mobile-Responsive Trader App Shell
+
+- [x] Finance.tsx: grid-cols-4 → grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 for KPI cards
+- [x] Finance.tsx: TabsList wrapped in overflow-x-auto for horizontal scroll on mobile
+- [x] DutyDrawback.tsx: grid-cols-2 → grid-cols-1 sm:grid-cols-2 for form fields
+- [x] TraderAEO.tsx: grid-cols-3 → grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 for tier cards
+- [x] TraderScorecard.tsx: grid-cols-4 → grid-cols-2 sm:grid-cols-4 for metric cards
+- [x] TraderDashboard.tsx: grid-cols-3 → grid-cols-1 sm:grid-cols-3 for stat cards
+- [x] MojaloopPayments.tsx: table wrapped in overflow-x-auto
+- [x] Vitest tests for responsive breakpoint logic and touch target validation (sprint63-65.test.ts)
+
+## Sprint 65 — End-to-End Integration Test Suite (Playwright)
+
+- [x] Installed @playwright/test 1.58.2 with TypeScript config (playwright.config.ts)
+- [x] playwright.config.ts: chromium + mobile-chrome projects, webServer auto-start, HTML report
+- [x] e2e/helpers.ts: shared page object helpers (gotoApp, expectHeading, expectToast, fillByLabel, etc.)
+- [x] e2e/journey1-declaration-clearance.spec.ts: 7 tests — auth redirect, home page, 404, mobile overflow
+- [x] e2e/journey2-aeo-self-assessment.spec.ts: 5 tests — AEO auth redirect, mobile, navigation
+- [x] e2e/journey3-5-drawback-admin-notifications.spec.ts: 14 tests — drawback, admin, notifications, cross-cutting
+- [x] CI-ready: BASE_URL env var, retries on CI, trace/screenshot/video on failure
+- [x] Vitest unit tests for E2E infrastructure and route protection logic (sprint63-65.test.ts)
+- [x] Total vitest tests: 964 passing (20 pre-existing DB-connection failures unchanged)

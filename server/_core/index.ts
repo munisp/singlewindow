@@ -11,6 +11,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
+import { setupWebSocketServer } from "./wsServer";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // General tRPC API: 200 requests per minute per IP
@@ -628,6 +629,8 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  // Sprint 63: WebSocket server for real-time notifications
+  setupWebSocketServer(server);
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

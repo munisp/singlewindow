@@ -1,10 +1,9 @@
 /**
- * Notification Centre — Sprint 15 / Sprint 21
+ * Notification Centre — Sprint 15 / Sprint 21 / Sprint 63
  * In-app inbox for traders and all platform users.
- * Backed by the user_notifications table via userNotifications tRPC router.
- * Sprint 21: Added Acknowledge button for security_alert port congestion notifications.
+ * Sprint 63: WebSocket real-time push, category filter tabs, real-time badge update.
  */
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -15,32 +14,46 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Bell, CheckCheck, RefreshCw, FileText, AlertTriangle,
-  CheckCircle, Clock, Shield, Info, Package, ShieldCheck
+  CheckCircle, Clock, Shield, Info, Package, ShieldCheck,
+  Wifi, WifiOff
 } from "lucide-react";
 import { toast } from "sonner";
+import { useNotificationSocket } from "@/hooks/useNotificationSocket";
 
-const TYPE_META: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  declaration_status_change: { icon: FileText, color: "text-blue-500", label: "Declaration Update" },
-  clearance_complete: { icon: CheckCircle, color: "text-green-500", label: "Clearance Complete" },
-  declaration_submitted: { icon: Package, color: "text-blue-400", label: "Submission Confirmed" },
-  declaration_cleared: { icon: CheckCircle, color: "text-green-500", label: "Cleared" },
-  declaration_rejected: { icon: AlertTriangle, color: "text-red-500", label: "Rejected" },
-  permit_expiry_warning: { icon: Clock, color: "text-amber-500", label: "Permit Expiry Warning" },
-  permit_approved: { icon: CheckCircle, color: "text-green-500", label: "Permit Approved" },
-  permit_rejected: { icon: AlertTriangle, color: "text-red-500", label: "Permit Rejected" },
-  fraud_case_opened: { icon: Shield, color: "text-red-500", label: "Fraud Case Opened" },
-  fraud_case_assigned: { icon: Shield, color: "text-orange-500", label: "Case Assigned" },
-  sla_breach: { icon: AlertTriangle, color: "text-red-600", label: "SLA Breach" },
-  kyc_approved: { icon: CheckCircle, color: "text-green-500", label: "Identity Verified" },
-  kyc_rejected: { icon: AlertTriangle, color: "text-red-500", label: "Verification Failed" },
-  duty_payment_due: { icon: Clock, color: "text-amber-500", label: "Payment Due" },
-  payment_confirmed: { icon: CheckCircle, color: "text-green-500", label: "Payment Confirmed" },
-  security_alert: { icon: Shield, color: "text-red-600", label: "Security Alert" },
-  aeo_status_update: { icon: CheckCircle, color: "text-blue-500", label: "AEO Status Update" },
-  document_required: { icon: FileText, color: "text-amber-500", label: "Document Required" },
-  general: { icon: Info, color: "text-muted-foreground", label: "General" },
-  system: { icon: Info, color: "text-muted-foreground", label: "System" },
+const TYPE_META: Record<string, { icon: React.ElementType; color: string; label: string; category: string }> = {
+  declaration_status_change: { icon: FileText, color: "text-blue-500", label: "Declaration Update", category: "declaration" },
+  clearance_complete: { icon: CheckCircle, color: "text-green-500", label: "Clearance Complete", category: "declaration" },
+  declaration_submitted: { icon: Package, color: "text-blue-400", label: "Submission Confirmed", category: "declaration" },
+  declaration_cleared: { icon: CheckCircle, color: "text-green-500", label: "Cleared", category: "declaration" },
+  declaration_rejected: { icon: AlertTriangle, color: "text-red-500", label: "Rejected", category: "declaration" },
+  permit_expiry_warning: { icon: Clock, color: "text-amber-500", label: "Permit Expiry Warning", category: "compliance" },
+  permit_approved: { icon: CheckCircle, color: "text-green-500", label: "Permit Approved", category: "compliance" },
+  permit_rejected: { icon: AlertTriangle, color: "text-red-500", label: "Permit Rejected", category: "compliance" },
+  fraud_case_opened: { icon: Shield, color: "text-red-500", label: "Fraud Case Opened", category: "security" },
+  fraud_case_assigned: { icon: Shield, color: "text-orange-500", label: "Case Assigned", category: "security" },
+  sla_breach: { icon: AlertTriangle, color: "text-red-600", label: "SLA Breach", category: "sla_breach" },
+  kyc_approved: { icon: CheckCircle, color: "text-green-500", label: "Identity Verified", category: "compliance" },
+  kyc_rejected: { icon: AlertTriangle, color: "text-red-500", label: "Verification Failed", category: "compliance" },
+  duty_payment_due: { icon: Clock, color: "text-amber-500", label: "Payment Due", category: "payment" },
+  payment_confirmed: { icon: CheckCircle, color: "text-green-500", label: "Payment Confirmed", category: "payment" },
+  security_alert: { icon: Shield, color: "text-red-600", label: "Security Alert", category: "security" },
+  aeo_status_update: { icon: CheckCircle, color: "text-blue-500", label: "AEO Status Update", category: "compliance" },
+  document_required: { icon: FileText, color: "text-amber-500", label: "Document Required", category: "declaration" },
+  general: { icon: Info, color: "text-muted-foreground", label: "General", category: "general" },
+  system: { icon: Info, color: "text-muted-foreground", label: "System", category: "general" },
 };
+
+const CATEGORIES = [
+  { key: "all", label: "All" },
+  { key: "declaration", label: "Declarations" },
+  { key: "payment", label: "Payments" },
+  { key: "sla_breach", label: "SLA Breaches" },
+  { key: "security", label: "Security" },
+  { key: "compliance", label: "Compliance" },
+  { key: "general", label: "General" },
+] as const;
+
+type CategoryKey = (typeof CATEGORIES)[number]["key"];
 
 function getTypeMeta(type: string) {
   return TYPE_META[type] ?? TYPE_META.general;
@@ -57,9 +70,6 @@ function timeAgo(isoString: string): string {
   return `${days}d ago`;
 }
 
-/** Extract port code from port congestion alert body text.
- *  Expected format: "Port XXXX has reached critical congestion..."
- */
 function extractPortCodeFromAlert(body: string | null | undefined): string | null {
   if (!body) return null;
   const match = body.match(/Port\s+([A-Z]{2,16})\s+has reached critical/);
@@ -70,15 +80,47 @@ export default function NotificationCentre() {
   const utils = trpc.useUtils();
   const { user } = useAuth();
   const canAcknowledge = user?.role === "admin" || user?.role === "customs_officer";
-  const [tab, setTab] = useState<"all" | "unread">("all");
+  const [readFilter, setReadFilter] = useState<"all" | "unread">("all");
+  const [category, setCategory] = useState<CategoryKey>("all");
+  const [wsConnected, setWsConnected] = useState(false);
+  const [liveCount, setLiveCount] = useState<number | null>(null);
 
   const { data, isLoading, refetch } = trpc.userNotifications.getMyNotifications.useQuery({
     limit: 100,
-    onlyUnread: tab === "unread",
+    onlyUnread: readFilter === "unread",
   });
 
   const { data: countData } = trpc.userNotifications.getUnreadCount.useQuery();
-  const unreadCount = countData?.count ?? 0;
+  const unreadCount = liveCount ?? countData?.count ?? 0;
+
+  // Sprint 63: WebSocket real-time push
+  const handleNotification = useCallback(() => {
+    utils.userNotifications.getMyNotifications.invalidate();
+    utils.userNotifications.getUnreadCount.invalidate();
+    toast.info("New notification received", { duration: 3000 });
+  }, [utils]);
+
+  const handleUnreadCount = useCallback((count: number) => {
+    setLiveCount(count);
+  }, []);
+
+  useNotificationSocket({
+    onNotification: handleNotification,
+    onUnreadCount: handleUnreadCount,
+    enabled: !!user,
+  });
+
+  // Track WS connection status via a simple ping check
+  const [wsChecked, setWsChecked] = useState(false);
+  if (!wsChecked && typeof window !== "undefined") {
+    setWsChecked(true);
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    try {
+      const testWs = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+      testWs.onopen = () => { setWsConnected(true); testWs.close(); };
+      testWs.onerror = () => setWsConnected(false);
+    } catch { /* ignore */ }
+  }
 
   const markAsRead = trpc.userNotifications.markAsRead.useMutation({
     onSuccess: () => {
@@ -92,6 +134,7 @@ export default function NotificationCentre() {
     onSuccess: () => {
       utils.userNotifications.getMyNotifications.invalidate();
       utils.userNotifications.getUnreadCount.invalidate();
+      setLiveCount(0);
       toast.success("All notifications marked as read");
     },
     onError: () => toast.error("Failed to mark all as read"),
@@ -99,19 +142,36 @@ export default function NotificationCentre() {
 
   const acknowledgePortAlert = trpc.geospatial.acknowledgePortAlert.useMutation({
     onSuccess: (result) => {
-      toast.success(`Port ${result.portCode} alert acknowledged — cron scan will suppress repeat alerts until status changes again`);
+      toast.success(`Port ${result.portCode} alert acknowledged`);
       utils.userNotifications.getMyNotifications.invalidate();
     },
     onError: (err) => toast.error(err.message ?? "Failed to acknowledge alert"),
   });
 
-  const notifications = data ?? [];
+  const allNotifications = data ?? [];
+
+  // Apply category filter
+  const notifications = category === "all"
+    ? allNotifications
+    : allNotifications.filter((n) => {
+        const meta = getTypeMeta(n.type);
+        return meta.category === category;
+      });
+
+  const categoryCounts = CATEGORIES.reduce<Record<string, number>>((acc, cat) => {
+    if (cat.key === "all") {
+      acc[cat.key] = allNotifications.length;
+    } else {
+      acc[cat.key] = allNotifications.filter((n) => getTypeMeta(n.type).category === cat.key).length;
+    }
+    return acc;
+  }, {});
 
   return (
     <DashboardLayout title="Notification Centre">
-      <div className="space-y-6 max-w-3xl">
+      <div className="space-y-6 max-w-4xl">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
               <Bell className="h-6 w-6 text-primary" />
@@ -120,11 +180,13 @@ export default function NotificationCentre() {
                 <Badge variant="destructive" className="ml-1">{unreadCount} unread</Badge>
               )}
             </h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Stay informed about your declarations, permits, and account activity
+            <p className="text-muted-foreground text-sm mt-1 flex items-center gap-1.5">
+              {wsConnected
+                ? <><Wifi className="h-3 w-3 text-green-500" /> Real-time updates active</>
+                : <><WifiOff className="h-3 w-3 text-muted-foreground" /> Polling mode</>}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {unreadCount > 0 && (
               <Button
                 variant="outline"
@@ -149,10 +211,35 @@ export default function NotificationCentre() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "all" | "unread")}>
+        {/* Category filter tabs */}
+        <div className="flex gap-1 flex-wrap">
+          {CATEGORIES.map((cat) => {
+            const count = categoryCounts[cat.key] ?? 0;
+            return (
+              <button
+                key={cat.key}
+                onClick={() => setCategory(cat.key)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  category === cat.key
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {cat.label}
+                {count > 0 && (
+                  <span className={`ml-1.5 ${category === cat.key ? "opacity-80" : "opacity-60"}`}>
+                    ({count})
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Read/Unread tabs */}
+        <Tabs value={readFilter} onValueChange={(v) => setReadFilter(v as "all" | "unread")}>
           <TabsList>
-            <TabsTrigger value="all">All ({data?.length ?? 0})</TabsTrigger>
+            <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="unread">
               Unread
               {unreadCount > 0 && (
@@ -161,11 +248,16 @@ export default function NotificationCentre() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value={tab} className="mt-4">
+          <TabsContent value={readFilter} className="mt-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
-                  {tab === "unread" ? "Unread Notifications" : "All Notifications"}
+                  {readFilter === "unread" ? "Unread Notifications" : "All Notifications"}
+                  {category !== "all" && (
+                    <span className="text-muted-foreground font-normal ml-2">
+                      — {CATEGORIES.find((c) => c.key === category)?.label}
+                    </span>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
@@ -179,10 +271,10 @@ export default function NotificationCentre() {
                   <div className="p-12 text-center text-muted-foreground">
                     <Bell className="h-12 w-12 mx-auto mb-3 opacity-30" />
                     <p className="font-medium">
-                      {tab === "unread" ? "No unread notifications" : "No notifications yet"}
+                      {readFilter === "unread" ? "No unread notifications" : "No notifications yet"}
                     </p>
                     <p className="text-sm mt-1">
-                      {tab === "unread"
+                      {readFilter === "unread"
                         ? "You're all caught up!"
                         : "Activity updates will appear here as your declarations progress."}
                     </p>
@@ -192,7 +284,6 @@ export default function NotificationCentre() {
                     {notifications.map((n) => {
                       const meta = getTypeMeta(n.type);
                       const Icon = meta.icon;
-                      // For security_alert port congestion notifications, extract the port code
                       const portCode = n.type === "security_alert"
                         ? extractPortCodeFromAlert(n.body)
                         : null;
@@ -203,17 +294,14 @@ export default function NotificationCentre() {
                             !n.isRead ? "bg-primary/5 hover:bg-primary/8" : "hover:bg-muted/30"
                           }`}
                         >
-                          {/* Unread dot */}
                           <div
                             className={`h-2 w-2 rounded-full mt-2.5 shrink-0 ${
                               !n.isRead ? "bg-primary" : "bg-transparent"
                             }`}
                           />
-                          {/* Icon */}
                           <div className={`mt-0.5 shrink-0 ${meta.color}`}>
                             <Icon className="h-5 w-5" />
                           </div>
-                          {/* Content */}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2">
                               <div>
@@ -233,7 +321,6 @@ export default function NotificationCentre() {
                                 </Badge>
                               </div>
                             </div>
-                            {/* Action buttons row */}
                             <div className="flex items-center gap-2 mt-1 flex-wrap">
                               {!n.isRead && (
                                 <Button
@@ -246,7 +333,6 @@ export default function NotificationCentre() {
                                   Mark as read
                                 </Button>
                               )}
-                              {/* Acknowledge button for port congestion critical alerts */}
                               {portCode && canAcknowledge && (
                                 <Button
                                   variant="outline"

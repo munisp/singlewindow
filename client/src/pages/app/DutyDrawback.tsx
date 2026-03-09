@@ -72,7 +72,7 @@ function NewClaimDialog({ open, onClose }: { open: boolean; onClose: () => void 
           <DialogTitle className="text-gold font-display">New Duty Drawback Claim</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-slate-300 text-sm">Import Declaration ID *</Label>
               <Input value={importDeclId} onChange={(e) => setImportDeclId(e.target.value)} type="number" placeholder="e.g. 42" className="bg-white/5 border-white/10 text-white mt-1" />
