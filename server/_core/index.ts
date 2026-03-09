@@ -6,6 +6,7 @@ import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
+import { registerOpenApiRoute } from "../openapi";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -637,6 +638,8 @@ async function startServer() {
   // OAuth callback under /api/oauth/callback — apply strict rate limiting
   app.use("/api/oauth", authRateLimit);
   registerOAuthRoutes(app);
+  // Sprint 68: OpenAPI spec endpoint
+  registerOpenApiRoute(app);
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

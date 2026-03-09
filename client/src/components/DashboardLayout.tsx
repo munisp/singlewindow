@@ -129,7 +129,8 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Port & Trade Intelligence",
         items: [
           { icon: Anchor, label: "Port Activity Map", path: "/app/geo/heatmap" },
-        { icon: Activity, label: "Congestion Forecast", path: "/app/geo/congestion-forecast" },
+          { icon: Activity, label: "Congestion Forecast", path: "/app/geo/congestion-forecast" },
+          { icon: Anchor, label: "Cargo Tracking Map", path: "/app/geo/cargo-tracking" },
         ],
       },
       {
@@ -185,6 +186,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: DollarSign, label: "Cost Management", path: "/app/admin/costs" },
           { icon: ClipboardCheck, label: "Audit Engine", path: "/app/admin/audit-engine" },
           { icon: Code2, label: "Developer Portal", path: "/app/developer" },
+          { icon: Code2, label: "API Explorer", path: "/app/developer/api-explorer" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },
@@ -283,6 +285,8 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: BarChart3, label: "Performance Scorecard", path: "/app/trader/scorecard" },
         { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },
         { icon: Fingerprint, label: "Identity Verification", path: "/app/trader/kyc" },
+        { icon: Anchor, label: "Cargo Tracking Map", path: "/app/geo/cargo-tracking" },
+        { icon: CheckCircle, label: "Account Setup Wizard", path: "/app/onboarding" },
       ],
     },
     {

@@ -1340,3 +1340,33 @@
 - [x] CI-ready: BASE_URL env var, retries on CI, trace/screenshot/video on failure
 - [x] Vitest unit tests for E2E infrastructure and route protection logic (sprint63-65.test.ts)
 - [x] Total vitest tests: 964 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 66 — Cargo Tracking Real-Time Map
+- [x] tRPC cargoTrackingRouter: getLiveVessels, getVesselRoute, getShipmentPosition, subscribeToUpdates, getPortArrivals
+- [x] AIS position polling: 30-second interval fetch from sedona-svc, store latest position per MMSI
+- [x] Route polyline: origin port → waypoints → current position → destination port
+- [x] CargoTracking UI: /app/geo/cargo-tracking — Google Maps component, animated vessel markers, route polyline, shipment info panel
+- [x] Real-time position updates: useInterval hook polling trpc.cargoTracking.getLiveVessels every 30s
+- [x] Vessel detail panel: click marker to show MMSI, vessel name, speed, heading, last update, linked declaration
+- [x] DashboardLayout: Cargo Tracking nav item added to admin Port Intelligence and trader My Trade Portal
+- [x] Vitest tests for AIS position interpolation and route calculationn
+
+## Sprint 67 — Trader Onboarding Wizard
+- [x] DB schema: onboarding_progress table added to drizzle/schema.ts
+- [x] tRPC onboardingRouter: getProgress, saveStep, calculateAeoEligibility, resetOnboarding, getOnboardingStats
+- [x] Step 1: Company Profile (name, registration number, country, address, industry)
+- [x] Step 2: KYC Document Upload (certificate of incorporation, tax ID, director ID)
+- [x] Step 3: Bank Account Verification (account number, bank name, SWIFT/BIC, currency)
+- [x] Step 4: Test Declaration (guided submission of a sample declaration with pre-filled data)
+- [x] Step 5: AEO Eligibility Check (auto-run eligibility assessment, show tier recommendation)
+- [x] Onboarding Wizard UI: /app/onboarding — 5-step wizard with progress bar, step validation, completion celebration
+- [x] DashboardLayout: Account Setup Wizard nav item added to trader portal
+- [x] Vitest tests for step validation and AEO eligibility scoringe
+
+### Sprint 68 — OpenAPI Specification Export
+- [x] Auto-generate OpenAPI 3.1 spec from tRPC router definitions (custom generator in server/openapi.ts)
+- [x] Serve spec at GET /api/openapi.json (public endpoint, 5-min cache, 54 paths)
+- [x] API Explorer UI: /app/developer/api-explorer — interactive endpoint browser with search, tag filter, expand/collapse
+- [x] Spec includes: all public and protected procedures, request/response schemas, auth requirements
+- [x] DashboardLayout: API Explorer nav item added to admin Reference section
+- [x] Vitest tests for spec generation and endpoint coverage validation

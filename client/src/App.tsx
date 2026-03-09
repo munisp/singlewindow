@@ -69,6 +69,12 @@ const AuditEngineDashboard = lazy(() => import('./pages/app/AuditEngineDashboard
 const BondedWarehouseManagement = lazy(() => import('./pages/app/BondedWarehouseManagement'));
 const DrawbackAutomation = lazy(() => import('./pages/app/DrawbackAutomation'));
 const TraderScorecard = lazy(() => import('./pages/app/TraderScorecard'));
+// Sprint 66 — Cargo Tracking Real-Time Map
+const CargoTrackingMap = lazy(() => import('./pages/app/CargoTrackingMap'));
+// Sprint 67 — Trader Onboarding Wizard
+const TraderOnboarding = lazy(() => import('./pages/app/TraderOnboarding'));
+// Sprint 68 — OpenAPI Explorer
+const ApiExplorer = lazy(() => import('./pages/app/ApiExplorer'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -306,6 +312,21 @@ function Router() {
       {/* Sprint 56 — Bonded Warehouse Management */}
       <Route path="/app/port/bonded-warehouse-mgmt">
         <Suspense fallback={<LazyFallback />}><BondedWarehouseManagement /></Suspense>
+      </Route>
+
+      {/* Sprint 66 — Cargo Tracking Real-Time Map */}
+      <Route path="/app/geo/cargo-tracking">
+        <Suspense fallback={<LazyFallback />}><CargoTrackingMap /></Suspense>
+      </Route>
+
+      {/* Sprint 67 — Trader Onboarding Wizard */}
+      <Route path="/app/onboarding">
+        <Suspense fallback={<LazyFallback />}><TraderOnboarding /></Suspense>
+      </Route>
+
+      {/* Sprint 68 — OpenAPI Explorer */}
+      <Route path="/app/developer/api-explorer">
+        <Suspense fallback={<LazyFallback />}><ApiExplorer /></Suspense>
       </Route>
 
       {/* 404 */}

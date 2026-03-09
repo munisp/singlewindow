@@ -1029,3 +1029,27 @@ export const tenantUsers = pgTable("tenant_users", {
 ]);
 export type TenantUser = typeof tenantUsers.$inferSelect;
 export type InsertTenantUser = typeof tenantUsers.$inferInsert;
+
+// ─── TRADER ONBOARDING WIZARD (Sprint 67) ────────────────────────────────────
+export const onboardingStepEnum = pgEnum("onboarding_step", [
+  "company_profile", "kyc_documents", "bank_account", "test_declaration", "aeo_eligibility"
+]);
+export const onboardingStepStatusEnum = pgEnum("onboarding_step_status", [
+  "pending", "in_progress", "completed", "skipped"
+]);
+
+export const onboardingProgress = pgTable("onboarding_progress", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  currentStep: onboardingStepEnum("current_step").default("company_profile").notNull(),
+  overallStatus: varchar("overall_status", { length: 32 }).default("in_progress").notNull(),
+  completedAt: timestamp("completed_at"),
+  stepData: json("step_data").default({}).notNull().$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_onboarding_user_id").on(t.userId),
+  index("idx_onboarding_status").on(t.overallStatus),
+]);
+export type OnboardingProgress = typeof onboardingProgress.$inferSelect;
+export type InsertOnboardingProgress = typeof onboardingProgress.$inferInsert;
