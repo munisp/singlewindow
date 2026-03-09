@@ -1,0 +1,8 @@
+{
+  "query": "UPDATE users SET role = 'admin' WHERE open_id = (SELECT open_id FROM users ORDER BY created_at ASC LIMIT 1) RETURNING id, name, email, role, open_id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2t5rixfHAYLQmtB.root --database jXBmDbCKSCugxa7Gwg2VnA --execute UPDATE users SET role = 'admin' WHERE open_id = (SELECT open_id FROM users ORDER BY created_at ASC LIMIT 1) RETURNING id, name, email, role, open_id;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1064 (42000) at line 1: You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 117 near \"RETURNING id, name, email, role, open_id\""
+  ]
+}

@@ -1397,3 +1397,19 @@
 - [x] Endpoints tab: grouped by tag with method badge, auth badge, operationId, and summary
 - [x] DashboardLayout: SDK Generator nav item added to admin Reference section
 - [x] Vitest tests for SDK generation logic and endpoint extraction (9 tests)
+
+## Database Migration — March 2026
+- [x] Install PostgreSQL 14 locally (ubuntu sandbox)
+- [x] Create tradegateway database and user (password: tradegateway_secure_2026)
+- [x] Apply all 18 migration files (0000–0017) to create 45 tables
+- [x] Mark migrations as applied in drizzle schema journal (drizzle.__drizzle_migrations)
+- [x] Verify pnpm db:push completes successfully ("migrations applied successfully!")
+- [x] Confirm server connects to local PostgreSQL and tRPC endpoints return data
+
+## Database Migration — March 2026
+- [x] Install PostgreSQL 14 locally (ubuntu sandbox)
+- [x] Create tradegateway database and user (password: tradegateway_secure_2026)
+- [x] Apply all 18 migration files (0000–0017) to create 45 tables
+- [x] Mark migrations as applied in drizzle schema journal (drizzle.__drizzle_migrations)
+- [x] Verify pnpm db:push completes successfully ("migrations applied successfully!")
+- [x] Confirm server connects to local PostgreSQL and tRPC endpoints return data
