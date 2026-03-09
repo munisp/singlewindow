@@ -12,11 +12,14 @@ import {
   Clock,
   Eye,
   FileText,
+  Radio,
   Search,
   Shield,
   XCircle,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 
 // SLA thresholds in hours by risk lane
@@ -274,6 +277,110 @@ export default function CustomsDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Fluvio Live Cargo Event Stream ─────────────────────────────── */}
+      <LiveCargoStream />
     </DashboardLayout>
+  );
+}
+
+// ─── Live Cargo Stream Panel ──────────────────────────────────────────────────
+const SEVERITY_STYLE: Record<string, string> = {
+  INFO:     "bg-blue-50 border-blue-200 text-blue-800",
+  WARNING:  "bg-amber-50 border-amber-200 text-amber-800",
+  CRITICAL: "bg-red-50 border-red-200 text-red-800",
+};
+
+function LiveCargoStream() {
+  const { data: wsInfo } = trpc.stream.getWebSocketUrl.useQuery({});
+  const { data: initialEvents, isLoading } = trpc.stream.getRecentEvents.useQuery({ limit: 20 });
+  const [events, setEvents] = useState<any[]>([]);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Seed with initial events from ring buffer
+  useEffect(() => {
+    if (initialEvents?.events) {
+      setEvents(initialEvents.events.slice(0, 20));
+    }
+  }, [initialEvents]);
+
+  // Open WebSocket when URL is available
+  useEffect(() => {
+    if (!wsInfo?.wsUrl) return;
+    const ws = new WebSocket(wsInfo.wsUrl);
+    wsRef.current = ws;
+    ws.onopen = () => setConnected(true);
+    ws.onclose = () => setConnected(false);
+    ws.onerror = () => setConnected(false);
+    ws.onmessage = (msg) => {
+      try {
+        const e = JSON.parse(msg.data);
+        setEvents(prev => [e, ...prev].slice(0, 50));
+        // Auto-scroll to top
+        if (listRef.current) listRef.current.scrollTop = 0;
+      } catch {}
+    };
+    return () => ws.close();
+  }, [wsInfo?.wsUrl]);
+
+  // Polling fallback when WebSocket is unavailable
+  const { data: polled } = trpc.stream.getRecentEvents.useQuery(
+    { limit: 10 },
+    { refetchInterval: wsInfo?.pollingIntervalMs ?? false, enabled: !wsInfo?.wsUrl }
+  );
+  useEffect(() => {
+    if (!wsInfo?.wsUrl && polled?.events) {
+      setEvents(polled.events.slice(0, 20));
+    }
+  }, [polled, wsInfo?.wsUrl]);
+
+  return (
+    <Card className="mt-6">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Radio className="h-4 w-4 text-primary" />
+            Live Cargo Event Stream
+          </CardTitle>
+          <div className="flex items-center gap-1.5 text-xs">
+            {connected ? (
+              <><Wifi className="h-3.5 w-3.5 text-emerald-500" /><span className="text-emerald-600 font-medium">Live</span></>
+            ) : (
+              <><WifiOff className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-muted-foreground">{wsInfo?.wsUrl ? "Connecting…" : "Polling"}</span></>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div ref={listRef} className="max-h-72 overflow-y-auto divide-y">
+          {isLoading ? (
+            Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 mx-4 my-1" />)
+          ) : events.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground text-center">No events yet — waiting for stream…</p>
+          ) : (
+            events.map((e: any, i: number) => (
+              <div key={e.event_id ?? i} className="flex items-start gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
+                <span className={`mt-0.5 shrink-0 text-xs font-medium px-1.5 py-0.5 rounded border ${SEVERITY_STYLE[e.severity] ?? SEVERITY_STYLE.INFO}`}>
+                  {e.severity ?? "INFO"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-foreground">{e.event_type}</span>
+                    {e.port_code && <span className="text-xs text-muted-foreground">{e.port_code}</span>}
+                    {e.declaration_id && <Badge variant="outline" className="text-xs h-4 px-1">Decl #{e.declaration_id}</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{e.message}</p>
+                </div>
+                <span className="text-xs text-muted-foreground shrink-0">
+                  {e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "—"}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

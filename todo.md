@@ -950,3 +950,36 @@
 - [x] tRPC keycloak router: getConfig, updateConfig, testConnection, validateToken procedures
 - [x] Admin identity provider UI: /app/admin/identity-provider page
 - [x] Vitest tests for keycloak router
+
+## Sprint 33 — Temporal Durable Workflow Integration
+
+- [x] Go temporal-worker: cmd/main.go with Temporal client + worker registration
+- [x] Go temporal-worker: workflows/declaration_clearance.go (full 8-step clearance workflow)
+- [x] Go temporal-worker: activities/risk_score.go (call Python risk-engine)
+- [x] Go temporal-worker: activities/oga_approval.go (fan-out to all OGA agencies)
+- [x] Go temporal-worker: activities/duty_payment.go (Mojaloop + TigerBeetle)
+- [x] Go temporal-worker: activities/cargo_release.go (port operator notification)
+- [x] Go temporal-worker: Dockerfile
+- [x] tRPC temporal router: startWorkflow, getWorkflowStatus, listWorkflows, cancelWorkflow
+- [x] Customs dashboard: workflow status tracker panel (TemporalWorkflows.tsx)
+- [x] Vitest tests for temporal tRPC router (sprint33-35.test.ts)
+
+## Sprint 34 — Fluvio Real-Time Stream Panel
+
+- [x] Go fluvio-consumer: cmd/main.go (Fluvio consumer + WebSocket broadcaster + ring buffer)
+- [x] Go fluvio-consumer: internal/consumer.go (simulated Fluvio consumer with real-event semantics)
+- [x] Go fluvio-consumer: internal/broadcaster.go (WebSocket hub with per-declaration filtering)
+- [x] Go fluvio-consumer: Dockerfile
+- [x] tRPC stream router: getRecentEvents, getWebSocketUrl, getServiceStatus, publishTestEvent
+- [x] Customs dashboard: live cargo event feed panel with WebSocket + polling fallback
+- [x] Vitest tests for stream router (sprint33-35.test.ts)
+
+## Sprint 35 — AEO Programme Management
+
+- [x] DB schema: aeo_applications, aeo_certificates tables
+- [x] tRPC aeo router: applyForAEO, getApplication, listApplications, reviewApplication, issueCertificate
+- [x] Trader UI: AEO self-assessment form (/app/trader/aeo) — TraderAEO.tsx (231 lines)
+- [x] Customs admin UI: AEO review queue (/app/admin/aeo) — AdminAEO.tsx fully rewritten with scoring
+- [x] Compliance scoring: 4-flag boolean scoring (25pts each) + security/financial sub-scores
+- [x] Green-lane trigger: isGreenLaneEligible() checks AEO status + certificate expiry
+- [x] Vitest tests for AEO router (sprint33-35.test.ts — 61 tests)
