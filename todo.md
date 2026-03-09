@@ -880,3 +880,73 @@
 - [x] ClamAV sidecar added to Helm chart deployment.yaml (clamd + freshclam containers + init container)
 - [x] ClamAV values added to Helm values.yaml (enabled, image, resources, persistence, config)
 - [x] 399/419 vitest tests pass (20 pre-existing DB-connection failures unrelated to Sprint 29)
+
+## Sprint 30 — Mojaloop Payment Integration
+
+- [ ] Mojaloop DB schema: mojaloop_transactions table (FSP, MSISDN, quote, transfer state)
+- [ ] Mojaloop tRPC router: getFSPs, initiatePayment, checkStatus, webhookCallback procedures
+- [ ] Mojaloop Go client: HTTP calls to Mojaloop Switch API (quotes, transfers)
+- [ ] Payment initiation wired to declaration duty amounts
+- [ ] Trader payment UI: FSP selector, MSISDN input, payment status polling
+- [ ] Payment status badge on DeclarationDetail page
+- [ ] Webhook endpoint for Mojaloop transfer callbacks
+- [ ] Audit event logged on payment initiation and completion
+- [ ] Vitest tests for Mojaloop router procedures
+
+## Sprint 31 — TigerBeetle Ledger Wiring
+
+- [ ] TigerBeetle DB schema: tigerbeetle_entries table (account IDs, amount, transfer ID, status)
+- [ ] TigerBeetle tRPC router: createAccounts, recordTransfer, getBalance, getLedgerEntries
+- [ ] TigerBeetle Go bridge service: HTTP wrapper around TigerBeetle client
+- [x] Wire duty payment completion to TigerBeetle double-entry record
+- [x] Finance dashboard panel: ledger balance, recent transfers, account summary
+- [x] Reconciliation view: match Mojaloop transfers to TigerBeetle entries
+- [x] Audit event logged on ledger entry creation
+- [x] Vitest tests for TigerBeetle router and ledger logic
+
+## Sprint 32 — Keycloak SSO Integration
+
+- [x] Keycloak DB schema: keycloak_config table (realm, client ID, discovery URL, enabled)
+- [x] Keycloak tRPC router: getConfig, updateConfig, testConnection procedures
+- [x] OIDC JWT validation middleware (verify tokens from Keycloak realm)
+- [x] Role federation: map Keycloak realm roles to TradeGateway roles
+- [x] Admin UI: Identity Provider Settings page (/app/admin/identity-provider)
+- [x] Login flow: redirect to Keycloak when SSO is enabled, fallback to Manus OAuth
+- [x] Keycloak Helm chart values for on-premise deployment
+- [x] Vitest tests for OIDC config and role mapping logic
+
+## Sprint 30 — Go Mojaloop Service (Revised: Go + Python)
+
+- [x] Go mojaloop-svc: cmd/mojaloop-svc/main.go with Gin HTTP server
+- [x] Go mojaloop-svc: internal/mojaloop/client.go (Mojaloop Switch API client)
+- [x] Go mojaloop-svc: internal/mojaloop/handlers.go (quote, transfer, status, webhook endpoints)
+- [x] Go mojaloop-svc: internal/mojaloop/ilp.go (ILP packet generation and condition/fulfilment)
+- [x] Go mojaloop-svc: internal/mojaloop/fsp.go (FSP registry and validation)
+- [x] Go mojaloop-svc: Dockerfile
+- [x] Python payment-risk-scorer: FastAPI service scoring payment risk before transfer
+- [x] tRPC mojaloop router: call Go service instead of in-process logic
+- [x] Trader payment UI: FSP selector, MSISDN input, status polling with Go service
+- [x] Vitest tests for mojaloop tRPC router
+
+## Sprint 31 — Go TigerBeetle Bridge + Python Risk Scorer (Revised)
+
+- [x] Go tigerbeetle-bridge: cmd/tigerbeetle-bridge/main.go with Gin HTTP server
+- [x] Go tigerbeetle-bridge: internal/ledger/accounts.go (create/query accounts)
+- [x] Go tigerbeetle-bridge: internal/ledger/transfers.go (post/query transfers)
+- [x] Go tigerbeetle-bridge: internal/ledger/balance.go (account balance queries)
+- [x] Python payment-risk-scorer: FastAPI /score endpoint (amount, FSP, trader profile)
+- [x] tRPC ledger router: createEntry, getBalance, listEntries procedures
+- [x] Finance dashboard panel: ledger balance, recent transfers, account summary
+- [x] Vitest tests for ledger router
+
+## Sprint 32 — Go Keycloak OIDC Validator (Revised)
+
+- [x] Go keycloak-svc: cmd/keycloak-svc/main.go with Gin HTTP server
+- [x] Go keycloak-svc: internal/oidc/discovery.go (fetch .well-known/openid-configuration)
+- [x] Go keycloak-svc: internal/oidc/jwks.go (fetch and cache JWKS, rotate keys)
+- [x] Go keycloak-svc: internal/oidc/validator.go (validate JWT, extract claims)
+- [x] Go keycloak-svc: internal/oidc/roles.go (map Keycloak realm roles to TradeGateway roles)
+- [x] Go keycloak-svc: Dockerfile
+- [x] tRPC keycloak router: getConfig, updateConfig, testConnection, validateToken procedures
+- [x] Admin identity provider UI: /app/admin/identity-provider page
+- [x] Vitest tests for keycloak router

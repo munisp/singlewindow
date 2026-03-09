@@ -31,6 +31,8 @@ import { slaEscalationRouter } from "./routers/slaEscalation";
 import { bulkExportRouter } from "./routers/bulkExport";
 import { notificationPreferencesRouter } from "./routers/notificationPreferences";
 import { adminAnalyticsRouter } from "./routers/adminAnalytics";
+import { ledgerRouter } from "./routers/ledger";
+import { keycloakRouter } from "./routers/keycloak";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -100,6 +102,8 @@ export const appRouter = router({
   notificationPreferences: notificationPreferencesRouter,
   adminAnalytics: adminAnalyticsRouter,
   documentVault: documentVaultRouter,
+  ledger: ledgerRouter,
+  keycloak: keycloakRouter,
 });
 
 export type AppRouter = typeof appRouter;

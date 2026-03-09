@@ -945,3 +945,128 @@ export async function markAllUserNotificationsRead(userId: number): Promise<numb
     .returning({ id: userNotifications.id });
   return result.length;
 }
+
+// ─── MOJALOOP TRANSACTION QUERIES ────────────────────────────────────────────
+
+export async function createMojaloopTransaction(data: typeof import("../drizzle/schema").mojaloopTransactions.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  const result = await db.insert(mojaloopTransactions).values(data).returning();
+  return result[0];
+}
+
+export async function getMojaloopTransactionByTransferId(transferId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  const result = await db.select().from(mojaloopTransactions)
+    .where(eq(mojaloopTransactions.transferId, transferId)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function updateMojaloopTransaction(transferId: string, data: Partial<typeof import("../drizzle/schema").mojaloopTransactions.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  const result = await db.update(mojaloopTransactions)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(mojaloopTransactions.transferId, transferId))
+    .returning();
+  return result[0];
+}
+
+export async function getMojaloopTransactionsByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  return db.select().from(mojaloopTransactions)
+    .where(eq(mojaloopTransactions.declarationId, declarationId))
+    .orderBy(desc(mojaloopTransactions.createdAt));
+}
+
+export async function getMojaloopTransactionsByUser(userId: number, limit = 20) {
+  const db = await getDb();
+  if (!db) return [];
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  return db.select().from(mojaloopTransactions)
+    .where(eq(mojaloopTransactions.initiatedBy, userId))
+    .orderBy(desc(mojaloopTransactions.createdAt))
+    .limit(limit);
+}
+
+// ─── TIGERBEETLE LEDGER QUERIES ───────────────────────────────────────────────
+
+export async function createLedgerEntry(data: typeof import("../drizzle/schema").tigerBeetleLedgerEntries.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { tigerBeetleLedgerEntries } = await import("../drizzle/schema");
+  const result = await db.insert(tigerBeetleLedgerEntries).values(data).returning();
+  return result[0];
+}
+
+export async function getLedgerEntriesByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const { tigerBeetleLedgerEntries } = await import("../drizzle/schema");
+  return db.select().from(tigerBeetleLedgerEntries)
+    .where(eq(tigerBeetleLedgerEntries.declarationId, declarationId))
+    .orderBy(desc(tigerBeetleLedgerEntries.createdAt));
+}
+
+export async function getLedgerEntriesByPayment(paymentId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const { tigerBeetleLedgerEntries } = await import("../drizzle/schema");
+  return db.select().from(tigerBeetleLedgerEntries)
+    .where(eq(tigerBeetleLedgerEntries.paymentId, paymentId))
+    .orderBy(desc(tigerBeetleLedgerEntries.createdAt));
+}
+
+export async function getRecentLedgerEntries(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  const { tigerBeetleLedgerEntries } = await import("../drizzle/schema");
+  return db.select().from(tigerBeetleLedgerEntries)
+    .orderBy(desc(tigerBeetleLedgerEntries.createdAt))
+    .limit(limit);
+}
+
+export async function updateLedgerEntry(tbTransferId: string, data: Partial<typeof import("../drizzle/schema").tigerBeetleLedgerEntries.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { tigerBeetleLedgerEntries } = await import("../drizzle/schema");
+  const result = await db.update(tigerBeetleLedgerEntries)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(tigerBeetleLedgerEntries.tbTransferId, tbTransferId))
+    .returning();
+  return result[0];
+}
+
+// ─── KEYCLOAK CONFIG QUERIES ──────────────────────────────────────────────────
+
+export async function getKeycloakConfig() {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { keycloakConfig } = await import("../drizzle/schema");
+  const result = await db.select().from(keycloakConfig).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function upsertKeycloakConfig(data: Partial<typeof import("../drizzle/schema").keycloakConfig.$inferInsert>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { keycloakConfig } = await import("../drizzle/schema");
+  // Only one row ever exists (id=1)
+  const existing = await db.select().from(keycloakConfig).limit(1);
+  if (existing[0]) {
+    const result = await db.update(keycloakConfig)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(keycloakConfig.id, existing[0].id))
+      .returning();
+    return result[0];
+  } else {
+    const result = await db.insert(keycloakConfig).values({ ...data }).returning();
+    return result[0];
+  }
+}

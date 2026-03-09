@@ -808,3 +808,131 @@ export const documentShares = pgTable("document_shares", {
 ]);
 export type DocumentShare = typeof documentShares.$inferSelect;
 export type InsertDocumentShare = typeof documentShares.$inferInsert;
+
+// ─── MOJALOOP TRANSACTIONS ────────────────────────────────────────────────────
+// Sprint 30: Persistent record of every Mojaloop payment transfer initiated
+// through the platform. Linked to payments and declarations for reconciliation.
+
+export const mojaloopTransferStatusEnum = pgEnum("mojaloop_transfer_status", [
+  "PENDING", "PROCESSING", "COMMITTED", "ABORTED", "EXPIRED",
+]);
+
+export const mojaloopFspTypeEnum = pgEnum("mojaloop_fsp_type", [
+  "BANK", "MOBILE_MONEY", "RTGS",
+]);
+
+export const mojaloopTransactions = pgTable("mojaloop_transactions", {
+  id: serial("id").primaryKey(),
+  transferId: varchar("transfer_id", { length: 128 }).notNull().unique(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  paymentId: integer("payment_id").references(() => payments.id, { onDelete: "set null" }),
+  initiatedBy: integer("initiated_by").notNull().references(() => users.id),
+  fspId: varchar("fsp_id", { length: 64 }).notNull(),
+  fspName: varchar("fsp_name", { length: 128 }).notNull(),
+  fspType: mojaloopFspTypeEnum("fsp_type").notNull(),
+  payerAccount: varchar("payer_account", { length: 128 }).notNull(),
+  payerName: varchar("payer_name", { length: 255 }).notNull(),
+  amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("GHS").notNull(),
+  status: mojaloopTransferStatusEnum("status").default("PENDING").notNull(),
+  ilpPacket: text("ilp_packet"),
+  condition: varchar("condition", { length: 128 }),
+  fulfilment: varchar("fulfilment", { length: 128 }),
+  paymentNote: varchar("payment_note", { length: 128 }),
+  expiresAt: timestamp("expires_at"),
+  committedAt: timestamp("committed_at"),
+  abortedAt: timestamp("aborted_at"),
+  failureReason: text("failure_reason"),
+  webhookPayload: json("webhook_payload"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_mjtx_transfer_id").on(t.transferId),
+  index("idx_mjtx_declaration_id").on(t.declarationId),
+  index("idx_mjtx_initiated_by").on(t.initiatedBy),
+  index("idx_mjtx_status").on(t.status),
+  index("idx_mjtx_created_at").on(t.createdAt),
+]);
+export type MojaloopTransaction = typeof mojaloopTransactions.$inferSelect;
+export type InsertMojaloopTransaction = typeof mojaloopTransactions.$inferInsert;
+
+// ─── TIGERBEETLE LEDGER ENTRIES ───────────────────────────────────────────────
+// Sprint 31: Double-entry ledger records for every duty payment, penalty,
+// drawback, and bond transaction. TigerBeetle IDs are 128-bit unsigned integers
+// stored as varchar(40) to avoid BigInt overflow in JS.
+
+export const tbEntryTypeEnum = pgEnum("tb_entry_type", [
+  "duty_payment", "vat_payment", "levy_payment",
+  "penalty", "bond_deposit", "bond_release",
+  "drawback_credit", "refund", "adjustment",
+]);
+
+export const tbEntryStatusEnum = pgEnum("tb_entry_status", [
+  "pending", "posted", "voided", "failed",
+]);
+
+export const tigerBeetleLedgerEntries = pgTable("tigerbeetle_ledger_entries", {
+  id: serial("id").primaryKey(),
+  // TigerBeetle transfer ID (128-bit, stored as hex string)
+  tbTransferId: varchar("tb_transfer_id", { length: 40 }).notNull().unique(),
+  // TigerBeetle account IDs for debit and credit legs
+  debitAccountId: varchar("debit_account_id", { length: 40 }).notNull(),
+  creditAccountId: varchar("credit_account_id", { length: 40 }).notNull(),
+  // Amount in minor currency units (e.g., pesewas for GHS)
+  amountMinorUnits: bigint("amount_minor_units", { mode: "number" }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("GHS").notNull(),
+  ledger: integer("ledger").default(1).notNull(), // TigerBeetle ledger ID
+  entryType: tbEntryTypeEnum("entry_type").notNull(),
+  status: tbEntryStatusEnum("status").default("pending").notNull(),
+  // Links to business objects
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  paymentId: integer("payment_id").references(() => payments.id, { onDelete: "set null" }),
+  mojaloopTransferId: varchar("mojaloop_transfer_id", { length: 128 }),
+  // Human-readable reference
+  reference: varchar("reference", { length: 128 }),
+  description: text("description"),
+  metadata: json("metadata"),
+  postedAt: timestamp("posted_at"),
+  voidedAt: timestamp("voided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tble_tb_transfer_id").on(t.tbTransferId),
+  index("idx_tble_declaration_id").on(t.declarationId),
+  index("idx_tble_payment_id").on(t.paymentId),
+  index("idx_tble_entry_type").on(t.entryType),
+  index("idx_tble_status").on(t.status),
+  index("idx_tble_created_at").on(t.createdAt),
+]);
+export type TigerBeetleLedgerEntry = typeof tigerBeetleLedgerEntries.$inferSelect;
+export type InsertTigerBeetleLedgerEntry = typeof tigerBeetleLedgerEntries.$inferInsert;
+
+// ─── KEYCLOAK / OIDC CONFIGURATION ───────────────────────────────────────────
+// Sprint 32: Single-row configuration table for Keycloak OIDC/SAML integration.
+// When enabled, login redirects to Keycloak realm; JWT tokens are validated
+// against the realm's JWKS endpoint.
+
+export const keycloakConfig = pgTable("keycloak_config", {
+  id: serial("id").primaryKey(),
+  enabled: boolean("enabled").default(false).notNull(),
+  realmUrl: text("realm_url"),           // e.g. https://keycloak.example.com/realms/tradegateway
+  clientId: varchar("client_id", { length: 128 }),
+  clientSecret: text("client_secret"),   // encrypted at rest in production
+  discoveryUrl: text("discovery_url"),   // /.well-known/openid-configuration
+  jwksUri: text("jwks_uri"),
+  issuer: text("issuer"),
+  // Role mapping: Keycloak realm role → TradeGateway role
+  roleMappings: json("role_mappings").$type<Record<string, string>>().default({}),
+  // Scopes to request from Keycloak
+  scopes: json("scopes").$type<string[]>().default(["openid", "profile", "email"]),
+  // Whether to fall back to Manus OAuth if Keycloak is unreachable
+  fallbackEnabled: boolean("fallback_enabled").default(true).notNull(),
+  lastTestedAt: timestamp("last_tested_at"),
+  lastTestResult: varchar("last_test_result", { length: 32 }),
+  lastTestError: text("last_test_error"),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type KeycloakConfig = typeof keycloakConfig.$inferSelect;
+export type InsertKeycloakConfig = typeof keycloakConfig.$inferInsert;

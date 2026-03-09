@@ -60,6 +60,8 @@ import {
   Timer,
   CalendarClock,
   FolderLock,
+  KeyRound,
+  Coins,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -144,6 +146,12 @@ function getNavGroups(role: string): NavGroup[] {
         ],
       },
       {
+        label: "Identity & Security",
+        items: [
+          { icon: KeyRound, label: "Identity Provider (Keycloak)", path: "/app/admin/identity-provider" },
+        ],
+      },
+      {
         label: "Reference",
         items: [
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
@@ -220,6 +228,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: CreditCard, label: "Duty Collections", path: "/app/customs/payments" },
           { icon: BarChart3, label: "Revenue Reports", path: "/app/finance" },
           { icon: RotateCcw, label: "Duty Refunds", path: "/app/finance/drawback" },
+          { icon: Coins, label: "Ledger (TigerBeetle)", path: "/app/finance/ledger" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
         ],
       },

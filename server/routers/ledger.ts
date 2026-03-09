@@ -1,0 +1,325 @@
+/**
+ * ledger.ts — tRPC router for TigerBeetle double-entry ledger (Sprint 31)
+ *
+ * Proxies to the Go tigerbeetle-bridge service (port 8086).
+ * Falls back to DB-persisted ledger entries when the bridge is unavailable.
+ *
+ * Procedures:
+ *   ledger.getAccount        — get account details and balance
+ *   ledger.getBalance        — get account balance
+ *   ledger.postTransfer      — post an immediate double-entry transfer
+ *   ledger.pendingTransfer   — create a two-phase pending transfer (reserve funds)
+ *   ledger.postPending       — finalize a pending transfer (commit)
+ *   ledger.voidPending       — void a pending transfer (cancel reservation)
+ *   ledger.getTransfer       — get a transfer by ID
+ *   ledger.listByDeclaration — list ledger entries for a declaration
+ *   ledger.listByPayment     — list ledger entries for a payment
+ *   ledger.getSummary        — get ledger summary (balances, recent transfers)
+ *   ledger.scorePaymentRisk  — call Python payment-risk-scorer before transfer
+ */
+
+import { TRPCError } from "@trpc/server";
+import { z } from "zod";
+import { protectedProcedure, router } from "../_core/trpc";
+import {
+  getLedgerEntriesByDeclaration,
+  getLedgerEntriesByPayment,
+  getRecentLedgerEntries,
+  createLedgerEntry,
+} from "../db";
+
+const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://localhost:8086";
+const PAYMENT_RISK_URL = process.env.PAYMENT_RISK_URL || "http://localhost:8092";
+
+async function tbBridgeAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${TB_BRIDGE_URL}/health`, { signal: AbortSignal.timeout(3_000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function riskScorerAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${PAYMENT_RISK_URL}/health`, { signal: AbortSignal.timeout(3_000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function tbFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${TB_BRIDGE_URL}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: `TigerBeetle bridge error (${res.status}): ${body}`,
+    });
+  }
+  return res.json() as Promise<T>;
+}
+
+export const ledgerRouter = router({
+  /**
+   * Get account details and current balance from the TigerBeetle bridge.
+   */
+  getAccount: protectedProcedure
+    .input(z.object({ accountId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
+      }
+      return tbFetch<Record<string, unknown>>(`/api/ledger/accounts/${input.accountId}`);
+    }),
+
+  /**
+   * Get the current balance of a ledger account.
+   */
+  getBalance: protectedProcedure
+    .input(z.object({ accountId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
+      }
+      return tbFetch<Record<string, unknown>>(`/api/ledger/accounts/${input.accountId}/balance`);
+    }),
+
+  /**
+   * Post an immediate double-entry transfer.
+   */
+  postTransfer: protectedProcedure
+    .input(z.object({
+      debitAccountId: z.string().min(1),
+      creditAccountId: z.string().min(1),
+      amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "Amount must be a positive decimal"),
+      currency: z.string().length(3).default("GHS"),
+      reference: z.string().max(128).optional(),
+      description: z.string().max(512).optional(),
+      declarationId: z.number().int().positive().optional(),
+      paymentId: z.number().int().positive().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const available = await tbBridgeAvailable();
+      if (available) {
+        const result = await tbFetch<Record<string, unknown>>("/api/ledger/transfers", {
+          method: "POST",
+          body: JSON.stringify({
+            debitAccountId: input.debitAccountId,
+            creditAccountId: input.creditAccountId,
+            amount: input.amount,
+            currency: input.currency,
+            reference: input.reference,
+            description: input.description,
+          }),
+        });
+        // Persist to DB for audit
+        await createLedgerEntry({
+          tbTransferId: (result as any).id ?? crypto.randomUUID(),
+          debitAccountId: input.debitAccountId,
+          creditAccountId: input.creditAccountId,
+          amountMinorUnits: Math.round(parseFloat(input.amount) * 100),
+          currency: input.currency,
+          ledger: 1,
+          entryType: "duty_payment",
+          status: "posted",
+          declarationId: input.declarationId,
+          paymentId: input.paymentId,
+          reference: input.reference,
+          description: input.description,
+          postedAt: new Date(),
+        }).catch(e => console.warn("[Ledger] DB persist failed:", e));
+        return result;
+      }
+
+      // Fallback: persist to DB only
+      const entry = await createLedgerEntry({
+        tbTransferId: crypto.randomUUID(),
+        debitAccountId: input.debitAccountId,
+        creditAccountId: input.creditAccountId,
+        amountMinorUnits: Math.round(parseFloat(input.amount) * 100),
+        currency: input.currency,
+        ledger: 1,
+        entryType: "duty_payment",
+        status: "posted",
+        declarationId: input.declarationId,
+        paymentId: input.paymentId,
+        reference: input.reference,
+        description: input.description,
+        postedAt: new Date(),
+      });
+      return { ...entry, _source: "db_fallback" };
+    }),
+
+  /**
+   * Create a two-phase pending transfer (reserve funds).
+   */
+  pendingTransfer: protectedProcedure
+    .input(z.object({
+      debitAccountId: z.string().min(1),
+      creditAccountId: z.string().min(1),
+      amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
+      currency: z.string().length(3).default("GHS"),
+      reference: z.string().max(128).optional(),
+      description: z.string().max(512).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
+      }
+      return tbFetch<Record<string, unknown>>("/api/ledger/transfers/pending", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    }),
+
+  /**
+   * Finalize a pending transfer (commit the reservation).
+   */
+  postPending: protectedProcedure
+    .input(z.object({ pendingId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
+      }
+      return tbFetch<Record<string, unknown>>(`/api/ledger/transfers/post/${input.pendingId}`, {
+        method: "POST",
+      });
+    }),
+
+  /**
+   * Void a pending transfer (cancel the reservation).
+   */
+  voidPending: protectedProcedure
+    .input(z.object({ pendingId: z.string().min(1) }))
+    .mutation(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
+      }
+      return tbFetch<Record<string, unknown>>(`/api/ledger/transfers/void/${input.pendingId}`, {
+        method: "POST",
+      });
+    }),
+
+  /**
+   * Get a transfer by its TigerBeetle transfer ID.
+   */
+  getTransfer: protectedProcedure
+    .input(z.object({ transferId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (available) {
+        return tbFetch<Record<string, unknown>>(`/api/ledger/transfers/${input.transferId}`);
+      }
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
+    }),
+
+  /**
+   * List ledger entries for a specific declaration (from DB).
+   */
+  listByDeclaration: protectedProcedure
+    .input(z.object({ declarationId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      return getLedgerEntriesByDeclaration(input.declarationId);
+    }),
+
+  /**
+   * List ledger entries for a specific payment (from DB).
+   */
+  listByPayment: protectedProcedure
+    .input(z.object({ paymentId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      return getLedgerEntriesByPayment(input.paymentId);
+    }),
+
+  /**
+   * Get ledger summary: all account balances + recent transfers.
+   * Calls the Go bridge; falls back to DB recent entries.
+   */
+  getSummary: protectedProcedure.query(async () => {
+    const available = await tbBridgeAvailable();
+    if (available) {
+      return tbFetch<Record<string, unknown>>("/api/ledger/summary");
+    }
+    // DB fallback
+    const recent = await getRecentLedgerEntries(20);
+    return {
+      recentTransfers: recent,
+      summary: {
+        mode: "db_fallback",
+        note: "TigerBeetle bridge unavailable — showing DB ledger entries only",
+      },
+    };
+  }),
+
+  /**
+   * Score payment risk via the Python payment-risk-scorer service.
+   * Call this before initiating a Mojaloop transfer to get risk tier and action.
+   */
+  scorePaymentRisk: protectedProcedure
+    .input(z.object({
+      traderId: z.string().min(1),
+      declarationId: z.string().optional(),
+      amount: z.number().positive(),
+      currency: z.string().length(3).default("GHS"),
+      fspId: z.string().min(1),
+      fspType: z.enum(["BANK", "MOBILE_MONEY", "RTGS"]),
+      payerAccount: z.string().min(5),
+      declarationValue: z.number().positive().optional(),
+      traderComplianceScore: z.number().min(0).max(1).optional(),
+      isFirstPayment: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const available = await riskScorerAvailable();
+      if (!available) {
+        // Return a default LOW risk score when scorer is unavailable
+        return {
+          traderId: input.traderId,
+          riskScore: 0.10,
+          riskTier: "LOW",
+          recommendedAction: "APPROVE",
+          flags: ["SCORER_UNAVAILABLE: risk scorer offline — defaulting to LOW"],
+          modelVersion: "fallback",
+          scoredAt: new Date().toISOString(),
+          _source: "fallback",
+        };
+      }
+
+      const res = await fetch(`${PAYMENT_RISK_URL}/api/payment-risk/score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trader_id: input.traderId,
+          declaration_id: input.declarationId,
+          amount: input.amount,
+          currency: input.currency,
+          fsp_id: input.fspId,
+          fsp_type: input.fspType,
+          payer_account: input.payerAccount,
+          declaration_value: input.declarationValue,
+          trader_compliance_score: input.traderComplianceScore,
+          is_first_payment: input.isFirstPayment,
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+
+      if (!res.ok) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Payment risk scorer error: ${res.status}`,
+        });
+      }
+
+      return res.json();
+    }),
+});

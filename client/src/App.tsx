@@ -48,6 +48,8 @@ const OfficerWorkload = lazy(() => import('./pages/app/OfficerWorkload'));
 const NotificationCentre = lazy(() => import('./pages/app/NotificationCentre'));
 const SLABreachDashboard = lazy(() => import('./pages/app/SLABreachDashboard'));
 const NotificationPreferences = lazy(() => import('./pages/app/NotificationPreferences'));
+const FinanceLedger = lazy(() => import('./pages/FinanceLedger'));
+const IdentityProvider = lazy(() => import('./pages/IdentityProvider'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -197,6 +199,16 @@ function Router() {
       <Route path="/app/ai-assistant" component={AIAssistant} />
       <Route path="/app/document-vault" component={DocumentVault} />
       <Route path="/share/:token" component={ShareLanding} />
+
+      {/* Sprint 31 — Finance Ledger (TigerBeetle) */}
+      <Route path="/app/finance/ledger">
+        <Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense>
+      </Route>
+
+      {/* Sprint 32 — Identity Provider (Keycloak) */}
+      <Route path="/app/admin/identity-provider">
+        <Suspense fallback={<LazyFallback />}><IdentityProvider /></Suspense>
+      </Route>
 
       {/* 404 */}
       <Route path="/404" component={NotFound} />
