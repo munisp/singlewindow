@@ -1244,3 +1244,33 @@
 - [x] DashboardLayout: Bonded Warehouse Mgmt nav item added to Port Operations section (admin role)
 - [x] Vitest tests for bond requirement, expiry detection, permit generation (sprint54-56.test.ts)
 - [x] Total vitest tests: 797 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 57 — ASEAN Single Window G2G Document Exchange
+
+- [x] tRPC aseanSwRouter: getMessages, sendMessage, acknowledgeMessage, retryMessage, getConnectivityStatus, listInboundMessages, getMessageStats
+- [x] ASEAN message types: ACDD, SSTC, ATIGA, CEPT, FORM_D, GENERAL — validated enum
+- [x] Message lifecycle: queued → sent → delivered → acknowledged / failed (max 3 retries)
+- [x] Country connectivity: 10 ASEAN member states with uptime %, avg latency, status (online/degraded/offline)
+- [x] ASEAN SW UI: /app/integrations/asean-sw — Inbound Messages tab, Connectivity Status panel, ACDD/SSTC/ATIGA type selector, retry/acknowledge actions
+- [x] DashboardLayout: ASEAN SW nav item already present in Integrations section
+- [x] Vitest tests for message lifecycle and connectivity scoring (sprint57-59.test.ts — 43 tests)
+
+## Sprint 58 — Trader AEO Self-Assessment Questionnaire
+
+- [x] tRPC aeoRouter: startSelfAssessment, saveSectionAnswers, submitSelfAssessment, getSelfAssessment, listSelfAssessments, getSelfAssessmentStats
+- [x] WCO SAFE Framework pillars: financial_solvency (25%), compliance_record (30%), security_standards (25%), logistics_competence (20%)
+- [x] Tier eligibility: standard ≥60%, silver ≥75%, gold ≥90%
+- [x] AEO Self-Assessment Wizard UI: /app/trader/aeo-self-assessment — 4-pillar questionnaire with progress bar, auto-scoring, review screen, and tier eligibility display
+- [x] DashboardLayout: AEO Self-Assessment nav item added to Trader Services section
+- [x] Vitest tests for pillar scoring, tier eligibility, and weight validation (sprint57-59.test.ts)
+
+## Sprint 59 — Real-Time Port Congestion Prediction
+
+- [x] tRPC portCongestionRouter: listPorts, getPortForecast, getAllForecasts, getNetworkSummary, getSlaBreachAlerts, ingestAisData, getCongestionHistory
+- [x] predictCongestionScore(): vessel count (40%), dwell hours (35%), declarations (25%) with day-of-week and hour-of-day seasonality
+- [x] scoreToLevel(): clear (<35), moderate (35-59), congested (60-79), critical (≥80)
+- [x] SLA breach alerts: per-port configurable threshold, 72h horizon scan
+- [x] Port Congestion Forecast UI: /app/geo/congestion-forecast — network summary, port overview table, 24/48/72h forecast chart, SLA breach alert list
+- [x] DashboardLayout: Congestion Forecast nav item added to Port & Trade Intelligence section
+- [x] Vitest tests for prediction model, level boundaries, SLA detection (sprint57-59.test.ts — 43 tests)
+- [x] Total vitest tests: 840 passing (20 pre-existing DB-connection failures unchanged)

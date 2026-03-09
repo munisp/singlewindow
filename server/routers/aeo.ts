@@ -155,4 +155,114 @@ export const aeoRouter = router({
 
       return updated;
     }),
+
+  // ─── Sprint 58: WCO SAFE Framework Self-Assessment ───────────────────────
+
+  getSelfAssessmentQuestions: protectedProcedure.query(async () => {
+    // WCO SAFE Framework pillars with questions
+    const pillars = [
+      {
+        id: "financial_solvency",
+        label: "Financial Solvency",
+        description: "Demonstrated financial standing and solvency over the past 3 years",
+        weight: 0.25,
+        questions: [
+          { id: "fs_1", text: "Has the company filed audited financial statements for the past 3 consecutive years?", weight: 0.3 },
+          { id: "fs_2", text: "Is the company free from bankruptcy, insolvency, or winding-up proceedings?", weight: 0.3 },
+          { id: "fs_3", text: "Does the company maintain a positive net worth as evidenced by the latest audited accounts?", weight: 0.25 },
+          { id: "fs_4", text: "Has the company paid all customs duties, taxes, and fees without significant arrears?", weight: 0.15 },
+        ],
+      },
+      {
+        id: "compliance_record",
+        label: "Compliance Record",
+        description: "History of compliance with customs and trade regulations",
+        weight: 0.30,
+        questions: [
+          { id: "cr_1", text: "Has the company maintained a clean customs compliance record with no serious violations in the past 3 years?", weight: 0.30 },
+          { id: "cr_2", text: "Does the company have a designated compliance officer responsible for customs matters?", weight: 0.25 },
+          { id: "cr_3", text: "Does the company maintain a documented customs compliance programme with regular internal audits?", weight: 0.25 },
+          { id: "cr_4", text: "Has the company implemented corrective actions for any past customs discrepancies?", weight: 0.20 },
+        ],
+      },
+      {
+        id: "security_standards",
+        label: "Security Standards",
+        description: "Physical, personnel, and information security measures in place",
+        weight: 0.25,
+        questions: [
+          { id: "ss_1", text: "Does the company have documented physical security procedures for its premises and cargo handling areas?", weight: 0.25 },
+          { id: "ss_2", text: "Are background checks conducted on all employees with access to cargo and sensitive trade data?", weight: 0.25 },
+          { id: "ss_3", text: "Does the company have an IT security policy covering access controls, encryption, and incident response?", weight: 0.25 },
+          { id: "ss_4", text: "Does the company vet and monitor the security practices of its trading partners and logistics providers?", weight: 0.25 },
+        ],
+      },
+      {
+        id: "logistics_competence",
+        label: "Logistics Competence",
+        description: "Operational capability and expertise in international trade logistics",
+        weight: 0.20,
+        questions: [
+          { id: "lc_1", text: "Does the company have staff with formal training in customs procedures and international trade regulations?", weight: 0.30 },
+          { id: "lc_2", text: "Does the company use an integrated IT system for managing trade documentation and declarations?", weight: 0.30 },
+          { id: "lc_3", text: "Does the company maintain accurate records of all import/export transactions for a minimum of 5 years?", weight: 0.20 },
+          { id: "lc_4", text: "Does the company have documented procedures for handling cargo discrepancies, shortages, and damages?", weight: 0.20 },
+        ],
+      },
+    ];
+    return { pillars };
+  }),
+
+  submitSelfAssessment: protectedProcedure
+    .input(z.object({
+      answers: z.record(z.string(), z.boolean()),
+      applicantName: z.string(),
+      companyName: z.string(),
+      registrationNo: z.string(),
+      targetTier: z.enum(["standard", "silver", "gold"]),
+    }))
+    .mutation(async ({ input }) => {
+      const pillars = [
+        { id: "financial_solvency", weight: 0.25, questions: ["fs_1","fs_2","fs_3","fs_4"], qWeights: [0.3,0.3,0.25,0.15] },
+        { id: "compliance_record", weight: 0.30, questions: ["cr_1","cr_2","cr_3","cr_4"], qWeights: [0.30,0.25,0.25,0.20] },
+        { id: "security_standards", weight: 0.25, questions: ["ss_1","ss_2","ss_3","ss_4"], qWeights: [0.25,0.25,0.25,0.25] },
+        { id: "logistics_competence", weight: 0.20, questions: ["lc_1","lc_2","lc_3","lc_4"], qWeights: [0.30,0.30,0.20,0.20] },
+      ];
+
+      const pillarScores: Record<string, number> = {};
+      let overallScore = 0;
+
+      for (const pillar of pillars) {
+        let pillarScore = 0;
+        for (let i = 0; i < pillar.questions.length; i++) {
+          const qId = pillar.questions[i];
+          const answered = input.answers[qId] === true;
+          pillarScore += answered ? pillar.qWeights[i] : 0;
+        }
+        pillarScores[pillar.id] = Math.round(pillarScore * 100);
+        overallScore += pillarScore * pillar.weight;
+      }
+
+      const overallPct = Math.round(overallScore * 100);
+      const eligibleTiers: string[] = [];
+      if (overallPct >= 60) eligibleTiers.push("standard");
+      if (overallPct >= 75) eligibleTiers.push("silver");
+      if (overallPct >= 90) eligibleTiers.push("gold");
+
+      const recommendation = eligibleTiers.includes(input.targetTier)
+        ? `Eligible for ${input.targetTier.toUpperCase()} AEO. Proceed to formal application.`
+        : `Score of ${overallPct}% is below the threshold for ${input.targetTier.toUpperCase()} AEO. Consider applying for ${eligibleTiers[eligibleTiers.length - 1]?.toUpperCase() ?? "Standard"} tier first.`;
+
+      return {
+        overallScore: overallPct,
+        pillarScores,
+        eligibleTiers,
+        recommendation,
+        assessedAt: new Date().toISOString(),
+        applicantName: input.applicantName,
+        companyName: input.companyName,
+        registrationNo: input.registrationNo,
+        targetTier: input.targetTier,
+      };
+    }),
 });

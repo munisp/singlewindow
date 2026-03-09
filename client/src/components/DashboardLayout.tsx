@@ -128,6 +128,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Port & Trade Intelligence",
         items: [
           { icon: Anchor, label: "Port Activity Map", path: "/app/geo/heatmap" },
+        { icon: Activity, label: "Congestion Forecast", path: "/app/geo/congestion-forecast" },
         ],
       },
       {
@@ -276,6 +277,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: FolderLock, label: "Document Vault", path: "/app/document-vault" },
         { icon: Building2, label: "My Business Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
+        { icon: Award, label: "AEO Self-Assessment", path: "/app/trader/aeo-self-assessment" },
         { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },
         { icon: Fingerprint, label: "Identity Verification", path: "/app/trader/kyc" },
       ],

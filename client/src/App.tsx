@@ -29,6 +29,8 @@ const MojaloopPayments = lazy(() => import("./pages/app/MojaloopPayments"));
 const TemporalWorkflows = lazy(() => import("./pages/app/TemporalWorkflows"));
 const TraderProfile = lazy(() => import("./pages/app/TraderProfile"));
 const TraderAEO = lazy(() => import("./pages/app/TraderAEO"));
+const AeoSelfAssessment = lazy(() => import("./pages/app/AeoSelfAssessment"));
+const PortCongestionForecast = lazy(() => import("./pages/app/PortCongestionForecast"));
 const AdminUsers = lazy(() => import("./pages/app/AdminUsers"));
 const AdminDeclarations = lazy(() => import("./pages/app/AdminDeclarations"));
 const AdminAEO = lazy(() => import("./pages/app/AdminAEO"));
@@ -100,6 +102,9 @@ function Router() {
       <Route path="/app/trader/aeo">
         <Suspense fallback={<LazyFallback />}><TraderAEO /></Suspense>
       </Route>
+      <Route path="/app/trader/aeo-self-assessment">
+        <Suspense fallback={<LazyFallback />}><AeoSelfAssessment /></Suspense>
+      </Route>
 
       {/* Customs Officer Portal */}
       <Route path="/app/customs" component={CustomsDashboard} />
@@ -143,6 +148,9 @@ function Router() {
 
       {/* Geospatial */}
       <Route path="/app/geo/heatmap" component={PortHeatmap} />
+      <Route path="/app/geo/congestion-forecast">
+        <Suspense fallback={<LazyFallback />}><PortCongestionForecast /></Suspense>
+      </Route>
 
       {/* Notifications */}
       {/* Legacy /app/notifications → redirect to Notification Centre */}

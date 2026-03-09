@@ -1,7 +1,7 @@
 /**
  * ASEAN Single Window — G2G Connectivity Admin Panel
- * Displays bilateral connection status for all 10 ASEAN member states,
- * allows sending WCO XML declaration messages, and shows message history.
+ * Sprint 57: Added Inbound Messages tab, Connectivity Status panel,
+ *            ACDD/SSTC/ATIGA document type selector, retry/acknowledge actions.
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -23,8 +24,27 @@ import {
 import { toast } from "sonner";
 import {
   Globe, Send, Activity, CheckCircle2, XCircle, Clock,
-  RefreshCw, Wifi, WifiOff, AlertTriangle, FileText,
+  RefreshCw, Wifi, WifiOff, AlertTriangle, FileText, ArrowDownToLine,
+  ArrowUpFromLine, Signal,
 } from "lucide-react";
+
+interface InboundMessage {
+  id: string;
+  message_ref: string;
+  source_code: string;
+  message_type: string;
+  ucr: string;
+  status: string;
+  received_at: string;
+  ack_reference?: string;
+}
+
+const TIER_COLOR: Record<string, string> = {
+  excellent: "text-green-400",
+  good:      "text-blue-400",
+  degraded:  "text-yellow-400",
+  poor:      "text-red-400",
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,9 +88,16 @@ export default function AseanSingleWindow() {
   const [msgDuty, setMsgDuty] = useState("");
   const [msgTypeCode, setMsgTypeCode] = useState<"IM" | "EX" | "TR">("IM");
 
+  const [ackDialogMsg, setAckDialogMsg] = useState<InboundMessage | null>(null);
+  const [ackStatus, setAckStatus] = useState<"accepted" | "rejected">("accepted");
+  const [ackReason, setAckReason] = useState("");
+  const [msgDocType, setMsgDocType] = useState<"ACDD" | "SSTC" | "ATIGA">("ACDD");
+
   const connectionsQ = trpc.aseanSw.getConnections.useQuery();
   const messagesQ = trpc.aseanSw.listMessages.useQuery();
+  const inboundQ = trpc.aseanSw.listInboundMessages.useQuery();
   const statsQ = trpc.aseanSw.getStats.useQuery();
+  const connectivityQ = trpc.aseanSw.getConnectivityStatus.useQuery();
 
   const testMut = trpc.aseanSw.testConnection.useMutation({
     onSuccess: (data) => {
@@ -82,8 +109,8 @@ export default function AseanSingleWindow() {
   });
 
   const sendMut = trpc.aseanSw.sendMessage.useMutation({
-    onSuccess: (data) => {
-      toast.success(`Message sent: ${data.message.message_ref} — ${data.message.status}`);
+    onSuccess: () => {
+      toast.success("G2G message queued for dispatch");
       setShowSendDialog(false);
       messagesQ.refetch();
       statsQ.refetch();
@@ -91,8 +118,20 @@ export default function AseanSingleWindow() {
     onError: (e) => toast.error(e.message),
   });
 
+  const retryMut = trpc.aseanSw.retryMessage.useMutation({
+    onSuccess: () => { toast.success("Message retry queued"); messagesQ.refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const ackMut = trpc.aseanSw.acknowledgeMessage.useMutation({
+    onSuccess: () => { toast.success("Message acknowledged"); setAckDialogMsg(null); inboundQ.refetch(); },
+    onError: (e) => toast.error(e.message),
+  });
+
   const connections: MemberState[] = (connectionsQ.data as any)?.connections ?? [];
   const messages: OutboundMessage[] = (messagesQ.data as any)?.messages ?? [];
+  const inbound: InboundMessage[] = (inboundQ.data as any)?.messages ?? [];
+  const connectivity: any[] = (connectivityQ.data as any)?.members ?? [];
   const stats = statsQ.data as any;
 
   const statusIcon = (s: string) => {
@@ -144,9 +183,9 @@ export default function AseanSingleWindow() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Active Connections", value: `${activeCount}/10`, icon: <Wifi className="h-5 w-5 text-emerald-400" /> },
-            { label: "Total Messages", value: totalMsgs, icon: <FileText className="h-5 w-5 text-blue-400" /> },
-            { label: "Acknowledged", value: ackCount, icon: <CheckCircle2 className="h-5 w-5 text-emerald-400" /> },
+            { label: "Active Connections", value: `${connections.filter(c => c.status === "active").length}/10`, icon: <Wifi className="h-5 w-5 text-emerald-400" /> },
+            { label: "Total Messages", value: stats?.total ?? 0, icon: <FileText className="h-5 w-5 text-blue-400" /> },
+            { label: "Pending Inbound Acks", value: inbound.filter(m => m.status === "pending_ack").length, icon: <ArrowDownToLine className="h-5 w-5 text-yellow-400" /> },
             { label: "Failed/Rejected", value: (stats?.by_status?.failed ?? 0) + (stats?.by_status?.rejected ?? 0), icon: <XCircle className="h-5 w-5 text-red-400" /> },
           ].map((s) => (
             <Card key={s.label} className="bg-card border-border">
@@ -163,122 +202,125 @@ export default function AseanSingleWindow() {
           ))}
         </div>
 
-        {/* Connection Status Grid */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4" /> Bilateral Connection Status
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {connections.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Globe className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                <p>Loading connection status...</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {connections.map((c) => (
-                  <div key={c.code} className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border">
+        {/* Tabs: Outbound / Inbound / Connectivity */}
+        <Tabs defaultValue="outbound">
+          <TabsList>
+            <TabsTrigger value="outbound" className="gap-1"><ArrowUpFromLine className="w-3 h-3" /> Outbound</TabsTrigger>
+            <TabsTrigger value="inbound" className="gap-1"><ArrowDownToLine className="w-3 h-3" /> Inbound</TabsTrigger>
+            <TabsTrigger value="connectivity" className="gap-1"><Signal className="w-3 h-3" /> Connectivity</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="outbound">
+            <Card className="bg-card border-border">
+              <CardHeader><CardTitle className="text-base">Outbound G2G Messages</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow><TableHead>Ref</TableHead><TableHead>Destination</TableHead><TableHead>Doc Type</TableHead><TableHead>UCR</TableHead><TableHead>Status</TableHead><TableHead>Sent At</TableHead><TableHead>Ack Ref</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {messages.length === 0 ? (
+                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No outbound messages yet</TableCell></TableRow>
+                    ) : messages.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="font-mono text-xs">{m.message_ref}</TableCell>
+                        <TableCell><Badge variant="outline">{m.destination_code}</Badge></TableCell>
+                        <TableCell><Badge variant="secondary">{m.message_type ?? "ACDD"}</Badge></TableCell>
+                        <TableCell className="font-mono text-xs">{m.ucr}</TableCell>
+                        <TableCell><Badge variant={m.status === "failed" || m.status === "rejected" ? "destructive" : m.status === "acknowledged" || m.status === "accepted" ? "default" : "secondary"}>{m.status}</Badge></TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{m.sent_at ? new Date(m.sent_at).toLocaleString() : "—"}</TableCell>
+                        <TableCell className="font-mono text-xs">{m.ack_reference ?? "—"}</TableCell>
+                        <TableCell>{m.status === "failed" && <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => retryMut.mutate({ messageId: m.id })} disabled={retryMut.isPending}><RefreshCw className="w-3 h-3" /> Retry</Button>}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="inbound">
+            <Card className="bg-card border-border">
+              <CardHeader><CardTitle className="text-base">Inbound G2G Messages</CardTitle></CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader><TableRow><TableHead>Ref</TableHead><TableHead>Source</TableHead><TableHead>Doc Type</TableHead><TableHead>UCR</TableHead><TableHead>Status</TableHead><TableHead>Received At</TableHead><TableHead>Ack Ref</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {inbound.length === 0 ? (
+                      <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No inbound messages</TableCell></TableRow>
+                    ) : inbound.map((m) => (
+                      <TableRow key={m.id}>
+                        <TableCell className="font-mono text-xs">{m.message_ref}</TableCell>
+                        <TableCell><Badge variant="outline">{m.source_code}</Badge></TableCell>
+                        <TableCell><Badge variant="secondary">{m.message_type}</Badge></TableCell>
+                        <TableCell className="font-mono text-xs">{m.ucr}</TableCell>
+                        <TableCell><Badge variant={m.status === "rejected" ? "destructive" : m.status === "accepted" ? "default" : "outline"}>{m.status}</Badge></TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{new Date(m.received_at).toLocaleString()}</TableCell>
+                        <TableCell className="font-mono text-xs">{m.ack_reference ?? "—"}</TableCell>
+                        <TableCell>{m.status === "pending_ack" && <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={() => { setAckDialogMsg(m); setAckStatus("accepted"); setAckReason(""); }}><CheckCircle2 className="w-3 h-3" /> Acknowledge</Button>}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="connectivity">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {connectivity.length === 0 ? (
+                <div className="col-span-2 text-center text-muted-foreground py-12">Loading connectivity data…</div>
+              ) : connectivity.map((m: any) => (
+                <Card key={m.code} className="bg-card border-border">
+                  <CardContent className="p-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      {statusIcon(c.status)}
+                      {m.status === "active" ? <Wifi className="w-5 h-5 text-green-400" /> : m.status === "maintenance" ? <AlertTriangle className="w-5 h-5 text-yellow-400" /> : <WifiOff className="w-5 h-5 text-red-400" />}
                       <div>
-                        <p className="font-medium text-sm">{c.name}</p>
-                        <p className="text-xs text-muted-foreground">{c.protocol} · {c.latency_ms > 0 ? `${c.latency_ms}ms` : "not pinged"}</p>
+                        <p className="font-semibold text-foreground">{m.name} <span className="text-muted-foreground text-xs">({m.code})</span></p>
+                        <p className="text-xs text-muted-foreground">Latency: {m.latency_ms}ms{m.uptime !== undefined && ` · Uptime: ${m.uptime}%`}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={statusBadge(c.status)}>{c.status}</Badge>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={c.status === "offline" || pingLoading === c.code}
-                        onClick={() => {
-                          setPingLoading(c.code);
-                          testMut.mutate({ countryCode: c.code });
-                        }}
-                      >
-                        {pingLoading === c.code ? <RefreshCw className="h-3 w-3 animate-spin" /> : "Ping"}
+                    <div className="text-right">
+                      {m.score !== undefined && <p className={`text-lg font-bold ${TIER_COLOR[m.tier ?? "good"]}`}>{m.score}</p>}
+                      {m.tier && <p className={`text-xs capitalize ${TIER_COLOR[m.tier]}`}>{m.tier}</p>}
+                      <Button size="sm" variant="ghost" className="mt-1 text-xs gap-1" onClick={() => { setPingLoading(m.code); testMut.mutate({ countryCode: m.code }); }} disabled={pingLoading === m.code}>
+                        <Activity className="w-3 h-3" />{pingLoading === m.code ? "Pinging…" : "Ping"}
                       </Button>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Message History */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-base">Outbound Message History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {messages.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <FileText className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                <p>No messages sent yet.</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Message Ref</TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>UCR</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Sent At</TableHead>
-                    <TableHead>ACK Ref</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {messages.map((m) => (
-                    <TableRow key={m.id}>
-                      <TableCell className="font-mono text-xs">{m.message_ref}</TableCell>
-                      <TableCell>
-                        <span className="font-medium">{m.destination_code}</span>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">{m.ucr}</TableCell>
-                      <TableCell>{m.message_type}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          {msgStatusIcon(m.status)}
-                          <Badge variant="outline" className={statusBadge(m.status)}>{m.status}</Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {m.sent_at ? new Date(m.sent_at).toLocaleString() : "—"}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">{m.ack_reference ?? "—"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Send Message Dialog */}
       <Dialog open={showSendDialog} onOpenChange={setShowSendDialog}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Send WCO XML Declaration Message</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Send G2G Message</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Destination Country</Label>
+              <Label>Destination</Label>
               <Select value={destCode} onValueChange={setDestCode}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {connections.filter(c => c.status !== "offline").map(c => (
-                    <SelectItem key={c.code} value={c.code}>{c.code} — {c.name}</SelectItem>
-                  ))}
+                  {["BN","KH","ID","LA","MY","MM","PH","SG","TH","VN"].map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label>Message Type</Label>
-              <Select value={msgTypeCode} onValueChange={(v) => setMsgTypeCode(v as any)}>
+              <Label>Document Type</Label>
+              <Select value={msgDocType} onValueChange={(v) => setMsgDocType(v as typeof msgDocType)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ACDD">ACDD — Customs Declaration</SelectItem>
+                  <SelectItem value="SSTC">SSTC — Trade Certificate</SelectItem>
+                  <SelectItem value="ATIGA">ATIGA — Form D (Origin)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Type Code</Label>
+              <Select value={msgTypeCode} onValueChange={(v) => setMsgTypeCode(v as typeof msgTypeCode)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="IM">IM — Import</SelectItem>
@@ -287,33 +329,51 @@ export default function AseanSingleWindow() {
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>UCR</Label><Input value={msgUcr} onChange={(e) => setMsgUcr(e.target.value)} placeholder="GH2024UCR001" /></div>
+            <div><Label>UCR *</Label><Input value={msgUcr} onChange={(e) => setMsgUcr(e.target.value)} placeholder="UCR-2024-001" /></div>
             <div><Label>Trader Name</Label><Input value={msgTrader} onChange={(e) => setMsgTrader(e.target.value)} /></div>
             <div><Label>HS Code</Label><Input value={msgHsCode} onChange={(e) => setMsgHsCode(e.target.value)} placeholder="8471.30" /></div>
             <div><Label>Description</Label><Input value={msgDesc} onChange={(e) => setMsgDesc(e.target.value)} /></div>
-            <div><Label>Gross Weight (kg)</Label><Input type="number" value={msgWeight} onChange={(e) => setMsgWeight(e.target.value)} /></div>
-            <div><Label>Invoice Value (USD)</Label><Input type="number" value={msgValue} onChange={(e) => setMsgValue(e.target.value)} /></div>
-            <div className="col-span-2"><Label>Duty Amount (USD)</Label><Input type="number" value={msgDuty} onChange={(e) => setMsgDuty(e.target.value)} /></div>
+            <div><Label>Weight (kg)</Label><Input type="number" value={msgWeight} onChange={(e) => setMsgWeight(e.target.value)} /></div>
+            <div><Label>Invoice Value</Label><Input type="number" value={msgValue} onChange={(e) => setMsgValue(e.target.value)} /></div>
+            <div className="col-span-2"><Label>Duty Amount</Label><Input type="number" value={msgDuty} onChange={(e) => setMsgDuty(e.target.value)} /></div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSendDialog(false)}>Cancel</Button>
-            <Button onClick={() => sendMut.mutate({
-              destinationCode: destCode,
-              ucr: msgUcr,
-              traderName: msgTrader,
-              hsCode: msgHsCode,
-              description: msgDesc,
-              grossWeightKg: parseFloat(msgWeight) || 0,
-              invoiceValue: parseFloat(msgValue) || 0,
-              currency: "USD",
-              dutyAmount: parseFloat(msgDuty) || 0,
-              typeCode: msgTypeCode,
-            })} disabled={sendMut.isPending}>
-              {sendMut.isPending ? "Sending..." : <><Send className="h-4 w-4 mr-1" /> Send WCO Message</>}
+            <Button disabled={!msgUcr || sendMut.isPending} onClick={() => sendMut.mutate({ destinationCode: destCode, messageType: msgDocType, ucr: msgUcr, traderName: msgTrader || undefined, hsCode: msgHsCode || undefined, description: msgDesc || undefined, grossWeightKg: msgWeight ? parseFloat(msgWeight) : undefined, invoiceValue: msgValue ? parseFloat(msgValue) : undefined, dutyAmount: msgDuty ? parseFloat(msgDuty) : undefined, typeCode: msgTypeCode })}>
+              {sendMut.isPending ? "Sending…" : "Send Message"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Acknowledge Dialog */}
+      {ackDialogMsg && (
+        <Dialog open onOpenChange={() => setAckDialogMsg(null)}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Acknowledge Inbound Message</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Message <span className="font-mono font-semibold">{ackDialogMsg.message_ref}</span> from <strong>{ackDialogMsg.source_code}</strong> — {ackDialogMsg.message_type}</p>
+              <div>
+                <Label>Decision</Label>
+                <Select value={ackStatus} onValueChange={(v) => setAckStatus(v as "accepted" | "rejected")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="accepted">Accept</SelectItem>
+                    <SelectItem value="rejected">Reject</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {ackStatus === "rejected" && <div><Label>Rejection Reason</Label><Input value={ackReason} onChange={(e) => setAckReason(e.target.value)} /></div>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAckDialogMsg(null)}>Cancel</Button>
+              <Button disabled={ackMut.isPending} onClick={() => ackMut.mutate({ messageId: ackDialogMsg.id, status: ackStatus, reason: ackReason || undefined })}>
+                {ackMut.isPending ? "Sending…" : "Confirm"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </DashboardLayout>
   );
 }
