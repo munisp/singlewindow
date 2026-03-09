@@ -27,7 +27,11 @@
       { "name": "oga_officer",      "description": "Other Government Agency officer" },
       { "name": "admin",            "description": "System administrator" },
       { "name": "security_analyst", "description": "Security operations center analyst" },
-      { "name": "auditor",          "description": "Post-clearance auditor" }
+      { "name": "auditor",          "description": "Post-clearance auditor" },
+      { "name": "finance_officer",    "description": "Finance officer managing duties, invoices, and drawback claims" },
+      { "name": "port_operator",      "description": "Port operator managing cargo release and berth scheduling" },
+      { "name": "compliance_officer", "description": "Compliance officer managing sanctions screening and WCO CEN alerts" },
+      { "name": "inspector",          "description": "Physical inspection officer using vision AI for container checks" }
     ]
   },
   "clients": [
@@ -81,5 +85,146 @@
   "otpPolicyType": "totp",
   "otpPolicyAlgorithm": "HmacSHA1",
   "otpPolicyDigits": 6,
-  "otpPolicyPeriod": 30
+  "otpPolicyPeriod": 30,
+
+  "clientScopes": [
+    {
+      "name": "tradegateway-roles",
+      "description": "TradeGateway platform roles included in tokens",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" },
+      "protocolMappers": [
+        {
+          "name": "tradegateway-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "company-name-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "company_name",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "company_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tin-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tin",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tin",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "aeo-status-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "aeo_status",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "aeo_status",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@tradegateway.gov.gh",
+      "firstName": "System",
+      "lastName": "Administrator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Admin@TradeGateway2026", "temporary": true }],
+      "realmRoles": ["admin"]
+    },
+    {
+      "username": "demo_trader",
+      "email": "trader@demo.tradegateway.gov.gh",
+      "firstName": "Demo",
+      "lastName": "Trader",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Trader@Demo2026", "temporary": true }],
+      "realmRoles": ["trader"],
+      "attributes": { "company_name": ["Demo Imports Ltd"], "tin": ["C0012345678"], "aeo_status": ["none"] }
+    },
+    {
+      "username": "demo_customs",
+      "email": "customs@demo.tradegateway.gov.gh",
+      "firstName": "Demo",
+      "lastName": "Customs Officer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Customs@Demo2026", "temporary": true }],
+      "realmRoles": ["customs_officer"]
+    },
+    {
+      "username": "demo_oga",
+      "email": "oga@demo.tradegateway.gov.gh",
+      "firstName": "Demo",
+      "lastName": "OGA Officer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "OGA@Demo2026", "temporary": true }],
+      "realmRoles": ["oga_officer"]
+    },
+    {
+      "username": "demo_finance",
+      "email": "finance@demo.tradegateway.gov.gh",
+      "firstName": "Demo",
+      "lastName": "Finance Officer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Finance@Demo2026", "temporary": true }],
+      "realmRoles": ["finance_officer"]
+    },
+    {
+      "username": "demo_port",
+      "email": "port@demo.tradegateway.gov.gh",
+      "firstName": "Demo",
+      "lastName": "Port Operator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Port@Demo2026", "temporary": true }],
+      "realmRoles": ["port_operator"]
+    },
+    {
+      "username": "demo_compliance",
+      "email": "compliance@demo.tradegateway.gov.gh",
+      "firstName": "Demo",
+      "lastName": "Compliance Officer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Compliance@Demo2026", "temporary": true }],
+      "realmRoles": ["compliance_officer"]
+    }
+  ]
 }

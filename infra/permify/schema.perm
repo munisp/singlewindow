@@ -1,5 +1,8 @@
 // TradeGateway NGSWTP — Permify Fine-Grained Authorization Schema
-// Defines entities, relations, and permissions for all platform resources
+// Version: 2.0.0 — Extended for all 30 stakeholder journeys
+// Resources: user, organization, declaration, permit, payment, profile,
+//            security_alert, aeo_application, system, cargo, audit_record,
+//            drawback_claim, sanctions_entry, system_config
 
 entity user {}
 
@@ -12,41 +15,52 @@ entity organization {
   permission view   = member or admin or owner
 }
 
+// ── Declaration (Journeys 1-3, 6-9) ──────────────────────────────────────────
 entity declaration {
-  relation owner          @user
-  relation customs_officer @user
-  relation oga_officer    @user
-  relation admin          @user
+  relation owner           @user   // trader who submitted
+  relation customs_officer @user   // assigned reviewer
+  relation oga_officer     @user
+  relation admin           @user
 
-  permission view    = owner or customs_officer or oga_officer or admin
-  permission edit    = owner
-  permission submit  = owner
-  permission assess  = customs_officer or admin
-  permission release = customs_officer or admin
-  permission reject  = customs_officer or admin
-  permission audit   = admin
+  permission view          = owner or customs_officer or oga_officer or admin
+  permission edit          = owner
+  permission submit        = owner
+  permission withdraw      = owner
+  permission assess        = customs_officer or admin
+  permission release       = customs_officer or admin
+  permission reject        = customs_officer or admin
+  permission override_risk = admin
+  permission audit         = admin
+  permission view_timeline = owner or customs_officer or oga_officer or admin
 }
 
+// ── OGA Permit (Journeys 11-14) ───────────────────────────────────────────────
 entity permit {
-  relation oga_officer @user
-  relation admin       @user
+  relation oga_officer       @user
+  relation admin             @user
   relation declaration_owner @user
 
-  permission view    = oga_officer or admin or declaration_owner
-  permission approve = oga_officer or admin
-  permission reject  = oga_officer or admin
+  permission view     = oga_officer or admin or declaration_owner
+  permission approve  = oga_officer or admin
+  permission reject   = oga_officer or admin
+  permission escalate = admin
 }
 
+// ── Payment Invoice (Journeys 18-20) ─────────────────────────────────────────
 entity payment {
-  relation owner   @user
-  relation admin   @user
+  relation owner           @user   // trader (payer)
+  relation finance_officer @user
+  relation admin           @user
 
-  permission view    = owner or admin
-  permission initiate = owner
-  permission confirm = admin
-  permission refund  = admin
+  permission view         = owner or finance_officer or admin
+  permission initiate     = owner
+  permission confirm      = admin
+  permission refund       = finance_officer or admin
+  permission reconcile    = finance_officer or admin
+  permission cancel       = admin
 }
 
+// ── Trader Profile (Journey 4, 24) ───────────────────────────────────────────
 entity profile {
   relation owner    @user
   relation reviewer @user
@@ -56,8 +70,10 @@ entity profile {
   permission edit    = owner
   permission approve = reviewer or admin
   permission suspend = admin
+  permission kyc_verify = reviewer or admin
 }
 
+// ── Security Alert (Journeys 21-23) ──────────────────────────────────────────
 entity security_alert {
   relation analyst @user
   relation admin   @user
@@ -68,6 +84,7 @@ entity security_alert {
   permission resolve     = admin
 }
 
+// ── AEO Application (Journey 4) ──────────────────────────────────────────────
 entity aeo_application {
   relation applicant @user
   relation reviewer  @user
@@ -80,11 +97,66 @@ entity aeo_application {
   permission revoke  = admin
 }
 
+// ── Cargo (Journey 15-16) ─────────────────────────────────────────────────────
+entity cargo {
+  relation declaration_owner @user
+  relation port_operator     @user
+  relation inspector         @user
+  relation admin             @user
+
+  permission view           = declaration_owner or port_operator or inspector or admin
+  permission release        = port_operator or admin
+  permission hold           = inspector or admin
+  permission schedule_berth = port_operator or admin
+  permission track          = declaration_owner or port_operator or inspector or admin
+}
+
+// ── Post-Clearance Audit (Journey 8) ─────────────────────────────────────────
+entity audit_record {
+  relation subject  @user   // trader being audited
+  relation auditor  @user
+  relation admin    @user
+
+  permission view          = auditor or admin
+  permission create        = admin
+  permission close         = auditor or admin
+  permission issue_penalty = auditor or admin
+  permission view_subject  = subject or auditor or admin
+}
+
+// ── Duty Drawback (Journey 5) ─────────────────────────────────────────────────
+entity drawback_claim {
+  relation claimant        @user
+  relation finance_officer @user
+  relation admin           @user
+
+  permission submit         = claimant
+  permission view           = claimant or finance_officer or admin
+  permission approve        = finance_officer or admin
+  permission reject         = finance_officer or admin
+  permission process_refund = finance_officer or admin
+}
+
+// ── Sanctions Entry (Journeys 21-23) ─────────────────────────────────────────
+entity sanctions_entry {
+  relation compliance_officer @user
+  relation admin              @user
+
+  permission screen = compliance_officer or admin
+  permission manage = admin
+  permission view   = compliance_officer or admin
+  permission alert  = compliance_officer or admin
+}
+
+// ── System Configuration (Journeys 24-27) ────────────────────────────────────
 entity system {
   relation admin @user
 
-  permission manage_users   = admin
-  permission view_analytics = admin
-  permission configure      = admin
-  permission audit_all      = admin
+  permission manage_users    = admin
+  permission view_analytics  = admin
+  permission configure       = admin
+  permission audit_all       = admin
+  permission manage_routes   = admin
+  permission manage_topics   = admin
+  permission manage_workflows = admin
 }

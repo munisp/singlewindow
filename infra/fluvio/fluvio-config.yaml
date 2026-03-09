@@ -1,0 +1,104 @@
+# Fluvio cluster configuration for TradeGateway NGSWTP
+# Fluvio mirrors the Kafka topics listed below via the Kafka Source Connector,
+# enabling sub-millisecond stream processing on the Fluvio side while Kafka
+# remains the durable event log for the lakehouse pipeline.
+#
+# To start Fluvio locally:
+#   fluvio cluster start
+#   fluvio topic create cargo-events --partitions 3 --replication 1
+#   fluvio topic create ais-vessel-positions --partitions 3 --replication 1
+#   fluvio topic create declaration-events --partitions 3 --replication 1
+#   fluvio topic create payment-events --partitions 3 --replication 1
+#
+# Kafka → Fluvio mirror connector (SmartModule):
+#   fluvio connector create kafka-mirror --config infra/fluvio/fluvio-config.yaml
+
+version: "0.1"
+
+connectors:
+  - name: kafka-to-fluvio-cargo
+    type: kafka-source
+    topic: cargo-events
+    parameters:
+      brokers:
+        - kafka:9092
+      group-id: fluvio-mirror-cargo
+      topics:
+        - cargo-events
+    smartmodules: []
+
+  - name: kafka-to-fluvio-ais
+    type: kafka-source
+    topic: ais-vessel-positions
+    parameters:
+      brokers:
+        - kafka:9092
+      group-id: fluvio-mirror-ais
+      topics:
+        - ais-vessel-positions
+    smartmodules: []
+
+  - name: kafka-to-fluvio-declarations
+    type: kafka-source
+    topic: declaration-events
+    parameters:
+      brokers:
+        - kafka:9092
+      group-id: fluvio-mirror-declarations
+      topics:
+        - declaration-events
+    smartmodules: []
+
+  - name: kafka-to-fluvio-payments
+    type: kafka-source
+    topic: payment-events
+    parameters:
+      brokers:
+        - kafka:9092
+      group-id: fluvio-mirror-payments
+      topics:
+        - payment-events
+    smartmodules: []
+
+# SmartModule: risk-filter
+# Filters events with severity=CRITICAL for priority routing to the SOC dashboard
+smartmodules:
+  - name: risk-filter
+    path: smartmodules/risk-filter/pkg/risk_filter.wasm
+    type: filter
+    params:
+      min_severity: WARNING
+
+# Topics with retention and compaction settings
+topics:
+  cargo-events:
+    partitions: 3
+    replication-factor: 1
+    retention:
+      time: 7d
+      size: 1GB
+    compression: lz4
+
+  ais-vessel-positions:
+    partitions: 6
+    replication-factor: 1
+    retention:
+      time: 24h
+      size: 500MB
+    compression: lz4
+
+  declaration-events:
+    partitions: 3
+    replication-factor: 1
+    retention:
+      time: 30d
+      size: 2GB
+    compression: snappy
+
+  payment-events:
+    partitions: 3
+    replication-factor: 1
+    retention:
+      time: 90d
+      size: 5GB
+    compression: snappy

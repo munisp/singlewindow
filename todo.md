@@ -1526,3 +1526,17 @@
 - [x] Lakehouse pipeline: Delta Lake + Flink ingestion config (10 tables, partitioned by year/month)
 - [x] Docker Compose: Full stack with PostgreSQL, Redis, Kafka, Temporal, Keycloak, MinIO, Jaeger, Prometheus, Grafana, OpenSearch
 - [x] Orchestration tests: 46 vitest tests covering all 10 middleware components (all passing)
+
+## Sprint — Permify, Keycloak, Fluvio, Stakeholder Docs
+
+- [x] Permify schema file (infra/permify/schema.perm) with 10 resource types and permission tuples
+- [x] Permify seed script (infra/permify/seed.mjs) pushing tuples to running Permify container
+- [x] tRPC procedures updated to call Permify for authorization checks
+- [x] Permify vitest tests (server/permify.test.ts) — 54 tests, all passing
+- [x] Keycloak realm-export.json with TradeGateway realm, 6 roles, client scopes, role mappers
+- [x] Keycloak realm README (infra/keycloak/README.md)
+- [x] Fluvio consumer Go service (fluvio-consumer) with WebSocket hub, ring buffer, Kafka consumer
+- [x] Fluvio producer package (internal/producer) with synthetic AIS generation
+- [x] Fluvio config YAML (infra/fluvio/fluvio-config.yaml) with topics, connectors, SmartModules
+- [x] fluvio-consumer builds cleanly (go mod tidy + go build ./...)
+- [x] 30 stakeholder journey reference document (docs/STAKEHOLDER_JOURNEYS.md) — 8 domains, 30 journeys, full middleware coverage matrix
