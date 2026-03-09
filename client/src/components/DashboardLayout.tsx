@@ -65,6 +65,9 @@ import {
   Warehouse,
   Radio,
   Code2,
+  ShieldAlert,
+  Activity,
+  Brain,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -130,6 +133,8 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Shield, label: "Security Monitoring", path: "/app/security" },
           { icon: Globe, label: "Restricted Parties", path: "/app/security/sanctions" },
           { icon: Radio, label: "WCO CEN Alerts", path: "/app/security/cen-alerts" },
+          { icon: ShieldAlert, label: "Threat Intelligence", path: "/app/security/threat-intel" },
+          { icon: Activity, label: "Wazuh SIEM / XDR", path: "/app/security/wazuh" },
         ],
       },
       {
@@ -166,6 +171,7 @@ function getNavGroups(role: string): NavGroup[] {
       {
         label: "Reference",
         items: [
+          { icon: Brain, label: "Risk Model Dashboard", path: "/app/admin/risk-model" },
           { icon: Code2, label: "Developer Portal", path: "/app/developer" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],

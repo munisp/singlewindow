@@ -55,6 +55,9 @@ const AseanSingleWindow = lazy(() => import('./pages/app/AseanSingleWindow'));
 const WcoCenAlerts = lazy(() => import('./pages/app/WcoCenAlerts'));
 const FreeZoneOps = lazy(() => import('./pages/app/FreeZoneOps'));
 const DeveloperPortal = lazy(() => import('./pages/app/DeveloperPortal'));
+const ThreatIntelligence = lazy(() => import('./pages/app/ThreatIntelligence'));
+const WazuhSecurityEvents = lazy(() => import('./pages/app/WazuhSecurityEvents'));
+const RiskModelDashboard = lazy(() => import('./pages/app/RiskModelDashboard'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -238,6 +241,15 @@ function Router() {
       {/* Sprint 41 — Developer Portal */}
       <Route path="/app/developer">
         <Suspense fallback={<LazyFallback />}><DeveloperPortal /></Suspense>
+      </Route>
+      <Route path="/app/security/threat-intel">
+        <Suspense fallback={<LazyFallback />}><ThreatIntelligence /></Suspense>
+      </Route>
+      <Route path="/app/security/wazuh">
+        <Suspense fallback={<LazyFallback />}><WazuhSecurityEvents /></Suspense>
+      </Route>
+      <Route path="/app/admin/risk-model">
+        <Suspense fallback={<LazyFallback />}><RiskModelDashboard /></Suspense>
       </Route>
 
       {/* 404 */}

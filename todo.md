@@ -1057,3 +1057,39 @@
 - [x] Sandbox environment toggle: sandbox mode flag per API key
 - [x] Developer Portal UI: /app/developer (DeveloperPortal.tsx) — sidebar nav item added
 - [x] Vitest tests for API key lifecycle and rate limit logic (sprint39-41.test.ts — 47 tests)
+
+## Sprint 42 — OpenCTI Threat Intelligence Feed
+
+- [x] Go opencti-svc: cmd/main.go with Gin HTTP server (port 8099)
+- [x] Go opencti-svc: STIX 2.1 indicator ingestion from OpenCTI GraphQL API
+- [x] Go opencti-svc: threat graph enrichment (link CEN alerts to STIX indicators)
+- [x] Go opencti-svc: indicator matching against HS codes, trader entities, UCRs
+- [x] Go opencti-svc: STIX bundle export for partner sharing
+- [x] Go opencti-svc: Dockerfile
+- [x] tRPC threatIntelRouter: getIndicators, matchDeclaration, enrichAlert, exportStix, getStats
+- [x] Threat Intelligence UI: /app/security/threat-intel (ThreatIntelligence.tsx)
+- [x] Vitest tests for STIX indicator matching and enrichment logic (sprint42-44.test.ts — 45 tests)
+
+## Sprint 43 — Wazuh SIEM/XDR Integration
+
+- [x] Go wazuh-svc: cmd/main.go with Gin HTTP server (port 8100)
+- [x] Go wazuh-svc: Wazuh REST API client (alerts, agents, rules)
+- [x] Go wazuh-svc: login anomaly detection (brute force, impossible travel, off-hours)
+- [x] Go wazuh-svc: API key abuse detection (rate spike, scope escalation attempts)
+- [x] Go wazuh-svc: privilege escalation playbook (auto-revoke + notify owner)
+- [x] Go wazuh-svc: Dockerfile
+- [x] tRPC wazuhRouter: getAlerts, getAgents, triggerPlaybook, getSecurityScore, listPlaybooks
+- [x] Security Events UI: /app/security/wazuh (WazuhSecurityEvents.tsx)
+- [x] Vitest tests for anomaly detection and playbook trigger logic (sprint42-44.test.ts)
+
+## Sprint 44 — Ray Distributed ML Risk Scoring
+
+- [x] Python ray-risk-scorer: FastAPI + Ray serve app (port 8101)
+- [x] Python ray-risk-scorer: feature engineering pipeline (AEO status, trader history, HS risk, route risk)
+- [x] Python ray-risk-scorer: gradient-boosted model (XGBoost) with AEO-aware scoring
+- [x] Python ray-risk-scorer: batch scoring endpoint for bulk declaration processing
+- [x] Python ray-risk-scorer: model explainability (SHAP values per declaration)
+- [x] Python ray-risk-scorer: Dockerfile
+- [x] tRPC riskModelRouter: scoreDeclaration, batchScore, getModelStats, getFeatureImportance
+- [x] Risk Model Dashboard UI: /app/admin/risk-model (RiskModelDashboard.tsx)
+- [x] Vitest tests for risk scoring logic and AEO feature weighting (sprint42-44.test.ts — 45 tests)
