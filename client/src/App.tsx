@@ -17,6 +17,7 @@ import KYCPortal from "./pages/app/KYCPortal";
 import VisionAnalysis from "./pages/app/VisionAnalysis";
 import AIAssistant from "./pages/app/AIAssistant";
 import DocumentVault from "./pages/app/DocumentVault";
+import ShareLanding from "./pages/ShareLanding";
 import AdminKYCReview from "./pages/app/AdminKYCReview";
 import PortHeatmap from "./pages/app/PortHeatmap";
 // Lazy-load the specification page (it's large))
@@ -195,6 +196,7 @@ function Router() {
       {/* AI Assistant */}
       <Route path="/app/ai-assistant" component={AIAssistant} />
       <Route path="/app/document-vault" component={DocumentVault} />
+      <Route path="/share/:token" component={ShareLanding} />
 
       {/* 404 */}
       <Route path="/404" component={NotFound} />

@@ -785,3 +785,26 @@ export const documentVault = pgTable("document_vault", {
 
 export type DocumentVault = typeof documentVault.$inferSelect;
 export type InsertDocumentVault = typeof documentVault.$inferInsert;
+
+// ─── Document Shares ─────────────────────────────────────────────────────────
+// Time-limited presigned share links with optional bcrypt password protection.
+export const documentShares = pgTable("document_shares", {
+  id: serial("id").primaryKey(),
+  documentId: integer("document_id").notNull().references(() => documentVault.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token: varchar("token", { length: 128 }).notNull().unique(),
+  passwordHash: varchar("password_hash", { length: 256 }),  // null = no password
+  expiresAt: timestamp("expires_at").notNull(),
+  maxDownloads: integer("max_downloads"),                    // null = unlimited
+  downloadCount: integer("download_count").default(0).notNull(),
+  label: varchar("label", { length: 255 }),                 // optional description for the share
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ds_token").on(t.token),
+  index("idx_ds_document_id").on(t.documentId),
+  index("idx_ds_created_by").on(t.createdBy),
+  index("idx_ds_expires_at").on(t.expiresAt),
+]);
+export type DocumentShare = typeof documentShares.$inferSelect;
+export type InsertDocumentShare = typeof documentShares.$inferInsert;

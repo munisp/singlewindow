@@ -50,6 +50,11 @@ import {
   Plus,
   AlertTriangle,
   Shield,
+  Share2,
+  Link2,
+  Clock,
+  Lock,
+  Copy,
 } from "lucide-react";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -122,6 +127,13 @@ function UploadDialog({
   const [accessLevel, setAccessLevel] = useState("private");
   const [description, setDescription] = useState("");
   const [isDragging, setIsDragging] = useState(false);
+  const [linkedDeclarationId, setLinkedDeclarationId] = useState<string>("none");
+
+  // Fetch trader's recent declarations for the selector
+  const { data: myDeclarations } = trpc.declarations.myDeclarations.useQuery(
+    { limit: 50, offset: 0 },
+    { staleTime: 60_000 }
+  );
 
   const upload = trpc.documentVault.upload.useMutation({
     onSuccess: () => {
@@ -130,6 +142,7 @@ function UploadDialog({
       onClose();
       setSelectedFile(null);
       setDescription("");
+      setLinkedDeclarationId("none");
     },
     onError: (err) => {
       toast.error("Upload failed", { description: err.message });
@@ -168,6 +181,7 @@ function UploadDialog({
       category,
       accessLevel: accessLevel as "private" | "shared_with_customs" | "shared_with_oga" | "public",
       description: description || undefined,
+      declarationId: linkedDeclarationId !== "none" ? Number(linkedDeclarationId) : undefined,
     });
   };
 
@@ -249,6 +263,27 @@ function UploadDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Link to declaration */}
+          <div className="space-y-1.5">
+            <Label>Link to Declaration (optional)</Label>
+            <Select value={linkedDeclarationId} onValueChange={setLinkedDeclarationId}>
+              <SelectTrigger>
+                <SelectValue placeholder="No declaration" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No declaration</SelectItem>
+                {(myDeclarations ?? []).map(d => (
+                  <SelectItem key={d.id} value={String(d.id)}>
+                    #{d.id} — {d.ucr ?? "Draft"} ({d.status})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Attach this document to a specific declaration so customs officers can view it inline.
+            </p>
           </div>
 
           {/* Description */}
@@ -384,12 +419,195 @@ type DocRecord = {
   createdAt: Date;
 };
 
+// ─── Share Dialog ─────────────────────────────────────────────────────────────
+
+function ShareDialog({
+  docId,
+  docName,
+  open,
+  onClose,
+}: {
+  docId: number;
+  docName: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [expiresInHours, setExpiresInHours] = useState(24);
+  const [usePassword, setUsePassword] = useState(false);
+  const [password, setPassword] = useState("");
+  const [maxDownloads, setMaxDownloads] = useState("");
+  const [label, setLabel] = useState("");
+  const [shareResult, setShareResult] = useState<{ token: string; expiresAt: Date } | null>(null);
+
+  const share = trpc.documentVault.share.useMutation({
+    onSuccess: (data) => {
+      setShareResult({ token: data.token, expiresAt: data.expiresAt });
+      toast.success("Share link created");
+    },
+    onError: (err) => toast.error("Failed to create share link", { description: err.message }),
+  });
+
+  const shareUrl = shareResult
+    ? `${window.location.origin}/share/${shareResult.token}`
+    : null;
+
+  const handleCopy = () => {
+    if (shareUrl) {
+      navigator.clipboard.writeText(shareUrl);
+      toast.success("Link copied to clipboard");
+    }
+  };
+
+  const handleClose = () => {
+    setShareResult(null);
+    setPassword("");
+    setUsePassword(false);
+    setMaxDownloads("");
+    setLabel("");
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Share2 className="h-5 w-5 text-blue-400" />
+            Share Document
+          </DialogTitle>
+          <DialogDescription>
+            Create a time-limited link for <span className="font-medium text-foreground">{docName}</span>.
+          </DialogDescription>
+        </DialogHeader>
+
+        {shareResult ? (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4">
+              <p className="text-sm font-medium text-green-400 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4" /> Share link created
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Expires: {new Date(shareResult.expiresAt).toLocaleString()}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={shareUrl ?? ""}
+                readOnly
+                className="text-xs font-mono"
+              />
+              <Button size="sm" variant="outline" onClick={handleCopy}>
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Close</Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Expires in</Label>
+              <Select value={String(expiresInHours)} onValueChange={(v) => setExpiresInHours(Number(v))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 hour</SelectItem>
+                  <SelectItem value="6">6 hours</SelectItem>
+                  <SelectItem value="24">24 hours</SelectItem>
+                  <SelectItem value="72">3 days</SelectItem>
+                  <SelectItem value="168">7 days</SelectItem>
+                  <SelectItem value="720">30 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <Label className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" /> Password protect</Label>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={usePassword}
+                onClick={() => setUsePassword(!usePassword)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                  usePassword ? "bg-primary" : "bg-muted"
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  usePassword ? "translate-x-4" : "translate-x-0.5"
+                }`} />
+              </button>
+            </div>
+
+            {usePassword && (
+              <div className="space-y-1.5">
+                <Label>Password (min 4 characters)</Label>
+                <Input
+                  type="password"
+                  placeholder="Enter password…"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  minLength={4}
+                  maxLength={64}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label>Max downloads (optional)</Label>
+              <Input
+                type="number"
+                placeholder="Unlimited"
+                value={maxDownloads}
+                onChange={(e) => setMaxDownloads(e.target.value)}
+                min={1}
+                max={1000}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Label (optional)</Label>
+              <Input
+                placeholder="e.g. For Customs Officer John"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                maxLength={255}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose} disabled={share.isPending}>Cancel</Button>
+              <Button
+                onClick={() => share.mutate({
+                  documentId: docId,
+                  expiresInHours,
+                  password: usePassword && password.length >= 4 ? password : undefined,
+                  maxDownloads: maxDownloads ? Number(maxDownloads) : undefined,
+                  label: label || undefined,
+                })}
+                disabled={share.isPending || (usePassword && password.length < 4)}
+              >
+                {share.isPending
+                  ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creating…</>
+                  : <><Link2 className="h-4 w-4 mr-2" /> Create Link</>}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Document Row ─────────────────────────────────────────────────────────────
+
 function DocumentRow({
   doc,
   onRevoke,
+  onShare,
 }: {
   doc: DocRecord;
   onRevoke: (id: number, name: string) => void;
+  onShare: (id: number, name: string) => void;
 }) {
   const download = trpc.documentVault.download.useMutation({
     onSuccess: (data) => {
@@ -455,6 +673,15 @@ function DocumentRow({
             <Button
               size="sm"
               variant="ghost"
+              className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300"
+              title="Share document"
+              onClick={() => onShare(doc.id, doc.filename)}
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               className="h-8 w-8 p-0 text-destructive hover:text-destructive"
               title="Revoke document"
               onClick={() => onRevoke(doc.id, doc.filename)}
@@ -473,6 +700,7 @@ function DocumentRow({
 export default function DocumentVault() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{ id: number; name: string } | null>(null);
+  const [shareTarget, setShareTarget] = useState<{ id: number; name: string } | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"active" | "revoked">("active");
   const [search, setSearch] = useState("");
@@ -615,6 +843,7 @@ export default function DocumentVault() {
                   key={doc.id}
                   doc={doc}
                   onRevoke={(id, name) => setRevokeTarget({ id, name })}
+                  onShare={(id, name) => setShareTarget({ id, name })}
                 />
               ))
             )}
@@ -635,6 +864,14 @@ export default function DocumentVault() {
           open={true}
           onClose={() => setRevokeTarget(null)}
           onSuccess={handleRefresh}
+        />
+      )}
+      {shareTarget && (
+        <ShareDialog
+          docId={shareTarget.id}
+          docName={shareTarget.name}
+          open={true}
+          onClose={() => setShareTarget(null)}
         />
       )}
     </DashboardLayout>

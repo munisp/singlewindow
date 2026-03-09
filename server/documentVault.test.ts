@@ -318,4 +318,97 @@ describe("documentVault router", () => {
       expect(result).toEqual({ totalFiles: 0, totalBytes: 0, activeFiles: 0, revokedFiles: 0 });
     });
   });
+
+  describe("listByDeclaration", () => {
+    it("returns empty array when db is unavailable", async () => {
+      vi.mocked(getDb).mockResolvedValue(null as never);
+      const caller = appRouter.createCaller(makeCtx());
+      const result = await caller.documentVault.listByDeclaration({ declarationId: 1 });
+      expect(result).toEqual([]);
+    });
+
+    it("queries documents by declarationId", async () => {
+      const fakeDocs = [
+        { id: 1, ownerId: 42, filename: "invoice.pdf", declarationId: 7, status: "active",
+          fileKey: "vault/42/invoice.pdf", url: "http://localhost:9000/invoice.pdf",
+          mimeType: "application/pdf", sizeBytes: 1024, category: "commercial_invoice",
+          accessLevel: "private", description: null, revokedBy: null, revokedAt: null,
+          createdAt: new Date(), updatedAt: new Date() },
+      ];
+      const db = makeDbMock();
+      db.orderBy.mockResolvedValue(fakeDocs);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx());
+      const result = await caller.documentVault.listByDeclaration({ declarationId: 7 });
+      expect(result).toHaveLength(1);
+      expect(result[0].filename).toBe("invoice.pdf");
+    });
+  });
+
+  describe("share", () => {
+    it("throws NOT_FOUND when document does not exist", async () => {
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx());
+      await expect(
+        caller.documentVault.share({ documentId: 9999, expiresInHours: 24 })
+      ).rejects.toThrow("Document not found");
+    });
+
+    it("throws FORBIDDEN when non-owner tries to share", async () => {
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([{ id: 1, ownerId: 99, status: "active", fileKey: "vault/99/doc.pdf", filename: "doc.pdf" }]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42, role: "user" })));
+      await expect(
+        caller.documentVault.share({ documentId: 1, expiresInHours: 24 })
+      ).rejects.toThrow("You do not own this document");
+    });
+
+    it("creates share record and returns token for owner", async () => {
+      const fakeDoc = { id: 1, ownerId: 42, status: "active", fileKey: "vault/42/doc.pdf", filename: "doc.pdf" };
+      const fakeShare = {
+        id: 10, documentId: 1, token: "test-nano-id", passwordHash: null,
+        expiresAt: new Date(Date.now() + 86400000), maxDownloads: null,
+        downloadCount: 0, label: null, createdBy: 42, createdAt: new Date(),
+      };
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([fakeDoc]);
+      db.returning.mockResolvedValue([fakeShare]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42 })));
+      const result = await caller.documentVault.share({ documentId: 1, expiresInHours: 24 });
+      expect(result.token).toBe("test-nano-id");
+      expect(result.shareId).toBe(10);
+      expect(result.hasPassword).toBe(false);
+    });
+  });
+
+  describe("verifyShare", () => {
+    it("throws NOT_FOUND when token does not exist", async () => {
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx());
+      await expect(
+        caller.documentVault.verifyShare({ token: "invalid-token" })
+      ).rejects.toThrow("Share link not found");
+    });
+
+    it("throws FORBIDDEN when share has expired", async () => {
+      const expiredShare = {
+        id: 10, documentId: 1, token: "expired-token", passwordHash: null,
+        expiresAt: new Date(Date.now() - 1000), maxDownloads: null,
+        downloadCount: 0, revokedAt: null, createdBy: 42, createdAt: new Date(),
+      };
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([expiredShare]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx());
+      await expect(
+        caller.documentVault.verifyShare({ token: "expired-token" })
+      ).rejects.toThrow("This share link has expired");
+    });
+  });
 });

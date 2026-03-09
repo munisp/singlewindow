@@ -9,7 +9,8 @@ import { trpc } from "@/lib/trpc";
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
-  DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield
+  DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield,
+  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon
 } from "lucide-react";
 import { useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
@@ -687,7 +688,117 @@ export default function DeclarationDetail() {
             </div>
           </>
         ) : null}
+
+        {/* Attached Documents from Document Vault */}
+        {declarationId > 0 && <AttachedDocuments declarationId={declarationId} />}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── Attached Documents Panel ────────────────────────────────────────────────
+
+function getDocFileIcon(mimeType: string) {
+  if (mimeType?.startsWith("image/")) return <Image className="h-4 w-4" />;
+  if (mimeType === "application/pdf") return <FileText className="h-4 w-4" />;
+  if (mimeType?.includes("zip") || mimeType?.includes("tar") || mimeType?.includes("gzip"))
+    return <Archive className="h-4 w-4" />;
+  return <File className="h-4 w-4" />;
+}
+
+function formatDocBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function AttachedDocuments({ declarationId }: { declarationId: number }) {
+  const { data: docs, isLoading, refetch } = trpc.documentVault.listByDeclaration.useQuery(
+    { declarationId },
+    { enabled: declarationId > 0 }
+  );
+
+  const download = trpc.documentVault.download.useMutation({
+    onSuccess: (data) => {
+      window.open(data.url, "_blank");
+      toast.success("Download ready", { description: "Presigned link expires in 1 hour." });
+    },
+    onError: (err) => toast.error("Download failed", { description: err.message }),
+  });
+
+  if (!isLoading && (!docs || docs.length === 0)) return null;
+
+  return (
+    <Card className="mt-6">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <FolderLock className="h-4 w-4 text-primary" />
+          Attached Documents
+          {docs && docs.length > 0 && (
+            <span className="ml-1 text-sm font-normal text-muted-foreground">({docs.length})</span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 w-7 p-0"
+            onClick={() => refetch()}
+          >
+            <RefreshCwIcon className="h-3.5 w-3.5" />
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-2">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-12 rounded-lg bg-muted/30 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {(docs ?? []).map(doc => (
+              <div
+                key={doc.id}
+                className="flex items-center gap-3 p-3 rounded-lg border border-border/40 bg-card/30 hover:bg-card/60 transition-colors"
+              >
+                <div className="flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center bg-primary/10 text-primary">
+                  {getDocFileIcon(doc.mimeType)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{doc.filename}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-muted-foreground">{formatDocBytes(doc.sizeBytes)}</span>
+                    <span className="text-xs text-muted-foreground">·</span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(doc.createdAt).toLocaleDateString()}
+                    </span>
+                    {doc.description && (
+                      <>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        <span className="text-xs text-muted-foreground truncate max-w-[200px]">{doc.description}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 w-8 p-0 flex-shrink-0"
+                  title="Download"
+                  onClick={() => download.mutate({ id: doc.id })}
+                  disabled={download.isPending}
+                >
+                  {download.isPending
+                    ? <RefreshCwIcon className="h-3.5 w-3.5 animate-spin" />
+                    : <Download className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

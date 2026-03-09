@@ -796,3 +796,32 @@
 - [x] Add Document Vault nav entry to DashboardLayout (trader view)
 - [x] Add /app/document-vault route to App.tsx
 - [x] Write 20 vitest tests for documentVault router and rustfsSvcClient (all passing)
+
+## Sprint 26 — Startup Automation, Document Sharing, Declaration Attachments
+
+- [ ] Install concurrently and wire RustFS + rustfs-svc into pnpm dev
+- [ ] Add start-rustfs.sh and build-rustfs-svc.sh helper scripts
+- [ ] Add document_shares table to schema (token, expires_at, password_hash, doc_id)
+- [ ] Run db:push for document_shares migration
+- [ ] Add share tRPC procedure (generate presigned share link with optional password + expiry)
+- [ ] Add verifyShare public procedure (validate token + optional password, return presigned URL)
+- [ ] Add Share button and ShareDialog to DocumentVault UI
+- [ ] Add public /share/:token route for share link landing page
+- [ ] Extend upload dialog with declaration selector (optional declarationId)
+- [ ] Show attached documents panel on Declaration Detail page
+- [ ] Write vitest tests for share and declaration-attachment features
+
+## Sprint 26 — Startup Automation, Document Sharing, Declaration Attachment Linking
+
+- [x] Startup automation: install concurrently, wire RustFS + rustfs-svc into pnpm dev
+- [x] Create scripts/start-rustfs.sh, scripts/start-rustfs-svc.sh, scripts/build-rustfs-svc.sh
+- [x] Update package.json dev script to use concurrently with color-coded prefixes
+- [x] Document sharing: add document_shares table to schema (migration 0012)
+- [x] Document sharing: install bcryptjs, add share/verifyShare/listShares/revokeShare procedures
+- [x] Document sharing: add ShareDialog component to DocumentVault page
+- [x] Document sharing: create public /share/:token landing page (ShareLanding.tsx)
+- [x] Document sharing: wire /share/:token route in App.tsx
+- [x] Declaration attachment linking: add listByDeclaration procedure to documentVault router
+- [x] Declaration attachment linking: extend UploadDialog with declaration selector (myDeclarations query)
+- [x] Declaration attachment linking: add AttachedDocuments panel to DeclarationDetail page
+- [x] Tests: add 7 new vitest tests for share, verifyShare, listByDeclaration (27 total, all passing)

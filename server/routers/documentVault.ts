@@ -8,12 +8,13 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { documentVault } from "../../drizzle/schema";
+import { documentVault, documentShares } from "../../drizzle/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck } from "../rustfsSvcClient";
 import { nanoid } from "nanoid";
+import bcrypt from "bcryptjs";
 
 const DOCUMENT_CATEGORIES = [
   "commercial_invoice", "bill_of_lading", "packing_list",
@@ -243,4 +244,200 @@ export const documentVaultRouter = router({
     const svcHealthy = await rustfsHealthCheck();
     return { database: !!db, rustfsSvc: svcHealthy };
   }),
+
+  // ── Document Sharing ──────────────────────────────────────────────────────
+
+  share: protectedProcedure
+    .input(z.object({
+      documentId: z.number().int().positive(),
+      expiresInHours: z.number().int().min(1).max(720).default(24),
+      password: z.string().min(4).max(64).optional(),
+      maxDownloads: z.number().int().min(1).max(1000).optional(),
+      label: z.string().max(255).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [doc] = await db
+        .select({ id: documentVault.id, ownerId: documentVault.ownerId, filename: documentVault.filename, status: documentVault.status })
+        .from(documentVault)
+        .where(eq(documentVault.id, input.documentId))
+        .limit(1);
+
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      if (doc.status !== "active") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot share a revoked document" });
+      if (doc.ownerId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this document" });
+      }
+
+      const token = nanoid(48);
+      const expiresAt = new Date(Date.now() + input.expiresInHours * 60 * 60 * 1000);
+      const passwordHash = input.password ? await bcrypt.hash(input.password, 10) : null;
+
+      const [share] = await db
+        .insert(documentShares)
+        .values({
+          documentId: input.documentId,
+          createdBy: ctx.user.id,
+          token,
+          passwordHash,
+          expiresAt,
+          maxDownloads: input.maxDownloads ?? null,
+          label: input.label ?? null,
+        })
+        .returning();
+
+      return {
+        shareId: share.id,
+        token: share.token,
+        expiresAt: share.expiresAt,
+        hasPassword: !!passwordHash,
+        maxDownloads: share.maxDownloads,
+        label: share.label,
+      };
+    }),
+
+  verifyShare: publicProcedure
+    .input(z.object({
+      token: z.string().min(1),
+      password: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [share] = await db
+        .select()
+        .from(documentShares)
+        .where(eq(documentShares.token, input.token))
+        .limit(1);
+
+      if (!share) throw new TRPCError({ code: "NOT_FOUND", message: "Share link not found" });
+      if (share.revokedAt) throw new TRPCError({ code: "FORBIDDEN", message: "This share link has been revoked" });
+      if (share.expiresAt < new Date()) throw new TRPCError({ code: "FORBIDDEN", message: "This share link has expired" });
+      if (share.maxDownloads !== null && share.downloadCount >= share.maxDownloads) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Download limit reached" });
+      }
+
+      if (share.passwordHash) {
+        if (!input.password) throw new TRPCError({ code: "FORBIDDEN", message: "Password required" });
+        const valid = await bcrypt.compare(input.password, share.passwordHash);
+        if (!valid) throw new TRPCError({ code: "FORBIDDEN", message: "Incorrect password" });
+      }
+
+      const [doc] = await db
+        .select({ fileKey: documentVault.fileKey, filename: documentVault.filename, status: documentVault.status })
+        .from(documentVault)
+        .where(eq(documentVault.id, share.documentId))
+        .limit(1);
+
+      if (!doc || doc.status !== "active") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Document is no longer available" });
+      }
+
+      const presignedUrl = await rustfsPresign(doc.fileKey, 3600);
+
+      await db
+        .update(documentShares)
+        .set({ downloadCount: share.downloadCount + 1 })
+        .where(eq(documentShares.id, share.id));
+
+      return {
+        url: presignedUrl,
+        filename: doc.filename,
+        expiresAt: share.expiresAt,
+        downloadsRemaining: share.maxDownloads !== null
+          ? share.maxDownloads - share.downloadCount - 1
+          : null,
+      };
+    }),
+
+  listShares: protectedProcedure
+    .input(z.object({ documentId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const [doc] = await db
+        .select({ ownerId: documentVault.ownerId })
+        .from(documentVault)
+        .where(eq(documentVault.id, input.documentId))
+        .limit(1);
+
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      if (doc.ownerId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+
+      return db
+        .select({
+          id: documentShares.id,
+          token: documentShares.token,
+          label: documentShares.label,
+          expiresAt: documentShares.expiresAt,
+          maxDownloads: documentShares.maxDownloads,
+          downloadCount: documentShares.downloadCount,
+          hasPassword: sql<boolean>`(${documentShares.passwordHash} IS NOT NULL)`,
+          revokedAt: documentShares.revokedAt,
+          createdAt: documentShares.createdAt,
+        })
+        .from(documentShares)
+        .where(eq(documentShares.documentId, input.documentId))
+        .orderBy(desc(documentShares.createdAt));
+    }),
+
+  revokeShare: protectedProcedure
+    .input(z.object({ shareId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [share] = await db
+        .select({ id: documentShares.id, createdBy: documentShares.createdBy })
+        .from(documentShares)
+        .where(eq(documentShares.id, input.shareId))
+        .limit(1);
+
+      if (!share) throw new TRPCError({ code: "NOT_FOUND", message: "Share not found" });
+      if (share.createdBy !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+
+       const [updated] = await db
+        .update(documentShares)
+        .set({ revokedAt: new Date() })
+        .where(eq(documentShares.id, input.shareId))
+        .returning();
+      return { revoked: true, shareId: updated.id };
+    }),
+
+  /**
+   * List all active documents attached to a specific declaration.
+   * Accessible by the document owner, customs officers, OGA officers, and admins.
+   */
+  listByDeclaration: protectedProcedure
+    .input(z.object({ declarationId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const isPrivileged = ["admin", "customs_officer", "oga_officer"].includes(ctx.user.role);
+
+      const conditions = [
+        eq(documentVault.declarationId, input.declarationId),
+        eq(documentVault.status, "active"),
+      ];
+
+      // Non-privileged users can only see their own documents
+      if (!isPrivileged) {
+        conditions.push(eq(documentVault.ownerId, ctx.user.id));
+      }
+
+      return db
+        .select()
+        .from(documentVault)
+        .where(and(...conditions))
+        .orderBy(desc(documentVault.createdAt));
+    }),
 });
