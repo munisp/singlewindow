@@ -1,0 +1,171 @@
+# TradeGateway NGSWTP — APISIX Keycloak Consumer Configuration
+#
+# This file defines APISIX consumers that validate Keycloak-issued JWT tokens
+# via JWKS (RS256). Each consumer maps to a Keycloak client role.
+#
+# Apply with:
+#   curl -X PUT http://localhost:9180/apisix/admin/consumers \
+#     -H "X-API-KEY: $APISIX_ADMIN_KEY" \
+#     -d @keycloak-consumer.yaml
+#
+# Or use the declarative config approach with apisix-ingress-controller.
+
+# ── JWKS-based JWT Plugin (global) ────────────────────────────────────────────
+#
+# APISIX's jwt-auth plugin supports JWKS endpoint discovery via the
+# openid-connect plugin, which is the recommended approach for Keycloak.
+# The configuration below uses the openid-connect plugin which:
+#   1. Fetches JWKS from Keycloak's well-known endpoint
+#   2. Validates RS256 signatures
+#   3. Injects user claims into upstream headers
+#   4. Handles token expiry and refresh automatically
+
+# ── Plugin Configuration ──────────────────────────────────────────────────────
+
+plugin_configs:
+  # Shared OIDC config for all protected microservice routes
+  - id: "keycloak-oidc"
+    plugins:
+      openid-connect:
+        # Keycloak realm discovery URL
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        # Client credentials (tradegateway-backend client)
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        # Redirect URI for browser-based flows
+        redirect_uri: "https://api.tradegateway.gov.gh/api/oauth/callback"
+        # Scope requested
+        scope: "openid profile email roles"
+        # Token validation
+        token_signing_alg_values_expected: "RS256"
+        # Introspection endpoint (optional — use for opaque tokens)
+        # introspection_endpoint: "http://keycloak.../protocol/openid-connect/token/introspect"
+        # Pass claims to upstream
+        set_userinfo_header: true
+        set_id_token_header: true
+        set_access_token_header: true
+        # Header names for upstream services
+        access_token_in_authorization_header: true
+        # Cache JWKS for 5 minutes
+        jwks_expires_in: 300
+        # Reject requests without valid token
+        bearer_only: true
+        # Realm roles claim path
+        realm_roles_claim: "realm_access.roles"
+
+# ── Consumers ─────────────────────────────────────────────────────────────────
+# Each consumer represents a Keycloak client application (service-to-service).
+# Human users authenticate via the openid-connect plugin above.
+
+consumers:
+  # Temporal worker service account
+  - username: temporal-worker
+    plugins:
+      jwt-auth:
+        key: "temporal-worker-key"
+        algorithm: RS256
+        # Public key fetched from Keycloak JWKS
+        public_key: |
+          # Populated at runtime from Keycloak JWKS endpoint
+          # GET http://keycloak:8080/realms/tradegateway/protocol/openid-connect/certs
+
+  # Risk engine service account
+  - username: risk-engine
+    plugins:
+      jwt-auth:
+        key: "risk-engine-key"
+        algorithm: RS256
+
+  # Sanctions service account
+  - username: sanctions-service
+    plugins:
+      jwt-auth:
+        key: "sanctions-service-key"
+        algorithm: RS256
+
+  # Fluvio consumer service account
+  - username: fluvio-consumer
+    plugins:
+      jwt-auth:
+        key: "fluvio-consumer-key"
+        algorithm: RS256
+
+# ── Route Plugin Config Bindings ──────────────────────────────────────────────
+# Bind the keycloak-oidc plugin config to all protected routes.
+# These IDs correspond to routes defined in apisix.yaml.
+
+route_plugin_bindings:
+  # tRPC API — Keycloak OIDC validation
+  - route_id: "100"
+    plugin_config_id: "keycloak-oidc"
+
+  # Declaration microservice
+  - route_id: "200"
+    plugin_config_id: "keycloak-oidc"
+
+  # Payment microservice
+  - route_id: "300"
+    plugin_config_id: "keycloak-oidc"
+
+  # OGA microservice
+  - route_id: "400"
+    plugin_config_id: "keycloak-oidc"
+
+  # Profile microservice
+  - route_id: "500"
+    plugin_config_id: "keycloak-oidc"
+
+  # Risk engine
+  - route_id: "600"
+    plugin_config_id: "keycloak-oidc"
+
+  # Cargo tracking
+  - route_id: "700"
+    plugin_config_id: "keycloak-oidc"
+
+  # Analytics
+  - route_id: "800"
+    plugin_config_id: "keycloak-oidc"
+
+# ── Role-Based Route Guards ────────────────────────────────────────────────────
+# Use the authz-keycloak plugin to enforce Keycloak role-based access at the
+# gateway level, before requests reach microservices.
+#
+# This provides a first line of defense; Permify provides resource-level
+# fine-grained authorization inside each service.
+
+route_role_guards:
+  # Only customs_officer, inspector, admin can call declaration status updates
+  - route_id: "200"
+    method: "PUT"
+    uri_pattern: "/api/declarations/*/status"
+    plugin: authz-keycloak
+    config:
+      token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
+      permissions:
+        - "declaration#assess"
+        - "declaration#release"
+        - "declaration#hold"
+      enforcement_mode: ENFORCING
+
+  # Only oga_officer, admin can approve/reject permits
+  - route_id: "400"
+    method: "PUT"
+    uri_pattern: "/api/oga/permits/*/approve"
+    plugin: authz-keycloak
+    config:
+      token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
+      permissions:
+        - "permit#approve"
+      enforcement_mode: ENFORCING
+
+  # Only finance, admin can access payment reconciliation
+  - route_id: "300"
+    method: "GET"
+    uri_pattern: "/api/payments/reconciliation*"
+    plugin: authz-keycloak
+    config:
+      token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
+      permissions:
+        - "payment#reconcile"
+      enforcement_mode: ENFORCING

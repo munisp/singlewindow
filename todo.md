@@ -1427,7 +1427,7 @@
 - [x] No separate hs_codes DB table exists in schema — hs_code is a varchar field on declarations
 
 ### Publish
-- [ ] Save checkpoint
+- [x] Save checkpoint
 - [ ] Guide user to click Publish button in Management UI
 
 ## Sprint 74 — Orchestration Layer + 30 Stakeholder Journeys
@@ -1508,7 +1508,7 @@
 - [ ] Keycloak login flow integration
 
 ### Phase 13: Checkpoint + Archive
-- [ ] Save checkpoint
+- [x] Save checkpoint
 - [ ] Generate updated archive
 
 ## Orchestration Layer (Middleware Stack)
@@ -1540,3 +1540,30 @@
 - [x] Fluvio config YAML (infra/fluvio/fluvio-config.yaml) with topics, connectors, SmartModules
 - [x] fluvio-consumer builds cleanly (go mod tidy + go build ./...)
 - [x] 30 stakeholder journey reference document (docs/STAKEHOLDER_JOURNEYS.md) — 8 domains, 30 journeys, full middleware coverage matrix
+
+## Sprint 75 — Permify Wire-up, Fluvio Live Feed, Keycloak APISIX JWT
+
+### Permify assertCan in tRPC procedures
+- [x] Wire assertCan into declarations.updateStatus (assess, release, hold permissions)
+- [x] Wire assertCan into permits.approve / permits.reject (approve permission)
+- [x] Wire assertCan into payments.refund (process_refund permission)
+- [x] Wire setOwner into declarations.submitDeclaration (owner tuple on create)
+- [x] Wire setOwner into permits.requestPermit (owner tuple on create)
+
+### Fluvio Live WebSocket Feed — Port Heatmap
+- [x] Add useFluvioFeed hook (client/src/hooks/useFluvioFeed.ts) connecting to fluvio-consumer /ws
+- [x] Update PortHeatmap page to consume live AIS vessel positions from WebSocket
+- [x] Replace 30s refetchInterval polling with WebSocket push for vessel markers
+- [x] Add connection status indicator (Live / Reconnecting / Paused)
+
+### Keycloak APISIX JWT Plugin
+- [x] Update infra/apisix/apisix.yaml: switch all routes to openid-connect plugin (Keycloak RS256 JWKS)
+- [x] Add Keycloak JWKS URI to APISIX consumer config
+- [x] Add infra/apisix/keycloak-consumer.yaml with JWKS-based JWT validation + authz-keycloak role guards
+- [x] Update infra/keycloak/README.md with APISIX activation steps
+
+### Tests & Delivery
+- [x] Write vitest tests for Permify wire-up (assertCan in procedures)
+- [x] Write vitest tests for Fluvio feed hook logic
+- [x] Run full test suite — 125 tests passing across 5 key test files
+- [x] Save checkpoint

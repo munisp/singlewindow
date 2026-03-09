@@ -115,10 +115,16 @@ routes:
         allow_methods: "GET,POST,PUT,DELETE,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         max_age: 3600
-      jwt-auth:
-        header: Authorization
-        query: token
-        cookie: session_token
+      # Keycloak OIDC — validates RS256 JWT from Keycloak, injects user claims
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        access_token_in_authorization_header: true
+        jwks_expires_in: 300
       request-id: {}
 
   # ── OAuth endpoints (no auth required) ────────────────────────────────────
@@ -141,8 +147,15 @@ routes:
     uri: /api/declarations/*
     upstream_id: "2"
     plugins:
-      jwt-auth:
-        header: Authorization
+      # Keycloak OIDC — bearer_only mode for service-to-service calls
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       opentelemetry:
         sampler:
           name: always_on
@@ -161,8 +174,14 @@ routes:
     uri: /api/payments/*
     upstream_id: "3"
     plugins:
-      jwt-auth:
-        header: Authorization
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       opentelemetry:
         sampler:
           name: always_on
@@ -196,8 +215,14 @@ routes:
     uri: /api/oga/*
     upstream_id: "4"
     plugins:
-      jwt-auth:
-        header: Authorization
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       opentelemetry:
         sampler:
           name: always_on
@@ -225,8 +250,14 @@ routes:
     uri: /api/profiles/*
     upstream_id: "5"
     plugins:
-      jwt-auth:
-        header: Authorization
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       limit-req:
         rate: 300
         burst: 60
@@ -239,8 +270,14 @@ routes:
     uri: /api/risk/*
     upstream_id: "6"
     plugins:
-      jwt-auth:
-        header: Authorization
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       limit-req:
         rate: 200
         burst: 40
@@ -253,8 +290,14 @@ routes:
     uri: /api/cargo/*
     upstream_id: "7"
     plugins:
-      jwt-auth:
-        header: Authorization
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       limit-req:
         rate: 500
         burst: 100
@@ -266,8 +309,14 @@ routes:
     uri: /api/analytics/*
     upstream_id: "8"
     plugins:
-      jwt-auth:
-        header: Authorization
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "tradegateway-backend"
+        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+        bearer_only: true
+        token_signing_alg_values_expected: "RS256"
+        set_access_token_header: true
+        jwks_expires_in: 300
       limit-req:
         rate: 100
         burst: 20
@@ -322,13 +371,37 @@ plugins:
       header_name: X-Request-ID
       include_in_response: true
 
-  # Keycloak JWT validation
-  - name: jwt-auth
+  # Keycloak OIDC plugin (global default config)
+  - name: openid-connect
     config:
-      key_claim_name: kid
-      algorithm: RS256
-      # Keycloak JWKS endpoint
-      public_key_url: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/certs"
+      # Keycloak realm discovery endpoint
+      discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+      client_id: "tradegateway-backend"
+      client_secret: "${KEYCLOAK_CLIENT_SECRET}"
+      # bearer_only: true means APISIX only validates tokens, does not redirect to login
+      bearer_only: true
+      # RS256 signature validation via JWKS
+      token_signing_alg_values_expected: "RS256"
+      # Cache JWKS for 5 minutes to reduce Keycloak load
+      jwks_expires_in: 300
+      # Inject access token into upstream Authorization header
+      set_access_token_header: true
+      access_token_in_authorization_header: true
+      # Inject user info into X-Userinfo header for upstream services
+      set_userinfo_header: true
+      # Inject ID token into X-ID-Token header
+      set_id_token_header: true
+
+  # Keycloak Authorization (authz-keycloak) for role-based route guards
+  - name: authz-keycloak
+    config:
+      token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
+      grant_type: urn:ietf:params:oauth:grant-type:uma-ticket
+      # enforcement_mode: ENFORCING rejects requests that lack required permissions
+      enforcement_mode: ENFORCING
+      # Keycloak resource server client
+      client_id: "tradegateway-backend"
+      client_secret: "${KEYCLOAK_CLIENT_SECRET}"
 
 # ── Rate limiting ──────────────────────────────────────────────────────────────
 # Global rate limits are applied per route above.

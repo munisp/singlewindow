@@ -7,6 +7,7 @@ import {
   getAllPayments, createUserNotification
 } from "../db";
 import { nanoid } from "nanoid";
+import { assertCan, setOwner } from "../_core/permify";
 
 export const paymentsRouter = router({
   // Initiate payment for a declaration
@@ -15,8 +16,7 @@ export const paymentsRouter = router({
       declarationId: z.number(),
       paymentMethod: z.enum(["bank_transfer", "mobile_money", "card", "bond"]),
     }))
-    .mutation(async ({ ctx, input }) => {
-      const decl = await getDeclarationById(input.declarationId);
+    .mutation(async ({ ctx, input }) => {      const decl = await getDeclarationById(input.declarationId);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
       if (decl.traderId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
       if (!["under_assessment", "payment_pending"].includes(decl.status)) {
@@ -32,6 +32,12 @@ export const paymentsRouter = router({
         status: "pending",
         reference: `PAY-${nanoid(12).toUpperCase()}`,
       });
+
+      // Permify: register trader as owner of this payment, assert initiate permission
+      if (payment) {
+        await setOwner("payment", payment.id, ctx.user.id);
+        await assertCan(String(ctx.user.id), "payment", String(payment.id), "initiate");
+      }
 
       await updateDeclaration(input.declarationId, { status: "payment_pending" });
       return payment;

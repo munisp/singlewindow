@@ -13,9 +13,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor, Wifi, WifiOff, Navigation, Flag } from "lucide-react";
+import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor, Wifi, WifiOff, Navigation, Flag, Radio, Zap } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { useFluvioFeed, type VesselPosition } from "@/hooks/useFluvioFeed";
 
 type CongestionStatus = "clear" | "moderate" | "congested" | "critical";
 
@@ -32,6 +33,148 @@ const STATUS_LABELS: Record<CongestionStatus, string> = {
   congested: "Congested",
   critical: "Critical",
 };
+
+// ── Fluvio Live Feed Panel ────────────────────────────────────────────────────
+
+function FluvioLiveFeedPanel() {
+  const { events, vesselPositions, status, lastUpdated, pause, resume, clearEvents } = useFluvioFeed();
+
+  const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
+    connected:    { label: "Live",         color: "text-emerald-400", dot: "bg-emerald-500" },
+    connecting:   { label: "Connecting…",  color: "text-amber-400",  dot: "bg-amber-400" },
+    reconnecting: { label: "Reconnecting…",color: "text-amber-400",  dot: "bg-amber-400" },
+    paused:       { label: "Paused",       color: "text-muted-foreground", dot: "bg-muted-foreground" },
+    error:        { label: "Offline",      color: "text-red-400",    dot: "bg-red-500" },
+  };
+  const cfg = statusConfig[status] ?? statusConfig.error;
+
+  const recentVessels = vesselPositions.slice(0, 15);
+  const recentEvents  = events.filter(e => e.type !== "ais.vessel_position").slice(0, 10);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Radio className="h-4 w-4 text-primary" />
+            Fluvio Live Event Feed
+            <span className="flex items-center gap-1.5 ml-2">
+              {status === "connected" ? (
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+              ) : (
+                <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
+              )}
+              <span className={`text-xs font-normal ${cfg.color}`}>{cfg.label}</span>
+            </span>
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-xs text-muted-foreground hidden sm:inline">
+                Last: {lastUpdated.toLocaleTimeString()}
+              </span>
+            )}
+            <Button variant="ghost" size="sm" onClick={clearEvents} className="h-7 px-2 text-xs">
+              Clear
+            </Button>
+            {status === "paused" ? (
+              <Button variant="outline" size="sm" onClick={resume} className="h-7 gap-1.5 text-xs">
+                <Wifi className="h-3 w-3" /> Resume
+              </Button>
+            ) : (
+              <Button variant="outline" size="sm" onClick={pause} className="h-7 gap-1.5 text-xs">
+                <WifiOff className="h-3 w-3" /> Pause
+              </Button>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Real-time AIS vessel positions and declaration lifecycle events via Fluvio consumer (port 8085).
+          {status === "error" && " Start the fluvio-consumer service to enable live feed."}
+        </p>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Tabs defaultValue="vessels">
+          <TabsList className="w-full rounded-none border-b bg-transparent h-9">
+            <TabsTrigger value="vessels" className="flex-1 text-xs">
+              <Ship className="h-3.5 w-3.5 mr-1" /> AIS Positions ({recentVessels.length})
+            </TabsTrigger>
+            <TabsTrigger value="events" className="flex-1 text-xs">
+              <Zap className="h-3.5 w-3.5 mr-1" /> Events ({recentEvents.length})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* AIS Vessel Positions */}
+          <TabsContent value="vessels" className="mt-0">
+            {recentVessels.length === 0 ? (
+              <div className="p-6 text-center text-muted-foreground text-sm">
+                <Ship className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                {status === "connected" ? "Waiting for AIS data…" : "Connect to see live vessel positions."}
+              </div>
+            ) : (
+              <div className="divide-y max-h-72 overflow-y-auto">
+                {recentVessels.map((v: VesselPosition, idx: number) => (
+                  <div key={idx} className="p-3 hover:bg-muted/20 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <Ship className="h-4 w-4 text-blue-400 shrink-0" />
+                        <div>
+                          <div className="text-sm font-medium">{v.vesselName || v.mmsi}</div>
+                          <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
+                            <span>MMSI: {v.mmsi}</span>
+                            <span>Port: {v.portCode}</span>
+                            <span>{v.speed?.toFixed(1)} kn</span>
+                            <span>{v.heading}&deg;</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-muted-foreground shrink-0">
+                        <div>{new Date(v.timestamp).toLocaleTimeString()}</div>
+                        <div className="text-[10px]">{v.lat.toFixed(3)}&deg;N, {v.lng.toFixed(3)}&deg;E</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Declaration / Cargo Events */}
+          <TabsContent value="events" className="mt-0">
+            {recentEvents.length === 0 ? (
+              <div className="p-6 text-center text-muted-foreground text-sm">
+                <Zap className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                {status === "connected" ? "Waiting for trade events…" : "Connect to see live trade events."}
+              </div>
+            ) : (
+              <div className="divide-y max-h-72 overflow-y-auto">
+                {recentEvents.map((e, idx) => (
+                  <div key={idx} className="p-3 hover:bg-muted/20 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <Badge variant="outline" className="text-[10px] mb-1">{e.type}</Badge>
+                        <div className="text-xs text-muted-foreground font-mono">
+                          {JSON.stringify(e.payload).slice(0, 80)}…
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground shrink-0 ml-2">
+                        {new Date(e.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Vessel Tracking Panel (DB-backed) ─────────────────────────────────────────
 
 function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) {
   const [search, setSearch] = useState("");
@@ -478,7 +621,10 @@ export default function PortHeatmap() {
           ))}
         </div>
 
-        {/* Vessel Tracking Timeline */}
+        {/* Fluvio Live Feed */}
+        <FluvioLiveFeedPanel />
+
+        {/* Vessel Tracking Timeline (DB-backed) */}
         <VesselTrackingPanel selectedPort={selectedPort} />
       </div>
     </DashboardLayout>

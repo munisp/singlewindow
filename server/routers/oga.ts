@@ -6,6 +6,7 @@ import {
   getPermitsByOfficer, getDeclarationById, logAuditEvent, createNotification,
   getDb
 } from "../db";
+import { assertCan, setOwner } from "../_core/permify";
 import { ogaPermits, declarations } from "../../drizzle/schema";
 import { and, gte, lte, isNotNull, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -79,6 +80,12 @@ export const ogaRouter = router({
         })
       ));
 
+      // Permify: register declaration owner as permit owner for each created permit
+      const decl2 = await getDeclarationById(input.declarationId);
+      if (decl2) {
+        await Promise.all(permits.map(p => p && setOwner("permit", p.id, decl2.traderId)));
+      }
+
       return permits;
     }),
 
@@ -101,6 +108,8 @@ export const ogaRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Permify: assert OGA officer can approve this permit
+      await assertCan(String(ctx.user.id), "permit", String(input.permitId), "approve");
       const updated = await updateOgaPermit(input.permitId, {
         status: "approved",
         assignedOfficerId: ctx.user.id,
@@ -143,6 +152,8 @@ export const ogaRouter = router({
       reason: z.string().min(10),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Permify: assert OGA officer can reject (approve permission covers both actions)
+      await assertCan(String(ctx.user.id), "permit", String(input.permitId), "approve");
       const updated = await updateOgaPermit(input.permitId, {
         status: "rejected",
         assignedOfficerId: ctx.user.id,

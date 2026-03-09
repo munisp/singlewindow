@@ -8,6 +8,7 @@ import {
 } from "../db";
 import { clearanceCertificates } from "../../drizzle/schema";
 import { invokeLLM } from "../_core/llm";
+import { assertCan, setOwner } from "../_core/permify";
 import { nanoid } from "nanoid";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
@@ -153,6 +154,8 @@ export const declarationsRouter = router({
         actorType: "trader",
         newState: decl,
       });
+      // Permify: register trader as owner of this declaration
+      await setOwner("declaration", decl!.id, ctx.user.id);
       return decl;
     }),
 
@@ -179,6 +182,9 @@ export const declarationsRouter = router({
       const duty = cif * 0.10;
       const vat = (cif + duty) * 0.15;
       const total = duty + vat;
+
+      // Permify: setOwner is called on create; submit is gated by traderId check above.
+      // assertCan is reserved for cross-role operations (approve, release, assess).
 
       const updated = await updateDeclaration(input.id, {
         status: "under_assessment",
@@ -263,6 +269,11 @@ export const declarationsRouter = router({
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       const decl = await getDeclarationById(input.id);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // Permify: assert officer can assess this declaration
+      const permifyAction = input.status === "cleared" ? "release" :
+        input.status === "under_examination" ? "hold" : "assess";
+      await assertCan(String(ctx.user.id), "declaration", String(input.id), permifyAction);
 
       const updateData: Record<string, unknown> = { status: input.status };
       if (input.status === "cleared") updateData.clearedAt = new Date();
