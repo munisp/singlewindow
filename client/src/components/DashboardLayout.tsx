@@ -63,6 +63,8 @@ import {
   KeyRound,
   Coins,
   Warehouse,
+  Radio,
+  Code2,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -127,6 +129,7 @@ function getNavGroups(role: string): NavGroup[] {
         items: [
           { icon: Shield, label: "Security Monitoring", path: "/app/security" },
           { icon: Globe, label: "Restricted Parties", path: "/app/security/sanctions" },
+          { icon: Radio, label: "WCO CEN Alerts", path: "/app/security/cen-alerts" },
         ],
       },
       {
@@ -157,11 +160,13 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Port Operations",
         items: [
           { icon: Warehouse, label: "Bonded Warehouse", path: "/app/port/bonded-warehouse" },
+          { icon: Building2, label: "Free Zone Operations", path: "/app/port/free-zone" },
         ],
       },
       {
         label: "Reference",
         items: [
+          { icon: Code2, label: "Developer Portal", path: "/app/developer" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },

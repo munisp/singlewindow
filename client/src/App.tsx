@@ -52,6 +52,9 @@ const FinanceLedger = lazy(() => import('./pages/FinanceLedger'));
 const IdentityProvider = lazy(() => import('./pages/IdentityProvider'));
 const BondedWarehouse = lazy(() => import('./pages/app/BondedWarehouse'));
 const AseanSingleWindow = lazy(() => import('./pages/app/AseanSingleWindow'));
+const WcoCenAlerts = lazy(() => import('./pages/app/WcoCenAlerts'));
+const FreeZoneOps = lazy(() => import('./pages/app/FreeZoneOps'));
+const DeveloperPortal = lazy(() => import('./pages/app/DeveloperPortal'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -220,6 +223,21 @@ function Router() {
       {/* Sprint 38 — ASEAN Single Window G2G */}
       <Route path="/app/admin/asean-sw">
         <Suspense fallback={<LazyFallback />}><AseanSingleWindow /></Suspense>
+      </Route>
+
+      {/* Sprint 39 — WCO CEN Alerts */}
+      <Route path="/app/security/cen-alerts">
+        <Suspense fallback={<LazyFallback />}><WcoCenAlerts /></Suspense>
+      </Route>
+
+      {/* Sprint 40 — Free Zone Operations */}
+      <Route path="/app/port/free-zone">
+        <Suspense fallback={<LazyFallback />}><FreeZoneOps /></Suspense>
+      </Route>
+
+      {/* Sprint 41 — Developer Portal */}
+      <Route path="/app/developer">
+        <Suspense fallback={<LazyFallback />}><DeveloperPortal /></Suspense>
       </Route>
 
       {/* 404 */}

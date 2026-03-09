@@ -936,3 +936,44 @@ export const keycloakConfig = pgTable("keycloak_config", {
 });
 export type KeycloakConfig = typeof keycloakConfig.$inferSelect;
 export type InsertKeycloakConfig = typeof keycloakConfig.$inferInsert;
+
+// ─── DEVELOPER PORTAL — API KEYS ─────────────────────────────────────────────
+// Sprint 41: API key management for the Open API ecosystem portal.
+// Raw keys are never stored; only the HMAC-SHA256 hash is persisted.
+export const apiKeys = pgTable("api_keys", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  name: varchar("name", { length: 100 }).notNull(),
+  keyHash: varchar("key_hash", { length: 64 }).notNull().unique(),
+  keyPrefix: varchar("key_prefix", { length: 20 }).notNull(),
+  scopes: text("scopes").notNull(),           // comma-separated scope list
+  rateLimit: integer("rate_limit").default(100).notNull(),
+  sandboxMode: boolean("sandbox_mode").default(false).notNull(),
+  status: varchar("status", { length: 20 }).default("active").notNull(), // active | revoked | expired
+  expiresAt: timestamp("expires_at"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_api_keys_user_id").on(t.userId),
+  index("idx_api_keys_key_hash").on(t.keyHash),
+  index("idx_api_keys_status").on(t.status),
+]);
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = typeof apiKeys.$inferInsert;
+
+// ─── DEVELOPER PORTAL — API USAGE LOGS ───────────────────────────────────────
+export const apiUsageLogs = pgTable("api_usage_logs", {
+  id: serial("id").primaryKey(),
+  apiKeyId: integer("api_key_id").notNull().references(() => apiKeys.id),
+  endpoint: varchar("endpoint", { length: 200 }).notNull(),
+  method: varchar("method", { length: 10 }).default("GET").notNull(),
+  statusCode: integer("status_code").default(200).notNull(),
+  latencyMs: integer("latency_ms"),
+  sandboxMode: boolean("sandbox_mode").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_api_usage_key_id").on(t.apiKeyId),
+  index("idx_api_usage_created_at").on(t.createdAt),
+]);
+export type ApiUsageLog = typeof apiUsageLogs.$inferSelect;
+export type InsertApiUsageLog = typeof apiUsageLogs.$inferInsert;

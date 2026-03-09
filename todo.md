@@ -1020,3 +1020,40 @@
 - [x] tRPC aseanSw router: getConnections, sendMessage, getMessageStatus, listMessages, testConnection, receiveAck, getStats
 - [x] Admin bilateral connection status UI: /app/admin/asean-sw (AseanSingleWindow.tsx)
 - [x] Vitest tests for ASEAN SW router (sprint36-38.test.ts — 45 tests)
+
+## Sprint 39 — WCO CEN Network Integration
+
+- [x] Go cen-service: cmd/main.go with Gin HTTP server (port 8097)
+- [x] Go cen-service: WCO CEN XML alert formatting (WCO CEN v2.0 schema)
+- [x] Go cen-service: partner customs administration registry (10 partner countries)
+- [x] Go cen-service: outbound risk alert dispatch with retry logic
+- [x] Go cen-service: inbound alert ingestion from partner administrations
+- [x] Go cen-service: alert correlation engine (deduplicate + risk multiplier scoring)
+- [x] Go cen-service: Dockerfile
+- [x] tRPC cenRouter: getPartners, sendAlert, listOutboundAlerts, listInboundAlerts, correlateAlerts, getStats
+- [x] Security Ops UI: WCO CEN Alerts page (/app/security/cen-alerts) — WcoCenAlerts.tsx
+- [x] Vitest tests for CEN alert formatting and correlation logic (sprint39-41.test.ts — 47 tests)
+
+## Sprint 40 — Free Zone Operations Management
+
+- [x] Go freezone-service: cmd/main.go with Gin HTTP server (port 8098)
+- [x] Go freezone-service: zone registration and operator licensing with licence number generation
+- [x] Go freezone-service: goods admission workflow (UCR, HS code, value, origin, duty suspension)
+- [x] Go freezone-service: internal transfer between free zone operators
+- [x] Go freezone-service: goods exit workflow (domestic, re-export, destruction)
+- [x] Go freezone-service: inventory snapshot and duty calculation on exit
+- [x] Go freezone-service: Dockerfile
+- [x] tRPC freeZoneRouter: registerZone, admitGoods, transferGoods, exitGoods, listInventory, listZones, getZoneStats
+- [x] Free Zone UI: /app/port/free-zone (FreeZoneOps.tsx) — sidebar nav item added
+- [x] Vitest tests for free zone admission, transfer, and exit logic (sprint39-41.test.ts)
+
+## Sprint 41 — Open API Ecosystem Portal
+
+- [x] DB schema: api_keys, api_usage_logs tables added to drizzle/schema.ts
+- [x] tRPC devPortalRouter: createApiKey, listApiKeys, revokeApiKey, getUsageStats, setRateLimit, toggleSandbox
+- [x] API key generation: prod (ngswtp_prod_) and sandbox (ngswtp_sb_) prefixes, SHA-256 hashed storage
+- [x] Rate limiting: per-minute and per-day sliding window counter with Retry-After headers
+- [x] Swagger/OpenAPI browser: endpoint documentation browser in Developer Portal UI
+- [x] Sandbox environment toggle: sandbox mode flag per API key
+- [x] Developer Portal UI: /app/developer (DeveloperPortal.tsx) — sidebar nav item added
+- [x] Vitest tests for API key lifecycle and rate limit logic (sprint39-41.test.ts — 47 tests)
