@@ -20,6 +20,7 @@ vi.mock("./rustfsSvcClient", () => ({
   rustfsPresign: vi.fn(),
   rustfsDelete: vi.fn(),
   rustfsHealthCheck: vi.fn(),
+  rustfsScan: vi.fn().mockResolvedValue({ clean: true, skipped: false }),
 }));
 
 vi.mock("nanoid", () => ({
