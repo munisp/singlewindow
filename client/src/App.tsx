@@ -76,6 +76,11 @@ const TraderOnboarding = lazy(() => import('./pages/app/TraderOnboarding'));
 // Sprint 68 — OpenAPI Explorer
 const ApiExplorer = lazy(() => import('./pages/app/ApiExplorer'));
 const SdkGenerator = lazy(() => import('./pages/app/SdkGenerator'));
+// Sprint 72-74 — Onboarding Analytics, Geofence Management, Webhook Management, API Changelog
+const OnboardingAnalyticsDashboard = lazy(() => import('./pages/app/OnboardingAnalyticsDashboard'));
+const GeofenceManagement = lazy(() => import('./pages/app/GeofenceManagement'));
+const WebhookManagement = lazy(() => import('./pages/app/WebhookManagement'));
+const ApiChangelog = lazy(() => import('./pages/app/ApiChangelog'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -333,6 +338,19 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><SdkGenerator /></Suspense>
       </Route>
 
+      {/* Sprint 72-74 — Onboarding Analytics, Geofence Management, Webhook Management, API Changelog */}
+      <Route path="/app/admin/onboarding-analytics">
+        <Suspense fallback={<LazyFallback />}><OnboardingAnalyticsDashboard /></Suspense>
+      </Route>
+      <Route path="/app/admin/geofences">
+        <Suspense fallback={<LazyFallback />}><GeofenceManagement /></Suspense>
+      </Route>
+      <Route path="/app/admin/webhooks">
+        <Suspense fallback={<LazyFallback />}><WebhookManagement /></Suspense>
+      </Route>
+      <Route path="/app/developer/changelog">
+        <Suspense fallback={<LazyFallback />}><ApiChangelog /></Suspense>
+      </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

@@ -120,6 +120,13 @@
       "when": 1773069602522,
       "tag": "0016_talented_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1773074391656,
+      "tag": "0017_mature_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

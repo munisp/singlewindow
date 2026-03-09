@@ -5,8 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -30,6 +31,9 @@ export default function FreeZoneOps() {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [admitOpen, setAdmitOpen] = useState(false);
   const [selectedZone, setSelectedZone] = useState("");
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferGoodsId, setTransferGoodsId] = useState("");
+  const [transferForm, setTransferForm] = useState({ toZoneId: "", reason: "", officerRef: "" });
 
   const [registerForm, setRegisterForm] = useState({
     zoneName: "",
@@ -86,6 +90,29 @@ export default function FreeZoneOps() {
     onError: (err: any) => toast.error(err.message),
   });
 
+  const transferMutation = trpc.freeZone.transferGoods.useMutation({
+    onSuccess: () => {
+      toast.success("Goods transferred successfully");
+      setTransferOpen(false);
+      setTransferForm({ toZoneId: "", reason: "", officerRef: "" });
+      refetchInventory();
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const handleTransfer = () => {
+    if (!transferForm.toZoneId || transferForm.reason.length < 5) {
+      toast.error("Please select a destination zone and provide a reason (min 5 chars)");
+      return;
+    }
+    transferMutation.mutate({
+      goodsId: transferGoodsId,
+      toZoneId: transferForm.toZoneId,
+      reason: transferForm.reason,
+      officerRef: transferForm.officerRef || undefined,
+    });
+  };
+
   const handleRegister = () => {
     if (!registerForm.zoneName || !registerForm.zoneCode || !registerForm.location) {
       toast.error("Please fill in all required fields");
@@ -125,6 +152,37 @@ export default function FreeZoneOps() {
 
   return (
     <DashboardLayout>
+      {/* Transfer Goods Dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Transfer Goods to Another Zone</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Destination Zone *</Label>
+              <Select value={transferForm.toZoneId} onValueChange={v => setTransferForm(f => ({ ...f, toZoneId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select zone" /></SelectTrigger>
+                <SelectContent>
+                  {zones.map((z: any) => <SelectItem key={z.id} value={z.id}>{z.name} ({z.code})</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Transfer Reason *</Label>
+              <Textarea placeholder="Reason for transfer (min 5 characters)" value={transferForm.reason} onChange={e => setTransferForm(f => ({ ...f, reason: e.target.value }))} rows={3} />
+            </div>
+            <div>
+              <Label>Officer Reference</Label>
+              <Input placeholder="Officer badge / reference (optional)" value={transferForm.officerRef} onChange={e => setTransferForm(f => ({ ...f, officerRef: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
+            <Button onClick={handleTransfer} disabled={transferMutation.isPending}>
+              {transferMutation.isPending ? "Transferring..." : "Confirm Transfer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -411,7 +469,7 @@ export default function FreeZoneOps() {
                                 variant="outline"
                                 size="sm"
                                 className="h-7 text-xs"
-                                onClick={() => toast.info("Transfer feature coming soon")}
+                                onClick={() => { setTransferGoodsId(item.id); setTransferOpen(true); }}
                               >
                                 <ArrowRightLeft className="w-3 h-3 mr-1" />
                                 Transfer

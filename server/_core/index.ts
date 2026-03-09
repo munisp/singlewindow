@@ -667,7 +667,10 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 
-  // Sprint 70: Broadcast live vessel positions every 15 seconds to cargo tracking subscribers
+  // Sprint 70/73: Broadcast live vessel positions every 15 seconds; check geofence crossings
+  // Deduplicate geofence alerts: track last-fired time per vessel+geofence pair
+  const geofenceAlertCache = new Map<string, number>();
+
   setInterval(async () => {
     try {
       const { getLiveVesselsData } = await import("../routers/cargoTracking");
@@ -678,6 +681,44 @@ async function startServer() {
           totalCount: vessels.length,
           lastRefresh: new Date().toISOString(),
         });
+        // Sprint 73: Check geofence crossings for each vessel
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (db) {
+          const { geofences: gfTable } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const { notifyOwner } = await import("./notification");
+          const activeGeoFences = await db.select().from(gfTable).where(eq(gfTable.status, "active"));
+          // Point-in-polygon check using ray casting algorithm
+          const pointInPolygon = (lat: number, lon: number, polygon: Array<{ lat: number; lon: number }>) => {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+              const xi = polygon[i].lon, yi = polygon[i].lat;
+              const xj = polygon[j].lon, yj = polygon[j].lat;
+              const intersect = ((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+          for (const vessel of vessels) {
+            for (const gf of activeGeoFences) {
+              if (!gf.polygon || gf.polygon.length < 3) continue;
+              const inside = pointInPolygon(vessel.lat, vessel.lon, gf.polygon);
+              if (inside && gf.alertOnEntry && gf.notifyOwnerOnTrigger) {
+                const eventKey = `gf-${gf.id}-${vessel.mmsi}`;
+                const now = Date.now();
+                const lastFired = geofenceAlertCache.get(eventKey) ?? 0;
+                if (now - lastFired > 3_600_000) {
+                  geofenceAlertCache.set(eventKey, now);
+                  notifyOwner({
+                    title: `Geofence Alert: ${vessel.vesselName} entered ${gf.name}`,
+                    content: `Vessel ${vessel.vesselName} (MMSI: ${vessel.mmsi}) entered geofence zone "${gf.name}" (${gf.geofenceType}) at ${new Date().toUTCString()}. Position: ${vessel.lat.toFixed(4)}, ${vessel.lon.toFixed(4)}.`,
+                  }).catch(() => {});
+                }
+              }
+            }
+          }
+        }
       }
     } catch {
       // Silently skip if DB is unavailable

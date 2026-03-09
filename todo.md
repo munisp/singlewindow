@@ -129,8 +129,8 @@
 
 ## Sprint 6 — Suggested Next Steps
 
-- [ ] Seed real African port data (portLocations + portCongestionEvents tables)
-- [ ] Add seedPorts admin tRPC procedure + seed script
+- [x] Seed real African port data (portLocations + portCongestionEvents tables)
+- [x] Add seedPorts admin tRPC procedure + seed script
 - [x] Build Finance role dashboard (/app/finance) with duty revenue charts
 - [x] Finance dashboard: revenue by HS chapter, by OGA, by corridor using recharts
 - [x] Finance dashboard: payment volume trend (last 30 days)
@@ -328,29 +328,29 @@
 ## Sprint 13 — Onboarding Notification, Declaration Timeline, Clearance Certificate
 
 ### Stakeholder Onboarding Welcome Notification
-- [ ] Add onboardingNotification procedure to kyc router: fires when admin approves a stakeholder profile
-- [ ] Notification includes: trader/agency name, login URL, access permissions summary
-- [ ] Wire to AdminKYCReview approval action (existing approve button)
-- [ ] Show success toast confirming notification was sent
+- [x] Add onboardingNotification procedure to kyc router: fires when admin approves a stakeholder profile
+- [x] Notification includes: trader/agency name, login URL, access permissions summary
+- [x] Wire to AdminKYCReview approval action (existing approve button)
+- [x] Show success toast confirming notification was sent
 
 ### Declaration Status Timeline
-- [ ] Add declarationTimeline tRPC query to declarations router (returns ordered status events)
-- [ ] Build DeclarationTimeline component: step-by-step visual tracker (Submitted → Risk Assessed → Agency Review → Duty Paid → Released)
-- [ ] Show timestamp, actor, and notes for each completed step
-- [ ] Highlight current active step; grey out future steps
-- [ ] Embed timeline in DeclarationDetail page
+- [x] Add declarationTimeline tRPC query to declarations router (returns ordered status events)
+- [x] Build DeclarationTimeline component: step-by-step visual tracker (Submitted → Risk Assessed → Agency Review → Duty Paid → Released)
+- [x] Show timestamp, actor, and notes for each completed step
+- [x] Highlight current active step; grey out future steps
+- [x] Embed timeline in DeclarationDetail page
 
 ### Printable Clearance Certificate PDF
-- [ ] Add generateClearanceCertificate tRPC mutation to declarations router
-- [ ] Server-side PDF generation: declaration number, trader name, goods description, HS code, duty paid, release timestamp, customs officer signature block
-- [ ] Upload PDF to S3 and return a download URL
-- [ ] Add "Download Clearance Certificate" button to DeclarationDetail page (only visible when status = released)
-- [ ] Show loading state during PDF generation
+- [x] Add generateClearanceCertificate tRPC mutation to declarations router
+- [x] Server-side PDF generation: declaration number, trader name, goods description, HS code, duty paid, release timestamp, customs officer signature block
+- [x] Upload PDF to S3 and return a download URL
+- [x] Add "Download Clearance Certificate" button to DeclarationDetail page (only visible when status = released)
+- [x] Show loading state during PDF generation
 
 ### Tests & Delivery
-- [ ] Write vitest tests for declarationTimeline procedure
-- [ ] Write vitest tests for generateClearanceCertificate procedure
-- [ ] Save checkpoint
+- [x] Write vitest tests for declarationTimeline procedure
+- [x] Write vitest tests for generateClearanceCertificate procedure
+- [x] Save checkpoint
 
 ## Sprint 13 — Onboarding Notification, Declaration Timeline, Clearance Certificate (COMPLETED)
 
@@ -384,31 +384,31 @@
 ## Sprint 14 — Certificate Archive, Permit Expiry Alerts, Officer Workload Dashboard
 
 ### Trader Certificate Archive
-- [ ] Add clearanceCertificates table to drizzle/schema.ts (id, declarationId, traderId, fileKey, fileUrl, generatedAt, generatedBy)
-- [ ] Run pnpm db:push to migrate schema
-- [ ] Update declarations.generateClearanceCertificate to persist record to clearanceCertificates table
-- [ ] Add declarations.listMyCertificates tRPC procedure (trader: own certs; admin/customs: all)
-- [ ] Build MyCertificates.tsx page: table of certificates with declaration ref, date, download link
-- [ ] Add "My Certificates" nav item to trader sidebar in DashboardLayout
-- [ ] Add /app/trader/certificates route to App.tsx
+- [x] Add clearanceCertificates table to drizzle/schema.ts (id, declarationId, traderId, fileKey, fileUrl, generatedAt, generatedBy)
+- [x] Run pnpm db:push to migrate schema
+- [x] Update declarations.generateClearanceCertificate to persist record to clearanceCertificates table
+- [x] Add declarations.listMyCertificates tRPC procedure (trader: own certs; admin/customs: all)
+- [x] Build MyCertificates.tsx page: table of certificates with declaration ref, date, download link
+- [x] Add "My Certificates" nav item to trader sidebar in DashboardLayout
+- [x] Add /app/trader/certificates route to App.tsx
 
 ### OGA Permit Expiry Alerts
-- [ ] Add alerts.runPermitExpiryCheck tRPC procedure (queries permits expiring within 30 days)
-- [ ] Wire permit expiry check into nightly cron job (alongside risk scan)
-- [ ] Send owner notification listing affected traders and permit numbers
-- [ ] Add permit expiry results to RiskAlerts page (new "Expiring Permits" tab)
+- [x] Add alerts.runPermitExpiryCheck tRPC procedure (queries permits expiring within 30 days)
+- [x] Wire permit expiry check into nightly cron job (alongside risk scan)
+- [x] Send owner notification listing affected traders and permit numbers
+- [x] Add permit expiry results to RiskAlerts page (new "Expiring Permits" tab)
 
 ### Customs Officer Workload Dashboard
-- [ ] Add declarations.getOfficerWorkload tRPC procedure (queue depth, avg review time, SLA rate per officer)
-- [ ] Build OfficerWorkload.tsx page: table of officers with queue depth, avg review time, SLA %
-- [ ] Add bar chart: declarations reviewed per officer (last 30 days)
-- [ ] Add SLA compliance gauge: % reviewed within target time (configurable, default 4h)
-- [ ] Add "Officer Workload" nav item to admin sidebar in DashboardLayout
-- [ ] Add /app/admin/officer-workload route to App.tsx
+- [x] Add declarations.getOfficerWorkload tRPC procedure (queue depth, avg review time, SLA rate per officer)
+- [x] Build OfficerWorkload.tsx page: table of officers with queue depth, avg review time, SLA %
+- [x] Add bar chart: declarations reviewed per officer (last 30 days)
+- [x] Add SLA compliance gauge: % reviewed within target time (configurable, default 4h)
+- [x] Add "Officer Workload" nav item to admin sidebar in DashboardLayout
+- [x] Add /app/admin/officer-workload route to App.tsx
 
 ### Tests & Delivery
-- [ ] Write vitest tests for listMyCertificates, runPermitExpiryCheck, getOfficerWorkload
-- [ ] Save checkpoint
+- [x] Write vitest tests for listMyCertificates, runPermitExpiryCheck, getOfficerWorkload
+- [x] Save checkpoint
 
 ## Sprint 14 — Certificate Archive, Permit Expiry Alerts, Officer Workload Dashboard (COMPLETED)
 
@@ -447,35 +447,35 @@
 ## Sprint 15 — Notification Centre, SLA Breach Escalation, Bulk Export (IN PROGRESS)
 
 ### Trader Notification Centre
-- [ ] Add userNotifications table to drizzle/schema.ts (id, userId, type, title, body, declarationId, isRead, createdAt)
-- [ ] Run pnpm db:push to migrate
-- [ ] Add notifications tRPC router: listMyNotifications, markRead, markAllRead, getUnreadCount
-- [ ] Wire declaration status changes to create notifications (in declarations router)
-- [ ] Add notification badge (red dot + count) to DashboardLayout header
-- [ ] Build TraderNotifications.tsx inbox page with read/unread state
-- [ ] Add "Notifications" nav item to all role sidebars
-- [ ] Register /app/notifications route in App.tsx
+- [x] Add userNotifications table to drizzle/schema.ts (id, userId, type, title, body, declarationId, isRead, createdAt)
+- [x] Run pnpm db:push to migrate
+- [x] Add notifications tRPC router: listMyNotifications, markRead, markAllRead, getUnreadCount
+- [x] Wire declaration status changes to create notifications (in declarations router)
+- [x] Add notification badge (red dot + count) to DashboardLayout header
+- [x] Build TraderNotifications.tsx inbox page with read/unread state
+- [x] Add "Notifications" nav item to all role sidebars
+- [x] Register /app/notifications route in App.tsx
 
 ### SLA Breach Escalation
-- [ ] Add slaBreachAt computed field logic to declarations router (submittedAt + slaTargetHours)
-- [ ] Add alerts.checkSlaBreaches procedure (admin/customs_officer): lists declarations past SLA
-- [ ] Wire SLA breach check into nightly cron job
-- [ ] Flag overdue declarations red in CustomsDashboard queue (visual indicator)
-- [ ] Send supervisor notification when breach detected (notifyOwner)
-- [ ] Add SLA breach count KPI tile to OfficerWorkload dashboard
+- [x] Add slaBreachAt computed field logic to declarations router (submittedAt + slaTargetHours)
+- [x] Add alerts.checkSlaBreaches procedure (admin/customs_officer): lists declarations past SLA
+- [x] Wire SLA breach check into nightly cron job
+- [x] Flag overdue declarations red in CustomsDashboard queue (visual indicator)
+- [x] Send supervisor notification when breach detected (notifyOwner)
+- [x] Add SLA breach count KPI tile to OfficerWorkload dashboard
 
 ### Bulk Declaration Export
-- [ ] Install xlsx package (SheetJS) on server
-- [ ] Add declarations.exportDeclarations tRPC procedure (admin/finance, date range + filters → base64 xlsx)
-- [ ] Add "Download Report" button to AdminDeclarations page with date range picker
-- [ ] Support CSV and Excel format toggle
-- [ ] Show export progress toast while generating
+- [x] Install xlsx package (SheetJS) on server
+- [x] Add declarations.exportDeclarations tRPC procedure (admin/finance, date range + filters → base64 xlsx)
+- [x] Add "Download Report" button to AdminDeclarations page with date range picker
+- [x] Support CSV and Excel format toggle
+- [x] Show export progress toast while generating
 
 ### Tests & Delivery
-- [ ] Write vitest tests for notifications router
-- [ ] Write vitest tests for alerts.checkSlaBreaches
-- [ ] Write vitest tests for declarations.exportDeclarations
-- [ ] Save checkpoint
+- [x] Write vitest tests for notifications router
+- [x] Write vitest tests for alerts.checkSlaBreaches
+- [x] Write vitest tests for declarations.exportDeclarations
+- [x] Save checkpoint
 
 ## Sprint 15 — Notification Centre, SLA Breach Escalation, Bulk Export (COMPLETED)
 
@@ -528,13 +528,13 @@
 
 ### Real-time Notifications on Declaration Status Change
 - [x] Wire createUserNotification into declarations.updateStatus procedure (trader notified on each status transition)
-- [ ] Wire createUserNotification into declarations.submitDeclaration (confirmation notification)
-- [ ] Wire createUserNotification into kyc.reviewVerification (trader notified on KYC approval/rejection)
-- [ ] Wire createUserNotification into payments.confirmPayment (trader notified on payment confirmation)
+- [x] Wire createUserNotification into declarations.submitDeclaration (confirmation notification)
+- [x] Wire createUserNotification into kyc.reviewVerification (trader notified on KYC approval/rejection)
+- [x] Wire createUserNotification into payments.confirmPayment (trader notified on payment confirmation)
 
 ### SLA Badge in Customs Dashboard Queue
 - [x] Add SLA breach indicator (red clock + "OVERDUE" badge) to CustomsDashboard declaration queue rows
-- [ ] Show hours overdue tooltip on hover
+- [x] Show hours overdue tooltip on hover
 - [x] Add SLA column to the queue table with colour-coded status
 
 ### XLSX Export Format
@@ -799,17 +799,17 @@
 
 ## Sprint 26 — Startup Automation, Document Sharing, Declaration Attachments
 
-- [ ] Install concurrently and wire RustFS + rustfs-svc into pnpm dev
-- [ ] Add start-rustfs.sh and build-rustfs-svc.sh helper scripts
-- [ ] Add document_shares table to schema (token, expires_at, password_hash, doc_id)
-- [ ] Run db:push for document_shares migration
-- [ ] Add share tRPC procedure (generate presigned share link with optional password + expiry)
-- [ ] Add verifyShare public procedure (validate token + optional password, return presigned URL)
-- [ ] Add Share button and ShareDialog to DocumentVault UI
-- [ ] Add public /share/:token route for share link landing page
-- [ ] Extend upload dialog with declaration selector (optional declarationId)
-- [ ] Show attached documents panel on Declaration Detail page
-- [ ] Write vitest tests for share and declaration-attachment features
+- [x] Install concurrently and wire RustFS + rustfs-svc into pnpm dev
+- [x] Add start-rustfs.sh and build-rustfs-svc.sh helper scripts
+- [x] Add document_shares table to schema (token, expires_at, password_hash, doc_id)
+- [x] Run db:push for document_shares migration
+- [x] Add share tRPC procedure (generate presigned share link with optional password + expiry)
+- [x] Add verifyShare public procedure (validate token + optional password, return presigned URL)
+- [x] Add Share button and ShareDialog to DocumentVault UI
+- [x] Add public /share/:token route for share link landing page
+- [x] Extend upload dialog with declaration selector (optional declarationId)
+- [x] Show attached documents panel on Declaration Detail page
+- [x] Write vitest tests for share and declaration-attachment features
 
 ## Sprint 26 — Startup Automation, Document Sharing, Declaration Attachment Linking
 
@@ -828,11 +828,11 @@
 
 ## Sprint 27 — Share Management UI, Email Notification, Document Preview
 
-- [ ] Share link management: add listShares + revokeShare procedures (already exist), build Manage Shares tab in Document Vault
-- [ ] Share link management: per-link revoke button, download-count badge, expiry countdown
-- [ ] Email notification on share: call notifyOwner when share link is created
-- [ ] Document preview drawer: slide-over with inline PDF iframe and image rendering
-- [ ] Document preview drawer: trigger from document row click, show metadata + download button
+- [x] Share link management: add listShares + revokeShare procedures (already exist), build Manage Shares tab in Document Vault
+- [x] Share link management: per-link revoke button, download-count badge, expiry countdown
+- [x] Email notification on share: call notifyOwner when share link is created
+- [x] Document preview drawer: slide-over with inline PDF iframe and image rendering
+- [x] Document preview drawer: trigger from document row click, show metadata + download button
 
 ## Sprint 27 — Share Link Management, Email Notification, Document Preview
 
@@ -845,14 +845,14 @@
 
 ## Sprint 28 — Download Count, Password Shares, Bulk Upload, RustFS K8s/OpenStack
 
-- [ ] Increment download_count in verifyShare procedure after presigned URL is issued
-- [ ] Add password toggle and input to ShareDialog (optional password protection)
-- [ ] Add password prompt to /share/:token landing page when share is password-protected
-- [ ] Add bcrypt password verification in verifyShare procedure
-- [ ] Bulk document upload: multi-file input with sequential queue and per-file progress in UploadDialog
-- [ ] RustFS Kubernetes Helm chart (values.yaml, deployment, service, PVC, configmap, ingress)
-- [ ] RustFS OpenStack Swift backend configuration (keystone auth, swift endpoint)
-- [ ] On-premise deploy guide (README-DEPLOY.md)
+- [x] Increment download_count in verifyShare procedure after presigned URL is issued
+- [x] Add password toggle and input to ShareDialog (optional password protection)
+- [x] Add password prompt to /share/:token landing page when share is password-protected
+- [x] Add bcrypt password verification in verifyShare procedure
+- [x] Bulk document upload: multi-file input with sequential queue and per-file progress in UploadDialog
+- [x] RustFS Kubernetes Helm chart (values.yaml, deployment, service, PVC, configmap, ingress)
+- [x] RustFS OpenStack Swift backend configuration (keystone auth, swift endpoint)
+- [x] On-premise deploy guide (README-DEPLOY.md)
 
 ## Sprint 28 — Bulk Upload, RustFS K8s/OpenStack Deploy
 
@@ -883,21 +883,21 @@
 
 ## Sprint 30 — Mojaloop Payment Integration
 
-- [ ] Mojaloop DB schema: mojaloop_transactions table (FSP, MSISDN, quote, transfer state)
-- [ ] Mojaloop tRPC router: getFSPs, initiatePayment, checkStatus, webhookCallback procedures
-- [ ] Mojaloop Go client: HTTP calls to Mojaloop Switch API (quotes, transfers)
-- [ ] Payment initiation wired to declaration duty amounts
-- [ ] Trader payment UI: FSP selector, MSISDN input, payment status polling
-- [ ] Payment status badge on DeclarationDetail page
-- [ ] Webhook endpoint for Mojaloop transfer callbacks
-- [ ] Audit event logged on payment initiation and completion
-- [ ] Vitest tests for Mojaloop router procedures
+- [x] Mojaloop DB schema: mojaloop_transactions table (FSP, MSISDN, quote, transfer state)
+- [x] Mojaloop tRPC router: getFSPs, initiatePayment, checkStatus, webhookCallback procedures
+- [x] Mojaloop Go client: HTTP calls to Mojaloop Switch API (quotes, transfers)
+- [x] Payment initiation wired to declaration duty amounts
+- [x] Trader payment UI: FSP selector, MSISDN input, payment status polling
+- [x] Payment status badge on DeclarationDetail page
+- [x] Webhook endpoint for Mojaloop transfer callbacks
+- [x] Audit event logged on payment initiation and completion
+- [x] Vitest tests for Mojaloop router procedures
 
 ## Sprint 31 — TigerBeetle Ledger Wiring
 
-- [ ] TigerBeetle DB schema: tigerbeetle_entries table (account IDs, amount, transfer ID, status)
-- [ ] TigerBeetle tRPC router: createAccounts, recordTransfer, getBalance, getLedgerEntries
-- [ ] TigerBeetle Go bridge service: HTTP wrapper around TigerBeetle client
+- [x] TigerBeetle DB schema: tigerbeetle_entries table (account IDs, amount, transfer ID, status)
+- [x] TigerBeetle tRPC router: createAccounts, recordTransfer, getBalance, getLedgerEntries
+- [x] TigerBeetle Go bridge service: HTTP wrapper around TigerBeetle client
 - [x] Wire duty payment completion to TigerBeetle double-entry record
 - [x] Finance dashboard panel: ledger balance, recent transfers, account summary
 - [x] Reconciliation view: match Mojaloop transfers to TigerBeetle entries

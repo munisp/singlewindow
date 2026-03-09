@@ -1053,3 +1053,131 @@ export const onboardingProgress = pgTable("onboarding_progress", {
 ]);
 export type OnboardingProgress = typeof onboardingProgress.$inferSelect;
 export type InsertOnboardingProgress = typeof onboardingProgress.$inferInsert;
+
+// ─── GEOFENCES (Sprint 73) ────────────────────────────────────────────────────
+export const geofenceTypeEnum = pgEnum("geofence_type", ["port_entry", "port_exit", "restricted_zone", "customs_zone"]);
+export const geofenceStatusEnum = pgEnum("geofence_status", ["active", "inactive", "draft"]);
+
+export const geofences = pgTable("geofences", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  portCode: varchar("port_code", { length: 16 }),
+  geofenceType: geofenceTypeEnum("geofence_type").default("port_entry").notNull(),
+  status: geofenceStatusEnum("status").default("active").notNull(),
+  polygon: json("polygon").notNull().$type<Array<{ lat: number; lon: number }>>(),
+  radiusMeters: integer("radius_meters"),
+  alertOnEntry: boolean("alert_on_entry").default(true).notNull(),
+  alertOnExit: boolean("alert_on_exit").default(false).notNull(),
+  notifyOwnerOnTrigger: boolean("notify_owner_on_trigger").default(true).notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_geofences_port_code").on(t.portCode),
+  index("idx_geofences_status").on(t.status),
+]);
+export type Geofence = typeof geofences.$inferSelect;
+export type InsertGeofence = typeof geofences.$inferInsert;
+
+export const geofenceEvents = pgTable("geofence_events", {
+  id: serial("id").primaryKey(),
+  geofenceId: integer("geofence_id").notNull().references(() => geofences.id),
+  mmsi: varchar("mmsi", { length: 20 }).notNull(),
+  vesselName: varchar("vessel_name", { length: 128 }),
+  eventType: varchar("event_type", { length: 16 }).notNull(),
+  lat: real("lat").notNull(),
+  lon: real("lon").notNull(),
+  speed: real("speed"),
+  notificationSent: boolean("notification_sent").default(false).notNull(),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_geofence_events_geofence_id").on(t.geofenceId),
+  index("idx_geofence_events_mmsi").on(t.mmsi),
+  index("idx_geofence_events_occurred_at").on(t.occurredAt),
+]);
+export type GeofenceEvent = typeof geofenceEvents.$inferSelect;
+export type InsertGeofenceEvent = typeof geofenceEvents.$inferInsert;
+
+// ─── WEBHOOK SUBSCRIPTIONS (Sprint 74) ───────────────────────────────────────
+export const webhookEventTypeEnum = pgEnum("webhook_event_type", [
+  "declaration.submitted", "declaration.approved", "declaration.rejected", "declaration.released",
+  "payment.confirmed", "payment.failed",
+  "kyc.approved", "kyc.rejected",
+  "permit.issued", "permit.expiring",
+  "vessel.geofence_entry", "vessel.geofence_exit",
+  "alert.high_risk", "alert.sanctions_hit",
+]);
+
+export const webhookSubscriptions = pgTable("webhook_subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  name: varchar("name", { length: 128 }).notNull(),
+  url: varchar("url", { length: 512 }).notNull(),
+  secret: varchar("secret", { length: 256 }).notNull(),
+  events: json("events").notNull().$type<string[]>(),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastDeliveredAt: timestamp("last_delivered_at"),
+  failureCount: integer("failure_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_webhook_subs_user_id").on(t.userId),
+  index("idx_webhook_subs_active").on(t.isActive),
+]);
+export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect;
+export type InsertWebhookSubscription = typeof webhookSubscriptions.$inferInsert;
+
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id: serial("id").primaryKey(),
+  subscriptionId: integer("subscription_id").notNull().references(() => webhookSubscriptions.id),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  payload: json("payload").notNull(),
+  statusCode: integer("status_code"),
+  responseBody: text("response_body"),
+  success: boolean("success").default(false).notNull(),
+  attemptCount: integer("attempt_count").default(1).notNull(),
+  deliveredAt: timestamp("delivered_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_webhook_deliveries_sub_id").on(t.subscriptionId),
+  index("idx_webhook_deliveries_success").on(t.success),
+]);
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+export type InsertWebhookDelivery = typeof webhookDeliveries.$inferInsert;
+
+// ─── API CHANGELOG (Sprint 74) ────────────────────────────────────────────────
+export const apiChangeTypeEnum = pgEnum("api_change_type", ["added", "modified", "deprecated", "removed", "breaking"]);
+
+export const apiChangelog = pgTable("api_changelog", {
+  id: serial("id").primaryKey(),
+  version: varchar("version", { length: 32 }).notNull(),
+  changeType: apiChangeTypeEnum("change_type").notNull(),
+  endpoint: varchar("endpoint", { length: 256 }).notNull(),
+  description: text("description").notNull(),
+  breakingChange: boolean("breaking_change").default(false).notNull(),
+  migrationGuide: text("migration_guide"),
+  publishedAt: timestamp("published_at").defaultNow().notNull(),
+  publishedBy: integer("published_by").references(() => users.id),
+}, (t) => [
+  index("idx_api_changelog_version").on(t.version),
+  index("idx_api_changelog_published_at").on(t.publishedAt),
+]);
+export type ApiChangelog = typeof apiChangelog.$inferSelect;
+export type InsertApiChangelog = typeof apiChangelog.$inferInsert;
+
+// ─── ONBOARDING ANALYTICS (Sprint 72) ────────────────────────────────────────
+export const onboardingAnalytics = pgTable("onboarding_analytics", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  step: varchar("step", { length: 64 }).notNull(),
+  action: varchar("action", { length: 32 }).notNull(),
+  timeSpentSeconds: integer("time_spent_seconds"),
+  errorCount: integer("error_count").default(0).notNull(),
+  metadata: json("metadata").default({}).$type<Record<string, unknown>>(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_onboarding_analytics_user_id").on(t.userId),
+  index("idx_onboarding_analytics_step").on(t.step),
+  index("idx_onboarding_analytics_recorded_at").on(t.recordedAt),
+]);
+export type OnboardingAnalytic = typeof onboardingAnalytics.$inferSelect;
+export type InsertOnboardingAnalytic = typeof onboardingAnalytics.$inferInsert;

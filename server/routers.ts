@@ -53,6 +53,10 @@ import { portCongestionRouter } from "./routers/portCongestion";
 import { traderScorecardRouter } from "./routers/traderScorecard";
 import { cargoTrackingRouter } from "./routers/cargoTracking";
 import { onboardingRouter } from "./routers/onboarding";
+import { geofencesRouter } from "./routers/geofences";
+import { webhooksRouter } from "./routers/webhooks";
+import { apiChangelogRouter } from "./routers/apiChangelog";
+import { onboardingAnalyticsRouter } from "./routers/onboardingAnalytics";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -163,6 +167,10 @@ export const appRouter = router({
   traderScorecard: traderScorecardRouter,
   cargoTracking: cargoTrackingRouter,
   onboarding: onboardingRouter,
+  geofences: geofencesRouter,
+  webhooks: webhooksRouter,
+  apiChangelog: apiChangelogRouter,
+  onboardingAnalytics: onboardingAnalyticsRouter,
 });
 
 export type AppRouter = typeof appRouter;
