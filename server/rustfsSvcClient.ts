@@ -90,6 +90,58 @@ export async function rustfsDelete(key: string): Promise<void> {
   }
 }
 
+export interface ScanResult {
+  /** true if the file is clean or the scan was skipped */
+  clean: boolean;
+  /** threat name if a virus was detected, null otherwise */
+  threat: string | null;
+  /** true when ClamAV virus DB is unavailable — upload is allowed with a warning */
+  skipped: boolean;
+  /** optional error message from the scanner */
+  error?: string;
+}
+
+/**
+ * Scan a file buffer for viruses using ClamAV via the Go microservice.
+ * Returns { clean: true, skipped: true } when the ClamAV virus DB is not
+ * available (graceful degradation — do not block the upload).
+ * Returns { clean: false, threat: "ThreatName" } when a virus is detected.
+ */
+export async function rustfsScan(
+  fileBuffer: Buffer,
+  filename: string
+): Promise<ScanResult> {
+  const FormData = (await import("form-data")).default;
+  const form = new FormData();
+  form.append("file", fileBuffer, {
+    filename,
+    contentType: "application/octet-stream",
+  });
+  form.append("filename", filename);
+
+  try {
+    const res = await fetch(`${RUSTFS_SVC_URL}/scan`, {
+      method: "POST",
+      body: form as unknown as BodyInit,
+      headers: form.getHeaders(),
+      signal: AbortSignal.timeout(90_000), // ClamAV can be slow on large files
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      // On scan service error, allow upload with skipped=true
+      console.warn(`[rustfsScan] Scan service error (${res.status}): ${text}`);
+      return { clean: true, threat: null, skipped: true, error: text };
+    }
+
+    return res.json() as Promise<ScanResult>;
+  } catch (err) {
+    // Network error reaching the scan service — allow upload with warning
+    console.warn(`[rustfsScan] Could not reach scan service: ${err}`);
+    return { clean: true, threat: null, skipped: true, error: String(err) };
+  }
+}
+
 /**
  * Check if the Go microservice is reachable.
  */

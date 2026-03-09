@@ -36,7 +36,29 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+
+      {{- if .Values.clamav.enabled }}
+      # ── Init container: wait for ClamAV DB before starting RustFS ────────────
+      initContainers:
+        - name: wait-for-clamav-db
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for ClamAV virus database..."
+              until [ -f /var/lib/clamav/main.cvd ] || [ -f /var/lib/clamav/main.cld ]; do
+                echo "ClamAV DB not ready, sleeping 10s..."
+                sleep 10
+              done
+              echo "ClamAV DB ready."
+          volumeMounts:
+            - name: clamav-db
+              mountPath: /var/lib/clamav
+      {{- end }}
+
       containers:
+        # ── Main: RustFS S3-compatible object storage ─────────────────────────
         - name: rustfs
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
@@ -54,7 +76,6 @@ spec:
             - configMapRef:
                 name: {{ include "rustfs.fullname" . }}-config
           env:
-            # S3 credentials from secret
             - name: RUSTFS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
@@ -66,7 +87,6 @@ spec:
                   name: {{ include "rustfs.credentialsSecretName" . }}
                   key: {{ .Values.credentials.existingSecretSecretKeyKey }}
             {{- if .Values.storage.openstack.enabled }}
-            # OpenStack Swift password from secret
             - name: OS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -91,9 +111,100 @@ spec:
             - name: data
               mountPath: /data
             {{- end }}
+            {{- if .Values.clamav.enabled }}
+            - name: clamav-db
+              mountPath: /var/lib/clamav
+            {{- end }}
+
+        {{- if .Values.clamav.enabled }}
+        # ── Sidecar: ClamAV daemon (clamd) ────────────────────────────────────
+        # Provides TCP socket on 127.0.0.1:3310. rustfs-svc calls clamscan
+        # for pre-upload scanning. Enable with clamav.enabled=true.
+        - name: clamd
+          image: "{{ .Values.clamav.image.repository }}:{{ .Values.clamav.image.tag }}"
+          imagePullPolicy: {{ .Values.clamav.image.pullPolicy }}
+          command:
+            - clamd
+            - --foreground
+            - --config-file=/etc/clamav/clamd.conf
+          ports:
+            - name: clamd-tcp
+              containerPort: 3310
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 3310
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - clamdscan
+                - --no-summary
+                - --config-file=/etc/clamav/clamd.conf
+                - /dev/null
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.clamav.resources | nindent 12 }}
+          volumeMounts:
+            - name: clamav-db
+              mountPath: /var/lib/clamav
+            - name: clamav-config-vol
+              mountPath: /etc/clamav/clamd.conf
+              subPath: clamd.conf
+            - name: clamav-run
+              mountPath: /run/clamav
+            - name: clamav-log
+              mountPath: /var/log/clamav
+
+        # ── Sidecar: freshclam (daily virus DB updater) ───────────────────────
+        - name: freshclam
+          image: "{{ .Values.clamav.image.repository }}:{{ .Values.clamav.image.tag }}"
+          imagePullPolicy: {{ .Values.clamav.image.pullPolicy }}
+          command:
+            - freshclam
+            - --foreground
+            - --config-file=/etc/clamav/freshclam.conf
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: clamav-db
+              mountPath: /var/lib/clamav
+            - name: clamav-config-vol
+              mountPath: /etc/clamav/freshclam.conf
+              subPath: freshclam.conf
+            - name: clamav-log
+              mountPath: /var/log/clamav
+        {{- end }}
+
       volumes:
         {{- if eq .Values.storage.backend "local" }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ if .Values.storage.local.existingClaim }}{{ .Values.storage.local.existingClaim }}{{ else }}{{ include "rustfs.fullname" . }}-data{{ end }}
+        {{- end }}
+        {{- if .Values.clamav.enabled }}
+        - name: clamav-db
+          {{- if .Values.clamav.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "rustfs.fullname" . }}-clamav-db
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.clamav.persistence.size | default "1Gi" }}
+          {{- end }}
+        - name: clamav-config-vol
+          configMap:
+            name: {{ include "rustfs.fullname" . }}-clamav-config
+        - name: clamav-run
+          emptyDir: {}
+        - name: clamav-log
+          emptyDir: {}
         {{- end }}

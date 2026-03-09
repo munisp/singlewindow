@@ -527,6 +527,85 @@ cron.schedule("0 0 8 * * 1", async () => {
 }, { timezone: "UTC" });
 console.log("[Cron] Weekly digest + analytics report scheduled at 08:00 UTC every Monday");
 
+// ── Document expiry enforcement cron ───────────────────────────────────────────
+// Runs daily at 03:00 UTC. Revokes share links whose expiresAt has passed,
+// logs an audit event for each, and notifies the owner.
+export async function runDocumentExpiryCron() {
+  try {
+    const { getDb } = await import("../db");
+    const { documentShares } = await import("../../drizzle/schema");
+    const { notifyOwner } = await import("./notification");
+    const { logAuditEvent } = await import("../db");
+    const { lte, isNull, and, inArray } = await import("drizzle-orm");
+    const db = await getDb();
+    if (!db) {
+      console.warn("[Cron] DB unavailable — skipping document expiry cron");
+      return { expired: 0, error: "DB unavailable" };
+    }
+
+    const now = new Date();
+
+    // Find share links that have passed their expiresAt and have not yet been revoked
+    const expiredShares = await db
+      .select({ id: documentShares.id, documentId: documentShares.documentId, label: documentShares.label })
+      .from(documentShares)
+      .where(
+        and(
+          lte(documentShares.expiresAt, now),
+          isNull(documentShares.revokedAt)
+        )
+      );
+
+    if (expiredShares.length === 0) {
+      console.log("[Cron] Document expiry: no expired share links found");
+      return { expired: 0 };
+    }
+
+    const shareIds = expiredShares.map((s) => s.id);
+
+    // Revoke all expired share links
+    await db
+      .update(documentShares)
+      .set({ revokedAt: now })
+      .where(inArray(documentShares.id, shareIds));
+
+    // Log an audit event for each expired share
+    for (const share of expiredShares) {
+      await logAuditEvent({
+        actorId: null,
+        actorType: "system",
+        action: "expire",
+        entityType: "document_vault" as any,
+        entityId: share.documentId,
+        metadata: { shareId: share.id, label: share.label, expiredAt: now.toISOString() },
+      });
+    }
+
+    // Notify owner
+    await notifyOwner({
+      title: `[Document Vault] ${expiredShares.length} share link(s) auto-expired`,
+      content: [
+        `Document share expiry cron ran at ${now.toUTCString()}.`,
+        `${expiredShares.length} share link(s) have been automatically revoked after passing their expiry time.`,
+        ``,
+        `Affected share IDs: ${shareIds.join(", ")}`,
+        ``,
+        `Log in to TradeGateway to review the Document Vault.`,
+      ].join("\n"),
+    });
+
+    console.log(`[Cron] Document expiry: revoked ${expiredShares.length} expired share link(s)`);
+    return { expired: expiredShares.length };
+  } catch (err) {
+    console.error("[Cron] Document expiry cron failed:", err);
+    return { expired: 0, error: String(err) };
+  }
+}
+
+// Document expiry cron — daily at 03:00 UTC
+cron.schedule("0 0 3 * * *", runDocumentExpiryCron, { timezone: "UTC" });
+console.log("[Cron] Document expiry enforcement scheduled at 03:00 UTC daily");
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();

@@ -866,3 +866,17 @@
 - [x] rustfs-svc Dockerfile (multi-stage Go build → distroless runtime)
 - [x] On-premise deployment guide: deploy/ONPREMISE-DEPLOY.md
 - [x] 365/384 vitest tests pass (19 pre-existing DB-connection failures unrelated to Sprint 28)
+
+## Sprint 29 — Helm CI, Document Expiry Cron, ClamAV Scanning
+
+- [x] Helm chart CI: GitHub Actions workflow (helm lint + helm template for both value sets)
+- [x] Document expiry enforcement cron: archive expired documents + notifyOwner
+- [x] ClamAV sidecar in rustfs-svc K8s manifest
+- [x] ClamAV scan endpoint in Go rustfs-svc microservice
+- [x] Pre-upload virus scan check in documentVault tRPC router
+- [x] Audit event logged on virus detection
+- [x] Vitest tests for expiry cron and scan procedures (35 tests in sprint29.test.ts)
+- [x] ClamAV ConfigMap Helm template (clamav-configmap.yaml) with clamd.conf + freshclam.conf
+- [x] ClamAV sidecar added to Helm chart deployment.yaml (clamd + freshclam containers + init container)
+- [x] ClamAV values added to Helm values.yaml (enabled, image, resources, persistence, config)
+- [x] 399/419 vitest tests pass (20 pre-existing DB-connection failures unrelated to Sprint 29)

@@ -12,7 +12,7 @@ import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { documentVault, documentShares } from "../../drizzle/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
-import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck } from "../rustfsSvcClient";
+import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck, rustfsScan } from "../rustfsSvcClient";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { notifyOwner } from "../_core/notification";
@@ -53,6 +53,30 @@ export const documentVaultRouter = router({
       }
 
       const buffer = Buffer.from(input.fileData, "base64");
+
+      // ── ClamAV virus scan (pre-upload) ────────────────────────────────────
+      // Runs before any S3 write. Gracefully skips when ClamAV DB is absent.
+      const scanResult = await rustfsScan(buffer, input.filename);
+      if (!scanResult.clean && !scanResult.skipped) {
+        const { logAuditEvent } = await import("../db");
+        await logAuditEvent({
+          actorId: ctx.user.id,
+          actorType: "user",
+          action: "malware_detected",
+          entityType: "document_vault" as any,
+          entityId: ctx.user.id,
+          metadata: { filename: input.filename, threat: scanResult.threat, sizeBytes: input.sizeBytes },
+        });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `File rejected: malware detected (${scanResult.threat}). Upload blocked for security.`,
+        });
+      }
+      if (scanResult.skipped) {
+        console.warn(`[DocumentVault] ClamAV scan skipped for ${input.filename} — virus DB unavailable`);
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const suffix = nanoid(10);
       const safeFilename = input.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
       const fileKey = `vault/${ctx.user.id}/${input.category}/${suffix}-${safeFilename}`;

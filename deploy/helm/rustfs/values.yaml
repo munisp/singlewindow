@@ -162,3 +162,46 @@ bucketInit:
     repository: minio/mc
     tag: latest
     pullPolicy: IfNotPresent
+
+# ─── ClamAV Virus Scanning ────────────────────────────────────────────────────
+# When enabled, adds clamd and freshclam sidecar containers to the RustFS Pod.
+# rustfs-svc calls clamscan before every upload; infected files are rejected
+# with a 400 error and the event is logged to audit_events.
+#
+# NOTE: The first Pod start will download the full ClamAV virus DB (~300 MB).
+# Enable persistence.enabled=true to avoid re-downloading on every Pod restart.
+clamav:
+  enabled: false   # Set to true to enable virus scanning on upload
+
+  image:
+    repository: clamav/clamav
+    tag: "1.3"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+  # Persist the ClamAV virus database across Pod restarts.
+  # Avoids re-downloading the full DB (~300 MB) on every restart.
+  persistence:
+    enabled: false
+    storageClass: ""     # "" = cluster default
+    size: "1Gi"
+    accessMode: ReadWriteOnce
+
+  # ClamAV daemon configuration overrides.
+  # These are written into a ConfigMap and mounted as /etc/clamav/clamd.conf.
+  config:
+    maxScanSize: "100M"
+    maxFileSize: "25M"
+    maxRecursion: 16
+    maxFiles: 10000
+    # Mirror to use for virus DB updates (freshclam)
+    databaseMirror: "database.clamav.net"
+    # How often freshclam checks for updates (times per day)
+    checksPerDay: 24

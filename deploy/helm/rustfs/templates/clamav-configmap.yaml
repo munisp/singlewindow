@@ -1,0 +1,50 @@
+{{- if .Values.clamav.enabled }}
+# ─────────────────────────────────────────────────────────────────────────────
+# ClamAV ConfigMap — clamd.conf and freshclam.conf
+# Mounted into the clamd and freshclam sidecar containers.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rustfs.fullname" . }}-clamav-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rustfs.labels" . | nindent 4 }}
+data:
+  clamd.conf: |
+    LogFile /var/log/clamav/clamd.log
+    LogTime yes
+    LogVerbose no
+    PidFile /run/clamav/clamd.pid
+    DatabaseDirectory /var/lib/clamav
+    LocalSocket /run/clamav/clamd.ctl
+    TCPSocket 3310
+    TCPAddr 127.0.0.1
+    MaxConnectionQueueLength 30
+    MaxThreads 12
+    ReadTimeout 300
+    MaxDirectoryRecursion 15
+    FollowDirectorySymlinks false
+    FollowFileSymlinks false
+    DetectPUA yes
+    ScanPE yes
+    ScanELF yes
+    ScanOLE2 yes
+    ScanPDF yes
+    ScanHTML yes
+    ScanArchive yes
+    MaxScanSize {{ .Values.clamav.config.maxScanSize | default "100M" }}
+    MaxFileSize {{ .Values.clamav.config.maxFileSize | default "25M" }}
+    MaxRecursion {{ .Values.clamav.config.maxRecursion | default 16 }}
+    MaxFiles {{ .Values.clamav.config.maxFiles | default 10000 }}
+    Bytecode yes
+
+  freshclam.conf: |
+    DatabaseDirectory /var/lib/clamav
+    UpdateLogFile /var/log/clamav/freshclam.log
+    LogTime yes
+    LogVerbose no
+    DatabaseMirror {{ .Values.clamav.config.databaseMirror | default "database.clamav.net" }}
+    Checks {{ .Values.clamav.config.checksPerDay | default 24 }}
+    NotifyClamd /etc/clamav/clamd.conf
+{{- end }}
