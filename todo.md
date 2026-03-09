@@ -1134,3 +1134,43 @@
 - [x] Role federation: map Keycloak realm roles to TradeGateway roles per tenant
 - [x] Vitest tests for tenant isolation and role federation logic (sprint45-47.test.ts — 31 tests total)
 - [x] Total vitest tests: 669 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 48 — Apache Flink CEP Trade Pattern Detection
+
+- [x] Python flink-cep-svc: FastAPI service (port 8104) with PyFlink CEP engine
+- [x] Python flink-cep-svc: carousel fraud detection (repeated import/re-export same goods within 30 days)
+- [x] Python flink-cep-svc: split-consignment evasion detection (same shipper/consignee, similar HS, < 72h apart)
+- [x] Python flink-cep-svc: valuation anomaly detection (price deviation > 3σ from HS chapter baseline)
+- [x] Python flink-cep-svc: suspicious routing detection (high-risk transshipment hubs in route)
+- [x] Python flink-cep-svc: CEP pattern registry (add/remove/list patterns via API)
+- [x] Python flink-cep-svc: Dockerfile
+- [x] tRPC cepRouter: getPatterns, detectPatterns, getAlerts, acknowledgeAlert, getStats
+- [x] Trade Pattern Alerts UI: /app/security/cep-alerts (FlinkCepAlerts.tsx)
+- [x] DashboardLayout: CEP Alerts nav item added to Compliance & Security section (admin role)
+- [x] Vitest tests for CEP pattern detection logic (sprint48-50.test.ts — 47 tests)
+
+## Sprint 49 — Kubecost Per-Tenant Cost Allocation
+
+- [x] Go kubecost-svc: HTTP client for Kubecost API (port 8105)
+- [x] Go kubecost-svc: per-tenant namespace cost aggregation (CPU, memory, storage, network)
+- [x] Go kubecost-svc: chargeback report generation by plan tier
+- [x] Go kubecost-svc: idle resource detection and rightsizing recommendations
+- [x] Go kubecost-svc: cost trend analysis (7d, 30d, 90d)
+- [x] Go kubecost-svc: Dockerfile
+- [x] tRPC costRouter: getTenantCosts, getChargebackReport, getIdleResources, getCostTrend, getClusterSummary
+- [x] Cost Management UI: /app/admin/costs (CostManagement.tsx) in Tenant Portal
+- [x] DashboardLayout: Cost Management nav item added to Reference section (admin role)
+- [x] Vitest tests for cost aggregation and chargeback logic (sprint48-50.test.ts)
+
+## Sprint 50 — Production Deployment Guide
+
+- [x] PRODUCTION-DEPLOY.md: Kubernetes namespace isolation per tenant
+- [x] PRODUCTION-DEPLOY.md: Helm values overrides for multi-tenant deployment
+- [x] PRODUCTION-DEPLOY.md: Secrets management with Vault + External Secrets Operator
+- [x] PRODUCTION-DEPLOY.md: TLS termination at APISIX with cert-manager
+- [x] PRODUCTION-DEPLOY.md: Disaster recovery procedures (backup, restore, RTO/RPO targets)
+- [x] PRODUCTION-DEPLOY.md: Tenant onboarding runbook (zero to first declaration)
+- [x] PRODUCTION-DEPLOY.md: Monitoring and alerting setup (Prometheus, Grafana, PagerDuty)
+- [x] PRODUCTION-DEPLOY.md: Security hardening checklist (CIS benchmarks, network policies)
+- [x] Vitest tests for deployment config validation (sprint48-50.test.ts — 47 tests)
+- [x] Total vitest tests: 716 passing (20 pre-existing DB-connection failures unchanged)

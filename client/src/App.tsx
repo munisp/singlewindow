@@ -60,6 +60,8 @@ const WazuhSecurityEvents = lazy(() => import('./pages/app/WazuhSecurityEvents')
 const RiskModelDashboard = lazy(() => import('./pages/app/RiskModelDashboard'));
 const TradeAnalytics = lazy(() => import('./pages/app/TradeAnalytics'));
 const TenantPortal = lazy(() => import('./pages/app/TenantPortal'));
+const FlinkCepAlerts = lazy(() => import('./pages/FlinkCepAlerts'));
+const CostManagement = lazy(() => import('./pages/CostManagement'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -258,6 +260,16 @@ function Router() {
       </Route>
       <Route path="/app/admin/tenants">
         <Suspense fallback={<LazyFallback />}><TenantPortal /></Suspense>
+      </Route>
+
+      {/* Sprint 48 — Flink CEP Trade Pattern Alerts */}
+      <Route path="/app/security/cep-alerts">
+        <Suspense fallback={<LazyFallback />}><FlinkCepAlerts /></Suspense>
+      </Route>
+
+      {/* Sprint 49 — Kubecost Cost Management */}
+      <Route path="/app/admin/costs">
+        <Suspense fallback={<LazyFallback />}><CostManagement /></Suspense>
       </Route>
 
       {/* 404 */}

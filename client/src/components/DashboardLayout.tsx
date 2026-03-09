@@ -69,6 +69,8 @@ import {
   Activity,
   Brain,
   BarChart2,
+  Zap,
+  DollarSign,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -136,6 +138,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Radio, label: "WCO CEN Alerts", path: "/app/security/cen-alerts" },
           { icon: ShieldAlert, label: "Threat Intelligence", path: "/app/security/threat-intel" },
           { icon: Activity, label: "Wazuh SIEM / XDR", path: "/app/security/wazuh" },
+          { icon: Zap, label: "CEP Pattern Alerts", path: "/app/security/cep-alerts" },
         ],
       },
       {
@@ -175,6 +178,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Brain, label: "Risk Model Dashboard", path: "/app/admin/risk-model" },
           { icon: BarChart2, label: "Trade Analytics", path: "/app/analytics" },
           { icon: Building2, label: "Tenant Portal", path: "/app/admin/tenants" },
+          { icon: DollarSign, label: "Cost Management", path: "/app/admin/costs" },
           { icon: Code2, label: "Developer Portal", path: "/app/developer" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],

@@ -44,6 +44,8 @@ import { wazuhRouter } from "./routers/wazuh";
 import { riskModelRouter } from "./routers/riskModel";
 import { analyticsRouter } from "./routers/analytics";
 import { tenantRouter } from "./routers/tenant";
+import { cepRouter } from "./routers/cep";
+import { costRouter } from "./routers/cost";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -126,6 +128,8 @@ export const appRouter = router({
   riskModel: riskModelRouter,
   analytics: analyticsRouter,
   tenant: tenantRouter,
+  cep: cepRouter,
+  cost: costRouter,
 });
 
 export type AppRouter = typeof appRouter;
