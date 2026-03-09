@@ -62,6 +62,9 @@ const TradeAnalytics = lazy(() => import('./pages/app/TradeAnalytics'));
 const TenantPortal = lazy(() => import('./pages/app/TenantPortal'));
 const FlinkCepAlerts = lazy(() => import('./pages/FlinkCepAlerts'));
 const CostManagement = lazy(() => import('./pages/CostManagement'));
+const SecurityOperationsCentre = lazy(() => import('./pages/app/SecurityOperationsCentre'));
+const AuditEngineDashboard = lazy(() => import('./pages/app/AuditEngineDashboard'));
+const BondedWarehouseManagement = lazy(() => import('./pages/app/BondedWarehouseManagement'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -270,6 +273,21 @@ function Router() {
       {/* Sprint 49 — Kubecost Cost Management */}
       <Route path="/app/admin/costs">
         <Suspense fallback={<LazyFallback />}><CostManagement /></Suspense>
+      </Route>
+
+      {/* Sprint 54 — Wazuh SOC Dashboard */}
+      <Route path="/app/security/soc">
+        <Suspense fallback={<LazyFallback />}><SecurityOperationsCentre /></Suspense>
+      </Route>
+
+      {/* Sprint 55 — Audit Engine Dashboard */}
+      <Route path="/app/admin/audit-engine">
+        <Suspense fallback={<LazyFallback />}><AuditEngineDashboard /></Suspense>
+      </Route>
+
+      {/* Sprint 56 — Bonded Warehouse Management */}
+      <Route path="/app/port/bonded-warehouse-mgmt">
+        <Suspense fallback={<LazyFallback />}><BondedWarehouseManagement /></Suspense>
       </Route>
 
       {/* 404 */}

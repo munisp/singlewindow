@@ -1211,3 +1211,36 @@
 - [x] Rate limit tracking: sliding window counter using api_usage_logs table
 - [x] Vitest tests for API key generation, hashing, and scope validation (sprint51-53.test.ts — 42 tests)
 - [x] Total vitest tests: 758 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 54 — Wazuh SIEM/XDR Integration
+
+- [x] Python wazuh-svc: FastAPI service (port 8108) connecting to Wazuh REST API
+- [x] Python wazuh-svc: security event ingestion (authentication failures, file integrity, vulnerability alerts)
+- [x] Python wazuh-svc: correlation engine (link events to declaration IDs and trader accounts)
+- [x] Python wazuh-svc: incident lifecycle management (open, investigate, contain, resolve)
+- [x] Python wazuh-svc: MITRE ATT&CK tactic/technique tagging for each alert
+- [x] Python wazuh-svc: Dockerfile
+- [x] tRPC socRouter: getAlerts, getIncidents, createIncident, updateIncident, correlateDeclaration, getAgentStatus, getMitreStats
+- [x] SOC Dashboard UI: /app/security/soc (SecurityOperationsCentre.tsx) — alert feed, incident queue, MITRE heatmap
+- [x] DashboardLayout: SOC Dashboard nav item added to Compliance & Security section (admin role)
+- [x] Vitest tests for incident correlation and MITRE tagging logic (sprint54-56.test.ts — 39 tests)
+
+## Sprint 55 — Post-Clearance Audit Engine
+
+- [x] tRPC auditEngineRouter: getAuditTasks, assignAuditTask, submitFindings, closeAudit, getDutyDiscrepancyReport, getAuditStats
+- [x] Audit selection logic: selectForAudit() with risk_score_high, value_threshold, hs_chapter_sensitive, trader_tier_review, post_green_lane, random_sample criteria
+- [x] Duty discrepancy calculation: calculateDutyDiscrepancy() summing non-no_finding findings
+- [x] Audit Engine Dashboard UI: /app/admin/audit-engine (AuditEngineDashboard.tsx) — task list, discrepancy report, selection breakdown
+- [x] DashboardLayout: Audit Engine nav item added to Reference section (admin role)
+- [x] Vitest tests for audit selection logic and discrepancy calculation (sprint54-56.test.ts)
+
+## Sprint 56 — Bonded Warehouse & Free Zone Management
+
+- [x] tRPC bondedWarehouseRouter: registerWarehouse, listWarehouses, getWarehouse, recordEntry, issueExBondPermit, getInventory, listPermits, getBondGuarantees, getExpiryAlerts
+- [x] calculateBondRequirement(): 110% of total inventory value
+- [x] isBondExpiringSoon(): configurable threshold (default 30 days)
+- [x] generatePermitNo(): BW-YYYY-XXXXXX format with cryptographic uniqueness
+- [x] Bonded Warehouse Management UI: /app/port/bonded-warehouse-mgmt (BondedWarehouseManagement.tsx) — warehouses, inventory, permits, bond guarantees tabs
+- [x] DashboardLayout: Bonded Warehouse Mgmt nav item added to Port Operations section (admin role)
+- [x] Vitest tests for bond requirement, expiry detection, permit generation (sprint54-56.test.ts)
+- [x] Total vitest tests: 797 passing (20 pre-existing DB-connection failures unchanged)

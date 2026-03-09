@@ -139,6 +139,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ShieldAlert, label: "Threat Intelligence", path: "/app/security/threat-intel" },
           { icon: Activity, label: "Wazuh SIEM / XDR", path: "/app/security/wazuh" },
           { icon: Zap, label: "CEP Pattern Alerts", path: "/app/security/cep-alerts" },
+          { icon: Shield, label: "SOC Dashboard", path: "/app/security/soc" },
         ],
       },
       {
@@ -170,6 +171,7 @@ function getNavGroups(role: string): NavGroup[] {
         items: [
           { icon: Warehouse, label: "Bonded Warehouse", path: "/app/port/bonded-warehouse" },
           { icon: Building2, label: "Free Zone Operations", path: "/app/port/free-zone" },
+          { icon: Warehouse, label: "Bonded Warehouse Mgmt", path: "/app/port/bonded-warehouse-mgmt" },
         ],
       },
       {
@@ -179,6 +181,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: BarChart2, label: "Trade Analytics", path: "/app/analytics" },
           { icon: Building2, label: "Tenant Portal", path: "/app/admin/tenants" },
           { icon: DollarSign, label: "Cost Management", path: "/app/admin/costs" },
+          { icon: ClipboardCheck, label: "Audit Engine", path: "/app/admin/audit-engine" },
           { icon: Code2, label: "Developer Portal", path: "/app/developer" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
