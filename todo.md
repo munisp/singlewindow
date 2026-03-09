@@ -1093,3 +1093,44 @@
 - [x] tRPC riskModelRouter: scoreDeclaration, batchScore, getModelStats, getFeatureImportance
 - [x] Risk Model Dashboard UI: /app/admin/risk-model (RiskModelDashboard.tsx)
 - [x] Vitest tests for risk scoring logic and AEO feature weighting (sprint42-44.test.ts — 45 tests)
+
+## Sprint 45 — Apache Sedona Geospatial Analytics
+
+- [x] Python sedona-svc: FastAPI service (port 8102) with Apache Sedona spatial engine
+- [x] Python sedona-svc: vessel AIS position ingestion and storage (MMSI, lat/lon, timestamp, speed, heading)
+- [x] Python sedona-svc: route anomaly detection (deviation from expected shipping lanes, dark vessel periods)
+- [x] Python sedona-svc: port-of-call mismatch detection (declared vs actual port)
+- [x] Python sedona-svc: geofencing alerts (vessel entering/leaving restricted zones)
+- [x] Python sedona-svc: spatial query endpoints (vessels near port, route history, anomaly list)
+- [x] Python sedona-svc: Dockerfile
+- [x] tRPC geospatial router: getVessels, getVesselRoute, detectAnomalies, getGeofenceAlerts, ingestAIS
+- [x] Customs Dashboard: vessel AIS map panel with anomaly markers (using existing Map component)
+- [x] Vitest tests for geospatial router and anomaly detection logic (sprint45-47.test.ts — 31 tests)
+
+## Sprint 46 — Delta Lake Analytics Pipeline
+
+- [x] Python deltalake-svc: FastAPI service (port 8103) with delta-rs and PyArrow
+- [x] Python deltalake-svc: declaration event ingestion from Kafka topics into Delta Lake Parquet
+- [x] Python deltalake-svc: time-partitioned trade statistics aggregation (daily/weekly/monthly)
+- [x] Python deltalake-svc: HS code volume and duty revenue analytics
+- [x] Python deltalake-svc: trader performance metrics (clearance time, rejection rate)
+- [x] Python deltalake-svc: route-level trade flow analytics (origin-destination pairs)
+- [x] Python deltalake-svc: Dockerfile
+- [x] tRPC analytics router: getTradeStats, getHsCodeVolume, getTraderMetrics, getRouteFlow, getDutyRevenue
+- [x] Trade Analytics dashboard UI: /app/analytics page with time-series charts and trade flow table
+- [x] Vitest tests for analytics aggregation logic (sprint45-47.test.ts)
+
+## Sprint 47 — Multi-Tenancy and Role Federation
+
+- [x] DB schema: tenants table (id, name, country_code, keycloak_realm, api_prefix, plan, status, created_at)
+- [x] tRPC tenantRouter: createTenant, listTenants, getTenant, updateTenant, suspendTenant, deprovisionTenant
+- [x] tRPC tenantRouter: provisionKeycloakRealm (calls keycloak-svc to create realm + client)
+- [x] Tenant status lifecycle: active → suspended → deprovisioned (terminal state)
+- [x] Plan tiers: starter (10 users, 100 decl/day), standard (100 users, 1000 decl/day), enterprise (unlimited)
+- [x] Super-admin portal UI: /app/admin/tenants page (Tenant Portal — tenant list, provision form, status management)
+- [x] Trade Analytics dashboard UI: /app/analytics (Trade Analytics — time-series charts, HS code volumes, duty revenue)
+- [x] DashboardLayout: Trade Analytics and Tenant Portal nav items added to Reference section (admin role)
+- [x] Per-tenant Keycloak realm config: realm name, client ID, JWKS URL stored in keycloak_config
+- [x] Role federation: map Keycloak realm roles to TradeGateway roles per tenant
+- [x] Vitest tests for tenant isolation and role federation logic (sprint45-47.test.ts — 31 tests total)
+- [x] Total vitest tests: 669 passing (20 pre-existing DB-connection failures unchanged)

@@ -68,6 +68,7 @@ import {
   ShieldAlert,
   Activity,
   Brain,
+  BarChart2,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -172,6 +173,8 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Reference",
         items: [
           { icon: Brain, label: "Risk Model Dashboard", path: "/app/admin/risk-model" },
+          { icon: BarChart2, label: "Trade Analytics", path: "/app/analytics" },
+          { icon: Building2, label: "Tenant Portal", path: "/app/admin/tenants" },
           { icon: Code2, label: "Developer Portal", path: "/app/developer" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],

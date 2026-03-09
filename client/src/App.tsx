@@ -58,6 +58,8 @@ const DeveloperPortal = lazy(() => import('./pages/app/DeveloperPortal'));
 const ThreatIntelligence = lazy(() => import('./pages/app/ThreatIntelligence'));
 const WazuhSecurityEvents = lazy(() => import('./pages/app/WazuhSecurityEvents'));
 const RiskModelDashboard = lazy(() => import('./pages/app/RiskModelDashboard'));
+const TradeAnalytics = lazy(() => import('./pages/app/TradeAnalytics'));
+const TenantPortal = lazy(() => import('./pages/app/TenantPortal'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -250,6 +252,12 @@ function Router() {
       </Route>
       <Route path="/app/admin/risk-model">
         <Suspense fallback={<LazyFallback />}><RiskModelDashboard /></Suspense>
+      </Route>
+      <Route path="/app/analytics">
+        <Suspense fallback={<LazyFallback />}><TradeAnalytics /></Suspense>
+      </Route>
+      <Route path="/app/admin/tenants">
+        <Suspense fallback={<LazyFallback />}><TenantPortal /></Suspense>
       </Route>
 
       {/* 404 */}

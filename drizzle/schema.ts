@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, bigint, index, unique, real
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid
 } from "drizzle-orm/pg-core";
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
@@ -977,3 +977,55 @@ export const apiUsageLogs = pgTable("api_usage_logs", {
 ]);
 export type ApiUsageLog = typeof apiUsageLogs.$inferSelect;
 export type InsertApiUsageLog = typeof apiUsageLogs.$inferInsert;
+
+// ─── MULTI-TENANCY — TENANTS (Sprint 47) ─────────────────────────────────────
+export const tenants = pgTable("tenants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 128 }).notNull(),
+  slug: varchar("slug", { length: 64 }).notNull().unique(),
+  country: varchar("country", { length: 3 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 256 }).notNull(),
+  plan: varchar("plan", { length: 32 }).default("standard").notNull(),
+  apiPrefix: varchar("api_prefix", { length: 64 }).notNull(),
+  status: varchar("status", { length: 32 }).default("active").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tenants_slug").on(t.slug),
+  index("idx_tenants_country").on(t.country),
+  index("idx_tenants_status").on(t.status),
+]);
+export type Tenant = typeof tenants.$inferSelect;
+export type InsertTenant = typeof tenants.$inferInsert;
+
+// ─── MULTI-TENANCY — PER-TENANT KEYCLOAK CONFIG ───────────────────────────────
+export const tenantKeycloakConfig = pgTable("tenant_keycloak_config", {
+  id: serial("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+  realm: varchar("realm", { length: 64 }).notNull(),
+  clientId: varchar("client_id", { length: 128 }).notNull(),
+  clientSecret: varchar("client_secret", { length: 256 }),
+  discoveryUrl: varchar("discovery_url", { length: 512 }).notNull(),
+  roleMappings: json("role_mappings").default({}).notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tenant_kc_tenant_id").on(t.tenantId),
+]);
+export type TenantKeycloakConfig = typeof tenantKeycloakConfig.$inferSelect;
+export type InsertTenantKeycloakConfig = typeof tenantKeycloakConfig.$inferInsert;
+
+// ─── MULTI-TENANCY — TENANT USERS ─────────────────────────────────────────────
+export const tenantUsers = pgTable("tenant_users", {
+  id: serial("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id),
+  userId: integer("user_id").notNull().references(() => users.id),
+  role: varchar("role", { length: 64 }).default("viewer").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tenant_users_tenant_id").on(t.tenantId),
+  index("idx_tenant_users_user_id").on(t.userId),
+]);
+export type TenantUser = typeof tenantUsers.$inferSelect;
+export type InsertTenantUser = typeof tenantUsers.$inferInsert;

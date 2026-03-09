@@ -353,4 +353,57 @@ export const geospatialRouter = router({
       await db.insert(vesselTrackingEvents).values(events);
       return { seeded: true, message: `Seeded ${events.length} vessel tracking events for ${vessels.length} vessels` };
     }),
+
+  // ─── Sedona AIS Anomaly Detection (Sprint 45) ──────────────────────────────
+
+  /** Detect AIS anomalies: dark vessel periods, speed anomalies (via sedona-svc) */
+  detectAISAnomalies: protectedProcedure.query(async () => {
+    const SEDONA_URL = process.env.SEDONA_SVC_URL ?? "http://localhost:8102";
+    try {
+      const res = await fetch(`${SEDONA_URL}/anomalies`);
+      if (!res.ok) return { anomalies: [], total: 0, service_online: false };
+      const data = await res.json() as { anomalies: unknown[]; total: number };
+      return { ...data, service_online: true };
+    } catch {
+      return { anomalies: [], total: 0, service_online: false };
+    }
+  }),
+
+  /** Get geofencing alerts for vessels entering restricted zones (via sedona-svc) */
+  getGeofenceAlerts: protectedProcedure.query(async () => {
+    const SEDONA_URL = process.env.SEDONA_SVC_URL ?? "http://localhost:8102";
+    try {
+      const res = await fetch(`${SEDONA_URL}/geofence-alerts`);
+      if (!res.ok) return { alerts: [], total: 0, service_online: false };
+      const data = await res.json() as { alerts: unknown[]; total: number };
+      return { ...data, service_online: true };
+    } catch {
+      return { alerts: [], total: 0, service_online: false };
+    }
+  }),
+
+  /** Get all tracked vessels with latest AIS position from sedona-svc */
+  getAISVessels: protectedProcedure.query(async () => {
+    const SEDONA_URL = process.env.SEDONA_SVC_URL ?? "http://localhost:8102";
+    try {
+      const res = await fetch(`${SEDONA_URL}/vessels`);
+      if (!res.ok) return { vessels: [], total: 0, service_online: false };
+      const data = await res.json() as { vessels: unknown[]; total: number };
+      return { ...data, service_online: true };
+    } catch {
+      return { vessels: [], total: 0, service_online: false };
+    }
+  }),
+
+  /** Get sedona-svc service statistics */
+  getSedonaStats: protectedProcedure.query(async () => {
+    const SEDONA_URL = process.env.SEDONA_SVC_URL ?? "http://localhost:8102";
+    try {
+      const res = await fetch(`${SEDONA_URL}/stats`);
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  }),
 });
