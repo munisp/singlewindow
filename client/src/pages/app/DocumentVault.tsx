@@ -76,6 +76,7 @@ import {
   ExternalLink,
   BarChart2,
   ChevronRight,
+  X,
 } from "lucide-react";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -133,6 +134,13 @@ function getCategoryLabel(value: string): string {
 
 // ─── Upload Dialog ────────────────────────────────────────────────────────────
 
+type QueueItem = {
+  id: string;
+  file: File;
+  status: "pending" | "uploading" | "done" | "error";
+  error?: string;
+};
+
 function UploadDialog({
   open,
   onClose,
@@ -143,12 +151,14 @@ function UploadDialog({
   onSuccess: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [category, setCategory] = useState<DocCategory>("commercial_invoice");
   const [accessLevel, setAccessLevel] = useState("private");
   const [description, setDescription] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [linkedDeclarationId, setLinkedDeclarationId] = useState<string>("none");
+  const utils = trpc.useUtils();
 
   // Fetch trader's recent declarations for the selector
   const { data: myDeclarations } = trpc.declarations.myDeclarations.useQuery(
@@ -156,113 +166,179 @@ function UploadDialog({
     { staleTime: 60_000 }
   );
 
-  const upload = trpc.documentVault.upload.useMutation({
-    onSuccess: () => {
-      toast.success("Document uploaded", { description: `${selectedFile?.name} stored in RustFS.` });
-      onSuccess();
-      onClose();
-      setSelectedFile(null);
-      setDescription("");
-      setLinkedDeclarationId("none");
-    },
-    onError: (err) => {
-      toast.error("Upload failed", { description: err.message });
-    },
-  });
-
-  const handleFile = useCallback((file: File) => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error("File too large", { description: "Maximum file size is 20 MB." });
-      return;
+  const addFiles = useCallback((files: FileList | File[]) => {
+    const arr = Array.from(files);
+    const valid: QueueItem[] = [];
+    for (const file of arr) {
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error("File too large", { description: `${file.name} exceeds 20 MB limit.` });
+        continue;
+      }
+      valid.push({ id: `${file.name}-${Date.now()}-${Math.random()}`, file, status: "pending" });
     }
-    setSelectedFile(file);
-  }, [toast]);
+    if (valid.length > 0) setQueue(prev => [...prev, ...valid]);
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
+    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+  }, [addFiles]);
 
-  const handleSubmit = async () => {
-    if (!selectedFile) return;
-
-    const arrayBuffer = await selectedFile.arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuffer);
-    let binary = "";
-    for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
-    const base64 = btoa(binary);
-
-    upload.mutate({
-      filename: selectedFile.name,
-      contentType: selectedFile.type || "application/octet-stream",
-      fileData: base64,
-      sizeBytes: selectedFile.size,
-      category,
-      accessLevel: accessLevel as "private" | "shared_with_customs" | "shared_with_oga" | "public",
-      description: description || undefined,
-      declarationId: linkedDeclarationId !== "none" ? Number(linkedDeclarationId) : undefined,
-    });
+  const removeFromQueue = (id: string) => {
+    if (!isProcessing) setQueue(prev => prev.filter(item => item.id !== id));
   };
 
+  const uploadSingle = async (item: QueueItem): Promise<void> => {
+    setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "uploading" } : q));
+    try {
+      const arrayBuffer = await item.file.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+      const base64 = btoa(binary);
+      await utils.client.documentVault.upload.mutate({
+        filename: item.file.name,
+        contentType: item.file.type || "application/octet-stream",
+        fileData: base64,
+        sizeBytes: item.file.size,
+        category,
+        accessLevel: accessLevel as "private" | "shared_with_customs" | "shared_with_oga" | "public",
+        description: description || undefined,
+        declarationId: linkedDeclarationId !== "none" ? Number(linkedDeclarationId) : undefined,
+      });
+      setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done" } : q));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error", error: msg } : q));
+    }
+  };
+
+  const handleSubmit = async () => {
+    const toUpload = queue.filter(q => q.status === "pending" || q.status === "error");
+    if (toUpload.length === 0) return;
+    setIsProcessing(true);
+    for (const item of toUpload) {
+      await uploadSingle(item);
+    }
+    setIsProcessing(false);
+    const finalQueue = queue.map(q =>
+      toUpload.find(t => t.id === q.id) ? { ...q, status: q.status } : q
+    );
+    const successCount = finalQueue.filter(q => q.status === "done").length;
+    const failCount = finalQueue.filter(q => q.status === "error").length;
+    onSuccess();
+    if (failCount === 0) {
+      toast.success(`${successCount} document${successCount > 1 ? "s" : ""} uploaded`, {
+        description: "All files stored in RustFS.",
+      });
+      onClose();
+      setQueue([]);
+      setDescription("");
+      setLinkedDeclarationId("none");
+    } else {
+      toast.info(`${successCount} uploaded, ${failCount} failed`, {
+        description: "Review errors in the queue below.",
+      });
+    }
+  };
+
+  const statusIcon = (status: QueueItem["status"]) => {
+    if (status === "pending") return <Clock className="h-4 w-4 text-muted-foreground" />;
+    if (status === "uploading") return <RefreshCw className="h-4 w-4 text-primary animate-spin" />;
+    if (status === "done") return <CheckCircle2 className="h-4 w-4 text-green-500" />;
+    return <AlertTriangle className="h-4 w-4 text-destructive" />;
+  };
+
+  const pendingCount = queue.filter(q => q.status === "pending" || q.status === "error").length;
+  const doneCount = queue.filter(q => q.status === "done").length;
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+    <Dialog open={open} onOpenChange={isProcessing ? undefined : onClose}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Upload className="h-5 w-5 text-primary" />
-            Upload Document to Vault
+            Upload Documents to Vault
           </DialogTitle>
           <DialogDescription>
             Files are stored in RustFS (S3-compatible). Maximum 20 MB per file.
           </DialogDescription>
         </DialogHeader>
-
         <div className="space-y-4">
           {/* Drop zone */}
           <div
             className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-              isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+              isDragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50"
             }`}
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
           >
+            <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Drop files here or <span className="text-primary underline">browse</span>
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, XLSX, images, ZIP — max 20 MB each</p>
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+              onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
             />
-            {selectedFile ? (
-              <div className="flex items-center justify-center gap-3">
-                {getFileIcon(selectedFile.type)}
-                <div className="text-left">
-                  <p className="text-sm font-medium truncate max-w-[280px]">{selectedFile.name}</p>
-                  <p className="text-xs text-muted-foreground">{formatBytes(selectedFile.size)}</p>
-                </div>
-                <CheckCircle2 className="h-5 w-5 text-green-500 ml-auto" />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2">
-                <Upload className="h-8 w-8 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  Drop a file here or <span className="text-primary underline">browse</span>
-                </p>
-                <p className="text-xs text-muted-foreground">PDF, DOCX, XLSX, images, ZIP — max 20 MB</p>
-              </div>
-            )}
           </div>
+
+          {/* Queue list */}
+          {queue.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">
+                  {queue.length} file{queue.length > 1 ? "s" : ""} queued
+                  {doneCount > 0 && ` · ${doneCount} done`}
+                </Label>
+                {!isProcessing && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs text-muted-foreground"
+                    onClick={() => setQueue([])}
+                  >
+                    Clear all
+                  </Button>
+                )}
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1 rounded-md border p-2 bg-muted/30">
+                {queue.map(item => (
+                  <div key={item.id} className="flex items-center gap-2 text-sm">
+                    {statusIcon(item.status)}
+                    <span className="flex-1 truncate" title={item.file.name}>{item.file.name}</span>
+                    <span className="text-xs text-muted-foreground shrink-0">{formatBytes(item.file.size)}</span>
+                    {item.status === "error" && (
+                      <span className="text-xs text-destructive truncate max-w-[120px]" title={item.error}>{item.error}</span>
+                    )}
+                    {!isProcessing && item.status !== "uploading" && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 shrink-0"
+                        onClick={(e) => { e.stopPropagation(); removeFromQueue(item.id); }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Category */}
           <div className="space-y-1.5">
-            <Label>Document Category</Label>
+            <Label>Document Category <span className="text-muted-foreground text-xs">(applies to all files)</span></Label>
             <Select value={category} onValueChange={(v) => setCategory(v as DocCategory)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {DOCUMENT_CATEGORIES.map(c => (
                   <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
@@ -270,14 +346,11 @@ function UploadDialog({
               </SelectContent>
             </Select>
           </div>
-
           {/* Access level */}
           <div className="space-y-1.5">
             <Label>Access Level</Label>
             <Select value={accessLevel} onValueChange={setAccessLevel}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {ACCESS_LEVELS.map(a => (
                   <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
@@ -285,14 +358,11 @@ function UploadDialog({
               </SelectContent>
             </Select>
           </div>
-
           {/* Link to declaration */}
           <div className="space-y-1.5">
             <Label>Link to Declaration (optional)</Label>
             <Select value={linkedDeclarationId} onValueChange={setLinkedDeclarationId}>
-              <SelectTrigger>
-                <SelectValue placeholder="No declaration" />
-              </SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="No declaration" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No declaration</SelectItem>
                 {(myDeclarations ?? []).map(d => (
@@ -302,16 +372,12 @@ function UploadDialog({
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              Attach this document to a specific declaration so customs officers can view it inline.
-            </p>
           </div>
-
           {/* Description */}
           <div className="space-y-1.5">
             <Label>Description (optional)</Label>
             <Textarea
-              placeholder="Brief note about this document…"
+              placeholder="Brief note about these documents…"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
@@ -319,14 +385,13 @@ function UploadDialog({
             />
           </div>
         </div>
-
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={upload.isPending}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={!selectedFile || upload.isPending}>
-            {upload.isPending ? (
+          <Button variant="outline" onClick={onClose} disabled={isProcessing}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={queue.length === 0 || pendingCount === 0 || isProcessing}>
+            {isProcessing ? (
               <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Uploading…</>
             ) : (
-              <><Upload className="h-4 w-4 mr-2" /> Upload</>
+              <><Upload className="h-4 w-4 mr-2" /> Upload {pendingCount > 0 ? `${pendingCount} File${pendingCount > 1 ? "s" : ""}` : ""}</>
             )}
           </Button>
         </DialogFooter>

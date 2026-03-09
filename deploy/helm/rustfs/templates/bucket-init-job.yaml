@@ -1,0 +1,61 @@
+{{- if .Values.bucketInit.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "rustfs.fullname" . }}-bucket-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rustfs.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "rustfs.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bucket-init
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for RustFS to be ready before creating buckets
+        - name: wait-for-rustfs
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until wget -qO- http://{{ include "rustfs.fullname" . }}:{{ .Values.service.port }}/minio/health/ready; do
+                echo "Waiting for RustFS to be ready..."
+                sleep 5
+              done
+      containers:
+        - name: mc
+          image: "{{ .Values.bucketInit.image.repository }}:{{ .Values.bucketInit.image.tag }}"
+          imagePullPolicy: {{ .Values.bucketInit.image.pullPolicy }}
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rustfs.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretAccessKeyKey }}
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rustfs.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretSecretKeyKey }}
+          command:
+            - sh
+            - -c
+            - |
+              mc alias set rustfs \
+                http://{{ include "rustfs.fullname" . }}:{{ .Values.service.port }} \
+                "$RUSTFS_ACCESS_KEY" \
+                "$RUSTFS_SECRET_KEY" && \
+              {{- range .Values.bucketInit.buckets }}
+              mc mb --ignore-existing rustfs/{{ . }} && \
+              {{- end }}
+              echo "All buckets created successfully."
+{{- end }}

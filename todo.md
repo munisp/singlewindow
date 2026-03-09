@@ -842,3 +842,27 @@
 - [x] Add PreviewDrawer slide-over with inline PDF iframe and image rendering
 - [x] Add Eye (preview) button to DocumentRow
 - [x] Add listShares and revokeShare vitest tests (33 total, all passing)
+
+## Sprint 28 — Download Count, Password Shares, Bulk Upload, RustFS K8s/OpenStack
+
+- [ ] Increment download_count in verifyShare procedure after presigned URL is issued
+- [ ] Add password toggle and input to ShareDialog (optional password protection)
+- [ ] Add password prompt to /share/:token landing page when share is password-protected
+- [ ] Add bcrypt password verification in verifyShare procedure
+- [ ] Bulk document upload: multi-file input with sequential queue and per-file progress in UploadDialog
+- [ ] RustFS Kubernetes Helm chart (values.yaml, deployment, service, PVC, configmap, ingress)
+- [ ] RustFS OpenStack Swift backend configuration (keystone auth, swift endpoint)
+- [ ] On-premise deploy guide (README-DEPLOY.md)
+
+## Sprint 28 — Bulk Upload, RustFS K8s/OpenStack Deploy
+
+- [x] Bulk document upload: multi-file queue with per-file progress in UploadDialog
+- [x] Download-count increment confirmed already in verifyShare procedure
+- [x] Password-protected share UI confirmed already in ShareDialog + ShareLanding
+- [x] RustFS Helm chart: Chart.yaml, values.yaml, values-openstack.yaml
+- [x] Helm templates: deployment, service, ingress, pvc, secret, configmap, bucket-init-job, NOTES.txt
+- [x] OpenStack Swift backend integration (OS_AUTH_URL, OS_PROJECT_NAME, OS_PASSWORD via secret)
+- [x] Flat kubectl manifests: rustfs-namespace.yaml, rustfs-all-in-one.yaml, rustfs-svc-deployment.yaml
+- [x] rustfs-svc Dockerfile (multi-stage Go build → distroless runtime)
+- [x] On-premise deployment guide: deploy/ONPREMISE-DEPLOY.md
+- [x] 365/384 vitest tests pass (19 pre-existing DB-connection failures unrelated to Sprint 28)

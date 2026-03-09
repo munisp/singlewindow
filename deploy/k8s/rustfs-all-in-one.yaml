@@ -1,0 +1,183 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RustFS — Kubernetes All-in-One Manifest (local storage backend)
+# Namespace: tradegateway-storage
+# Apply: kubectl apply -f rustfs-namespace.yaml -f rustfs-all-in-one.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+---
+# Secret — S3 credentials
+# IMPORTANT: Replace base64 values before applying.
+# echo -n 'your-access-key' | base64
+# echo -n 'your-secret-key' | base64
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rustfs-credentials
+  namespace: tradegateway-storage
+type: Opaque
+data:
+  access-key: dHJhZGVnYXRld2F5          # tradegateway
+  secret-key: Y2hhbmdlLW1lLXNlY3JldA==  # change-me-secret
+---
+# PersistentVolumeClaim — local data volume
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rustfs-data
+  namespace: tradegateway-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+---
+# ConfigMap — RustFS environment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rustfs-config
+  namespace: tradegateway-storage
+data:
+  RUSTFS_VOLUMES: "/data"
+  RUSTFS_ADDRESS: ":9000"
+  RUSTFS_CONSOLE_ADDRESS: ":9001"
+  RUSTFS_STORAGE_BACKEND: "local"
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs
+  namespace: tradegateway-storage
+  labels:
+    app.kubernetes.io/name: rustfs
+    app.kubernetes.io/component: object-storage
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rustfs
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rustfs
+        app.kubernetes.io/component: object-storage
+    spec:
+      serviceAccountName: default
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: rustfs
+          image: ghcr.io/rustfs/rustfs:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - rustfs
+            - server
+            - /data
+            - --address
+            - :9000
+            - --console-address
+            - :9001
+          envFrom:
+            - configMapRef:
+                name: rustfs-config
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-credentials
+                  key: access-key
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-credentials
+                  key: secret-key
+          ports:
+            - name: s3-api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rustfs-data
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: tradegateway-storage
+  labels:
+    app.kubernetes.io/name: rustfs
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9000
+      targetPort: 9000
+      protocol: TCP
+      name: s3-api
+    - port: 9001
+      targetPort: 9001
+      protocol: TCP
+      name: console
+  selector:
+    app.kubernetes.io/name: rustfs
+---
+# HorizontalPodAutoscaler (optional — only useful with Swift backend)
+# Uncomment and set storage.backend=openstack-swift for multi-replica scaling
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: rustfs
+#   namespace: tradegateway-storage
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: rustfs
+#   minReplicas: 2
+#   maxReplicas: 6
+#   metrics:
+#     - type: Resource
+#       resource:
+#         name: cpu
+#         target:
+#           type: Utilization
+#           averageUtilization: 70

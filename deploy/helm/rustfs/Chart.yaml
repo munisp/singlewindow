@@ -1,0 +1,23 @@
+apiVersion: v2
+name: rustfs
+description: |
+  Helm chart for deploying RustFS — a high-performance, S3-compatible object storage server
+  written in Rust — on Kubernetes with optional OpenStack Swift backend integration.
+  Designed for on-premise TradeGateway™ NGSWTP deployments.
+type: application
+version: 1.0.0
+appVersion: "latest"
+keywords:
+  - object-storage
+  - s3
+  - rustfs
+  - openstack
+  - swift
+home: https://github.com/rustfs/rustfs
+sources:
+  - https://github.com/rustfs/rustfs
+maintainers:
+  - name: TradeGateway Platform Team
+    email: platform@tradegateway.gov
+annotations:
+  category: Storage

@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RustFS Helm Chart — OpenStack Swift Backend Override Values
+# Usage: helm install rustfs ./deploy/helm/rustfs -f values-openstack.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Use 2+ replicas when backed by OpenStack Swift (stateless pods, no PVC needed)
+replicaCount: 2
+
+storage:
+  backend: "openstack-swift"
+
+  local:
+    enabled: false   # No PVC needed; Swift is the durable store
+
+  openstack:
+    enabled: true
+    # Replace with your Keystone v3 endpoint
+    authUrl: "https://keystone.tradegateway.gov:5000/v3"
+    projectName: "tradegateway-prod"
+    projectDomainName: "Default"
+    username: "rustfs-svc"
+    # Set password via existingSecret in production — never commit plaintext
+    password: ""
+    existingSecret: "rustfs-openstack-creds"
+    existingSecretPasswordKey: "os-password"
+    userDomainName: "Default"
+    containerPrefix: "tg-docs"
+    region: "RegionOne"
+
+# Credentials for the S3 API layer (RustFS access key / secret key)
+credentials:
+  existingSecret: "rustfs-s3-creds"
+  existingSecretAccessKeyKey: "access-key"
+  existingSecretSecretKeyKey: "secret-key"
+
+# Horizontal scaling — RollingUpdate is safe with Swift backend
+# (no local disk state; override the default Recreate strategy)
+# Add this to deployment.yaml strategy if needed:
+# strategy:
+#   type: RollingUpdate
+#   rollingUpdate:
+#     maxSurge: 1
+#     maxUnavailable: 0
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: storage.tradegateway.gov
+      paths:
+        - path: /
+          pathType: Prefix
+          port: 9000
+    - host: storage-console.tradegateway.gov
+      paths:
+        - path: /
+          pathType: Prefix
+          port: 9001
+  tls:
+    - secretName: rustfs-tls-prod
+      hosts:
+        - storage.tradegateway.gov
+        - storage-console.tradegateway.gov
+
+resources:
+  requests:
+    cpu: "1000m"
+    memory: "1Gi"
+  limits:
+    cpu: "4000m"
+    memory: "4Gi"

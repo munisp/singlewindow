@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rustfs.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rustfs.labels" . | nindent 4 }}
+data:
+  RUSTFS_VOLUMES: "/data"
+  RUSTFS_ADDRESS: ":9000"
+  RUSTFS_CONSOLE_ADDRESS: ":9001"
+  {{- if .Values.storage.openstack.enabled }}
+  # OpenStack Swift gateway configuration
+  RUSTFS_STORAGE_BACKEND: "openstack-swift"
+  OS_AUTH_URL: {{ .Values.storage.openstack.authUrl | quote }}
+  OS_PROJECT_NAME: {{ .Values.storage.openstack.projectName | quote }}
+  OS_PROJECT_DOMAIN_NAME: {{ .Values.storage.openstack.projectDomainName | quote }}
+  OS_USERNAME: {{ .Values.storage.openstack.username | quote }}
+  OS_USER_DOMAIN_NAME: {{ .Values.storage.openstack.userDomainName | quote }}
+  OS_CONTAINER_PREFIX: {{ .Values.storage.openstack.containerPrefix | quote }}
+  {{- if .Values.storage.openstack.region }}
+  OS_REGION_NAME: {{ .Values.storage.openstack.region | quote }}
+  {{- end }}
+  {{- else }}
+  RUSTFS_STORAGE_BACKEND: "local"
+  {{- end }}
+  {{- range .Values.extraEnv }}
+  {{ .name }}: {{ .value | quote }}
+  {{- end }}

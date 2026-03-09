@@ -1,0 +1,106 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# rustfs-svc — Go Storage Microservice Kubernetes Manifest
+# This is the Go HTTP bridge between the tRPC backend and RustFS.
+# Build the image from: rustfs-svc/main.go
+# ─────────────────────────────────────────────────────────────────────────────
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rustfs-svc-config
+  namespace: tradegateway-storage
+data:
+  RUSTFS_ENDPOINT: "http://rustfs.tradegateway-storage.svc.cluster.local:9000"
+  RUSTFS_BUCKET: "tradegateway-docs"
+  RUSTFS_USE_PATH_STYLE: "true"
+  PORT: "4500"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rustfs-svc
+  namespace: tradegateway-storage
+  labels:
+    app.kubernetes.io/name: rustfs-svc
+    app.kubernetes.io/component: storage-gateway
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rustfs-svc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rustfs-svc
+        app.kubernetes.io/component: storage-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: rustfs-svc
+          # Build this image from rustfs-svc/main.go:
+          #   docker build -t registry.tradegateway.gov/rustfs-svc:latest ./rustfs-svc
+          image: registry.tradegateway.gov/rustfs-svc:latest
+          imagePullPolicy: Always
+          envFrom:
+            - configMapRef:
+                name: rustfs-svc-config
+          env:
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-credentials
+                  key: access-key
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-credentials
+                  key: secret-key
+          ports:
+            - name: http
+              containerPort: 4500
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4500
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4500
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs-svc
+  namespace: tradegateway-storage
+  labels:
+    app.kubernetes.io/name: rustfs-svc
+spec:
+  type: ClusterIP
+  ports:
+    - port: 4500
+      targetPort: 4500
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: rustfs-svc

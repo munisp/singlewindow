@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rustfs.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rustfs.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "rustfs.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: Recreate   # Required for single-node with RWO PVC
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "rustfs.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "rustfs.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: rustfs
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - rustfs
+            - server
+            - /data
+            - --address
+            - :9000
+            - --console-address
+            - :9001
+          envFrom:
+            - configMapRef:
+                name: {{ include "rustfs.fullname" . }}-config
+          env:
+            # S3 credentials from secret
+            - name: RUSTFS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rustfs.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretAccessKeyKey }}
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rustfs.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretSecretKeyKey }}
+            {{- if .Values.storage.openstack.enabled }}
+            # OpenStack Swift password from secret
+            - name: OS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rustfs.openstackSecretName" . }}
+                  key: {{ .Values.storage.openstack.existingSecretPasswordKey | default "os-password" }}
+            {{- end }}
+          ports:
+            - name: s3-api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- if eq .Values.storage.backend "local" }}
+            - name: data
+              mountPath: /data
+            {{- end }}
+      volumes:
+        {{- if eq .Values.storage.backend "local" }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ if .Values.storage.local.existingClaim }}{{ .Values.storage.local.existingClaim }}{{ else }}{{ include "rustfs.fullname" . }}-data{{ end }}
+        {{- end }}

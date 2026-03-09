@@ -1,0 +1,54 @@
+╔══════════════════════════════════════════════════════════════════════╗
+║  RustFS — TradeGateway™ NGSWTP Object Storage                       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+RustFS has been deployed to namespace: {{ .Release.Namespace }}
+
+━━━ S3 API Endpoint ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.ingress.enabled }}
+  External: https://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+  Internal (ClusterIP):
+    kubectl port-forward svc/{{ include "rustfs.fullname" . }} 9000:9000 -n {{ .Release.Namespace }}
+    Then access: http://localhost:9000
+{{- end }}
+
+━━━ Web Console ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.ingress.enabled }}
+  External: https://{{ (index .Values.ingress.hosts 1).host }}
+{{- else }}
+    kubectl port-forward svc/{{ include "rustfs.fullname" . }} 9001:9001 -n {{ .Release.Namespace }}
+    Then access: http://localhost:9001
+{{- end }}
+
+━━━ Credentials ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Access Key:
+    kubectl get secret {{ include "rustfs.credentialsSecretName" . }} \
+      -n {{ .Release.Namespace }} -o jsonpath='{.data.access-key}' | base64 -d
+
+  Secret Key:
+    kubectl get secret {{ include "rustfs.credentialsSecretName" . }} \
+      -n {{ .Release.Namespace }} -o jsonpath='{.data.secret-key}' | base64 -d
+
+━━━ Storage Backend ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Backend: {{ .Values.storage.backend }}
+{{- if eq .Values.storage.backend "openstack-swift" }}
+  OpenStack Auth URL: {{ .Values.storage.openstack.authUrl }}
+  Project: {{ .Values.storage.openstack.projectName }}
+{{- else }}
+  PVC Size: {{ .Values.storage.local.size }}
+{{- end }}
+
+━━━ rustfs-svc (Go microservice) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  The Go microservice (rustfs-svc) connects to RustFS at:
+    http://{{ include "rustfs.fullname" . }}:{{ .Values.service.port }}
+
+  Update rustfs-svc environment variables:
+    RUSTFS_ENDPOINT=http://{{ include "rustfs.fullname" . }}:{{ .Values.service.port }}
+    RUSTFS_ACCESS_KEY=<from secret above>
+    RUSTFS_SECRET_KEY=<from secret above>
+    RUSTFS_BUCKET=tradegateway-docs
+
+━━━ Verify Deployment ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  kubectl get pods -l app.kubernetes.io/name=rustfs -n {{ .Release.Namespace }}
+  kubectl logs -l app.kubernetes.io/name=rustfs -n {{ .Release.Namespace }}

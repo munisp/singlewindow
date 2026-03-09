@@ -1,0 +1,164 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RustFS Helm Chart — values.yaml
+# TradeGateway™ NGSWTP On-Premise Deployment
+# ─────────────────────────────────────────────────────────────────────────────
+
+# -- Global image settings
+image:
+  repository: ghcr.io/rustfs/rustfs
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# -- Number of RustFS replicas (use 1 for standalone, ≥4 for distributed mode)
+replicaCount: 1
+
+# -- Kubernetes service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ─── S3 API Credentials ──────────────────────────────────────────────────────
+# These become environment variables injected into the RustFS pod.
+# Override with a sealed secret or external-secrets operator in production.
+credentials:
+  # Access key ID (min 3 chars)
+  accessKey: "tradegateway"
+  # Secret access key (min 8 chars)
+  secretKey: "tradegateway-secret-change-me"
+  # Reference an existing Kubernetes Secret instead of creating one from values.
+  # When set, accessKey/secretKey above are ignored.
+  existingSecret: ""
+  existingSecretAccessKeyKey: "access-key"
+  existingSecretSecretKeyKey: "secret-key"
+
+# ─── Storage Backend ─────────────────────────────────────────────────────────
+storage:
+  # backend: "local" | "openstack-swift"
+  backend: "local"
+
+  # Local PersistentVolumeClaim settings (used when backend = "local")
+  local:
+    enabled: true
+    storageClass: ""          # "" = cluster default StorageClass
+    size: "100Gi"
+    accessMode: ReadWriteOnce
+    # Optionally bind to an existing PVC
+    existingClaim: ""
+
+  # OpenStack Swift backend settings (used when backend = "openstack-swift")
+  # RustFS uses the S3-Swift gateway; configure Keystone v3 credentials here.
+  openstack:
+    enabled: false
+    # Keystone v3 auth endpoint
+    authUrl: "https://keystone.example.com:5000/v3"
+    # OpenStack project / tenant
+    projectName: "tradegateway"
+    projectDomainName: "Default"
+    # OpenStack user credentials
+    username: "rustfs-svc"
+    password: ""              # Use existingSecret in production
+    userDomainName: "Default"
+    # Swift container that maps to the RustFS root bucket namespace
+    containerPrefix: "tg-docs"
+    # Region (optional)
+    region: "RegionOne"
+    # Reference an existing secret for OpenStack password
+    existingSecret: ""
+    existingSecretPasswordKey: "os-password"
+
+# ─── Networking ──────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  # S3 API port
+  port: 9000
+  # RustFS web console port
+  consolePort: 9001
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "25m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  hosts:
+    - host: rustfs.tradegateway.local
+      paths:
+        - path: /
+          pathType: Prefix
+          port: 9000
+    - host: rustfs-console.tradegateway.local
+      paths:
+        - path: /
+          pathType: Prefix
+          port: 9001
+  tls:
+    - secretName: rustfs-tls
+      hosts:
+        - rustfs.tradegateway.local
+        - rustfs-console.tradegateway.local
+
+# ─── Resource Requests & Limits ──────────────────────────────────────────────
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+  limits:
+    cpu: "2000m"
+    memory: "2Gi"
+
+# ─── Probes ──────────────────────────────────────────────────────────────────
+livenessProbe:
+  httpGet:
+    path: /minio/health/live
+    port: 9000
+  initialDelaySeconds: 30
+  periodSeconds: 20
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /minio/health/ready
+    port: 9000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+# ─── Pod settings ────────────────────────────────────────────────────────────
+podAnnotations: {}
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+
+# ─── Node scheduling ─────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ─── Extra environment variables ─────────────────────────────────────────────
+# Injected directly into the RustFS container.
+extraEnv: []
+# - name: RUSTFS_LOG_LEVEL
+#   value: "info"
+
+# ─── Bucket initialisation job ───────────────────────────────────────────────
+# A post-install Job that creates the default bucket using mc (MinIO Client).
+bucketInit:
+  enabled: true
+  buckets:
+    - tradegateway-docs
+    - tradegateway-archive
+  image:
+    repository: minio/mc
+    tag: latest
+    pullPolicy: IfNotPresent
