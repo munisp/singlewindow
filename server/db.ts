@@ -110,6 +110,12 @@ export async function getUserById(id: number) {
   return result[0] ?? undefined;
 }
 
+export async function getUsersByRole(role: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(users).where(eq(users.role, role as typeof users.role._.data));
+}
+
 // ─── STAKEHOLDER PROFILE QUERIES ─────────────────────────────────────────────
 
 export async function getProfileByUserId(userId: number) {

@@ -128,6 +128,8 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 
 export default function Finance() {
   const [trendDays, setTrendDays] = useState(30);
+  const [exportLoading, setExportLoading] = useState(false);
+  const exportCSVMutation = trpc.finance.exportCSV.useMutation();
 
   const kpisQuery = trpc.finance.kpis.useQuery();
   const hsChapterQuery = trpc.finance.revenueByHsChapter.useQuery({ limit: 12 });
@@ -174,30 +176,32 @@ export default function Finance() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                const rows = Array.isArray(pendingQuery.data) ? pendingQuery.data : [];
-                if (!rows.length) return;
-                const headers = ["Declaration ID", "Trader", "Amount", "Currency", "Status", "Due Date"];
-                const csvRows = rows.map((r: { declarationId?: number; traderName?: string; totalAmount?: number; currency?: string; status?: string; dueDate?: string }) => [
-                  r.declarationId ?? "",
-                  r.traderName ?? "",
-                  r.totalAmount ?? "",
-                  r.currency ?? "USD",
-                  r.status ?? "",
-                  r.dueDate ?? "",
-                ].join(","));
-                const csv = [headers.join(","), ...csvRows].join("\n");
-                const blob = new Blob([csv], { type: "text/csv" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `finance_report_${new Date().toISOString().slice(0, 10)}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
+              disabled={exportLoading}
+              onClick={async () => {
+                setExportLoading(true);
+                try {
+                  const result = await exportCSVMutation.mutateAsync({
+                    startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+                    endDate: new Date().toISOString(),
+                    limit: 5000,
+                  });
+                  const blob = new Blob([result.csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = result.filename;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } catch (e) {
+                  console.error("CSV export failed", e);
+                } finally {
+                  setExportLoading(false);
+                }
               }}
               className="gap-2"
             >
-              <Download className="h-4 w-4" /> Export CSV
+              {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export CSV
             </Button>
             <Button variant="outline" size="sm" onClick={handleRefresh} className="gap-2">
               <RefreshCw className="h-4 w-4" /> Refresh

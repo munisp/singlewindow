@@ -1598,3 +1598,15 @@
 ### Archive
 - [x] Generate comprehensive archive including all services, infra, docs
 - [x] Compare with previous archive — comprehensive archive generated
+
+## Sprint 77 — Next Steps + Government Presentation
+
+### Next Steps (from Sprint 76)
+- [ ] Temporal worker Kubernetes deployment manifest (infra/kubernetes/temporal-worker-deployment.yaml)
+- [ ] Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
+- [ ] Finance CSV export procedure (finance.exportCSV tRPC + download button in Finance Dashboard)
+
+### Government Presentation
+- [ ] Research Nigeria trade statistics and Single Window ROI data
+- [ ] Write comprehensive slide content (docs/presentation-content.md)
+- [ ] Generate high-impact slides for Nigerian government officials

@@ -106,4 +106,80 @@ export const financeRouter = router({
       const txs = await getAllPayments(input.limit, input.offset);
       return { transactions: txs, total: txs.length };
     }),
+
+  // CSV export: confirmed payments grouped by HS chapter and corridor for a date range
+  exportCSV: protectedProcedure
+    .input(z.object({
+      startDate: z.string().datetime({ offset: true }).optional(),
+      endDate: z.string().datetime({ offset: true }).optional(),
+      limit: z.number().min(1).max(10000).default(5000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      assertFinanceAccess(ctx.user.role);
+      const { getDb } = await import("../db");
+      const { payments, declarations } = await import("../../drizzle/schema");
+      const { eq, and, gte, lte, desc } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const conditions: ReturnType<typeof eq>[] = [eq(payments.status, "confirmed")];
+      if (input.startDate) conditions.push(gte(payments.createdAt, new Date(input.startDate)) as any);
+      if (input.endDate) conditions.push(lte(payments.createdAt, new Date(input.endDate)) as any);
+
+      const rows = await db
+        .select({
+          paymentId: payments.id,
+          paymentRef: payments.reference,
+          declarationId: payments.declarationId,
+          declarationNumber: declarations.declarationNumber,
+          hsChapter: declarations.hsCode,
+          corridor: declarations.portOfEntry,
+          declarationType: declarations.declarationType,
+          amount: payments.amount,
+          currency: payments.currency,
+          paymentMethod: payments.paymentMethod,
+          paidAt: payments.confirmedAt,
+          createdAt: payments.createdAt,
+        })
+        .from(payments)
+        .leftJoin(declarations, eq(payments.declarationId, declarations.id))
+        .where(conditions.length === 1 ? conditions[0] : and(...conditions))
+        .orderBy(desc(payments.confirmedAt))
+        .limit(input.limit);
+
+      // Build CSV
+      const headers = [
+        "Payment ID", "Payment Reference", "Declaration ID", "Declaration Number",
+        "HS Chapter", "Port/Corridor", "Declaration Type",
+        "Amount", "Currency", "Payment Method", "Paid At", "Created At",
+      ];
+
+      const escape = (v: unknown) => {
+        const s = v == null ? "" : String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      };
+
+      const csvLines = [
+        headers.join(","),
+        ...rows.map((r) =>
+          [
+            r.paymentId, r.paymentRef, r.declarationId, r.declarationNumber,
+            r.hsChapter ? r.hsChapter.substring(0, 2) : "",
+            r.corridor, r.declarationType,
+            r.amount, r.currency, r.paymentMethod,
+            r.paidAt ? new Date(r.paidAt).toISOString() : "",
+            r.createdAt ? new Date(r.createdAt).toISOString() : "",
+          ].map(escape).join(",")
+        ),
+      ];
+
+      return {
+        csv: csvLines.join("\n"),
+        rowCount: rows.length,
+        generatedAt: new Date().toISOString(),
+        filename: `duty-revenue-${new Date().toISOString().split("T")[0]}.csv`,
+      };
+    }),
 });

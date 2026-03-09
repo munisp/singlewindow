@@ -686,6 +686,9 @@ async function startServer() {
   // Sprint 74: OGA approval callback webhook (POST /api/webhooks/oga)
   const { registerOgaWebhookRoute } = await import("../webhooks/oga");
   registerOgaWebhookRoute(app);
+  // Sprint 77: Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
+  const { registerSanctionsWebhookRoute } = await import("../webhooks/sanctions");
+  registerSanctionsWebhookRoute(app);
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

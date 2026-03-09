@@ -1,0 +1,218 @@
+# ─── Temporal Worker — Kubernetes Deployment ─────────────────────────────────
+# TradeGateway NGSWTP — Durable Workflow Engine
+# Handles: ImportClearance, AEOCertification, DutyDrawback, PostClearanceAudit,
+#          ASEANSingleWindow, SanctionsHold, PaymentCollection, CargoRelease,
+#          OGASLAEnforcement, RiskAssessment workflows
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-worker-config
+  namespace: tradegateway
+data:
+  TEMPORAL_HOST: "temporal-frontend.temporal.svc.cluster.local:7233"
+  TEMPORAL_NAMESPACE: "tradegateway"
+  TEMPORAL_TASK_QUEUE: "tradegateway-main"
+  DECLARATION_SERVICE_URL: "http://declaration-service.tradegateway.svc.cluster.local:8080"
+  PAYMENT_SERVICE_URL: "http://payment-service.tradegateway.svc.cluster.local:8082"
+  OGA_SERVICE_URL: "http://oga-service.tradegateway.svc.cluster.local:8083"
+  RISK_ENGINE_URL: "http://risk-engine.tradegateway.svc.cluster.local:8000"
+  SANCTIONS_SERVICE_URL: "http://sanctions-service.tradegateway.svc.cluster.local:8001"
+  LOG_LEVEL: "info"
+  WORKER_CONCURRENCY: "20"
+  ACTIVITY_CONCURRENCY: "40"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+  labels:
+    app: temporal-worker
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+  labels:
+    app: temporal-worker
+    version: v1
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+    app.kubernetes.io/component: workflow-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # Zero-downtime: always keep at least 1 worker running
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        version: v1
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "temporal-worker"
+        dapr.io/app-port: "8090"
+        dapr.io/log-level: "info"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: temporal-worker
+      terminationGracePeriodSeconds: 60   # Allow in-flight activities to complete
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+        - name: temporal-worker
+          image: tradegateway/temporal-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - name: health
+              containerPort: 8090
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: temporal-worker-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+            - name: TEMPORAL_TLS_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-tls
+                  key: tls.crt
+                  optional: true
+            - name: TEMPORAL_TLS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-tls
+                  key: tls.key
+                  optional: true
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Signal worker to drain: stop accepting new tasks, finish current ones
+                command: ["/bin/sh", "-c", "kill -SIGTERM 1 && sleep 30"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["temporal-worker"]
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+  labels:
+    app: temporal-worker
+spec:
+  selector:
+    app: temporal-worker
+  ports:
+    - name: health
+      port: 8090
+      targetPort: health
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: temporal-worker-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: temporal-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: temporal-worker-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: temporal-worker
