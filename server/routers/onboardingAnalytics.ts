@@ -6,7 +6,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { onboardingAnalytics, onboardingProgress, users } from "../../drizzle/schema";
+import { onboardingAnalytics, onboardingProgress, users, aeoApplications } from "../../drizzle/schema";
 import { eq, desc, and, gte, count, avg, sql } from "drizzle-orm";
 
 async function requireDb() {
@@ -179,6 +179,24 @@ export const onboardingAnalyticsRouter = router({
         .limit(input.limit);
       return rows;
     }),
+
+  /** Admin: AEO tier distribution — count of applications per tier */
+  aeoTiers: adminProcedure.query(async () => {
+    const db = await requireDb();
+    const rows = await db
+      .select({
+        tier: aeoApplications.tier,
+        count: count(),
+      })
+      .from(aeoApplications)
+      .groupBy(aeoApplications.tier);
+    // Return all three tiers even if count is 0
+    const tierMap: Record<string, number> = { Gold: 0, Silver: 0, Standard: 0 };
+    for (const row of rows) {
+      if (row.tier) tierMap[row.tier] = row.count;
+    }
+    return Object.entries(tierMap).map(([tier, count]) => ({ tier, count }));
+  }),
 });
 
 export type OnboardingAnalyticsRouter = typeof onboardingAnalyticsRouter;

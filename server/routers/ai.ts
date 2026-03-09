@@ -207,15 +207,34 @@ Respond with this exact JSON structure:
   "originRisk": "LOW" | "MEDIUM" | "HIGH"
 }`;
 
-      const result = await llmWithFallback(
-        input.model,
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        { temperature: 0.05 }
-      );
-
+      let llmResult: { content: string; model: string; source: string } | null = null;
+      try {
+        llmResult = await llmWithFallback(
+          input.model,
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          { temperature: 0.05 }
+        );
+      } catch {
+        // LLM completely unavailable — return safe structured fallback
+        return {
+          riskScore: 35,
+          riskLane: "YELLOW" as const,
+          riskFactors: ["LLM unavailable \u2014 manual review recommended"],
+          recommendedAction: "DOCUMENT_REVIEW" as const,
+          reasoning: "Risk engine temporarily unavailable. Declaration routed for manual document review.",
+          hsCodeValid: true,
+          valuationFlag: false,
+          originRisk: "MEDIUM" as const,
+          declarationId: input.declarationId,
+          model: "fallback",
+          source: "fallback",
+          scoredAt: Date.now(),
+        };
+      }
+      const result = llmResult;
       try {
         // Extract JSON from response (handle markdown code blocks)
         const jsonMatch = result.content.match(/\{[\s\S]*\}/);
@@ -232,13 +251,13 @@ Respond with this exact JSON structure:
         // Fallback structured response
         return {
           riskScore: 35,
-          riskLane: "YELLOW",
-          riskFactors: ["LLM parsing failed — manual review recommended"],
-          recommendedAction: "DOCUMENT_REVIEW",
+          riskLane: "YELLOW" as const,
+          riskFactors: ["LLM parsing failed \u2014 manual review recommended"],
+          recommendedAction: "DOCUMENT_REVIEW" as const,
           reasoning: result.content.slice(0, 300),
           hsCodeValid: true,
           valuationFlag: false,
-          originRisk: "MEDIUM",
+          originRisk: "MEDIUM" as const,
           declarationId: input.declarationId,
           model: result.model,
           source: result.source,

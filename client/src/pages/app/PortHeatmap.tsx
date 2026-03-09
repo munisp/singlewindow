@@ -318,6 +318,53 @@ export default function PortHeatmap() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(() => new Date());
 
+  // Fluvio AIS live vessel positions — overlay on the map
+  const aisMarkersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const { vesselPositions: liveVessels, status: fluvioStatus } = useFluvioFeed();
+
+  // Update AIS markers on the map whenever live vessel positions change
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    const map = mapRef.current;
+    const existing = aisMarkersRef.current;
+    const seen = new Set<string>();
+
+    for (const vessel of liveVessels) {
+      seen.add(vessel.mmsi);
+      const pos = { lat: vessel.lat, lng: vessel.lng };
+      if (existing.has(vessel.mmsi)) {
+        // Update position of existing marker
+        existing.get(vessel.mmsi)!.setPosition(pos);
+      } else {
+        // Create new AIS marker (small blue ship icon)
+        const marker = new google.maps.Marker({
+          position: pos,
+          map,
+          title: `${vessel.vesselName ?? vessel.mmsi} — ${vessel.speed?.toFixed(1) ?? 0} kn`,
+          icon: {
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 4,
+            fillColor: "#3b82f6",
+            fillOpacity: 0.9,
+            strokeColor: "#ffffff",
+            strokeWeight: 1,
+            rotation: vessel.heading ?? 0,
+          },
+          zIndex: 10,
+        });
+        existing.set(vessel.mmsi, marker);
+      }
+    }
+
+    // Remove markers for vessels no longer in the feed
+    for (const [mmsi, marker] of Array.from(existing.entries())) {
+      if (!seen.has(mmsi)) {
+        marker.setMap(null);
+        existing.delete(mmsi);
+      }
+    }
+  }, [liveVessels, mapReady]);
+
   const { data: heatmapData, isLoading, refetch, isFetching, dataUpdatedAt } = trpc.geospatial.heatmapData.useQuery(undefined, {
     refetchInterval: autoRefresh ? 30_000 : false, // 30-second polling when auto-refresh is on
   });
@@ -483,6 +530,7 @@ export default function PortHeatmap() {
             { label: "Congested", count: stats?.congested, icon: <AlertTriangle className="h-4 w-4 text-orange-400" />, color: "text-orange-400" },
             { label: "Critical", count: stats?.critical, icon: <AlertTriangle className="h-4 w-4 text-red-400" />, color: "text-red-400" },
             { label: "Total Vessels", count: stats?.totalVessels, icon: <Ship className="h-4 w-4 text-blue-400" />, color: "text-blue-400" },
+            { label: "AIS Live", count: liveVessels.length, icon: <Zap className="h-4 w-4 text-primary" />, color: fluvioStatus === "connected" ? "text-primary" : "text-muted-foreground" },
           ].map((s) => (
             <Card key={s.label}>
               <CardContent className="p-4 flex items-center gap-3">

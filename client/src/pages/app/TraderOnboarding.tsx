@@ -202,46 +202,82 @@ function CompanyProfileStep({ onNext, savedData }: { onNext: (data: Record<strin
 
 // ─── STEP 2: KYC DOCUMENTS ───────────────────────────────────────────────────
 
+type DocSlot = { label: string; docType: "certificate_of_incorporation" | "tax_certificate" | "national_id"; desc: string; urlKey: string; nameKey: string };
+const DOC_SLOTS: DocSlot[] = [
+  { label: "Certificate of Incorporation", docType: "certificate_of_incorporation", desc: "Official company registration document", urlKey: "incorporationCertUrl", nameKey: "incorporationCertName" },
+  { label: "Tax Registration Certificate", docType: "tax_certificate", desc: "Government-issued tax ID certificate", urlKey: "taxIdCertUrl", nameKey: "taxIdCertName" },
+  { label: "Director National ID", docType: "national_id", desc: "Passport or national ID of primary director", urlKey: "directorIdUrl", nameKey: "directorIdName" },
+];
+
 function KycDocumentsStep({ onNext, onBack, savedData }: { onNext: (data: Record<string, unknown>) => void; onBack: () => void; savedData?: Record<string, unknown> }) {
   const [form, setForm] = useState({
     taxId: (savedData?.taxId as string) ?? "",
     directorName: (savedData?.directorName as string) ?? "",
-    incorporationCertUrl: (savedData?.incorporationCertUrl as string) ?? "https://cdn.example.com/docs/incorporation.pdf",
-    incorporationCertName: (savedData?.incorporationCertName as string) ?? "Certificate of Incorporation.pdf",
-    taxIdCertUrl: (savedData?.taxIdCertUrl as string) ?? "https://cdn.example.com/docs/tax-id.pdf",
-    taxIdCertName: (savedData?.taxIdCertName as string) ?? "Tax Registration Certificate.pdf",
-    directorIdUrl: (savedData?.directorIdUrl as string) ?? "https://cdn.example.com/docs/director-id.pdf",
-    directorIdName: (savedData?.directorIdName as string) ?? "Director National ID.pdf",
+    incorporationCertUrl: (savedData?.incorporationCertUrl as string) ?? "",
+    incorporationCertName: (savedData?.incorporationCertName as string) ?? "",
+    taxIdCertUrl: (savedData?.taxIdCertUrl as string) ?? "",
+    taxIdCertName: (savedData?.taxIdCertName as string) ?? "",
+    directorIdUrl: (savedData?.directorIdUrl as string) ?? "",
+    directorIdName: (savedData?.directorIdName as string) ?? "",
   });
+  const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  const uploadMutation = trpc.kyc.uploadDocument.useMutation();
+
+  const handleFileSelect = async (slot: DocSlot, file: File) => {
+    if (file.size > 20 * 1024 * 1024) { toast.error("File must be under 20 MB"); return; }
+    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf", "image/tiff"];
+    if (!allowed.includes(file.type)) { toast.error("Unsupported file type"); return; }
+    setUploading(u => ({ ...u, [slot.urlKey]: true }));
+    try {
+      const fileData = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve((e.target?.result as string).split(",")[1] ?? "");
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await uploadMutation.mutateAsync({
+        filename: file.name,
+        contentType: file.type as "image/jpeg" | "image/png" | "image/webp" | "application/pdf" | "image/tiff",
+        documentType: slot.docType,
+        fileSize: file.size,
+        fileData,
+      });
+      setForm(f => ({ ...f, [slot.urlKey]: result.fileUrl, [slot.nameKey]: file.name }));
+      toast.success(`${slot.label} uploaded successfully`);
+    } catch (err: unknown) {
+      toast.error(`Upload failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setUploading(u => ({ ...u, [slot.urlKey]: false }));
+    }
+  };
 
   const isValid = form.taxId && form.directorName;
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3 text-sm text-blue-400 flex gap-2">
-        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-        <p>In production, documents are uploaded securely to S3. For this demo, placeholder URLs are pre-filled.</p>
-      </div>
       <div className="space-y-3">
-        {[
-          { label: "Certificate of Incorporation", urlKey: "incorporationCertUrl", nameKey: "incorporationCertName", desc: "Official company registration document" },
-          { label: "Tax Registration Certificate", urlKey: "taxIdCertUrl", nameKey: "taxIdCertName", desc: "Government-issued tax ID certificate" },
-          { label: "Director National ID", urlKey: "directorIdUrl", nameKey: "directorIdName", desc: "Passport or national ID of primary director" },
-        ].map(doc => (
-          <div key={doc.urlKey} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card/50">
-            <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center shrink-0">
-              <FileCheck className="h-5 w-5 text-green-400" />
+        {DOC_SLOTS.map(doc => {
+          const uploaded = !!(form as Record<string, string>)[doc.urlKey];
+          const isUploading = !!uploading[doc.urlKey];
+          return (
+            <div key={doc.urlKey} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card/50">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${uploaded ? "bg-green-500/10" : "bg-muted/30"}`}>
+                {isUploading ? <Loader2 className="h-5 w-5 animate-spin text-primary" /> : uploaded ? <FileCheck className="h-5 w-5 text-green-400" /> : <Upload className="h-5 w-5 text-muted-foreground" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">{doc.label}</p>
+                <p className="text-xs text-muted-foreground">{doc.desc}</p>
+                {uploaded && <p className="text-xs text-green-400 mt-0.5 truncate">{(form as Record<string, string>)[doc.nameKey]}</p>}
+              </div>
+              <label className="cursor-pointer">
+                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp,.tiff" onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(doc, f); e.target.value = ""; }} disabled={isUploading} />
+                <Badge variant="outline" className={`shrink-0 cursor-pointer ${uploaded ? "text-green-400 border-green-400/50" : "text-primary border-primary/50"}`}>
+                  {uploaded ? <><CheckCircle2 className="h-3 w-3 mr-1" /> Uploaded</> : <><Upload className="h-3 w-3 mr-1" /> Upload</>}
+                </Badge>
+              </label>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">{doc.label}</p>
-              <p className="text-xs text-muted-foreground">{doc.desc}</p>
-              <p className="text-xs text-green-400 mt-0.5 truncate">{(form as Record<string, string>)[doc.nameKey]}</p>
-            </div>
-            <Badge variant="outline" className="text-green-400 border-green-400/50 shrink-0">
-              <CheckCircle2 className="h-3 w-3 mr-1" /> Ready
-            </Badge>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>

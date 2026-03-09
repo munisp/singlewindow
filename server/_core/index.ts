@@ -627,9 +627,52 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
   throw new Error(`No available port found starting from ${startPort}`);
 }
 
+async function runPermifySeedOnStartup() {
+  const permifyHost = process.env.PERMIFY_HOST;
+  if (!permifyHost) {
+    console.log("[Permify] PERMIFY_HOST not set — skipping seed on startup");
+    return;
+  }
+  try {
+    // Check if Permify is reachable before attempting seed
+    const healthRes = await fetch(`${permifyHost}/healthz`, { signal: AbortSignal.timeout(2000) });
+    if (!healthRes.ok) {
+      console.warn("[Permify] Health check failed — skipping seed");
+      return;
+    }
+    // Write the schema
+    const schemaPath = new URL("../../infra/permify/schema.perm", import.meta.url);
+    let schemaBody: string;
+    try {
+      const { readFileSync } = await import("fs");
+      schemaBody = readFileSync(schemaPath, "utf8");
+    } catch {
+      console.warn("[Permify] schema.perm not found — skipping seed");
+      return;
+    }
+    const PERMIFY_TENANT = process.env.PERMIFY_TENANT || "tradegateway";
+    const schemaRes = await fetch(`${permifyHost}/v1/tenants/${PERMIFY_TENANT}/schemas/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ schema: schemaBody }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (schemaRes.ok) {
+      console.log("[Permify] Schema written successfully");
+    } else {
+      const text = await schemaRes.text();
+      console.warn(`[Permify] Schema write failed (${schemaRes.status}): ${text}`);
+    }
+  } catch (err) {
+    console.warn("[Permify] Seed on startup failed (non-fatal):", err);
+  }
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  // Permify schema seed on startup (non-blocking, only when PERMIFY_HOST is set)
+  runPermifySeedOnStartup().catch(() => {});
   // Sprint 63: WebSocket server for real-time notifications
   setupWebSocketServer(server);
   // Configure body parser with larger size limit for file uploads

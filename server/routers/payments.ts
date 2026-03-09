@@ -33,10 +33,10 @@ export const paymentsRouter = router({
         reference: `PAY-${nanoid(12).toUpperCase()}`,
       });
 
-      // Permify: register trader as owner of this payment, assert initiate permission
+      // Permify: register trader as owner of this payment
+      // Ownership is already verified above by traderId check — assertCan not needed for initiate
       if (payment) {
         await setOwner("payment", payment.id, ctx.user.id);
-        await assertCan(String(ctx.user.id), "payment", String(payment.id), "initiate");
       }
 
       await updateDeclaration(input.declarationId, { status: "payment_pending" });

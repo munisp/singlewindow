@@ -29,6 +29,7 @@ const AEO_TIERS = ["Gold", "Silver", "Standard"];
 export default function OnboardingAnalyticsDashboard() {
   const { data: funnel, isLoading: funnelLoading } = trpc.onboardingAnalytics.funnel.useQuery();
   const { data: overview, isLoading: overviewLoading } = trpc.onboardingAnalytics.summary.useQuery();
+  const { data: aeoTiersData } = trpc.onboardingAnalytics.aeoTiers.useQuery();
 
   const funnelData = (funnel ?? []).map((f: any) => ({
     step: STEP_LABELS[f.step as string] ?? f.step,
@@ -40,7 +41,7 @@ export default function OnboardingAnalyticsDashboard() {
 
   const aeoData = AEO_TIERS.map((tier, i) => ({
     name: tier,
-    value: 0,
+    value: aeoTiersData?.find((t: { tier: string; count: number }) => t.tier === tier)?.count ?? 0,
     color: AEO_COLORS[i],
   }));
 

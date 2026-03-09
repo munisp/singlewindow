@@ -1,6 +1,7 @@
 /**
  * ai.risk.test.ts — Unit tests for the AI risk scoring (ai.scoreRisk) procedure
  *
+ * The LLM is mocked so tests run offline and never hit the Forge quota.
  * Tests cover:
  *  - Authentication: unauthenticated callers are rejected (UNAUTHORIZED)
  *  - Input validation: required fields, value ranges, string lengths
@@ -10,13 +11,32 @@
  *  - Recommended action values: one of the four valid actions
  *  - Optional traderProfile: accepted when provided, omitted when not
  *  - Fallback behaviour: procedure returns a valid response even when LLM fails
- *
- * NOTE: The LLM call is made to the real Forge endpoint in CI. If the endpoint
- * is unavailable the procedure falls back to a structured default response —
- * tests verify that the fallback also satisfies the schema.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+// ─── Mock LLM before importing the router ────────────────────────────────────
+vi.mock("./_core/llm", () => ({
+  invokeLLM: vi.fn().mockResolvedValue({
+    choices: [
+      {
+        message: {
+          content: JSON.stringify({
+            riskScore: 42,
+            riskLane: "YELLOW",
+            riskFactors: ["Moderate origin risk", "Standard goods"],
+            recommendedAction: "DOCUMENT_REVIEW",
+            reasoning: "Mocked LLM response for testing purposes.",
+            hsCodeValid: true,
+            valuationFlag: false,
+            originRisk: "MEDIUM",
+          }),
+        },
+      },
+    ],
+  }),
+}));
+
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
@@ -72,7 +92,6 @@ describe("ai.scoreRisk — authentication", () => {
 
   it("allows authenticated user role to call scoreRisk", async () => {
     const caller = appRouter.createCaller(makeCtx("user"));
-    // Should not throw UNAUTHORIZED or FORBIDDEN
     const result = await caller.ai.scoreRisk(VALID_INPUT);
     expect(result).toBeDefined();
   });
@@ -118,7 +137,6 @@ describe("ai.scoreRisk — input validation", () => {
 
   it("accepts zero declaredValue (no lower bound in schema)", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    // The schema uses z.number() without .positive() — zero is accepted
     const result = await caller.ai.scoreRisk({ ...VALID_INPUT, declaredValue: 0 });
     expect(result).toBeDefined();
     expect(["GREEN", "YELLOW", "RED", "BLUE"]).toContain(result.riskLane);
@@ -126,7 +144,6 @@ describe("ai.scoreRisk — input validation", () => {
 
   it("accepts zero weight (no lower bound in schema)", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    // The schema uses z.number() without .positive() — zero is accepted
     const result = await caller.ai.scoreRisk({ ...VALID_INPUT, weight: 0 });
     expect(result).toBeDefined();
     expect(["GREEN", "YELLOW", "RED", "BLUE"]).toContain(result.riskLane);
@@ -209,7 +226,7 @@ describe("ai.scoreRisk — response shape", () => {
     expect(Array.isArray(result.riskFactors)).toBe(true);
   });
 
-  it("recommendedAction is one of the four valid values", { timeout: 30_000 }, async () => {
+  it("recommendedAction is one of the four valid values", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.ai.scoreRisk(VALID_INPUT);
 
@@ -229,7 +246,7 @@ describe("ai.scoreRisk — response shape", () => {
     expect(result.reasoning.length).toBeGreaterThan(0);
   });
 
-  it("hsCodeValid is a boolean", { timeout: 30_000 }, async () => {
+  it("hsCodeValid is a boolean", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.ai.scoreRisk(VALID_INPUT);
 
@@ -265,8 +282,8 @@ describe("ai.scoreRisk — response shape", () => {
 
     expect(typeof result.scoredAt).toBe("number");
     expect(result.scoredAt).toBeGreaterThanOrEqual(before);
-    expect(result.scoredAt).toBeLessThanOrEqual(after + 30_000); // 30s tolerance for LLM latency
-  }, 30_000);
+    expect(result.scoredAt).toBeLessThanOrEqual(after + 5_000);
+  });
 });
 
 // ─── High-risk goods scenario ─────────────────────────────────────────────────
@@ -284,7 +301,6 @@ describe("ai.scoreRisk — high-risk goods scenario", () => {
       weight: 2000,
     });
 
-    // Should return a valid response (not throw)
     expect(result).toBeDefined();
     expect(result.riskScore).toBeGreaterThanOrEqual(0);
     expect(result.riskScore).toBeLessThanOrEqual(100);
@@ -315,6 +331,21 @@ describe("ai.scoreRisk — AEO low-risk scenario", () => {
     expect(result).toBeDefined();
     expect(result.riskScore).toBeGreaterThanOrEqual(0);
     expect(result.riskScore).toBeLessThanOrEqual(100);
+    expect(["GREEN", "YELLOW", "RED", "BLUE"]).toContain(result.riskLane);
+  });
+});
+
+// ─── LLM fallback scenario ────────────────────────────────────────────────────
+
+describe("ai.scoreRisk — LLM fallback", () => {
+  it("returns a valid response when LLM throws", async () => {
+    const { invokeLLM } = await import("./_core/llm");
+    vi.mocked(invokeLLM).mockRejectedValueOnce(new Error("LLM quota exceeded"));
+
+    const caller = appRouter.createCaller(makeCtx());
+    // The procedure has a try/catch fallback — it should not throw
+    const result = await caller.ai.scoreRisk(VALID_INPUT);
+    expect(result).toBeDefined();
     expect(["GREEN", "YELLOW", "RED", "BLUE"]).toContain(result.riskLane);
   });
 });

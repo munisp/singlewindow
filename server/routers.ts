@@ -65,6 +65,11 @@ export const appRouter = router({
     me: publicProcedure.query(async (opts) => {
       const user = opts.ctx.user;
       if (!user) return null;
+      // Keycloak role sync: if a Keycloak Bearer token is present, sync realm_access.roles → user.role
+      try {
+        const { syncKeycloakRole } = await import("./_core/keycloakRoleSync");
+        await syncKeycloakRole(opts.ctx.req, user.id);
+      } catch { /* non-fatal */ }
       // Sprint 69: check onboarding completion status
       try {
         const db = await (await import("./db")).getDb();
