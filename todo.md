@@ -704,3 +704,39 @@
 - [x] Sprint 21 vitest tests already written (sprint21.test.ts, 16 tests)
 - [x] Run full test suite — 325/325 tests passing (17 test files)
 - [x] Save checkpoint
+
+## Sprint 22 — Trader SLA Tracker, Bulk Import, OGA Permit Expiry Calendar + Audit Fixes
+
+### Trader SLA Tracker
+- [x] Add slaEscalation.getMyAtRisk procedure (trader-facing, returns declarations approaching SLA deadline)
+- [x] Add SLA Tracker widget to TraderDashboard (colour-coded by urgency: critical/warning/ok/breached)
+- [x] Widget shows declaration number, lane, SLA deadline, hours remaining, links to detail page
+
+### Bulk Declaration Import
+- [x] Add bulkExport.importDeclarations procedure (parse CSV rows, validate, batch insert, return per-row results)
+- [x] Create BulkImportDialog component with CSV template download, file upload, preview table, progress bar, per-row error report
+- [x] Add Import CSV button to TraderDeclarations page header (next to Export)
+- [x] Supports up to 200 rows per batch
+
+### OGA Permit Expiry Calendar
+- [x] Add oga.expiryCalendar procedure (returns permits expiring within configurable window, sorted by expiry asc)
+- [x] Create OGAExpiryCalendar page at /app/oga/expiry-calendar
+- [x] 4 summary cards (Critical ≤7d, Urgent 8-30d, Due Soon 31-60d, Upcoming >60d)
+- [x] Colour-coded table rows with left border by urgency band
+- [x] Configurable window selector (30/60/90/180 days) + search filter
+- [x] Add CalendarClock nav link to OGA officer sidebar in DashboardLayout
+- [x] Add route in App.tsx
+
+### Audit Fixes (deferred to Sprint 23)
+- [ ] Replace Math.random() suffix generators with crypto.randomUUID() in postAudit, drawback, fraudCases, kyc routers
+- [ ] Add geospatial.getVesselTrack procedure to consume vessel_tracking_events table
+- [ ] Wire Finance page "Generate Report" button to bulkExport.exportDeclarations
+- [ ] Redirect /app/notifications to /app/notification-centre
+- [ ] Add vessel tracking panel to PortHeatmap page
+
+### Tests & Delivery
+- [x] Write vitest tests for SLA urgency logic (4 tests)
+- [x] Write vitest tests for CSV parsing logic (4 tests)
+- [x] Write vitest tests for expiry calendar urgency bands (5 tests)
+- [x] Run full test suite — 338/338 tests passing (18 test files)
+- [x] Save checkpoint

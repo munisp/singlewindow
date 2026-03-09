@@ -58,6 +58,7 @@ import {
   GitFork,
   Award,
   Timer,
+  CalendarClock,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -196,6 +197,7 @@ function getNavGroups(role: string): NavGroup[] {
         items: [
           { icon: LayoutDashboard, label: "My Workstation", path: "/app/oga" },
           { icon: Package, label: "Pending Permit Requests", path: "/app/oga" },
+          { icon: CalendarClock, label: "Expiry Calendar", path: "/app/oga/expiry-calendar" },
           { icon: FileText, label: "Related Declarations", path: "/app/customs" },
         ],
       },

@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
@@ -9,6 +9,7 @@ import TraderDashboard from "./pages/app/TraderDashboard";
 import NewDeclaration from "./pages/app/NewDeclaration";
 import CustomsDashboard from "./pages/app/CustomsDashboard";
 import OGAPortal from "./pages/app/OGAPortal";
+import OGAExpiryCalendar from "./pages/app/OGAExpiryCalendar";
 import AdminConsole from "./pages/app/AdminConsole";
 import SecurityOps from "./pages/app/SecurityOps";
 import DeclarationDetail from "./pages/app/DeclarationDetail";
@@ -97,6 +98,7 @@ function Router() {
 
       {/* OGA Portal */}
       <Route path="/app/oga" component={OGAPortal} />
+      <Route path="/app/oga/expiry-calendar" component={OGAExpiryCalendar} />
 
       {/* Admin Console */}
       <Route path="/app/admin" component={AdminConsole} />
@@ -124,8 +126,9 @@ function Router() {
       <Route path="/app/geo/heatmap" component={PortHeatmap} />
 
       {/* Notifications */}
+      {/* Legacy /app/notifications → redirect to Notification Centre */}
       <Route path="/app/notifications">
-        <Suspense fallback={<LazyFallback />}><Notifications /></Suspense>
+        <Redirect to="/app/notification-centre" />
       </Route>
 
       {/* Finance Dashboard */}

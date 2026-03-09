@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   CreditCard,
   DollarSign,
+  Download,
   Loader2,
   RefreshCw,
   TrendingUp,
@@ -169,9 +170,39 @@ export default function Finance() {
               Duty revenue analytics, payment flows, and financial reporting
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={handleRefresh} className="gap-2">
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const rows = Array.isArray(pendingQuery.data) ? pendingQuery.data : [];
+                if (!rows.length) return;
+                const headers = ["Declaration ID", "Trader", "Amount", "Currency", "Status", "Due Date"];
+                const csvRows = rows.map((r: { declarationId?: number; traderName?: string; totalAmount?: number; currency?: string; status?: string; dueDate?: string }) => [
+                  r.declarationId ?? "",
+                  r.traderName ?? "",
+                  r.totalAmount ?? "",
+                  r.currency ?? "USD",
+                  r.status ?? "",
+                  r.dueDate ?? "",
+                ].join(","));
+                const csv = [headers.join(","), ...csvRows].join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `finance_report_${new Date().toISOString().slice(0, 10)}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleRefresh} className="gap-2">
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </Button>
+          </div>
         </div>
 
         {/* KPI Cards */}

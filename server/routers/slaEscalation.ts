@@ -324,4 +324,68 @@ export const slaEscalationRouter = router({
       generatedAt: now.toISOString(),
     };
   }),
+
+  // ── TRADER: MY DECLARATIONS AT SLA RISK ─────────────────────────────────────
+  // Returns the calling trader's in-processing declarations with SLA urgency info.
+  // Urgency: "critical" = already breached, "warning" = >75% of SLA elapsed, "ok" = safe.
+  getMyAtRisk: protectedProcedure.query(async ({ ctx }) => {
+    const { getDb } = await import("../db");
+    const { declarations } = await import("../../drizzle/schema");
+    const { and, eq, inArray, isNotNull } = await import("drizzle-orm");
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+    const processingStatuses = ["submitted", "under_assessment", "docs_required", "payment_pending", "under_examination"];
+    const rows = await db
+      .select({
+        id: declarations.id,
+        declarationNumber: declarations.declarationNumber,
+        riskLane: declarations.riskLane,
+        status: declarations.status,
+        submittedAt: declarations.submittedAt,
+        goodsDescription: declarations.goodsDescription,
+        portOfEntry: declarations.portOfEntry,
+      })
+      .from(declarations)
+      .where(
+        and(
+          eq(declarations.traderId, ctx.user.id),
+          inArray(declarations.status, processingStatuses as any[]),
+          isNotNull(declarations.submittedAt)
+        )
+      );
+    const now = Date.now();
+    const results = rows.map((r) => {
+      const lane = r.riskLane ?? "green";
+      const thresholdMs = SLA_THRESHOLDS_MS[lane] ?? SLA_THRESHOLDS_MS.green;
+      const elapsedMs = now - new Date(r.submittedAt!).getTime();
+      const remainingMs = thresholdMs - elapsedMs;
+      const pctElapsed = Math.min(100, (elapsedMs / thresholdMs) * 100);
+      let urgency: "critical" | "warning" | "ok";
+      if (elapsedMs >= thresholdMs) urgency = "critical";
+      else if (pctElapsed >= 75) urgency = "warning";
+      else urgency = "ok";
+      return {
+        id: r.id,
+        declarationNumber: r.declarationNumber,
+        riskLane: lane,
+        status: r.status,
+        goodsDescription: r.goodsDescription ?? "",
+        portOfEntry: r.portOfEntry ?? "",
+        submittedAt: r.submittedAt!.toISOString(),
+        slaLabel: SLA_LABELS[lane] ?? "4 hours",
+        thresholdMs,
+        elapsedMs,
+        remainingMs,
+        pctElapsed: Math.round(pctElapsed),
+        urgency,
+      };
+    }).sort((a, b) => b.pctElapsed - a.pctElapsed);
+    return {
+      declarations: results,
+      critical: results.filter((r) => r.urgency === "critical").length,
+      warning: results.filter((r) => r.urgency === "warning").length,
+      ok: results.filter((r) => r.urgency === "ok").length,
+      generatedAt: new Date().toISOString(),
+    };
+  }),
 });

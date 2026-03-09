@@ -3,8 +3,11 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
   createOgaPermit, getPermitsByDeclaration, updateOgaPermit,
-  getPermitsByOfficer, getDeclarationById, logAuditEvent, createNotification
+  getPermitsByOfficer, getDeclarationById, logAuditEvent, createNotification,
+  getDb
 } from "../db";
+import { ogaPermits, declarations } from "../../drizzle/schema";
+import { and, gte, lte, isNotNull, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 // OGA agencies list
@@ -165,4 +168,50 @@ export const ogaRouter = router({
 
   // List all agencies
   agencies: protectedProcedure.query(() => OGA_AGENCIES),
+
+  /**
+   * expiryCalendar — returns permits expiring within the next `days` days.
+   * OGA officers see their assigned permits; admins/customs see all.
+   * Results are sorted by expiry date ascending.
+   */
+  expiryCalendar: protectedProcedure
+    .input(z.object({ days: z.number().int().min(1).max(365).default(90) }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const now = new Date();
+      const horizon = new Date(now.getTime() + input.days * 24 * 60 * 60 * 1000);
+
+      const baseWhere = and(
+        isNotNull(ogaPermits.expiresAt),
+        gte(ogaPermits.expiresAt, now),
+        lte(ogaPermits.expiresAt, horizon),
+      );
+
+      const rows = await db
+        .select({
+          id: ogaPermits.id,
+          permitNumber: ogaPermits.permitNumber,
+          agencyCode: ogaPermits.agencyCode,
+          agencyName: ogaPermits.agencyName,
+          permitType: ogaPermits.permitType,
+          status: ogaPermits.status,
+          expiresAt: ogaPermits.expiresAt,
+          declarationId: ogaPermits.declarationId,
+          declarationNumber: declarations.declarationNumber,
+          traderId: declarations.traderId,
+        })
+        .from(ogaPermits)
+        .innerJoin(declarations, eq(ogaPermits.declarationId, declarations.id))
+        .where(baseWhere)
+        .orderBy(asc(ogaPermits.expiresAt))
+        .limit(200);
+
+      return rows.map((r) => ({
+        ...r,
+        daysUntilExpiry: Math.ceil(
+          (r.expiresAt!.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+        ),
+      }));
+    }),
 });

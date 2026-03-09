@@ -97,8 +97,9 @@ Green: 0-30 (auto-clear), Yellow: 31-60 (doc review), Red: 61-100 (physical insp
   } catch (e) {
     console.error("[RiskScore] LLM error:", e);
   }
-  // Fallback deterministic scoring
-  const score = Math.floor(Math.random() * 40) + 10;
+  // Fallback: deterministic score based on HS code hash (no randomness)
+  const hsHash = data.hsCode ? data.hsCode.split("").reduce((a, c) => a + c.charCodeAt(0), 0) : 50;
+  const score = (hsHash % 40) + 10;
   return {
     score,
     lane: score < 30 ? "green" : score < 60 ? "yellow" : "red",

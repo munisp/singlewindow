@@ -7,8 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, Plus, RefreshCw, Download } from "lucide-react";
+import { FileText, Plus, RefreshCw, Download, Upload } from "lucide-react";
 import { ExportDeclarationsDialog } from "@/components/ExportDeclarationsDialog";
+import { BulkImportDialog } from "@/components/BulkImportDialog";
 import { Link, useLocation } from "wouter";
 
 const LANE_STYLES: Record<string, string> = {
@@ -52,6 +53,14 @@ export default function TraderDeclarations() {
                   <Download className="h-4 w-4" />Export
                 </Button>
               }
+            />
+            <BulkImportDialog
+              trigger={
+                <Button variant="outline" size="sm" className="gap-1.5">
+                  <Upload className="h-4 w-4" />Import CSV
+                </Button>
+              }
+              onSuccess={() => refetch()}
             />
             <Button size="sm" onClick={() => navigate("/app/trader/declarations/new")} className="gap-1.5">
               <Plus className="h-4 w-4" />New Declaration

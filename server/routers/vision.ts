@@ -69,7 +69,7 @@ async function runVisionAnalysis(
 // ─── Mock vision analysis for development ─────────────────────────────────
 
 function mockVisionAnalysis(analysisType: string): Record<string, unknown> {
-  const processingTimeMs = Math.floor(Math.random() * 3000) + 1500;
+  const processingTimeMs = 2200; // deterministic processing time estimate
 
   const baseResult = {
     analysis_type: analysisType,
@@ -287,11 +287,11 @@ export const visionRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const userId = ctx.user.id;
-      const reportId = `VIS-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const reportId = `VIS-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
 
       // Upload image to S3
       const buffer = Buffer.from(input.imageData, "base64");
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
       const imageKey = `vision/${userId}/${input.analysisType}-${suffix}-${input.imageFilename}`;
       const { url: imageUrl } = await storagePut(imageKey, buffer, input.contentType);
 
@@ -395,10 +395,10 @@ export const visionRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const userId = ctx.user.id;
-      const reportId = `SEAL-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const reportId = `SEAL-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
 
       const buffer = Buffer.from(input.imageData, "base64");
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
       const imageKey = `vision/${userId}/seal-${suffix}-${input.imageFilename}`;
       const { url: imageUrl } = await storagePut(imageKey, buffer, input.contentType);
 
@@ -479,10 +479,10 @@ export const visionRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const userId = ctx.user.id;
-      const reportId = `MFST-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      const reportId = `MFST-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
 
       const buffer = Buffer.from(input.imageData, "base64");
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
       const imageKey = `vision/${userId}/manifest-${suffix}-${input.imageFilename}`;
       const { url: imageUrl } = await storagePut(imageKey, buffer, input.contentType);
 

@@ -128,8 +128,8 @@ const paymentStateStore = new Map<string, {
 
 function generateILPPacket(): string {
   return Buffer.from(JSON.stringify({
-    amount: Math.floor(Math.random() * 1000000),
-    account: `g.gh.customs.${Math.random().toString(36).slice(2, 12)}`,
+    amount: 500000,
+    account: `g.gh.customs.${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`,
     data: Buffer.from("TradeGateway Duty Payment").toString("base64"),
   })).toString("base64");
 }
@@ -137,7 +137,7 @@ function generateILPPacket(): string {
 function generateCondition(): string {
   return Array.from({ length: 43 }, () =>
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[
-      Math.floor(Math.random() * 64)
+      32
     ]
   ).join("");
 }
@@ -221,7 +221,7 @@ export const mojaloopRouter = router({
         });
       }
 
-      const transferId = `TRF-${Date.now()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+      const transferId = `TRF-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
       const ilpPacket = generateILPPacket();
       const condition = generateCondition();
 
@@ -323,7 +323,7 @@ export const mojaloopRouter = router({
 
       if (status === "PROCESSING" && elapsedMs > 15_000) {
         // 95% success rate simulation
-        status = Math.random() < 0.95 ? "COMMITTED" : "ABORTED";
+        status = "COMMITTED"; // deterministic: always committed in dev mode
         fulfilment = status === "COMMITTED" ? generateCondition() : undefined;
         paymentStateStore.set(input.transferId, {
           ...state,

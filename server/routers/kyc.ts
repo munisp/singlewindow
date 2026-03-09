@@ -170,7 +170,7 @@ export const kycRouter = router({
 
       // Decode base64 and upload to S3
       const buffer = Buffer.from(input.fileData, "base64");
-      const suffix = Math.random().toString(36).slice(2, 8);
+      const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
       const fileKey = `kyc/${userId}/${input.documentType}-${suffix}-${input.filename}`;
 
       const { url } = await storagePut(fileKey, buffer, input.contentType);

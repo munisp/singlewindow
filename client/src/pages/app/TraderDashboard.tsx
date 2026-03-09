@@ -12,6 +12,7 @@ import {
   FileText,
   Plus,
   ShieldCheck,
+  Timer,
   TrendingUp,
 } from "lucide-react";
 import { useLocation } from "wouter";
@@ -38,6 +39,7 @@ export default function TraderDashboard() {
   const { data: declarations, isLoading: declLoading } = trpc.declarations.myDeclarations.useQuery({ limit: 5 });
   const { data: profile } = trpc.profiles.me.useQuery();
   const { data: aeoApp } = trpc.aeo.myApplication.useQuery();
+  const { data: slaRisk } = trpc.slaEscalation.getMyAtRisk.useQuery();
 
   return (
     <DashboardLayout title="My Dashboard">
@@ -69,6 +71,21 @@ export default function TraderDashboard() {
             <Button size="sm" variant="outline" onClick={() => setLocation("/app/trader/profile")} className="shrink-0">
               View Profile
             </Button>
+          </div>
+        )}
+
+        {/* SLA breach banner */}
+        {slaRisk && slaRisk.critical > 0 && (
+          <div className="flex items-center gap-3 p-4 rounded-lg border border-red-300 bg-red-50 text-red-900">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-red-600" />
+            <div className="flex-1">
+              <p className="font-medium text-sm">
+                {slaRisk.critical} declaration{slaRisk.critical !== 1 ? "s have" : " has"} exceeded the SLA deadline
+              </p>
+              <p className="text-xs text-red-700 mt-0.5">
+                Our customs team has been notified and is prioritising your cases.
+              </p>
+            </div>
           </div>
         )}
 
@@ -226,6 +243,53 @@ export default function TraderDashboard() {
               </CardContent>
             </Card>
 
+            {/* SLA Tracker widget — shown only when there are at-risk declarations */}
+            {slaRisk && (slaRisk.critical > 0 || slaRisk.warning > 0) && (
+              <Card className="border-amber-500/40 bg-amber-500/5">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base font-semibold flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                    <Timer className="h-4 w-4" />
+                    SLA Tracker
+                    {slaRisk.critical > 0 && (
+                      <Badge variant="destructive" className="ml-auto text-xs">{slaRisk.critical} breached</Badge>
+                    )}
+                    {slaRisk.critical === 0 && slaRisk.warning > 0 && (
+                      <Badge variant="outline" className="ml-auto text-xs border-amber-500 text-amber-600">{slaRisk.warning} at risk</Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {slaRisk.declarations.slice(0, 4).map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded p-1 -mx-1"
+                      onClick={() => setLocation(`/app/trader/declarations/${d.id}`)}
+                    >
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        d.urgency === "critical" ? "bg-red-500" :
+                        d.urgency === "warning" ? "bg-amber-500" : "bg-emerald-500"
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-mono truncate">{d.declarationNumber}</p>
+                        <p className="text-xs text-muted-foreground truncate">{d.goodsDescription || d.portOfEntry}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs font-medium">
+                          {d.urgency === "critical" ? "Breached" : `${d.pctElapsed}%`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">SLA: {d.slaLabel}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {slaRisk.declarations.length > 4 && (
+                    <p className="text-xs text-muted-foreground text-center pt-1">
+                      +{slaRisk.declarations.length - 4} more
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Quick actions */}
             <Card>
               <CardHeader className="pb-3">
@@ -238,7 +302,7 @@ export default function TraderDashboard() {
                 <Button variant="outline" className="w-full justify-start gap-2 text-sm" onClick={() => setLocation("/app/trader/profile")}>
                   <FileText className="h-4 w-4" /> Update Profile
                 </Button>
-                <Button variant="outline" className="w-full justify-start gap-2 text-sm" onClick={() => setLocation("/app/notifications")}>
+                <Button variant="outline" className="w-full justify-start gap-2 text-sm" onClick={() => setLocation("/app/notification-centre")}>
                   <AlertTriangle className="h-4 w-4" /> View Notifications
                 </Button>
               </CardContent>

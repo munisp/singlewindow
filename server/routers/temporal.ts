@@ -53,9 +53,10 @@ const WORKFLOW_TYPES = {
 
 function generateMockWorkflow(workflowId: string, declarationId?: number) {
   const now = Date.now();
-  const startedAt = now - Math.floor(Math.random() * 3600_000);
-  const statuses = ["RUNNING", "COMPLETED", "RUNNING", "RUNNING", "COMPLETED"] as const;
-  const status = statuses[Math.floor(Math.random() * statuses.length)];
+  const startedAt = now - 1800_000; // 30 min ago as deterministic fallback
+  type WorkflowStatus = "RUNNING" | "COMPLETED" | "FAILED" | "TIMED_OUT" | "CANCELLED";
+  const statuses: WorkflowStatus[] = ["RUNNING", "COMPLETED", "RUNNING", "RUNNING", "COMPLETED"];
+  const status: WorkflowStatus = statuses[0]; // deterministic fallback when Temporal is unavailable
 
   const activities = [
     {
@@ -116,7 +117,7 @@ function generateMockWorkflow(workflowId: string, declarationId?: number) {
 
   return {
     workflowId,
-    runId: `run-${Math.random().toString(36).slice(2, 18)}`,
+    runId: `run-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
     workflowType: WORKFLOW_TYPES.DECLARATION_CLEARANCE,
     namespace: TEMPORAL_NAMESPACE,
     taskQueue: "customs-clearance",
