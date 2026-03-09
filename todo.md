@@ -774,3 +774,25 @@
 - [x] Run full test suite — 351/351 tests passing (19 test files)
 - [x] Save checkpoint
 - [x] Generate updated archive
+
+## Sprint 25 — RustFS Document Vault + Audit Trail + Declarations Indexes
+
+- [x] Expand auditEntityEnum with 'aeo_application' and 'kyc_verification'
+- [x] Add 4 composite indexes to declarations table (trader_id+status, submitted_at DESC, risk_lane+status, assigned_officer_id)
+- [x] Add document_vault table with 5 indexes and 3 FK constraints
+- [x] Run db:push migration (SQL generated: 0011_curious_grim_reaper.sql)
+- [x] Wire logAuditEvent into OGA rejectPermit mutation
+- [x] Wire logAuditEvent into AEO approve and reject mutations
+- [x] Wire logAuditEvent into KYC verifyIdentity, verifyBusiness, reviewVerification mutations
+- [x] Wire logAuditEvent into auth.changeRole mutation
+- [x] Wire logAuditEvent into declarations generateClearanceCertificate mutation
+- [x] Install RustFS (S3-compatible object storage) on port 9000
+- [x] Create tradegateway-docs bucket in RustFS
+- [x] Write Go microservice (rustfs-svc) with upload, presign, delete, health endpoints on port 4500
+- [x] Write TypeScript rustfsSvcClient.ts HTTP client for Go service
+- [x] Write documentVault tRPC router (upload, list, getById, download, revoke, permanentDelete, adminList, stats, health)
+- [x] Register documentVaultRouter in routers.ts
+- [x] Build DocumentVault.tsx UI page (upload dialog, list with filters, presigned download, revoke, stats bar)
+- [x] Add Document Vault nav entry to DashboardLayout (trader view)
+- [x] Add /app/document-vault route to App.tsx
+- [x] Write 20 vitest tests for documentVault router and rustfsSvcClient (all passing)

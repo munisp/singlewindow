@@ -31,6 +31,7 @@ import {
   updateKYCVerification,
   listKYCVerifications,
   createUserNotification,
+  logAuditEvent,
 } from "../db";
 import { storagePut } from "../storage";
 
@@ -282,6 +283,14 @@ export const kycRouter = router({
         submittedAt: new Date(),
       });
 
+      await logAuditEvent({
+        entityType: "kyc_verification",
+        entityId: verification.id,
+        action: "kyc_identity_submitted",
+        actorId: ctx.user.id,
+        actorType: "trader",
+        newState: { status: "PENDING_REVIEW", verificationType: "INDIVIDUAL" },
+      });
       return {
         verificationId: verification.id,
         status: "PENDING_REVIEW",
@@ -328,6 +337,14 @@ export const kycRouter = router({
         },
       });
 
+      await logAuditEvent({
+        entityType: "kyc_verification",
+        entityId: verification.id,
+        action: "kyc_business_submitted",
+        actorId: ctx.user.id,
+        actorType: "trader",
+        newState: { status: "PENDING_REVIEW", verificationType: "BUSINESS" },
+      });
       return {
         verificationId: verification.id,
         status: "PENDING_REVIEW",
@@ -435,6 +452,15 @@ export const kycRouter = router({
           }).catch(() => { /* non-blocking */ });
         }
       }
+      await logAuditEvent({
+        entityType: "kyc_verification",
+        entityId: input.verificationId,
+        action: `kyc_review_${input.decision.toLowerCase()}`,
+        actorId: ctx.user.id,
+        actorType: "admin",
+        previousState: { status: "PENDING_REVIEW" },
+        newState: { status: input.decision, notes: input.notes, rejectionReason: input.rejectionReason },
+      });
       return {
         verificationId: input.verificationId,
         status: input.decision,

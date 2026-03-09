@@ -162,6 +162,15 @@ export const ogaRouter = router({
           entityId: input.permitId,
         });
       }
+      await logAuditEvent({
+        entityType: "permit",
+        entityId: input.permitId,
+        action: "permit_rejected",
+        actorId: ctx.user.id,
+        actorType: "oga_officer",
+        previousState: { status: "under_review" },
+        newState: { status: "rejected", reason: input.reason },
+      });
 
       return updated;
     }),

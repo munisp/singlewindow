@@ -57,7 +57,8 @@ export const paymentStatusEnum = pgEnum("payment_status", [
 ]);
 
 export const auditEntityEnum = pgEnum("audit_entity", [
-  "declaration", "user", "payment", "permit", "document"
+  "declaration", "user", "payment", "permit", "document",
+  "aeo_application", "kyc_verification"
 ]);
 
 export const alertSeverityEnum = pgEnum("alert_severity", [
@@ -171,6 +172,11 @@ export const declarations = pgTable("declarations", {
   index("idx_decl_trader_id").on(t.traderId),
   index("idx_decl_status").on(t.status),
   index("idx_decl_risk_lane").on(t.riskLane),
+  // Sprint 25 composite indexes for query performance
+  index("idx_decl_trader_status").on(t.traderId, t.status),
+  index("idx_decl_submitted_at").on(t.submittedAt),
+  index("idx_decl_risk_lane_status").on(t.riskLane, t.status),
+  index("idx_decl_assigned_officer").on(t.assignedOfficerId),
 ]);
 
 export type Declaration = typeof declarations.$inferSelect;
@@ -731,3 +737,51 @@ export const portCongestionAlerts = pgTable("port_congestion_alerts", {
   index("idx_pca_port_code").on(t.portCode),
 ]);
 export type PortCongestionAlert = typeof portCongestionAlerts.$inferSelect;
+
+// ─── DOCUMENT VAULT ───────────────────────────────────────────────────────────
+// Sprint 25: S3-backed (RustFS) document storage for traders and customs officers.
+// Files are stored in RustFS (port 9000); this table holds metadata + S3 key.
+
+export const documentVaultCategoryEnum = pgEnum("document_vault_category", [
+  "commercial_invoice", "bill_of_lading", "packing_list",
+  "certificate_of_origin", "phytosanitary_cert", "import_permit",
+  "export_permit", "insurance_cert", "customs_bond",
+  "kyc_identity", "kyc_business", "aeo_supporting",
+  "post_clearance", "correspondence", "other"
+]);
+
+export const documentVaultAccessEnum = pgEnum("document_vault_access", [
+  "private", "shared_with_customs", "shared_with_oga", "public"
+]);
+
+export const documentVaultStatusEnum = pgEnum("document_vault_status", [
+  "active", "revoked", "expired"
+]);
+
+export const documentVault = pgTable("document_vault", {
+  id: serial("id").primaryKey(),
+  ownerId: integer("owner_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  fileKey: varchar("file_key", { length: 512 }).notNull(),
+  url: text("url").notNull(),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  mimeType: varchar("mime_type", { length: 128 }).notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  category: documentVaultCategoryEnum("category").notNull(),
+  accessLevel: documentVaultAccessEnum("access_level").default("private").notNull(),
+  status: documentVaultStatusEnum("status").default("active").notNull(),
+  description: text("description"),
+  revokedBy: integer("revoked_by").references(() => users.id),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_dv_owner_id").on(t.ownerId),
+  index("idx_dv_declaration_id").on(t.declarationId),
+  index("idx_dv_status").on(t.status),
+  index("idx_dv_category").on(t.category),
+  index("idx_dv_owner_status").on(t.ownerId, t.status),
+]);
+
+export type DocumentVault = typeof documentVault.$inferSelect;
+export type InsertDocumentVault = typeof documentVault.$inferInsert;

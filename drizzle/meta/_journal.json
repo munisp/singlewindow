@@ -78,6 +78,13 @@
       "when": 1773013528150,
       "tag": "0010_glamorous_night_thrasher",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1773021638579,
+      "tag": "0011_curious_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

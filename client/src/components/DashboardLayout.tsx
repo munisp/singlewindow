@@ -59,6 +59,7 @@ import {
   Award,
   Timer,
   CalendarClock,
+  FolderLock,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -234,6 +235,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: LayoutDashboard, label: "My Overview", path: "/app/trader" },
         { icon: FileText, label: "My Shipment Declarations", path: "/app/trader/declarations" },
         { icon: Award, label: "My Clearance Certificates", path: "/app/trader/certificates" },
+        { icon: FolderLock, label: "Document Vault", path: "/app/document-vault" },
         { icon: Building2, label: "My Business Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
         { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },

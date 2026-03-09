@@ -111,6 +111,14 @@ export const aeoRouter = router({
         entityType: "aeo_application",
         entityId: input.applicationId,
       });
+      await logAuditEvent({
+        entityType: "aeo_application",
+        entityId: input.applicationId,
+        action: "aeo_approved",
+        actorId: ctx.user.id,
+        actorType: "admin",
+        newState: { status: "approved", certificateNumber: certNumber },
+      });
 
       return updated;
     }),
@@ -134,6 +142,15 @@ export const aeoRouter = router({
         message: `Your AEO application was not approved. Reason: ${input.reason}. You may reapply after addressing the concerns raised.`,
         entityType: "aeo_application",
         entityId: input.applicationId,
+      });
+      await logAuditEvent({
+        entityType: "aeo_application",
+        entityId: input.applicationId,
+        action: "aeo_rejected",
+        actorId: ctx.user.id,
+        actorType: "admin",
+        previousState: { status: "under_review" },
+        newState: { status: "rejected", reason: input.reason },
       });
 
       return updated;

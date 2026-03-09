@@ -3,7 +3,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { getAllUsers, getUserById } from "./db";
+import { getAllUsers, getUserById, logAuditEvent } from "./db";
+import { documentVaultRouter } from "./routers/documentVault";
 import { z } from "zod";
 import { declarationsRouter } from "./routers/declarations";
 import { profilesRouter } from "./routers/profiles";
@@ -61,6 +62,14 @@ export const appRouter = router({
         const { eq } = await import("drizzle-orm");
         const result = await db.update(users).set({ role: input.role }).where(eq(users.id, input.userId)).returning();
         if (!result[0]) throw new TRPCError({ code: "NOT_FOUND" });
+        await logAuditEvent({
+          entityType: "user",
+          entityId: input.userId,
+          action: "role_changed",
+          actorId: ctx.user.id,
+          actorType: "admin",
+          newState: { role: input.role },
+        });
         return result[0];
       }),
   }),
@@ -90,6 +99,7 @@ export const appRouter = router({
   bulkExport: bulkExportRouter,
   notificationPreferences: notificationPreferencesRouter,
   adminAnalytics: adminAnalyticsRouter,
+  documentVault: documentVaultRouter,
 });
 
 export type AppRouter = typeof appRouter;
