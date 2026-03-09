@@ -15,6 +15,7 @@ import { eq, and, desc, count, sql } from "drizzle-orm";
 import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck } from "../rustfsSvcClient";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
+import { notifyOwner } from "../_core/notification";
 
 const DOCUMENT_CATEGORIES = [
   "commercial_invoice", "bill_of_lading", "packing_list",
@@ -287,6 +288,12 @@ export const documentVaultRouter = router({
           label: input.label ?? null,
         })
         .returning();
+
+      // Fire-and-forget owner notification — never block the response
+      notifyOwner({
+        title: `Document shared: ${doc.filename}`,
+        content: `A share link was created for "${doc.filename}" (ID: ${doc.id}) by user ${ctx.user.id}.\nExpires: ${expiresAt.toISOString()}${input.label ? `\nLabel: ${input.label}` : ""}${passwordHash ? "\nPassword protected: yes" : ""}`,
+      }).catch(() => {/* non-critical */});
 
       return {
         shareId: share.id,

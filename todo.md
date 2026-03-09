@@ -825,3 +825,20 @@
 - [x] Declaration attachment linking: extend UploadDialog with declaration selector (myDeclarations query)
 - [x] Declaration attachment linking: add AttachedDocuments panel to DeclarationDetail page
 - [x] Tests: add 7 new vitest tests for share, verifyShare, listByDeclaration (27 total, all passing)
+
+## Sprint 27 — Share Management UI, Email Notification, Document Preview
+
+- [ ] Share link management: add listShares + revokeShare procedures (already exist), build Manage Shares tab in Document Vault
+- [ ] Share link management: per-link revoke button, download-count badge, expiry countdown
+- [ ] Email notification on share: call notifyOwner when share link is created
+- [ ] Document preview drawer: slide-over with inline PDF iframe and image rendering
+- [ ] Document preview drawer: trigger from document row click, show metadata + download button
+
+## Sprint 27 — Share Link Management, Email Notification, Document Preview
+
+- [x] Add ManageSharesTab component with per-document share list, download-count badges, expiry countdown, and revoke buttons
+- [x] Add tab switcher (My Documents / Manage Shares) to Document Vault page
+- [x] Wire notifyOwner into share procedure for owner email notification on share creation
+- [x] Add PreviewDrawer slide-over with inline PDF iframe and image rendering
+- [x] Add Eye (preview) button to DocumentRow
+- [x] Add listShares and revokeShare vitest tests (33 total, all passing)

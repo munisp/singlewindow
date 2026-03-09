@@ -411,4 +411,90 @@ describe("documentVault router", () => {
       ).rejects.toThrow("This share link has expired");
     });
   });
+
+  describe("listShares", () => {
+    it("returns empty array when db is unavailable", async () => {
+      vi.mocked(getDb).mockResolvedValue(null as never);
+      const caller = appRouter.createCaller(makeCtx());
+      const result = await caller.documentVault.listShares({ documentId: 1 });
+      expect(result).toEqual([]);
+    });
+
+    it("throws FORBIDDEN when non-owner tries to list shares", async () => {
+      const fakeDoc = { id: 1, ownerId: 99, status: "active", fileKey: "vault/99/doc.pdf", filename: "doc.pdf" };
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([fakeDoc]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42, role: "user" })));
+      await expect(
+        caller.documentVault.listShares({ documentId: 1 })
+      ).rejects.toThrow("Access denied");
+    });
+
+    it("returns share list for document owner", async () => {
+      const fakeDoc = { id: 1, ownerId: 42, status: "active", fileKey: "vault/42/doc.pdf", filename: "doc.pdf" };
+      const fakeShares = [
+        {
+          id: 10, documentId: 1, token: "tok-abc", passwordHash: null,
+          expiresAt: new Date(Date.now() + 86400000), maxDownloads: null,
+          downloadCount: 3, label: "For customs", revokedAt: null, createdBy: 42, createdAt: new Date(),
+        },
+      ];
+      const db = makeDbMock();
+      // First limit call returns the doc lookup, second returns shares
+      let callCount = 0;
+      db.limit.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.resolve([fakeDoc]);
+        return Promise.resolve(fakeShares);
+      });
+      db.orderBy.mockResolvedValue(fakeShares);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42 })));
+      const result = await caller.documentVault.listShares({ documentId: 1 });
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe("revokeShare", () => {
+    it("throws NOT_FOUND when share does not exist", async () => {
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42 })));
+      await expect(
+        caller.documentVault.revokeShare({ shareId: 9999 })
+      ).rejects.toThrow("Share not found");
+    });
+
+    it("throws FORBIDDEN when non-owner tries to revoke share", async () => {
+      const fakeShare = {
+        id: 10, documentId: 1, token: "tok-abc", passwordHash: null,
+        expiresAt: new Date(Date.now() + 86400000), maxDownloads: null,
+        downloadCount: 0, label: null, revokedAt: null, createdBy: 99, createdAt: new Date(),
+      };
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([fakeShare]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42, role: "user" })));
+      await expect(
+        caller.documentVault.revokeShare({ shareId: 10 })
+      ).rejects.toThrow("Access denied");
+    });
+
+    it("revokes share for owner", async () => {
+      const fakeShare = {
+        id: 10, documentId: 1, token: "tok-abc", passwordHash: null,
+        expiresAt: new Date(Date.now() + 86400000), maxDownloads: null,
+        downloadCount: 0, label: null, revokedAt: null, createdBy: 42, createdAt: new Date(),
+      };
+      const db = makeDbMock();
+      db.limit.mockResolvedValue([fakeShare]);
+      db.returning.mockResolvedValue([{ ...fakeShare, revokedAt: new Date() }]);
+      vi.mocked(getDb).mockResolvedValue(db as never);
+      const caller = appRouter.createCaller(makeCtx(makeUser({ id: 42 })));
+      const result = await caller.documentVault.revokeShare({ shareId: 10 });
+      expect(result.revoked).toBe(true);
+    });
+  });
 });

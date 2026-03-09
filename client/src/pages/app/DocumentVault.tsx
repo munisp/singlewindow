@@ -7,7 +7,7 @@
  * Design: Deep Navy (#0A1628) + Gold (#D4A017) — Sovereign Blueprint theme.
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -55,6 +70,12 @@ import {
   Clock,
   Lock,
   Copy,
+  Eye,
+  Ban,
+  Calendar,
+  ExternalLink,
+  BarChart2,
+  ChevronRight,
 } from "lucide-react";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -405,6 +426,331 @@ function StatsBar() {
   );
 }
 
+// ─── formatExpiry helper ────────────────────────────────────────────────────
+
+function formatExpiry(expiresAt: Date): { label: string; isExpired: boolean; isNear: boolean } {
+  const now = Date.now();
+  const exp = new Date(expiresAt).getTime();
+  const diff = exp - now;
+  if (diff <= 0) return { label: "Expired", isExpired: true, isNear: false };
+  const hours = Math.floor(diff / 3_600_000);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return { label: `${days}d ${hours % 24}h`, isExpired: false, isNear: days < 2 };
+  return { label: `${hours}h ${Math.floor((diff % 3_600_000) / 60_000)}m`, isExpired: false, isNear: true };
+}
+
+// ─── PreviewDrawer ────────────────────────────────────────────────────────────
+
+type PreviewDoc = {
+  id: number;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  category: string;
+  status: string;
+  createdAt: Date;
+};
+
+function PreviewDrawer({
+  doc,
+  open,
+  onClose,
+}: {
+  doc: PreviewDoc | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [presignedUrl, setPresignedUrl] = useState<string | null>(null);
+  const [loadingUrl, setLoadingUrl] = useState(false);
+
+  const downloadMut = trpc.documentVault.download.useMutation({
+    onSuccess: (data) => {
+      setPresignedUrl(data.url);
+      setLoadingUrl(false);
+    },
+    onError: (err) => {
+      toast.error("Preview failed", { description: err.message });
+      setLoadingUrl(false);
+    },
+  });
+
+  useEffect(() => {
+    if (open && doc) {
+      setPresignedUrl(null);
+      setLoadingUrl(true);
+      downloadMut.mutate({ id: doc.id, expiresIn: 3600 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, doc?.id]);
+
+  const isImage = doc?.mimeType.startsWith("image/") ?? false;
+  const isPdf = doc?.mimeType === "application/pdf";
+  const canPreview = isImage || isPdf;
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-2xl p-0 flex flex-col">
+        <SheetHeader className="p-6 pb-4 border-b border-border/40">
+          <SheetTitle className="flex items-center gap-2 text-base">
+            {doc && getFileIcon(doc.mimeType)}
+            <span className="truncate">{doc?.filename ?? "Document Preview"}</span>
+          </SheetTitle>
+          <SheetDescription className="text-xs">
+            {doc && (
+              <span className="flex flex-wrap gap-3 mt-1">
+                <span className="flex items-center gap-1">
+                  <HardDrive className="h-3 w-3" />
+                  {formatBytes(doc.sizeBytes)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
+                  {getCategoryLabel(doc.category)}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  {new Date(doc.createdAt).toLocaleDateString()}
+                </span>
+                <Badge variant={doc.status === "active" ? "default" : "destructive"} className="text-xs h-5">
+                  {doc.status}
+                </Badge>
+              </span>
+            )}
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-auto p-6">
+          {loadingUrl ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+              <RefreshCw className="h-8 w-8 animate-spin" />
+              <p className="text-sm">Generating secure preview link…</p>
+            </div>
+          ) : !presignedUrl ? (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+              <AlertTriangle className="h-8 w-8" />
+              <p className="text-sm">Could not load preview. Try downloading instead.</p>
+            </div>
+          ) : !canPreview ? (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-muted-foreground">
+              <div className="p-6 rounded-2xl bg-card/50 border border-border/40 flex flex-col items-center gap-3">
+                {doc && getFileIcon(doc.mimeType)}
+                <p className="text-sm font-medium text-foreground">{doc?.filename}</p>
+                <p className="text-xs text-center">
+                  Preview not available for <span className="font-mono">{doc?.mimeType}</span>
+                </p>
+                <Button size="sm" asChild>
+                  <a href={presignedUrl} target="_blank" rel="noopener noreferrer" download={doc?.filename}>
+                    <Download className="h-4 w-4 mr-1.5" />
+                    Download File
+                  </a>
+                </Button>
+              </div>
+            </div>
+          ) : isImage ? (
+            <div className="flex items-center justify-center h-full">
+              <img
+                src={presignedUrl}
+                alt={doc?.filename}
+                className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+              />
+            </div>
+          ) : (
+            <iframe
+              src={presignedUrl}
+              title={doc?.filename}
+              className="w-full h-full rounded-lg border border-border/40 min-h-[500px]"
+            />
+          )}
+        </div>
+
+        {presignedUrl && (
+          <div className="p-4 border-t border-border/40 flex gap-2 justify-end">
+            <Button variant="outline" size="sm" asChild>
+              <a href={presignedUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1.5" />
+                Open in New Tab
+              </a>
+            </Button>
+            <Button size="sm" asChild>
+              <a href={presignedUrl} download={doc?.filename}>
+                <Download className="h-4 w-4 mr-1.5" />
+                Download
+              </a>
+            </Button>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ─── ManageSharesTab ──────────────────────────────────────────────────────────
+
+function ManageSharesTab({ docs }: { docs: Array<{ id: number; filename: string; mimeType: string }> }) {
+  const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
+  const utils = trpc.useUtils();
+
+  const { data: shares, isLoading } = trpc.documentVault.listShares.useQuery(
+    { documentId: selectedDocId! },
+    { enabled: !!selectedDocId }
+  );
+
+  const revokeShare = trpc.documentVault.revokeShare.useMutation({
+    onSuccess: () => {
+      toast.success("Share link revoked");
+      utils.documentVault.listShares.invalidate({ documentId: selectedDocId! });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const activeShares = shares?.filter(s => !s.revokedAt) ?? [];
+  const revokedShares = shares?.filter(s => s.revokedAt) ?? [];
+
+  return (
+    <div className="space-y-4">
+      <Card className="bg-card/30 border-border/40">
+        <CardContent className="p-4">
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">Select a document to manage its share links</p>
+            <Select
+              value={selectedDocId ? String(selectedDocId) : ""}
+              onValueChange={(v) => setSelectedDocId(Number(v))}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Choose a document…" />
+              </SelectTrigger>
+              <SelectContent>
+                {docs.map(d => (
+                  <SelectItem key={d.id} value={String(d.id)}>
+                    <span className="flex items-center gap-2">
+                      {getFileIcon(d.mimeType)}
+                      <span className="truncate max-w-[280px]">{d.filename}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {selectedDocId && (
+        <Card className="bg-card/30 border-border/40">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Link2 className="h-4 w-4 text-primary" />
+                Share Links
+              </span>
+              <div className="flex gap-2">
+                {activeShares.length > 0 && (
+                  <Badge variant="default" className="text-xs">{activeShares.length} active</Badge>
+                )}
+                {revokedShares.length > 0 && (
+                  <Badge variant="secondary" className="text-xs">{revokedShares.length} revoked</Badge>
+                )}
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="space-y-2">
+                {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}
+              </div>
+            ) : !shares || shares.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
+                <Link2 className="h-8 w-8 opacity-30" />
+                <p className="text-sm">No share links for this document</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {shares.map(share => {
+                  const expiry = formatExpiry(share.expiresAt);
+                  const isRevoked = !!share.revokedAt;
+                  const shareUrl = `${window.location.origin}/share/${share.token}`;
+                  return (
+                    <div
+                      key={share.id}
+                      className={`p-3 rounded-lg border transition-colors ${
+                        isRevoked
+                          ? "border-border/30 bg-card/20 opacity-60"
+                          : "border-border/50 bg-card/40"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0 space-y-1">
+                          {share.label && (
+                            <p className="text-xs font-medium text-foreground truncate">{share.label}</p>
+                          )}
+                          <div className="flex flex-wrap gap-2 items-center">
+                            <Badge variant="outline" className="text-xs gap-1 h-5">
+                              <Download className="h-2.5 w-2.5" />
+                              {share.downloadCount}
+                              {share.maxDownloads !== null && ` / ${share.maxDownloads}`}
+                            </Badge>
+                            <Badge
+                              variant={isRevoked ? "secondary" : expiry.isExpired ? "destructive" : expiry.isNear ? "outline" : "default"}
+                              className={`text-xs gap-1 h-5 ${expiry.isNear && !expiry.isExpired && !isRevoked ? "border-yellow-500/50 text-yellow-400" : ""}`}
+                            >
+                              <Clock className="h-2.5 w-2.5" />
+                              {isRevoked ? "Revoked" : expiry.label}
+                            </Badge>
+                            {share.hasPassword && (
+                              <Badge variant="outline" className="text-xs gap-1 h-5">
+                                <Lock className="h-2.5 w-2.5" />
+                                Password
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground font-mono truncate">
+                            {share.token.slice(0, 16)}…
+                          </p>
+                        </div>
+                        {!isRevoked && !expiry.isExpired && (
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0"
+                              onClick={() => {
+                                navigator.clipboard.writeText(shareUrl);
+                                toast.success("Link copied");
+                              }}
+                              title="Copy link"
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              onClick={() => revokeShare.mutate({ shareId: share.id })}
+                              disabled={revokeShare.isPending}
+                              title="Revoke link"
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!selectedDocId && (
+        <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground">
+          <Share2 className="h-12 w-12 opacity-20" />
+          <p className="text-sm">Select a document above to view and manage its share links</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Document Row ─────────────────────────────────────────────────────────────
 
 type DocRecord = {
@@ -604,10 +950,12 @@ function DocumentRow({
   doc,
   onRevoke,
   onShare,
+  onPreview,
 }: {
   doc: DocRecord;
   onRevoke: (id: number, name: string) => void;
   onShare: (id: number, name: string) => void;
+  onPreview: (doc: DocRecord) => void;
 }) {
   const download = trpc.documentVault.download.useMutation({
     onSuccess: (data) => {
@@ -673,6 +1021,15 @@ function DocumentRow({
             <Button
               size="sm"
               variant="ghost"
+              className="h-8 w-8 p-0 text-violet-400 hover:text-violet-300"
+              title="Preview document"
+              onClick={() => onPreview(doc)}
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
               className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300"
               title="Share document"
               onClick={() => onShare(doc.id, doc.filename)}
@@ -701,6 +1058,9 @@ export default function DocumentVault() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{ id: number; name: string } | null>(null);
   const [shareTarget, setShareTarget] = useState<{ id: number; name: string } | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<DocRecord | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("documents");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"active" | "revoked">("active");
   const [search, setSearch] = useState("");
@@ -723,6 +1083,11 @@ export default function DocumentVault() {
   const filteredDocs = (docs ?? []).filter(doc =>
     search === "" || doc.filename.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handlePreview = useCallback((doc: DocRecord) => {
+    setPreviewTarget(doc);
+    setPreviewOpen(true);
+  }, []);
 
   return (
     <DashboardLayout title="Document Vault">
@@ -758,98 +1123,146 @@ export default function DocumentVault() {
           </div>
         </div>
 
+        {/* Tab switcher */}
+        <div className="flex gap-1 p-1 bg-card/30 border border-border/40 rounded-lg w-fit">
+          <button
+            onClick={() => setActiveTab("documents")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "documents"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <FolderLock className="h-3.5 w-3.5" />
+              My Documents
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab("shares")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "shares"
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <Share2 className="h-3.5 w-3.5" />
+              Manage Shares
+            </span>
+          </button>
+        </div>
+
         {/* Stats */}
         <StatsBar />
 
-        {/* Filters */}
-        <Card className="bg-card/30 border-border/40">
-          <CardContent className="p-4">
-            <div className="flex flex-wrap gap-3 items-center">
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by filename…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 h-9"
-                />
-              </div>
+        {/* Filters — only shown in Documents tab */}
+        {activeTab === "documents" && (
+          <>
+            {/* Filters */}
+            <Card className="bg-card/30 border-border/40">
+              <CardContent className="p-4">
+                <div className="flex flex-wrap gap-3 items-center">
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by filename…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="pl-9 h-9"
+                    />
+                  </div>
 
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-[200px] h-9">
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {DOCUMENT_CATEGORIES.map(c => (
-                    <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger className="w-[200px] h-9">
+                      <SelectValue placeholder="All categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All categories</SelectItem>
+                      {DOCUMENT_CATEGORIES.map(c => (
+                        <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "revoked")}>
-                <SelectTrigger className="w-[130px] h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="revoked">Revoked</SelectItem>
-                </SelectContent>
-              </Select>
+                  <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as "active" | "revoked")}>
+                    <SelectTrigger className="w-[130px] h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="revoked">Revoked</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-              <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-9">
-                <RefreshCw className="h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Document list */}
-        <Card className="bg-card/30 border-border/40">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">
-              {statusFilter === "active" ? "Active Documents" : "Revoked Documents"}
-              {filteredDocs.length > 0 && (
-                <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  ({filteredDocs.length})
-                </span>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {isLoading ? (
-              [...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)
-            ) : filteredDocs.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 py-12 text-center">
-                <FolderLock className="h-12 w-12 text-muted-foreground/30" />
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">No documents found</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {statusFilter === "active"
-                      ? "Upload your first document to get started."
-                      : "No revoked documents in this vault."}
-                  </p>
-                </div>
-                {statusFilter === "active" && (
-                  <Button size="sm" onClick={() => setUploadOpen(true)}>
-                    <Plus className="h-4 w-4 mr-1.5" />
-                    Upload Document
+                  <Button variant="ghost" size="sm" onClick={handleRefresh} className="h-9">
+                    <RefreshCw className="h-4 w-4" />
                   </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Document list */}
+            <Card className="bg-card/30 border-border/40">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  {statusFilter === "active" ? "Active Documents" : "Revoked Documents"}
+                  {filteredDocs.length > 0 && (
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      ({filteredDocs.length})
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {isLoading ? (
+                  [...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)
+                ) : filteredDocs.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-12 text-center">
+                    <FolderLock className="h-12 w-12 text-muted-foreground/30" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">No documents found</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {statusFilter === "active"
+                          ? "Upload your first document to get started."
+                          : "No revoked documents in this vault."}
+                      </p>
+                    </div>
+                    {statusFilter === "active" && (
+                      <Button size="sm" onClick={() => setUploadOpen(true)}>
+                        <Plus className="h-4 w-4 mr-1.5" />
+                        Upload Document
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  filteredDocs.map(doc => (
+                    <DocumentRow
+                      key={doc.id}
+                      doc={doc}
+                      onRevoke={(id, name) => setRevokeTarget({ id, name })}
+                      onShare={(id, name) => setShareTarget({ id, name })}
+                      onPreview={handlePreview}
+                    />
+                  ))
                 )}
-              </div>
-            ) : (
-              filteredDocs.map(doc => (
-                <DocumentRow
-                  key={doc.id}
-                  doc={doc}
-                  onRevoke={(id, name) => setRevokeTarget({ id, name })}
-                  onShare={(id, name) => setShareTarget({ id, name })}
-                />
-              ))
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {activeTab === "shares" && (
+          <ManageSharesTab
+            docs={(docs ?? []).map(d => ({ id: d.id, filename: d.filename, mimeType: d.mimeType }))}
+          />
+        )}
       </div>
+
+      <PreviewDrawer
+        doc={previewTarget}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+      />
 
       <UploadDialog
         open={uploadOpen}
