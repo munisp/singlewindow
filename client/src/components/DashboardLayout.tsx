@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useOnboardingRedirect } from "@/hooks/useOnboardingRedirect";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -187,6 +188,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ClipboardCheck, label: "Audit Engine", path: "/app/admin/audit-engine" },
           { icon: Code2, label: "Developer Portal", path: "/app/developer" },
           { icon: Code2, label: "API Explorer", path: "/app/developer/api-explorer" },
+          { icon: Package, label: "SDK Generator", path: "/app/developer/sdk" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },
@@ -376,6 +378,10 @@ function DashboardLayoutContent({
 }) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
+  // Sprint 69: first-login redirect to onboarding wizard
+  const { hasCompletedOnboarding } = useOnboardingRedirect();
+  const isTraderRole = user?.role === "user";
+  const showOnboardingBanner = isTraderRole && !hasCompletedOnboarding && location !== "/app/onboarding";
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
@@ -556,6 +562,24 @@ function DashboardLayoutContent({
                 )}
               </button>
             </div>
+          </div>
+        )}
+        {/* Sprint 69: Incomplete onboarding banner */}
+        {showOnboardingBanner && (
+          <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle className="h-4 w-4 text-amber-500 shrink-0" />
+              <span className="text-amber-700 dark:text-amber-400 font-medium">Complete your account setup</span>
+              <span className="text-muted-foreground hidden sm:inline">— finish the onboarding wizard to unlock all features.</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 h-7 text-xs border-amber-500/50 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+              onClick={() => setLocation("/app/onboarding")}
+            >
+              Continue Setup
+            </Button>
           </div>
         )}
         <main className="flex-1 p-4 md:p-6">{children}</main>

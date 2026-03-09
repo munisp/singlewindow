@@ -1370,3 +1370,30 @@
 - [x] Spec includes: all public and protected procedures, request/response schemas, auth requirements
 - [x] DashboardLayout: API Explorer nav item added to admin Reference section
 - [x] Vitest tests for spec generation and endpoint coverage validation
+
+## Sprint 69 — First-Login Redirect to Onboarding Wizard
+- [x] tRPC: hasCompletedOnboarding flag added to auth.me response (checks onboarding_progress.completedAt)
+- [x] useOnboardingRedirect hook: auto-redirects non-admin users with incomplete onboarding to /app/onboarding
+- [x] DashboardLayout: integrated hook + "Complete Setup" banner with link to /app/onboarding
+- [x] Onboarding completion: completedAt set on step 5 completion, redirect to /app/trader
+- [x] Vitest tests for redirect logic and onboarding status detection (6 tests)
+
+## Sprint 70 — Cargo Tracking WebSocket Real-Time Push
+- [x] Server: broadcastVesselUpdate() added to wsServer.ts; subscribe_cargo / unsubscribe_cargo message protocol
+- [x] getLiveVesselsData() exported from cargoTracking router for server-side broadcast
+- [x] Server: 15-second setInterval in index.ts broadcasts vessel positions to all cargo subscribers
+- [x] useVesselWebSocket hook: auto-reconnect, max 5 attempts, fallback signal
+- [x] CargoTrackingMap UI: WebSocket-first with 30s polling fallback; merges WS position updates
+- [x] Connection status badge: Live (green) / Reconnecting (yellow) / Polling (blue) / Connecting (grey)
+- [x] Drift simulation capped at 120 ticks (1 hour) to keep positions geographically valid
+- [x] Vitest tests for WebSocket message format and vessel data (10 tests)
+
+## Sprint 71 — OpenAPI SDK Generator Page
+- [x] SdkGenerator page: /app/developer/sdk — TypeScript + Python + Endpoints tabs
+- [x] TypeScript SDK: fetch-based TradeGatewayClient class, zero dependencies, typed methods per endpoint
+- [x] Python SDK: requests-based TradeGatewayClient class + requirements.txt download
+- [x] Copy-to-clipboard for both quick-start snippets and full SDK source
+- [x] Spec summary cards: API version, endpoint count, tag groups, auth-required count
+- [x] Endpoints tab: grouped by tag with method badge, auth badge, operationId, and summary
+- [x] DashboardLayout: SDK Generator nav item added to admin Reference section
+- [x] Vitest tests for SDK generation logic and endpoint extraction (9 tests)

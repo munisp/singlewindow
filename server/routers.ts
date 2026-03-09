@@ -58,7 +58,26 @@ export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(async (opts) => {
+      const user = opts.ctx.user;
+      if (!user) return null;
+      // Sprint 69: check onboarding completion status
+      try {
+        const db = await (await import("./db")).getDb();
+        if (!db) return { ...user, hasCompletedOnboarding: false };
+        const { onboardingProgress } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const [record] = await db
+          .select({ completedAt: onboardingProgress.completedAt })
+          .from(onboardingProgress)
+          .where(eq(onboardingProgress.userId, user.id))
+          .limit(1);
+        const hasCompletedOnboarding = !!(record?.completedAt);
+        return { ...user, hasCompletedOnboarding };
+      } catch {
+        return { ...user, hasCompletedOnboarding: false };
+      }
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });

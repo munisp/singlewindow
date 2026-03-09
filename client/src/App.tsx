@@ -75,6 +75,7 @@ const CargoTrackingMap = lazy(() => import('./pages/app/CargoTrackingMap'));
 const TraderOnboarding = lazy(() => import('./pages/app/TraderOnboarding'));
 // Sprint 68 — OpenAPI Explorer
 const ApiExplorer = lazy(() => import('./pages/app/ApiExplorer'));
+const SdkGenerator = lazy(() => import('./pages/app/SdkGenerator'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -327,6 +328,9 @@ function Router() {
       {/* Sprint 68 — OpenAPI Explorer */}
       <Route path="/app/developer/api-explorer">
         <Suspense fallback={<LazyFallback />}><ApiExplorer /></Suspense>
+      </Route>
+      <Route path="/app/developer/sdk">
+        <Suspense fallback={<LazyFallback />}><SdkGenerator /></Suspense>
       </Route>
 
       {/* 404 */}

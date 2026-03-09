@@ -27,12 +27,65 @@ export interface WsUnreadCountEvent {
   payload: { count: number };
 }
 
-export type WsEvent = WsNotificationEvent | WsUnreadCountEvent;
+// Sprint 70 — Cargo Tracking WebSocket Push
+export interface WsVesselUpdateEvent {
+  type: "vessel_update";
+  payload: {
+    vessels: Array<{
+      mmsi: string;
+      vesselName: string;
+      lat: number;
+      lon: number;
+      speed: number;
+      heading: number;
+      status: string;
+      riskFlag: "green" | "amber" | "red";
+      lastUpdate: string;
+    }>;
+    totalCount: number;
+    lastRefresh: string;
+  };
+}
+
+export interface WsCargoConnectionEvent {
+  type: "cargo_connected";
+  payload: { message: string; refreshIntervalMs: number };
+}
+
+export type WsCargoEvent = WsVesselUpdateEvent | WsCargoConnectionEvent;
+
+export type WsEvent = WsNotificationEvent | WsUnreadCountEvent | WsVesselUpdateEvent | WsCargoConnectionEvent;
 
 // ─── Connection Registry ──────────────────────────────────────────────────────
 
 // Map of userId → Set of open WebSocket connections
 const connections = new Map<number, Set<WebSocket>>();
+
+// Sprint 70: Cargo tracking subscribers (anonymous — no auth required for public vessel data)
+const cargoSubscribers = new Set<WebSocket>();
+
+export function registerCargoSubscriber(ws: WebSocket): void {
+  cargoSubscribers.add(ws);
+}
+
+export function removeCargoSubscriber(ws: WebSocket): void {
+  cargoSubscribers.delete(ws);
+}
+
+export function getCargoSubscriberCount(): number {
+  return cargoSubscribers.size;
+}
+
+export function broadcastVesselUpdate(payload: WsVesselUpdateEvent["payload"]): void {
+  const message = JSON.stringify({ type: "vessel_update", payload });
+  cargoSubscribers.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(message);
+    } else {
+      cargoSubscribers.delete(ws);
+    }
+  });
+}
 
 export function registerConnection(userId: number, ws: WebSocket): void {
   if (!connections.has(userId)) {
@@ -130,6 +183,17 @@ export function setupWebSocketServer(httpServer: Server): WebSocketServer {
         if (msg.type === "ping") {
           ws.send(JSON.stringify({ type: "pong" }));
         }
+        // Sprint 70: subscribe to cargo tracking updates
+        if (msg.type === "subscribe_cargo") {
+          registerCargoSubscriber(ws);
+          ws.send(JSON.stringify({
+            type: "cargo_connected",
+            payload: { message: "Subscribed to live vessel position updates", refreshIntervalMs: 15000 },
+          }));
+        }
+        if (msg.type === "unsubscribe_cargo") {
+          removeCargoSubscriber(ws);
+        }
       } catch {
         // Ignore malformed messages
       }
@@ -139,12 +203,15 @@ export function setupWebSocketServer(httpServer: Server): WebSocketServer {
       if (userId !== null) {
         removeConnection(userId, ws);
       }
+      // Sprint 70: clean up cargo subscriber
+      removeCargoSubscriber(ws);
     });
 
     ws.on("error", () => {
       if (userId !== null) {
         removeConnection(userId, ws);
       }
+      removeCargoSubscriber(ws);
     });
   });
 

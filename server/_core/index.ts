@@ -12,7 +12,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
-import { setupWebSocketServer } from "./wsServer";
+import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // General tRPC API: 200 requests per minute per IP
@@ -666,6 +666,23 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // Sprint 70: Broadcast live vessel positions every 15 seconds to cargo tracking subscribers
+  setInterval(async () => {
+    try {
+      const { getLiveVesselsData } = await import("../routers/cargoTracking");
+      const vessels = await getLiveVesselsData();
+      if (vessels.length > 0) {
+        broadcastVesselUpdate({
+          vessels,
+          totalCount: vessels.length,
+          lastRefresh: new Date().toISOString(),
+        });
+      }
+    } catch {
+      // Silently skip if DB is unavailable
+    }
+  }, 15_000);
 }
 
 startServer().catch(console.error);

@@ -15,8 +15,9 @@ import { Separator } from "@/components/ui/separator";
 import {
   Anchor, Ship, Navigation, AlertTriangle, RefreshCw,
   Clock, MapPin, Gauge, Compass, Package, Radio,
-  TrendingUp, Filter, X, ChevronRight, Activity,
+  TrendingUp, Filter, X, ChevronRight, Activity, Wifi, WifiOff,
 } from "lucide-react";
+import { useVesselWebSocket } from "@/hooks/useVesselWebSocket";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -110,11 +111,18 @@ export default function CargoTrackingMap() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [mapReady, setMapReady] = useState(false);
 
-  // ─── DATA FETCHING ──────────────────────────────────────────────────────────
+  // ─── SPRINT 70: WebSocket real-time push ─────────────────────────────────────
+
+  const { vessels: wsVessels, connectionStatus, lastRefresh: wsLastRefresh } = useVesselWebSocket(true);
+  // Use WebSocket data when live, fall back to tRPC polling otherwise
+  const isWsLive = connectionStatus === "live";
+
+  // ─── DATA FETCHING (polling fallback) ────────────────────────────────────────────────
 
   const { data: vesselData, refetch: refetchVessels } = trpc.cargoTracking.getLiveVessels.useQuery(
     { riskFilter, statusFilter },
-    { refetchInterval: 30000 }
+    // Only poll when WebSocket is not live
+    { refetchInterval: isWsLive ? false : 30000 }
   );
 
   const { data: statsData } = trpc.cargoTracking.getVesselStats.useQuery(undefined, {
@@ -246,13 +254,30 @@ export default function CargoTrackingMap() {
     }
   }, []);
 
-  // ─── EFFECTS ────────────────────────────────────────────────────────────────
+  //   // ─── EFFECTS ────────────────────────────────────────────────────────
 
+  // Sprint 70: update markers from WebSocket when live
   useEffect(() => {
-    if (mapReady && vesselData?.vessels) {
+    if (mapReady && isWsLive && wsVessels.length > 0) {
+      // Merge WS position updates into the full vessel objects from tRPC
+      const fullVessels = (vesselData?.vessels ?? []) as Vessel[];
+      const wsMap = new Map(wsVessels.map(v => [v.mmsi, v]));
+      const merged = fullVessels.map(v => {
+        const ws = wsMap.get(v.mmsi);
+        if (!ws) return v;
+        return { ...v, lat: ws.lat, lon: ws.lon, speed: ws.speed, heading: ws.heading, lastUpdate: ws.lastUpdate };
+      });
+      updateMarkers(merged.length > 0 ? merged : fullVessels);
+      if (wsLastRefresh) setLastRefresh(new Date(wsLastRefresh));
+    }
+  }, [mapReady, isWsLive, wsVessels, vesselData, wsLastRefresh, updateMarkers]);
+
+  // Fallback: update markers from tRPC polling when WS is not live
+  useEffect(() => {
+    if (mapReady && !isWsLive && vesselData?.vessels) {
       updateMarkers(vesselData.vessels as Vessel[]);
     }
-  }, [mapReady, vesselData, updateMarkers]);
+  }, [mapReady, isWsLive, vesselData, updateMarkers]);
 
   useEffect(() => {
     if (selectedVessel && routeData?.waypoints && mapReady) {
@@ -322,8 +347,28 @@ export default function CargoTrackingMap() {
             </SelectContent>
           </Select>
           <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-            <Activity className="h-3 w-3 text-green-400 animate-pulse" />
-            <span>Live — refreshes every 30s</span>
+            {/* Sprint 70: WebSocket connection status badge */}
+            {connectionStatus === "live" ? (
+              <>
+                <Wifi className="h-3 w-3 text-green-400" />
+                <span className="text-green-500 font-medium">Live</span>
+              </>
+            ) : connectionStatus === "reconnecting" ? (
+              <>
+                <WifiOff className="h-3 w-3 text-yellow-400 animate-pulse" />
+                <span className="text-yellow-500">Reconnecting…</span>
+              </>
+            ) : connectionStatus === "fallback" ? (
+              <>
+                <Activity className="h-3 w-3 text-blue-400 animate-pulse" />
+                <span>Polling — 30s</span>
+              </>
+            ) : (
+              <>
+                <Activity className="h-3 w-3 text-muted-foreground animate-pulse" />
+                <span>Connecting…</span>
+              </>
+            )}
             <span>·</span>
             <span>Last: {formatTime(lastRefresh.toISOString())}</span>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetchVessels()}>

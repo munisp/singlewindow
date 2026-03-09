@@ -319,7 +319,42 @@ const PORT_ARRIVALS = [
   { vesselName: "NILE CARRIER", mmsi: "636098901", eta: new Date(Date.now() + 8 * 3600000).toISOString(), berth: "Berth 5 (Bulk)", cargoType: "Fertiliser", teu: null, riskFlag: "amber" as RiskFlag },
 ];
 
-// ─── ROUTER ───────────────────────────────────────────────────────────────────
+// ─── ROUTER// ─── SHARED DATA HELPER (used by Sprint 70 WS broadcast) ───────────────────────
+
+/**
+ * getLiveVesselsData — returns the current drifted vessel positions.
+ * Exported so the WS broadcast interval in server/_core/index.ts can call it directly.
+ */
+export function getLiveVesselsData(): Array<{
+  mmsi: string;
+  vesselName: string;
+  lat: number;
+  lon: number;
+  speed: number;
+  heading: number;
+  status: string;
+  riskFlag: "green" | "amber" | "red";
+  lastUpdate: string;
+}> {
+  // Cap drift at 120 ticks (1 hour of 30-second intervals) so positions stay near origin
+  const tick = Math.floor(Date.now() / 30000) % 120;
+  return BASE_VESSELS.map(v => {
+    const drifted = driftVessel(v, tick * 0.5);
+    return {
+      mmsi: drifted.mmsi,
+      vesselName: drifted.vesselName,
+      lat: drifted.lat,
+      lon: drifted.lon,
+      speed: drifted.speed,
+      heading: drifted.heading,
+      status: drifted.status,
+      riskFlag: (drifted.riskFlag ?? "green") as "green" | "amber" | "red",
+      lastUpdate: drifted.lastUpdate,
+    };
+  });
+}
+
+// ─── ROUTER ──────────────────────────────────────────────────────
 
 export const cargoTrackingRouter = router({
   /**
@@ -332,8 +367,8 @@ export const cargoTrackingRouter = router({
       statusFilter: z.enum(["all", "underway", "moored", "anchored"]).optional().default("all"),
     }))
     .query(({ input }) => {
-      // Simulate 30-second drift from base positions
-      const tick = Math.floor(Date.now() / 30000); // changes every 30 s
+      // Simulate 30-second drift from base positions (capped at 120 ticks = 1 hour)
+      const tick = Math.floor(Date.now() / 30000) % 120;
       const vessels = BASE_VESSELS.map(v => driftVessel(v, tick * 0.5));
 
       let filtered = vessels;
