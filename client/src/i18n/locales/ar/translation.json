@@ -1,0 +1,103 @@
+{
+  "app": {
+    "name": "TradeGateway™ NGSWTP",
+    "tagline": "منصة النافذة الواحدة الوطنية للتجارة"
+  },
+  "nav": {
+    "overview": "نظرة عامة",
+    "declarations": "التصريحات",
+    "payments": "المدفوعات",
+    "profile": "الملف الشخصي",
+    "logout": "تسجيل الخروج",
+    "login": "تسجيل الدخول",
+    "notifications": "الإشعارات"
+  },
+  "status": {
+    "draft": "مسودة",
+    "submitted": "مُقدَّم",
+    "under_assessment": "قيد التقييم",
+    "docs_required": "مطلوب مستندات",
+    "payment_pending": "في انتظار الدفع",
+    "payment_confirmed": "تم تأكيد الدفع",
+    "under_examination": "قيد الفحص",
+    "examination_complete": "اكتمل الفحص",
+    "cleared": "تم التخليص",
+    "rejected": "مرفوض",
+    "cancelled": "ملغى"
+  },
+  "declaration": {
+    "new": "تصريح جديد",
+    "list": "تصريحاتي",
+    "detail": "تفاصيل التصريح",
+    "hsCode": "رمز النظام المنسق",
+    "description": "الوصف",
+    "originCountry": "بلد المنشأ",
+    "value": "القيمة المُصرَّح بها",
+    "weight": "الوزن (كجم)",
+    "currency": "العملة",
+    "submit": "تقديم التصريح",
+    "save": "حفظ المسودة",
+    "cancel": "إلغاء"
+  },
+  "risk": {
+    "green": "المسار الأخضر",
+    "yellow": "المسار الأصفر",
+    "red": "المسار الأحمر",
+    "score": "درجة المخاطر",
+    "level": "مستوى المخاطر"
+  },
+  "aeo": {
+    "title": "المشغل الاقتصادي المعتمد",
+    "tier": {
+      "none": "غير مؤهل",
+      "standard": "معتمد قياسي",
+      "silver": "معتمد فضي",
+      "gold": "معتمد ذهبي"
+    }
+  },
+  "common": {
+    "loading": "جارٍ التحميل…",
+    "error": "حدث خطأ",
+    "retry": "إعادة المحاولة",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "view": "عرض",
+    "search": "بحث",
+    "filter": "تصفية",
+    "export": "تصدير",
+    "print": "طباعة",
+    "close": "إغلاق",
+    "back": "رجوع",
+    "next": "التالي",
+    "previous": "السابق",
+    "submit": "إرسال",
+    "approve": "موافقة",
+    "reject": "رفض",
+    "pending": "معلق",
+    "active": "نشط",
+    "inactive": "غير نشط",
+    "yes": "نعم",
+    "no": "لا",
+    "total": "الإجمالي",
+    "date": "التاريخ",
+    "amount": "المبلغ",
+    "status": "الحالة",
+    "actions": "الإجراءات",
+    "details": "التفاصيل",
+    "name": "الاسم",
+    "email": "البريد الإلكتروني",
+    "phone": "الهاتف",
+    "address": "العنوان",
+    "country": "الدولة",
+    "language": "اللغة"
+  },
+  "language": {
+    "en": "English",
+    "fr": "Français",
+    "ar": "العربية",
+    "select": "اختر اللغة"
+  }
+}

@@ -1,0 +1,344 @@
+/**
+ * Sprint 61 — Trader Performance Scorecard
+ * Clearance time percentile, rejection rate trend, AEO tier status, 12-month compliance history.
+ */
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import DashboardLayout from "@/components/DashboardLayout";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Cell, ReferenceLine,
+} from "recharts";
+import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target } from "lucide-react";
+
+const TIER_COLORS: Record<string, string> = {
+  gold: "#D4A017",
+  silver: "#9CA3AF",
+  standard: "#3B82F6",
+  none: "#6B7280",
+};
+
+const TIER_LABELS: Record<string, string> = {
+  gold: "Gold AEO",
+  silver: "Silver AEO",
+  standard: "Standard AEO",
+  none: "Not Eligible",
+};
+
+function StatCard({ title, value, sub, icon: Icon, color }: {
+  title: string; value: string | number; sub?: string;
+  icon: React.ComponentType<{ className?: string }>; color: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p className="text-2xl font-bold mt-1" style={{ color }}>{value}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+          </div>
+          <div className="p-2 rounded-lg" style={{ backgroundColor: `${color}20` }}>
+            <span style={{ color }}><Icon className="w-5 h-5" /></span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function TraderScorecard() {
+  const { user } = useAuth();
+  const { data: scorecard, isLoading: loadingScorecard } = trpc.traderScorecard.getScorecard.useQuery();
+  const { data: percentile } = trpc.traderScorecard.getClearancePercentile.useQuery({});
+  const { data: trendData } = trpc.traderScorecard.getRejectionTrend.useQuery();
+  const { data: benchmark } = trpc.traderScorecard.getBenchmark.useQuery();
+
+  const summary = scorecard?.summary;
+  const tier = summary?.aeoTier ?? "none";
+  const tierColor = TIER_COLORS[tier];
+
+  const historyChartData = scorecard?.complianceHistory?.map((h) => ({
+    month: h.month.slice(5), // "MM"
+    cleared: h.cleared,
+    rejected: h.rejected,
+    underReview: h.underReview,
+  })) ?? [];
+
+  const trendChartData = trendData?.trend?.map((t) => ({
+    month: t.month.slice(5),
+    rate: t.rate,
+    delta: t.delta,
+  })) ?? [];
+
+  return (
+    <DashboardLayout>
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Performance Scorecard</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Your trade compliance metrics for the last 12 months
+            </p>
+          </div>
+          <Badge
+            className="px-4 py-2 text-base font-semibold"
+            style={{ backgroundColor: tierColor, color: "#fff" }}
+          >
+            <Award className="w-4 h-4 mr-2 inline" />
+            {TIER_LABELS[tier]}
+          </Badge>
+        </div>
+
+        {/* Compliance Score */}
+        {summary && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Overall Compliance Score</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-6">
+                <div className="text-5xl font-bold" style={{ color: tierColor }}>
+                  {summary.complianceScore}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <Progress value={summary.complianceScore} className="h-3" />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>0 — Not Eligible</span>
+                    <span>60 — Standard</span>
+                    <span>75 — Silver</span>
+                    <span>90 — Gold</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* KPI Cards */}
+        {loadingScorecard ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <Card key={i}><CardContent className="pt-6 h-24 animate-pulse bg-muted rounded" /></Card>
+            ))}
+          </div>
+        ) : summary ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <StatCard
+              title="Total Declarations"
+              value={summary.total}
+              sub="Last 12 months"
+              icon={FileText}
+              color="#3B82F6"
+            />
+            <StatCard
+              title="Clearance Rate"
+              value={`${summary.total > 0 ? Math.round((summary.cleared / summary.total) * 100) : 0}%`}
+              sub={`${summary.cleared} cleared`}
+              icon={CheckCircle}
+              color="#10B981"
+            />
+            <StatCard
+              title="Rejection Rate"
+              value={`${summary.rejectionRate}%`}
+              sub={`${summary.rejected} rejected`}
+              icon={AlertTriangle}
+              color={summary.rejectionRate > 10 ? "#EF4444" : summary.rejectionRate > 5 ? "#F59E0B" : "#10B981"}
+            />
+            <StatCard
+              title="Avg Clearance Time"
+              value={`${summary.avgClearanceHours}h`}
+              sub="Per declaration"
+              icon={Clock}
+              color="#8B5CF6"
+            />
+          </div>
+        ) : null}
+
+        {/* Clearance Percentile */}
+        {percentile && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-primary" />
+                Clearance Speed Percentile
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-6">
+                <div className="text-center">
+                  <div className="text-4xl font-bold text-primary">{percentile.percentile}th</div>
+                  <div className="text-sm text-muted-foreground mt-1">percentile</div>
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Progress value={percentile.percentile} className="h-4" />
+                  <p className="text-sm text-muted-foreground">
+                    Your average clearance time of <strong>{percentile.avgHours}h</strong> is faster than{" "}
+                    <strong>{percentile.percentile}%</strong> of {percentile.populationSize} traders on the platform.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Tabs defaultValue="history">
+          <TabsList>
+            <TabsTrigger value="history">12-Month History</TabsTrigger>
+            <TabsTrigger value="rejection">Rejection Trend</TabsTrigger>
+            <TabsTrigger value="benchmark">Platform Benchmark</TabsTrigger>
+          </TabsList>
+
+          {/* 12-Month Compliance History */}
+          <TabsContent value="history">
+            <Card>
+              <CardHeader>
+                <CardTitle>Declaration Outcomes by Month</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {historyChartData.length === 0 ? (
+                  <div className="h-48 flex items-center justify-center text-muted-foreground">
+                    No declaration data available for the last 12 months.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={historyChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="month" tick={{ fill: "#9CA3AF", fontSize: 12 }} />
+                      <YAxis tick={{ fill: "#9CA3AF", fontSize: 12 }} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "8px" }}
+                        labelStyle={{ color: "#F9FAFB" }}
+                      />
+                      <Bar dataKey="cleared" name="Cleared" stackId="a" fill="#10B981" />
+                      <Bar dataKey="underReview" name="Under Review" stackId="a" fill="#F59E0B" />
+                      <Bar dataKey="rejected" name="Rejected" stackId="a" fill="#EF4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Rejection Rate Trend */}
+          <TabsContent value="rejection">
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Rejection Rate (%)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {trendChartData.length === 0 ? (
+                  <div className="h-48 flex items-center justify-center text-muted-foreground">
+                    No rejection data available.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={trendChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="month" tick={{ fill: "#9CA3AF", fontSize: 12 }} />
+                      <YAxis tick={{ fill: "#9CA3AF", fontSize: 12 }} unit="%" />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "8px" }}
+                        formatter={(v: number) => [`${v}%`, "Rejection Rate"]}
+                      />
+                      <ReferenceLine y={10} stroke="#EF4444" strokeDasharray="4 4" label={{ value: "10% threshold", fill: "#EF4444", fontSize: 11 }} />
+                      <Line type="monotone" dataKey="rate" stroke="#F59E0B" strokeWidth={2} dot={{ fill: "#F59E0B", r: 4 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Platform Benchmark */}
+          <TabsContent value="benchmark">
+            <Card>
+              <CardHeader>
+                <CardTitle>You vs Platform Average (Last 3 Months)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!benchmark ? (
+                  <div className="h-48 flex items-center justify-center text-muted-foreground">Loading benchmark…</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Clearance Rate */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium">Clearance Rate</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span>You</span>
+                            <span className="font-semibold text-green-400">{benchmark.trader?.clearanceRate ?? 0}%</span>
+                          </div>
+                          <Progress value={benchmark.trader?.clearanceRate ?? 0} className="h-3" />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span>Platform Avg</span>
+                            <span className="font-semibold text-muted-foreground">{benchmark.platform?.clearanceRate ?? 0}%</span>
+                          </div>
+                          <Progress value={benchmark.platform?.clearanceRate ?? 0} className="h-3 opacity-50" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Rejection Rate */}
+                    <div className="space-y-3">
+                      <h4 className="font-medium">Rejection Rate</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span>You</span>
+                            <span className={`font-semibold ${(benchmark.trader?.rejectionRate ?? 0) > (benchmark.platform?.rejectionRate ?? 0) ? "text-red-400" : "text-green-400"}`}>
+                              {benchmark.trader?.rejectionRate ?? 0}%
+                            </span>
+                          </div>
+                          <Progress value={benchmark.trader?.rejectionRate ?? 0} className="h-3" />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span>Platform Avg</span>
+                            <span className="font-semibold text-muted-foreground">{benchmark.platform?.rejectionRate ?? 0}%</span>
+                          </div>
+                          <Progress value={benchmark.platform?.rejectionRate ?? 0} className="h-3 opacity-50" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Summary */}
+                    <div className="md:col-span-2 p-4 rounded-lg bg-muted/30 border">
+                      <div className="flex items-start gap-3">
+                        {(benchmark.trader?.clearanceRate ?? 0) >= (benchmark.platform?.clearanceRate ?? 0) ? (
+                          <TrendingUp className="w-5 h-5 text-green-400 mt-0.5 shrink-0" />
+                        ) : (
+                          <TrendingDown className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+                        )}
+                        <p className="text-sm text-muted-foreground">
+                          Your clearance rate of <strong>{benchmark.trader?.clearanceRate ?? 0}%</strong> is{" "}
+                          {(benchmark.trader?.clearanceRate ?? 0) >= (benchmark.platform?.clearanceRate ?? 0) ? (
+                            <span className="text-green-400">above</span>
+                          ) : (
+                            <span className="text-red-400">below</span>
+                          )}{" "}
+                          the platform average of <strong>{benchmark.platform?.clearanceRate ?? 0}%</strong>.{" "}
+                          {(benchmark.trader?.rejectionRate ?? 0) <= (benchmark.platform?.rejectionRate ?? 0)
+                            ? "Your rejection rate is also better than average — keep it up!"
+                            : "Consider reviewing your declaration accuracy to reduce rejections."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </DashboardLayout>
+  );
+}

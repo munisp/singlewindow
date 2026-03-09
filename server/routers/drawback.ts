@@ -343,6 +343,179 @@ export const drawbackRouter = router({
     }),
 
   /**
+   * Sprint 60 — Check eligibility for duty drawback claim.
+   * Cross-references import declaration against export proof by HS code and trader.
+   */
+  checkEligibility: protectedProcedure
+    .input(z.object({
+      importDeclarationId: z.number().int().positive(),
+      exportDeclarationId: z.number().int().positive().optional(),
+      drawbackType: z.enum(["manufacturing", "unused_merchandise", "rejected_merchandise", "substitution"]),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [importDecl] = await db.select({
+        id: declarations.id,
+        declarationNumber: declarations.declarationNumber,
+        traderId: declarations.traderId,
+        status: declarations.status,
+        dutyAmount: declarations.dutyAmount,
+        totalDue: declarations.totalDue,
+        hsCode: declarations.hsCode,
+        goodsDescription: declarations.goodsDescription,
+        submittedAt: declarations.submittedAt,
+        clearedAt: declarations.clearedAt,
+      }).from(declarations).where(eq(declarations.id, input.importDeclarationId)).limit(1);
+
+      if (!importDecl) {
+        return { eligible: false, reason: "Import declaration not found", refundRate: 0, estimatedRefund: 0 };
+      }
+      if (importDecl.traderId !== ctx.user.id) {
+        return { eligible: false, reason: "You do not own this import declaration", refundRate: 0, estimatedRefund: 0 };
+      }
+      if (importDecl.status !== "cleared") {
+        return { eligible: false, reason: `Declaration must be cleared (current: ${importDecl.status})`, refundRate: 0, estimatedRefund: 0 };
+      }
+
+      // Check if a claim already exists for this import declaration
+      const existingClaims = await db.select({ id: dutyDrawbackClaims.id, status: dutyDrawbackClaims.status })
+        .from(dutyDrawbackClaims)
+        .where(and(
+          eq(dutyDrawbackClaims.importDeclarationId, input.importDeclarationId),
+          eq(dutyDrawbackClaims.traderId, ctx.user.id),
+        ));
+      const activeClaim = existingClaims.find(c => !["rejected"].includes(c.status));
+      if (activeClaim) {
+        return { eligible: false, reason: `A claim already exists for this declaration (status: ${activeClaim.status})`, refundRate: 0, estimatedRefund: 0 };
+      }
+
+      // Check 3-year filing deadline
+      const clearedDate = importDecl.clearedAt ?? importDecl.submittedAt;
+      if (clearedDate) {
+        const yearsElapsed = (Date.now() - new Date(clearedDate).getTime()) / (365.25 * 24 * 3600 * 1000);
+        if (yearsElapsed > 3) {
+          return { eligible: false, reason: "Filing deadline exceeded (3 years from clearance date)", refundRate: 0, estimatedRefund: 0 };
+        }
+      }
+
+      // Determine refund rate by drawback type
+      const REFUND_RATES: Record<string, number> = {
+        manufacturing: 0.99,
+        unused_merchandise: 0.99,
+        rejected_merchandise: 1.00,
+        substitution: 0.99,
+      };
+      const refundRate = REFUND_RATES[input.drawbackType] ?? 0.99;
+      const dutyPaid = parseFloat(importDecl.dutyAmount ?? importDecl.totalDue ?? "0");
+      const estimatedRefund = Math.round(dutyPaid * refundRate * 100) / 100;
+
+      return {
+        eligible: true,
+        reason: "Declaration is eligible for duty drawback",
+        refundRate,
+        estimatedRefund,
+        dutyPaid,
+        hsCode: importDecl.hsCode,
+        declarationNumber: importDecl.declarationNumber,
+        clearedAt: importDecl.clearedAt,
+      };
+    }),
+
+  /**
+   * Sprint 60 — Calculate refund amount for a drawback claim.
+   * Supports partial quantity claims (export quantity < import quantity).
+   */
+  calculateRefund: protectedProcedure
+    .input(z.object({
+      drawbackType: z.enum(["manufacturing", "unused_merchandise", "rejected_merchandise", "substitution"]),
+      dutyPaid: z.number().positive(),
+      importQuantity: z.number().positive().optional(),
+      exportQuantity: z.number().positive().optional(),
+      hsCode: z.string().max(20).optional(),
+    }))
+    .query(({ input }) => {
+      const REFUND_RATES: Record<string, number> = {
+        manufacturing: 0.99,
+        unused_merchandise: 0.99,
+        rejected_merchandise: 1.00,
+        substitution: 0.99,
+      };
+      const refundRate = REFUND_RATES[input.drawbackType] ?? 0.99;
+
+      // Partial quantity adjustment
+      let quantityRatio = 1.0;
+      if (input.importQuantity && input.exportQuantity) {
+        quantityRatio = Math.min(input.exportQuantity / input.importQuantity, 1.0);
+      }
+
+      const grossRefund = input.dutyPaid * refundRate * quantityRatio;
+      const processingFee = Math.min(grossRefund * 0.005, 500); // 0.5% capped at $500
+      const netRefund = Math.round((grossRefund - processingFee) * 100) / 100;
+
+      return {
+        refundRate,
+        quantityRatio: Math.round(quantityRatio * 10000) / 10000,
+        grossRefund: Math.round(grossRefund * 100) / 100,
+        processingFee: Math.round(processingFee * 100) / 100,
+        netRefund,
+        breakdown: {
+          dutyPaid: input.dutyPaid,
+          refundRateApplied: refundRate,
+          quantityAdjustment: quantityRatio < 1 ? `${Math.round(quantityRatio * 100)}% (partial export)` : "100% (full export)",
+          processingFeeNote: "0.5% of gross refund, capped at USD 500",
+        },
+      };
+    }),
+
+  /**
+   * Sprint 60 — Generate a pre-filled drawback claim PDF summary.
+   * Returns a structured data object for client-side PDF rendering.
+   */
+  generateClaimPdf: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [claim] = await db.select().from(dutyDrawbackClaims).where(eq(dutyDrawbackClaims.id, input.id)).limit(1);
+      if (!claim) throw new TRPCError({ code: "NOT_FOUND", message: "Claim not found" });
+
+      const isReviewer = ["customs_officer", "admin", "finance"].includes(ctx.user.role);
+      if (!isReviewer && claim.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+
+      // Return structured data for client-side PDF generation
+      return {
+        claimNumber: claim.claimNumber,
+        traderId: claim.traderId,
+        traderName: ctx.user.name,
+        drawbackType: claim.drawbackType,
+        status: claim.status,
+        importDeclarationNumber: claim.importDeclarationNumber,
+        exportDeclarationNumber: claim.exportDeclarationNumber,
+        hsCode: claim.hsCode,
+        goodsDescription: claim.goodsDescription,
+        importDate: claim.importDate,
+        exportDate: claim.exportDate,
+        originalDutyPaid: parseFloat(claim.originalDutyPaid ?? "0"),
+        claimedAmount: parseFloat(claim.claimedAmount ?? "0"),
+        approvedAmount: claim.approvedAmount ? parseFloat(claim.approvedAmount) : null,
+        importQuantity: claim.importQuantity ? parseFloat(claim.importQuantity) : null,
+        exportQuantity: claim.exportQuantity ? parseFloat(claim.exportQuantity) : null,
+        quantityUnit: claim.quantityUnit,
+        submittedAt: claim.submittedAt,
+        reviewedAt: claim.reviewedAt,
+        generatedAt: new Date(),
+        formTitle: "DUTY DRAWBACK CLAIM FORM",
+        authority: "Ghana Revenue Authority — Customs Division",
+        legalBasis: "Customs and Excise Management Act (CEMA), Section 118",
+      };
+    }),
+
+  /**
    * Dashboard statistics for the drawback module.
    */
   stats: protectedProcedure

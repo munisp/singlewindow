@@ -67,6 +67,8 @@ const CostManagement = lazy(() => import('./pages/CostManagement'));
 const SecurityOperationsCentre = lazy(() => import('./pages/app/SecurityOperationsCentre'));
 const AuditEngineDashboard = lazy(() => import('./pages/app/AuditEngineDashboard'));
 const BondedWarehouseManagement = lazy(() => import('./pages/app/BondedWarehouseManagement'));
+const DrawbackAutomation = lazy(() => import('./pages/app/DrawbackAutomation'));
+const TraderScorecard = lazy(() => import('./pages/app/TraderScorecard'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -173,6 +175,14 @@ function Router() {
       </Route>
       <Route path="/app/finance/drawback">
         <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
+      </Route>
+      {/* Sprint 60 — Drawback Automation */}
+      <Route path="/app/finance/drawback-automation">
+        <Suspense fallback={<LazyFallback />}><DrawbackAutomation /></Suspense>
+      </Route>
+      {/* Sprint 61 — Trader Performance Scorecard */}
+      <Route path="/app/trader/scorecard">
+        <Suspense fallback={<LazyFallback />}><TraderScorecard /></Suspense>
       </Route>
 
       {/* Knowledge Graph Explorer */}

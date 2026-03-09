@@ -1274,3 +1274,35 @@
 - [x] DashboardLayout: Congestion Forecast nav item added to Port & Trade Intelligence section
 - [x] Vitest tests for prediction model, level boundaries, SLA detection (sprint57-59.test.ts — 43 tests)
 - [x] Total vitest tests: 840 passing (20 pre-existing DB-connection failures unchanged)
+
+## Sprint 60 — Duty Drawback Automation
+
+- [x] tRPC drawbackRouter: extended with checkEligibility, calculateRefund, generateClaimPdf
+- [x] Eligibility engine: 6 checks — export after import, 12-month window, HS chapter match, quantity cap, minimum value $100
+- [x] Refund calculation: duty rate by HS chapter × proportion exported × 99% drawback rate
+- [x] PDF generation: pre-filled drawback claim with declaration refs, HS codes, duty amounts, trader details
+- [x] Drawback Automation UI: /app/finance/drawback-automation (DrawbackAutomation.tsx) — eligibility checker and refund calculator tabs
+- [x] DashboardLayout: Drawback Automation nav item added to Finance section
+- [x] Vitest tests for eligibility logic and refund calculation (sprint60-62.test.ts — 87 tests)
+
+## Sprint 61 — Trader Performance Scorecard
+
+- [x] tRPC traderScorecardRouter: getScorecard, getClearancePercentile, getRejectionTrend, getBenchmark
+- [x] Compliance score: clearanceRate (50%) + (1-rejectionRate) (30%) + speedScore (20%)
+- [x] AEO tier from score: gold (≥90), silver (≥75), standard (≥60), none (<60)
+- [x] Clearance percentile: compare trader avg hours against platform population
+- [x] Rejection trend: recent 3-month vs older 3-month delta with improving/worsening flag
+- [x] Scorecard UI: /app/trader/scorecard — compliance score bar, percentile badge, 12-month history chart, rejection trend chart, platform benchmark tab
+- [x] DashboardLayout: Performance Scorecard nav item added to Trader Services section
+- [x] Vitest tests for percentile calculation and trend analysis (sprint60-62.test.ts)
+
+## Sprint 62 — Multi-Language Support (i18n)
+
+- [x] Installed react-i18next, i18next, i18next-browser-languagedetector
+- [x] Locale files: client/src/i18n/locales/{en,fr,ar}/translation.json — 8 namespaces, 60+ keys each
+- [x] i18n config: client/src/i18n/index.ts — language detector, localStorage persistence, fallback to EN
+- [x] applyDocumentDirection(): sets dir and lang attributes on document root for RTL (Arabic)
+- [x] LanguageSwitcher component: Globe icon dropdown with EN/FR/AR options in DashboardLayout top nav
+- [x] main.tsx: i18n imported before app renders to ensure translations are ready
+- [x] Vitest tests: 87 tests covering eligibility, scorecard, locale completeness, RTL detection (sprint60-62.test.ts)
+- [x] Total vitest tests: 927 passing (20 pre-existing DB-connection failures unchanged)

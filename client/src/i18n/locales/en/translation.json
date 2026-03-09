@@ -1,0 +1,103 @@
+{
+  "app": {
+    "name": "TradeGateway™ NGSWTP",
+    "tagline": "National Single Window Trade Platform"
+  },
+  "nav": {
+    "overview": "Overview",
+    "declarations": "Declarations",
+    "payments": "Payments",
+    "profile": "Profile",
+    "logout": "Log Out",
+    "login": "Log In",
+    "notifications": "Notifications"
+  },
+  "status": {
+    "draft": "Draft",
+    "submitted": "Submitted",
+    "under_assessment": "Under Assessment",
+    "docs_required": "Documents Required",
+    "payment_pending": "Payment Pending",
+    "payment_confirmed": "Payment Confirmed",
+    "under_examination": "Under Examination",
+    "examination_complete": "Examination Complete",
+    "cleared": "Cleared",
+    "rejected": "Rejected",
+    "cancelled": "Cancelled"
+  },
+  "declaration": {
+    "new": "New Declaration",
+    "list": "My Declarations",
+    "detail": "Declaration Detail",
+    "hsCode": "HS Code",
+    "description": "Description",
+    "originCountry": "Country of Origin",
+    "value": "Declared Value",
+    "weight": "Weight (kg)",
+    "currency": "Currency",
+    "submit": "Submit Declaration",
+    "save": "Save Draft",
+    "cancel": "Cancel"
+  },
+  "risk": {
+    "green": "Green Lane",
+    "yellow": "Yellow Lane",
+    "red": "Red Lane",
+    "score": "Risk Score",
+    "level": "Risk Level"
+  },
+  "aeo": {
+    "title": "Authorised Economic Operator",
+    "tier": {
+      "none": "Not Eligible",
+      "standard": "Standard AEO",
+      "silver": "Silver AEO",
+      "gold": "Gold AEO"
+    }
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "An error occurred",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "search": "Search",
+    "filter": "Filter",
+    "export": "Export",
+    "print": "Print",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "submit": "Submit",
+    "approve": "Approve",
+    "reject": "Reject",
+    "pending": "Pending",
+    "active": "Active",
+    "inactive": "Inactive",
+    "yes": "Yes",
+    "no": "No",
+    "total": "Total",
+    "date": "Date",
+    "amount": "Amount",
+    "status": "Status",
+    "actions": "Actions",
+    "details": "Details",
+    "name": "Name",
+    "email": "Email",
+    "phone": "Phone",
+    "address": "Address",
+    "country": "Country",
+    "language": "Language"
+  },
+  "language": {
+    "en": "English",
+    "fr": "Français",
+    "ar": "العربية",
+    "select": "Select Language"
+  }
+}

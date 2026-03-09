@@ -1,0 +1,103 @@
+{
+  "app": {
+    "name": "TradeGateway™ NGSWTP",
+    "tagline": "Plateforme Nationale de Guichet Unique du Commerce"
+  },
+  "nav": {
+    "overview": "Aperçu",
+    "declarations": "Déclarations",
+    "payments": "Paiements",
+    "profile": "Profil",
+    "logout": "Déconnexion",
+    "login": "Connexion",
+    "notifications": "Notifications"
+  },
+  "status": {
+    "draft": "Brouillon",
+    "submitted": "Soumis",
+    "under_assessment": "En cours d'évaluation",
+    "docs_required": "Documents requis",
+    "payment_pending": "Paiement en attente",
+    "payment_confirmed": "Paiement confirmé",
+    "under_examination": "En cours d'examen",
+    "examination_complete": "Examen terminé",
+    "cleared": "Dédouané",
+    "rejected": "Rejeté",
+    "cancelled": "Annulé"
+  },
+  "declaration": {
+    "new": "Nouvelle Déclaration",
+    "list": "Mes Déclarations",
+    "detail": "Détail de la Déclaration",
+    "hsCode": "Code SH",
+    "description": "Description",
+    "originCountry": "Pays d'origine",
+    "value": "Valeur déclarée",
+    "weight": "Poids (kg)",
+    "currency": "Devise",
+    "submit": "Soumettre la déclaration",
+    "save": "Enregistrer le brouillon",
+    "cancel": "Annuler"
+  },
+  "risk": {
+    "green": "Voie verte",
+    "yellow": "Voie jaune",
+    "red": "Voie rouge",
+    "score": "Score de risque",
+    "level": "Niveau de risque"
+  },
+  "aeo": {
+    "title": "Opérateur Économique Agréé",
+    "tier": {
+      "none": "Non éligible",
+      "standard": "OEA Standard",
+      "silver": "OEA Argent",
+      "gold": "OEA Or"
+    }
+  },
+  "common": {
+    "loading": "Chargement…",
+    "error": "Une erreur s'est produite",
+    "retry": "Réessayer",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "view": "Voir",
+    "search": "Rechercher",
+    "filter": "Filtrer",
+    "export": "Exporter",
+    "print": "Imprimer",
+    "close": "Fermer",
+    "back": "Retour",
+    "next": "Suivant",
+    "previous": "Précédent",
+    "submit": "Soumettre",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "pending": "En attente",
+    "active": "Actif",
+    "inactive": "Inactif",
+    "yes": "Oui",
+    "no": "Non",
+    "total": "Total",
+    "date": "Date",
+    "amount": "Montant",
+    "status": "Statut",
+    "actions": "Actions",
+    "details": "Détails",
+    "name": "Nom",
+    "email": "E-mail",
+    "phone": "Téléphone",
+    "address": "Adresse",
+    "country": "Pays",
+    "language": "Langue"
+  },
+  "language": {
+    "en": "English",
+    "fr": "Français",
+    "ar": "العربية",
+    "select": "Choisir la langue"
+  }
+}

@@ -24,6 +24,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 import {
@@ -258,6 +259,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: CreditCard, label: "Duty Collections", path: "/app/customs/payments" },
           { icon: BarChart3, label: "Revenue Reports", path: "/app/finance" },
           { icon: RotateCcw, label: "Duty Refunds", path: "/app/finance/drawback" },
+          { icon: RotateCcw, label: "Drawback Automation", path: "/app/finance/drawback-automation" },
           { icon: Coins, label: "Ledger (TigerBeetle)", path: "/app/finance/ledger" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
         ],
@@ -278,6 +280,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: Building2, label: "My Business Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
         { icon: Award, label: "AEO Self-Assessment", path: "/app/trader/aeo-self-assessment" },
+        { icon: BarChart3, label: "Performance Scorecard", path: "/app/trader/scorecard" },
         { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },
         { icon: Fingerprint, label: "Identity Verification", path: "/app/trader/kyc" },
       ],
@@ -534,18 +537,21 @@ function DashboardLayoutContent({
               <SidebarTrigger className="h-9 w-9 rounded-lg" />
               <span className="font-medium text-sm">{activeLabel}</span>
             </div>
-            <button
-              onClick={() => setLocation("/app/notification-centre")}
-              className="relative flex items-center justify-center h-9 w-9 rounded-lg hover:bg-muted transition-colors"
-              aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
-            >
-              <Bell className="h-5 w-5" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
-                  {unreadCount > 99 ? "99+" : unreadCount}
-                </span>
-              )}
-            </button>
+            <div className="flex items-center gap-1">
+              <LanguageSwitcher />
+              <button
+                onClick={() => setLocation("/app/notification-centre")}
+                className="relative flex items-center justify-center h-9 w-9 rounded-lg hover:bg-muted transition-colors"
+                aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         )}
         <main className="flex-1 p-4 md:p-6">{children}</main>

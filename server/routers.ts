@@ -50,6 +50,7 @@ import { socRouter } from "./routers/soc";
 import { auditEngineRouter } from "./routers/auditEngine";
 import { bondedWarehouseRouter } from "./routers/bondedWarehouse";
 import { portCongestionRouter } from "./routers/portCongestion";
+import { traderScorecardRouter } from "./routers/traderScorecard";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -138,6 +139,7 @@ export const appRouter = router({
   auditEngine: auditEngineRouter,
   bondedWarehouse: bondedWarehouseRouter,
   portCongestion: portCongestionRouter,
+  traderScorecard: traderScorecardRouter,
 });
 
 export type AppRouter = typeof appRouter;
