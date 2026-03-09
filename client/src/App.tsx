@@ -81,6 +81,9 @@ const OnboardingAnalyticsDashboard = lazy(() => import('./pages/app/OnboardingAn
 const GeofenceManagement = lazy(() => import('./pages/app/GeofenceManagement'));
 const WebhookManagement = lazy(() => import('./pages/app/WebhookManagement'));
 const ApiChangelog = lazy(() => import('./pages/app/ApiChangelog'));
+const RulesOfOrigin = lazy(() => import('./pages/app/RulesOfOrigin'));
+const PilotDashboard = lazy(() => import('./pages/app/PilotDashboard'));
+const ExecutiveDashboard = lazy(() => import('./pages/app/ExecutiveDashboard'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -350,6 +353,16 @@ function Router() {
       </Route>
       <Route path="/app/developer/changelog">
         <Suspense fallback={<LazyFallback />}><ApiChangelog /></Suspense>
+      </Route>
+      {/* Sprint 78 — Rules of Origin, Pilot Dashboard, Executive Dashboard */}
+      <Route path="/app/oga/rules-of-origin">
+        <Suspense fallback={<LazyFallback />}><RulesOfOrigin /></Suspense>
+      </Route>
+      <Route path="/app/admin/pilot-dashboard">
+        <Suspense fallback={<LazyFallback />}><PilotDashboard /></Suspense>
+      </Route>
+      <Route path="/app/executive/dashboard">
+        <Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense>
       </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />

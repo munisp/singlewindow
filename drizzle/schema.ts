@@ -1181,3 +1181,94 @@ export const onboardingAnalytics = pgTable("onboarding_analytics", {
 ]);
 export type OnboardingAnalytic = typeof onboardingAnalytics.$inferSelect;
 export type InsertOnboardingAnalytic = typeof onboardingAnalytics.$inferInsert;
+
+// ─── RULES OF ORIGIN / AfCFTA (Sprint 78) ─────────────────────────────────────
+export const originCertStatusEnum = pgEnum("origin_cert_status", [
+  "draft", "submitted", "under_review", "approved", "rejected", "expired"
+]);
+export const originCertTypeEnum = pgEnum("origin_cert_type", [
+  "form_a", "eur1", "afcfta_co", "comesa_co", "ecowas_co", "bilateral_co"
+]);
+export const originCriteriaMet = pgEnum("origin_criteria_met", [
+  "wholly_obtained", "substantial_transformation", "value_added_rule", "tariff_shift_rule"
+]);
+
+export const originCertificates = pgTable("origin_certificates", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  traderId: integer("trader_id").notNull().references(() => users.id),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  certType: originCertTypeEnum("cert_type").notNull().default("afcfta_co"),
+  status: originCertStatusEnum("status").notNull().default("draft"),
+  certNumber: varchar("cert_number", { length: 64 }),
+  exporterName: varchar("exporter_name", { length: 256 }).notNull(),
+  exporterAddress: text("exporter_address").notNull(),
+  importerName: varchar("importer_name", { length: 256 }).notNull(),
+  importerAddress: text("importer_address").notNull(),
+  originCountry: varchar("origin_country", { length: 3 }).notNull(),
+  destinationCountry: varchar("destination_country", { length: 3 }).notNull(),
+  hsCode: varchar("hs_code", { length: 16 }).notNull(),
+  goodsDescription: text("goods_description").notNull(),
+  grossWeight: varchar("gross_weight", { length: 64 }),
+  netWeight: varchar("net_weight", { length: 64 }),
+  quantity: varchar("quantity", { length: 64 }),
+  invoiceNumber: varchar("invoice_number", { length: 128 }),
+  invoiceDate: timestamp("invoice_date"),
+  originCriteria: originCriteriaMet("origin_criteria").notNull().default("substantial_transformation"),
+  localValueAddedPct: integer("local_value_added_pct"),
+  reviewNotes: text("review_notes"),
+  approvedAt: timestamp("approved_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_origin_certs_trader_id").on(t.traderId),
+  index("idx_origin_certs_declaration_id").on(t.declarationId),
+  index("idx_origin_certs_status").on(t.status),
+  index("idx_origin_certs_cert_number").on(t.certNumber),
+]);
+export type OriginCertificate = typeof originCertificates.$inferSelect;
+export type InsertOriginCertificate = typeof originCertificates.$inferInsert;
+
+// ─── PILOT PROGRAMME (Sprint 78) ──────────────────────────────────────────────
+export const pilotScopeEnum = pgEnum("pilot_scope", ["apapa_apmt", "tin_can_island", "both"]);
+export const pilotRoleEnum = pgEnum("pilot_role", ["ncs_officer", "trader", "oga_officer", "port_operator"]);
+
+export const pilotParticipants = pgTable("pilot_participants", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  pilotRole: pilotRoleEnum("pilot_role").notNull(),
+  scope: pilotScopeEnum("scope").notNull().default("both"),
+  organisation: varchar("organisation", { length: 256 }),
+  contactEmail: varchar("contact_email", { length: 256 }),
+  isActive: boolean("is_active").default(true).notNull(),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+  notes: text("notes"),
+}, (t) => [
+  index("idx_pilot_participants_user_id").on(t.userId),
+  index("idx_pilot_participants_role").on(t.pilotRole),
+]);
+export type PilotParticipant = typeof pilotParticipants.$inferSelect;
+export type InsertPilotParticipant = typeof pilotParticipants.$inferInsert;
+
+export const pilotReports = pgTable("pilot_reports", {
+  id: serial("id").primaryKey(),
+  reportDate: timestamp("report_date").defaultNow().notNull(),
+  totalDeclarations: integer("total_declarations").default(0).notNull(),
+  greenLane: integer("green_lane").default(0).notNull(),
+  yellowLane: integer("yellow_lane").default(0).notNull(),
+  redLane: integer("red_lane").default(0).notNull(),
+  avgClearanceHoursX100: integer("avg_clearance_hours_x100").default(0).notNull(),
+  totalDutyCollectedKobo: bigint("total_duty_collected_kobo", { mode: "number" }).default(0).notNull(),
+  activeTraders: integer("active_traders").default(0).notNull(),
+  activeOfficers: integer("active_officers").default(0).notNull(),
+  systemUptimePctX100: integer("system_uptime_pct_x100").default(10000).notNull(),
+  reportPdfUrl: text("report_pdf_url"),
+  generatedBy: integer("generated_by").references(() => users.id),
+  emailedAt: timestamp("emailed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pilot_reports_date").on(t.reportDate),
+]);
+export type PilotReport = typeof pilotReports.$inferSelect;
+export type InsertPilotReport = typeof pilotReports.$inferInsert;

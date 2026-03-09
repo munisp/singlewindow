@@ -1602,11 +1602,30 @@
 ## Sprint 77 — Next Steps + Government Presentation
 
 ### Next Steps (from Sprint 76)
-- [ ] Temporal worker Kubernetes deployment manifest (infra/kubernetes/temporal-worker-deployment.yaml)
-- [ ] Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
-- [ ] Finance CSV export procedure (finance.exportCSV tRPC + download button in Finance Dashboard)
+- [x] Temporal worker Kubernetes deployment manifest (infra/kubernetes/temporal-worker-deployment.yaml)
+- [x] Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
+- [x] Finance CSV export procedure (finance.exportCSV tRPC + download button in Finance Dashboard)
 
 ### Government Presentation
-- [ ] Research Nigeria trade statistics and Single Window ROI data
-- [ ] Write comprehensive slide content (docs/presentation-content.md)
-- [ ] Generate high-impact slides for Nigerian government officials
+- [x] Research Nigeria trade statistics and Single Window ROI data
+- [x] Write comprehensive slide content (docs/presentation-content.md)
+- [x] Generate high-impact slides for Nigerian government officials — 24 slides delivered
+
+## Sprint 78 — Pilot Config, Rules of Origin, Executive Dashboard
+
+- [x] pilot tRPC router (getConfig, registerParticipant, listParticipants, generateDailyReport, getReports, getKpiSummary)
+- [x] pilotParticipants + pilotReports DB tables added to schema.ts
+- [x] PilotDashboard.tsx page for admins — KPI summary, participant registration, daily reports
+- [x] pilot router wired into appRouter
+- [x] originCertificates DB table added to schema.ts (pnpm db:push applied)
+- [x] rulesOfOrigin tRPC router (submitCertificate, verify, getByDeclaration, list, updateStatus)
+- [x] RulesOfOrigin.tsx page for OGA officers — submit, verify, list, approve/reject
+- [x] ExecutiveDashboard.tsx page (/app/executive-dashboard) — finance/admin roles
+- [x] Real-time revenue counter with daily collection vs. target gauge (auto-refresh every 30s)
+- [x] Top 10 HS chapters by revenue chart + corridor breakdown
+- [x] One-click CSV export for executive dashboard (finance.exportCSV)
+- [x] App.tsx routes: /app/oga/rules-of-origin, /app/admin/pilot-dashboard, /app/executive-dashboard
+- [x] DashboardLayout: Rules of Origin in OGA nav, Executive Dashboard in finance + admin nav, Pilot Dashboard in admin nav
+- [x] Vitest tests: 1192 tests passing (39 files, 0 failures)
+- [x] Full test suite passing — 1192 tests, 0 failures
+- [x] Save checkpoint
