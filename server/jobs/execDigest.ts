@@ -21,6 +21,7 @@
 
 import { getDb } from "../db";
 import { notifyOwner } from "../_core/notification";
+import { sendDigestEmail } from "../lib/digestEmail";
 import {
   declarations,
   payments,
@@ -46,6 +47,9 @@ export interface ExecDigestResult {
   pilotGreenPct: number | null;
   pilotAvgClearanceHours: number | null;
   notificationSent: boolean;
+  emailSent: boolean;
+  emailRecipients?: string[];
+  emailSkipReason?: string;
 }
 
 export async function runExecDailyDigest(): Promise<ExecDigestResult> {
@@ -69,6 +73,8 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
       pilotGreenPct: null,
       pilotAvgClearanceHours: null,
       notificationSent: false,
+      emailSent: false,
+      emailSkipReason: "DB unavailable",
     };
   }
 
@@ -261,7 +267,8 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
     console.error("[Cron] Executive daily digest notification failed:", err);
   }
 
-  const result: ExecDigestResult = {
+  // Build partial result so we can pass it to sendDigestEmail
+  const partialResult = {
     date: dateLabel,
     totalDeclarations,
     greenLane,
@@ -276,12 +283,24 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
     pilotGreenPct,
     pilotAvgClearanceHours,
     notificationSent,
+    emailSent: false,
+  } satisfies ExecDigestResult;
+
+  // Send SMTP email digest (gracefully skipped if SendGrid not configured)
+  const emailResult = await sendDigestEmail(partialResult);
+
+  const result: ExecDigestResult = {
+    ...partialResult,
+    emailSent: emailResult.sent,
+    emailRecipients: emailResult.recipients,
+    emailSkipReason: emailResult.reason,
   };
 
   console.log(
     `[Cron] Executive daily digest complete — ${fmt(totalDeclarations)} decls, ` +
     `${fmtNaira(dutyRevenueNaira)} duty, ${clearanceRatePct}% cleared, ` +
-    `notification sent: ${notificationSent}`
+    `notification: ${notificationSent}, email: ${result.emailSent}` +
+    (result.emailSkipReason ? ` (${result.emailSkipReason})` : "")
   );
 
   return result;

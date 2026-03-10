@@ -3,10 +3,11 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   pilotParticipants, pilotReports, pilotRoleEnum, pilotScopeEnum,
-  declarations, payments, users,
+  declarations, payments, users, stakeholderProfiles,
 } from "../../drizzle/schema";
 import { eq, desc, and, gte, count, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import crypto from "crypto";
 
 const pilotRoleValues = pilotRoleEnum.enumValues;
 const pilotScopeValues = pilotScopeEnum.enumValues;
@@ -180,6 +181,310 @@ export const pilotRouter = router({
         .limit(input.limit)
         .offset(input.offset);
       return reports;
+    }),
+
+  // Load live-demo seed data (admin-only, idempotent)
+  loadDemoData: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can load demo data" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const NCS_OFFICERS = [
+        { name: "Adeola Fashola",   email: "a.fashola@customs.gov.ng",   badge: "NCS-APT-001" },
+        { name: "Emeka Okonkwo",    email: "e.okonkwo@customs.gov.ng",   badge: "NCS-APT-002" },
+        { name: "Ngozi Eze",        email: "n.eze@customs.gov.ng",       badge: "NCS-APT-003" },
+        { name: "Babatunde Lawal",  email: "b.lawal@customs.gov.ng",     badge: "NCS-APT-004" },
+        { name: "Fatima Abdullahi", email: "f.abdullahi@customs.gov.ng", badge: "NCS-APT-005" },
+      ];
+
+      const TRADERS = [
+        { name: "Dangote Industries Ltd",        email: "trade@dangote.com",         rc: "RC-001234" },
+        { name: "BUA Group",                     email: "imports@buagroup.com",      rc: "RC-002345" },
+        { name: "Flour Mills of Nigeria",        email: "customs@flourmills.ng",     rc: "RC-003456" },
+        { name: "Zenith Petroleum Ltd",          email: "ops@zenithpetro.ng",        rc: "RC-004567" },
+        { name: "Coscharis Motors",              email: "imports@coscharis.ng",      rc: "RC-005678" },
+        { name: "Stallion Group",                email: "trade@stalliongroup.ng",    rc: "RC-006789" },
+        { name: "CFAO Nigeria",                  email: "customs@cfao.ng",           rc: "RC-007890" },
+        { name: "Olam Nigeria",                  email: "imports@olam.ng",           rc: "RC-008901" },
+        { name: "Somotex Nigeria",               email: "trade@somotex.ng",          rc: "RC-009012" },
+        { name: "Promasidor Nigeria",            email: "imports@promasidor.ng",     rc: "RC-010123" },
+        { name: "Chi Limited",                   email: "customs@chilimited.ng",     rc: "RC-011234" },
+        { name: "Nestle Nigeria",                email: "imports@nestle.ng",         rc: "RC-012345" },
+        { name: "Nigerian Breweries",            email: "trade@nbplc.ng",            rc: "RC-013456" },
+        { name: "Guinness Nigeria",              email: "imports@guinness.ng",       rc: "RC-014567" },
+        { name: "Unilever Nigeria",              email: "customs@unilever.ng",       rc: "RC-015678" },
+        { name: "PZ Cussons Nigeria",            email: "trade@pzcussons.ng",        rc: "RC-016789" },
+        { name: "Honeywell Flour Mills",         email: "imports@honeywell.ng",      rc: "RC-017890" },
+        { name: "Vitafoam Nigeria",              email: "customs@vitafoam.ng",       rc: "RC-018901" },
+        { name: "Lafarge Africa",                email: "imports@lafarge.ng",        rc: "RC-019012" },
+        { name: "Cement Company of Northern NG", email: "trade@ccnn.ng",             rc: "RC-020123" },
+      ];
+
+      const HS_CODES = [
+        "8703.23", "8704.21", "2710.19", "1001.99", "1005.90",
+        "8471.30", "8517.12", "3004.90", "7208.51", "4011.10",
+      ];
+
+      const CORRIDORS = [
+        { origin: "CHN", destination: "NGA" },
+        { origin: "USA", destination: "NGA" },
+        { origin: "DEU", destination: "NGA" },
+        { origin: "IND", destination: "NGA" },
+        { origin: "NGA", destination: "GHA" },
+      ];
+
+      function rand(min: number, max: number) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+      }
+      function pick<T>(arr: T[]): T {
+        return arr[Math.floor(Math.random() * arr.length)];
+      }
+      function daysAgo(n: number): Date {
+        const d = new Date();
+        d.setDate(d.getDate() - n);
+        d.setHours(0, 0, 0, 0);
+        return d;
+      }
+
+      let officersCreated = 0;
+      let tradersCreated = 0;
+      let reportsCreated = 0;
+      let declarationsCreated = 0;
+      let paymentsCreated = 0;
+
+      // ── 1. Upsert NCS officers ─────────────────────────────────────────────
+      const officerIds: number[] = [];
+      for (const o of NCS_OFFICERS) {
+        const openId = `pilot-ncs-${o.badge.toLowerCase()}`;
+        const [user] = await db
+          .insert(users)
+          .values({
+            openId,
+            name: o.name,
+            email: o.email,
+            loginMethod: "pilot_seed",
+            role: "customs_officer",
+          })
+          .onConflictDoUpdate({
+            target: users.openId,
+            set: { name: o.name, email: o.email, role: "customs_officer" },
+          })
+          .returning({ id: users.id });
+        officerIds.push(user.id);
+
+        // Stakeholder profile (skip if exists)
+        const [existingSp] = await db
+          .select({ id: stakeholderProfiles.id })
+          .from(stakeholderProfiles)
+          .where(eq(stakeholderProfiles.userId, user.id));
+        if (!existingSp) {
+          await db.insert(stakeholderProfiles).values({
+            userId: user.id,
+            stakeholderType: "customs_officer",
+            organizationName: "Nigeria Customs Service",
+            organizationCode: o.badge,
+            status: "approved",
+          });
+        }
+
+        // Pilot participant (skip if exists)
+        const [existingPp] = await db
+          .select({ id: pilotParticipants.id })
+          .from(pilotParticipants)
+          .where(eq(pilotParticipants.userId, user.id));
+        if (!existingPp) {
+          await db.insert(pilotParticipants).values({
+            userId: user.id,
+            pilotRole: "ncs_officer",
+            scope: "apapa_apmt",
+            organisation: "Nigeria Customs Service – Apapa",
+            contactEmail: o.email,
+            isActive: true,
+          });
+          officersCreated++;
+        }
+      }
+
+      // ── 2. Upsert traders ──────────────────────────────────────────────────
+      const traderIds: number[] = [];
+      for (const t of TRADERS) {
+        const openId = `pilot-trader-${t.rc.toLowerCase()}`;
+        const [user] = await db
+          .insert(users)
+          .values({
+            openId,
+            name: t.name,
+            email: t.email,
+            loginMethod: "pilot_seed",
+            role: "user",
+          })
+          .onConflictDoUpdate({
+            target: users.openId,
+            set: { name: t.name, email: t.email },
+          })
+          .returning({ id: users.id });
+        traderIds.push(user.id);
+
+        const [existingSp] = await db
+          .select({ id: stakeholderProfiles.id })
+          .from(stakeholderProfiles)
+          .where(eq(stakeholderProfiles.userId, user.id));
+        if (!existingSp) {
+          await db.insert(stakeholderProfiles).values({
+            userId: user.id,
+            stakeholderType: "trader",
+            organizationName: t.name,
+            organizationCode: t.rc,
+            taxId: t.rc,
+            status: "approved",
+          });
+        }
+
+        const [existingPp] = await db
+          .select({ id: pilotParticipants.id })
+          .from(pilotParticipants)
+          .where(eq(pilotParticipants.userId, user.id));
+        if (!existingPp) {
+          await db.insert(pilotParticipants).values({
+            userId: user.id,
+            pilotRole: "trader",
+            scope: "apapa_apmt",
+            organisation: t.name,
+            contactEmail: t.email,
+            isActive: true,
+          });
+          tradersCreated++;
+        }
+      }
+
+      // ── 3. Seed 30 days of pilot reports ──────────────────────────────────
+      const systemOfficer = officerIds[0];
+      for (let day = 29; day >= 0; day--) {
+        const reportDate = daysAgo(day);
+        const [existing] = await db
+          .select({ id: pilotReports.id })
+          .from(pilotReports)
+          .where(sql`DATE(${pilotReports.reportDate}) = DATE(${reportDate.toISOString()})`);
+        if (existing) continue;
+
+        const progressFactor = (30 - day) / 30;
+        const totalDeclarations = rand(30, 60) + Math.floor(progressFactor * 20);
+        const greenPct = 0.55 + progressFactor * 0.20;
+        const greenLane = Math.floor(totalDeclarations * greenPct);
+        const yellowLane = Math.floor(totalDeclarations * 0.25);
+        const redLane = totalDeclarations - greenLane - yellowLane;
+        const avgClearanceHours = 5.5 - progressFactor * 2.7;
+        const avgClearanceHoursX100 = Math.round(avgClearanceHours * 100);
+        const dutyNaira = (50_000_000 + rand(0, 130_000_000)) * (0.8 + progressFactor * 0.4);
+        const totalDutyCollectedKobo = Math.round(dutyNaira * 100);
+
+        await db.insert(pilotReports).values({
+          reportDate,
+          totalDeclarations,
+          greenLane,
+          yellowLane,
+          redLane,
+          avgClearanceHoursX100,
+          totalDutyCollectedKobo,
+          activeTraders: rand(12, 20),
+          activeOfficers: rand(3, 5),
+          systemUptimePctX100: rand(9950, 9999),
+          generatedBy: systemOfficer,
+          createdAt: reportDate,
+        });
+        reportsCreated++;
+      }
+
+      // ── 4. Seed 15 declarations ────────────────────────────────────────────
+      const declIds: Array<{ id: number; traderId: number; amount: number; status: string }> = [];
+      for (let i = 0; i < 15; i++) {
+        const traderId = pick(traderIds);
+        const corridor = pick(CORRIDORS);
+        const hsCode = pick(HS_CODES);
+        const lanes = ["green", "green", "green", "yellow", "red"];
+        const riskLane = pick(lanes);
+        const invoiceValue = rand(50_000, 5_000_000);
+        const dutyRate = 0.05 + Math.random() * 0.15;
+        const dutyAmount = Math.round(invoiceValue * dutyRate);
+        const vatAmount = Math.round(invoiceValue * 0.075);
+        const declNumber = `APT-${Date.now()}-${String(i + 1).padStart(3, "0")}`;
+        const ucr = `UCR-NGAPP-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+        const statuses = ["cleared", "cleared", "cleared", "payment_confirmed", "under_examination"];
+        const status = pick(statuses);
+        const submittedAt = daysAgo(rand(1, 28));
+        const clearedAt = status === "cleared" ? new Date(submittedAt.getTime() + rand(2, 6) * 3_600_000) : null;
+
+        try {
+          const [decl] = await db.insert(declarations).values({
+            declarationNumber: declNumber,
+            ucr,
+            traderId,
+            declarationType: "import",
+            status: status as any,
+            riskLane: riskLane as any,
+            riskScore: (Math.random() * 0.9).toFixed(2),
+            hsCode,
+            goodsDescription: `Pilot cargo shipment — HS ${hsCode}`,
+            countryOfOrigin: corridor.origin,
+            countryOfDestination: corridor.destination,
+            portOfEntry: "NGAPP",
+            grossWeight: (rand(500, 50_000) / 10).toFixed(1),
+            netWeight: (rand(400, 45_000) / 10).toFixed(1),
+            numberOfPackages: rand(1, 100),
+            invoiceValue: invoiceValue.toFixed(2),
+            invoiceCurrency: "NGN",
+            dutyAmount: dutyAmount.toFixed(2),
+            vatAmount: vatAmount.toFixed(2),
+            totalDue: (dutyAmount + vatAmount).toFixed(2),
+            submittedAt,
+            clearedAt,
+            createdAt: submittedAt,
+            updatedAt: submittedAt,
+          }).returning({ id: declarations.id });
+          if (decl) {
+            declIds.push({ id: decl.id, traderId, amount: dutyAmount + vatAmount, status });
+            declarationsCreated++;
+          }
+        } catch {
+          // Skip duplicate declaration numbers
+        }
+      }
+
+      // ── 5. Seed payments for cleared declarations ─────────────────────────
+      const clearedDecls = declIds.filter(d => d.status === "cleared" || d.status === "payment_confirmed");
+      const methods: Array<"bank_transfer" | "mobile_money" | "card"> = ["bank_transfer", "mobile_money", "card"];
+      for (let i = 0; i < Math.min(10, clearedDecls.length); i++) {
+        const decl = clearedDecls[i];
+        const ref = `PAY-APT-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+        await db.insert(payments).values({
+          declarationId: decl.id,
+          traderId: decl.traderId,
+          amount: decl.amount.toFixed(2),
+          currency: "NGN",
+          paymentMethod: pick(methods),
+          status: "confirmed",
+          reference: ref,
+          confirmedAt: new Date(),
+        });
+        paymentsCreated++;
+      }
+
+      console.log(
+        `[Pilot] loadDemoData: ${officersCreated} officers, ${tradersCreated} traders, ` +
+        `${reportsCreated} reports, ${declarationsCreated} declarations, ${paymentsCreated} payments created`
+      );
+
+      return {
+        officersCreated,
+        tradersCreated,
+        reportsCreated,
+        declarationsCreated,
+        paymentsCreated,
+        totalParticipants: officersCreated + tradersCreated,
+      };
     }),
 
   // Get pilot KPI summary

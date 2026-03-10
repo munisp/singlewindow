@@ -7,7 +7,7 @@ import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from "@/components/ui/card";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 import {
   Anchor, Users, FileText, TrendingUp, Clock, CheckCircle,
-  AlertTriangle, Plus, Target, RefreshCw,
+  AlertTriangle, Plus, Target, RefreshCw, Database,
 } from "lucide-react";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -39,6 +39,7 @@ const PILOT_ROLE_LABELS: Record<string, string> = {
 
 export default function PilotDashboard() {
   const [showRegister, setShowRegister] = useState(false);
+  const [showDemoConfirm, setShowDemoConfirm] = useState(false);
   const [newParticipant, setNewParticipant] = useState({
     pilotRole: "trader" as "trader" | "ncs_officer" | "oga_officer" | "port_operator",
     scope: "both" as "apapa_apmt" | "tin_can_island" | "both",
@@ -70,6 +71,24 @@ export default function PilotDashboard() {
     onError: (e) => toast.error(e.message),
   });
 
+  const loadDemoMutation = trpc.pilot.loadDemoData.useMutation({
+    onSuccess: (data) => {
+      setShowDemoConfirm(false);
+      const parts = [
+        data.officersCreated > 0 ? `${data.officersCreated} officers` : null,
+        data.tradersCreated > 0 ? `${data.tradersCreated} traders` : null,
+        data.reportsCreated > 0 ? `${data.reportsCreated} reports` : null,
+        data.declarationsCreated > 0 ? `${data.declarationsCreated} declarations` : null,
+        data.paymentsCreated > 0 ? `${data.paymentsCreated} payments` : null,
+      ].filter(Boolean);
+      const summary = parts.length > 0 ? parts.join(", ") : "All data already present (idempotent)";
+      toast.success(`Demo data loaded — ${summary}`);
+      refetchKpi();
+      refetchParticipants();
+    },
+    onError: (e) => toast.error(`Demo load failed: ${e.message}`),
+  });
+
   const config = kpi?.config;
   const startDate = config?.startDate ? new Date(config.startDate) : new Date("2026-04-01");
   const daysElapsed = Math.max(0, Math.floor((Date.now() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
@@ -97,6 +116,13 @@ export default function PilotDashboard() {
             <Button variant="outline" onClick={() => generateReportMutation.mutate()} disabled={generateReportMutation.isPending}>
               <FileText className="h-4 w-4 mr-2" />
               {generateReportMutation.isPending ? "Generating..." : "Generate Daily Report"}
+            </Button>
+            <Button
+              variant="outline"
+              className="border-amber-400 text-amber-700 hover:bg-amber-50"
+              onClick={() => setShowDemoConfirm(true)}
+            >
+              <Database className="h-4 w-4 mr-2" /> Load Demo Data
             </Button>
             <Button onClick={() => setShowRegister(true)}>
               <Plus className="h-4 w-4 mr-2" /> Register Participant
@@ -317,6 +343,51 @@ export default function PilotDashboard() {
                 disabled={registerMutation.isPending}
               >
                 {registerMutation.isPending ? "Registering..." : "Register"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Load Demo Data Confirmation Dialog */}
+        <Dialog open={showDemoConfirm} onOpenChange={setShowDemoConfirm}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-amber-600" />
+                Load Apapa Port Demo Data
+              </DialogTitle>
+              <DialogDescription>
+                This will seed the database with 5 NCS officers, 20 traders, 30 days of pilot
+                reports, 15 sample declarations, and up to 10 confirmed payments.
+                The operation is <strong>idempotent</strong> — running it multiple times is safe;
+                existing records will not be duplicated.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2 space-y-2">
+              <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                <strong>Admin-only action.</strong> Demo participants will appear in the
+                Participants table and KPI counters will update immediately after loading.
+              </div>
+              <ul className="text-sm text-muted-foreground space-y-1 pl-4 list-disc">
+                <li>5 NCS officer accounts (Apapa APMT scope)</li>
+                <li>20 trader accounts (major Nigerian corporates)</li>
+                <li>30 days of pilot reports with realistic KPI progression</li>
+                <li>15 sample declarations across corridors</li>
+                <li>Up to 10 confirmed duty payments</li>
+              </ul>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowDemoConfirm(false)}
+                disabled={loadDemoMutation.isPending}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={() => loadDemoMutation.mutate()}
+                disabled={loadDemoMutation.isPending}
+              >
+                <Database className="h-4 w-4 mr-2" />
+                {loadDemoMutation.isPending ? "Loading demo data…" : "Load Demo Data"}
               </Button>
             </DialogFooter>
           </DialogContent>

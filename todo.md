@@ -1636,3 +1636,16 @@
 - [x] Executive Dashboard daily email digest cron job: server/jobs/execDigest.ts, fires at 03:05 UTC daily, collects yesterday's KPIs (declarations, revenue, SLA, AEO, sanctions, pilot)
 - [x] Vitest tests: server/sprint78.test.ts — 17 new tests, all 1207 tests passing (40 files, 0 failures)
 - [x] Save checkpoint
+
+## Sprint 78 Next Steps — Pilot Demo Button, PDF Branding, Digest Email
+- [x] Pilot Dashboard: add pilot.loadDemoData tRPC mutation (wraps seed logic server-side)
+- [x] Pilot Dashboard: "Load Demo Data" button in UI (admin-only, with confirmation dialog + progress toast)
+- [x] Certificate PDF: embed NCS/AfCFTA logo image in PDF header
+- [x] Certificate PDF: add QR-code verification URL block (qrcode package, verifiable at /verify/:certNumber)
+- [x] Certificate PDF: add public verify endpoint (GET /api/verify/:certNumber → JSON cert status)
+- [x] Exec digest: install nodemailer + @sendgrid/mail
+- [x] Exec digest: SENDGRID_API_KEY/DIGEST_RECIPIENTS env vars (gracefully skipped when not set)
+- [x] Exec digest: extend runExecDailyDigest to send formatted HTML email via SendGrid
+- [x] Exec digest: DIGEST_RECIPIENTS env var (comma-separated list of email addresses)
+- [x] Vitest tests for all three features (1217 tests, 40 files, 0 failures)
+- [x] Save checkpoint
