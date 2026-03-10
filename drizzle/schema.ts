@@ -1184,7 +1184,7 @@ export type InsertOnboardingAnalytic = typeof onboardingAnalytics.$inferInsert;
 
 // ─── RULES OF ORIGIN / AfCFTA (Sprint 78) ─────────────────────────────────────
 export const originCertStatusEnum = pgEnum("origin_cert_status", [
-  "draft", "submitted", "under_review", "approved", "rejected", "expired"
+  "draft", "submitted", "under_review", "approved", "rejected", "expired", "revoked"
 ]);
 export const originCertTypeEnum = pgEnum("origin_cert_type", [
   "form_a", "eur1", "afcfta_co", "comesa_co", "ecowas_co", "bilateral_co"
@@ -1219,6 +1219,9 @@ export const originCertificates = pgTable("origin_certificates", {
   reviewNotes: text("review_notes"),
   approvedAt: timestamp("approved_at"),
   expiresAt: timestamp("expires_at"),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: integer("revoked_by").references(() => users.id),
+  revocationReason: text("revocation_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [

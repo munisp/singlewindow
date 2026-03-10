@@ -1719,3 +1719,28 @@
 - [x] trpc.onboardingAnalytics.funnel / summary / aeoTiers all wired and rendering
 - [x] Vitest tests for all three onboardingAnalytics procedures in sprint81.test.ts
 - [x] 1232 tests, 41 files, 0 failures
+
+## Sprint 82 — Cert Revocation, Digest Drop-off Alerts, Verify Print/PDF
+
+### Certificate Revocation Workflow
+- [x] originCertStatusEnum extended with 'revoked'; revokedAt, revokedBy, revocationReason columns added
+- [x] DB migration applied (0019_quick_pandemic.sql)
+- [x] rulesOfOrigin.revokeCertificate adminProcedure added (input: certId, reason)
+- [x] Revoke button added to RulesOfOrigin admin table (approved certs only, ShieldOff icon)
+- [x] Confirmation dialog with reason textarea before revoking
+- [x] Public verify page shows "Certificate Invalid" for revoked certs
+
+### Onboarding Drop-off Alerts in Exec Digest
+- [x] execDigest.ts queries onboardingAnalytics (action='complete') for last 7 days
+- [x] Identifies top 3 steps with highest relative drop-off rate
+- [x] OnboardingDropOffStep[] added to ExecDigestResult type
+- [x] Drop-off section included in owner notification body
+- [x] DB early-return path also includes onboardingDropOff: []
+
+### Cert Verify Page Print/PDF
+- [x] 'Print / Save as PDF' button added (Printer icon, print:hidden class on search bar)
+- [x] Button calls window.print() — browser print dialog opens with print-optimised layout
+- [x] Search bar and footer hidden in print layout via print:hidden Tailwind class
+
+### Tests
+- [x] 1232 tests, 41 files, 0 failures (all passing)

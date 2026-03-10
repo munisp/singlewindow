@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  FileCheck, Search, Plus, CheckCircle, XCircle, Globe, AlertTriangle, Download,
+  FileCheck, Search, Plus, CheckCircle, XCircle, Globe, AlertTriangle, Download, ShieldOff,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,6 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
   approved: "bg-green-100 text-green-700",
   rejected: "bg-red-100 text-red-700",
   expired: "bg-orange-100 text-orange-700",
+  revoked: "bg-red-200 text-red-900",
 };
 
 const CERT_TYPE_LABELS: Record<string, string> = {
@@ -46,6 +47,8 @@ export default function RulesOfOrigin() {
   const [showCreate, setShowCreate] = useState(false);
   const [showVerify, setShowVerify] = useState(false);
   const [verifyCertNumber, setVerifyCertNumber] = useState("");
+  const [revokeTarget, setRevokeTarget] = useState<{ id: number; certNumber: string } | null>(null);
+  const [revokeReason, setRevokeReason] = useState("");
 
   // Create form state
   const [form, setForm] = useState({
@@ -104,6 +107,18 @@ export default function RulesOfOrigin() {
       utils.rulesOfOrigin.getMyCertificates.invalidate();
     },
     onError: (e) => toast.error(e.message),
+  });
+
+  const revokeMutation = trpc.rulesOfOrigin.revokeCertificate.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Certificate ${data.certNumber} has been revoked`);
+      setRevokeTarget(null);
+      setRevokeReason("");
+      utils.rulesOfOrigin.getMyCertificates.invalidate();
+      utils.rulesOfOrigin.listPending.invalidate();
+      utils.rulesOfOrigin.getStats.invalidate();
+    },
+    onError: (e) => toast.error(`Revocation failed: ${e.message}`),
   });
 
   const generatePdfMutation = trpc.rulesOfOrigin.generatePdf.useMutation({
@@ -314,6 +329,18 @@ export default function RulesOfOrigin() {
                                 {generatePdfMutation.isPending ? "Generating..." : "PDF"}
                               </Button>
                             )}
+                            {/* Revoke — admin only, approved certs only */}
+                            {(cert.status as string) === "approved" && user?.role === "admin" && (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="h-7 text-xs"
+                                onClick={() => setRevokeTarget({ id: cert.id as number, certNumber: (cert.certNumber as string) ?? String(cert.id) })}
+                                title="Revoke this certificate"
+                              >
+                                <ShieldOff className="h-3 w-3 mr-1" /> Revoke
+                              </Button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -463,6 +490,55 @@ export default function RulesOfOrigin() {
                 </div>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Revoke Certificate Confirmation Dialog */}
+        <Dialog open={!!revokeTarget} onOpenChange={(open) => { if (!open) { setRevokeTarget(null); setRevokeReason(""); } }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-700">
+                <ShieldOff className="h-5 w-5" /> Revoke Certificate
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-sm text-red-800 font-medium">You are about to revoke:</p>
+                <p className="text-sm font-mono text-red-900 mt-1">{revokeTarget?.certNumber}</p>
+                <p className="text-xs text-red-700 mt-2">
+                  This action is irreversible. The certificate will immediately show as <strong>REVOKED</strong> on the public verification page.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="revoke-reason">Reason for revocation <span className="text-red-500">*</span></Label>
+                <Textarea
+                  id="revoke-reason"
+                  placeholder="Provide a detailed reason (minimum 10 characters)…"
+                  value={revokeReason}
+                  onChange={(e) => setRevokeReason(e.target.value)}
+                  rows={3}
+                  className="resize-none"
+                />
+                <p className="text-xs text-muted-foreground">{revokeReason.length}/1000 characters (min 10)</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setRevokeTarget(null); setRevokeReason(""); }}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={revokeReason.trim().length < 10 || revokeMutation.isPending}
+                onClick={() => {
+                  if (revokeTarget) {
+                    revokeMutation.mutate({ id: revokeTarget.id, reason: revokeReason.trim() });
+                  }
+                }}
+              >
+                <ShieldOff className="h-4 w-4 mr-2" />
+                {revokeMutation.isPending ? "Revoking…" : "Confirm Revocation"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

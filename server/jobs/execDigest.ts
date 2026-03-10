@@ -29,8 +29,15 @@ import {
   aeoApplications,
   sanctionsChecks,
   pilotReports,
+  onboardingAnalytics,
 } from "../../drizzle/schema";
-import { eq, gte, lt, and, count, sql, avg } from "drizzle-orm";
+import { eq, gte, lt, and, count, sql, avg, desc } from "drizzle-orm";
+
+export interface OnboardingDropOffStep {
+  step: string;
+  completions: number;
+  dropOffRate: number;
+}
 
 export interface ExecDigestResult {
   date: string;
@@ -46,6 +53,7 @@ export interface ExecDigestResult {
   sanctionsHits: number;
   pilotGreenPct: number | null;
   pilotAvgClearanceHours: number | null;
+  onboardingDropOff: OnboardingDropOffStep[];
   notificationSent: boolean;
   emailSent: boolean;
   emailRecipients?: string[];
@@ -72,6 +80,7 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
       sanctionsHits: 0,
       pilotGreenPct: null,
       pilotAvgClearanceHours: null,
+      onboardingDropOff: [],
       notificationSent: false,
       emailSent: false,
       emailSkipReason: "DB unavailable",
@@ -186,7 +195,53 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
     ));
   const sanctionsHits = Number(sanctionsRow?.count ?? 0);
 
-  // ── 7. Pilot report for yesterday ────────────────────────────────────────
+  // ── 7. Onboarding drop-off (this week) ──────────────────────────────────
+  const ONBOARDING_STEPS = [
+    "role_selection",
+    "company_profile",
+    "kyc_documents",
+    "bank_details",
+    "first_declaration",
+    "aeo_interest",
+  ];
+  let onboardingDropOff: OnboardingDropOffStep[] = [];
+  try {
+    const oneWeekAgo = new Date(now);
+    oneWeekAgo.setUTCDate(oneWeekAgo.getUTCDate() - 7);
+    // Count completions per step in the last 7 days
+    const stepRows = await db
+      .select({
+        step: onboardingAnalytics.step,
+        completions: count(),
+      })
+      .from(onboardingAnalytics)
+      .where(and(
+        gte(onboardingAnalytics.recordedAt, oneWeekAgo),
+        eq(onboardingAnalytics.action, "complete")
+      ))
+      .groupBy(onboardingAnalytics.step);
+
+    const stepMap = new Map(stepRows.map(r => [r.step, Number(r.completions)]));
+    const maxCompletions = Math.max(...ONBOARDING_STEPS.map(s => stepMap.get(s) ?? 0), 1);
+
+    // Find top 3 drop-off steps (steps with highest relative drop from previous step)
+    const stepCounts = ONBOARDING_STEPS.map(s => stepMap.get(s) ?? 0);
+    const dropOffSteps: OnboardingDropOffStep[] = [];
+    for (let i = 0; i < ONBOARDING_STEPS.length; i++) {
+      const prev = i === 0 ? maxCompletions : stepCounts[i - 1];
+      const curr = stepCounts[i];
+      const dropOffRate = prev > 0 ? Math.round(((prev - curr) / prev) * 1000) / 10 : 0;
+      dropOffSteps.push({ step: ONBOARDING_STEPS[i], completions: curr, dropOffRate });
+    }
+    // Sort by drop-off rate descending, take top 3
+    onboardingDropOff = dropOffSteps
+      .sort((a, b) => b.dropOffRate - a.dropOffRate)
+      .slice(0, 3);
+  } catch {
+    // Non-fatal — onboarding analytics may be empty
+  }
+
+  // ── 8. Pilot report for yesterday ────────────────────────────────────────
   let pilotGreenPct: number | null = null;
   let pilotAvgClearanceHours: number | null = null;
   try {
@@ -251,6 +306,16 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
     );
   }
 
+  if (onboardingDropOff.length > 0) {
+    lines.push(
+      ``,
+      `━━ ONBOARDING DROP-OFF (Top 3, Last 7 Days) ━━━━━━`,
+      ...onboardingDropOff.map(s =>
+        `  ${s.step.replace(/_/g, " ").padEnd(20)} ${s.completions} completions  (${s.dropOffRate}% drop-off)`
+      )
+    );
+  }
+
   lines.push(
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -282,6 +347,7 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
     sanctionsHits,
     pilotGreenPct,
     pilotAvgClearanceHours,
+    onboardingDropOff,
     notificationSent,
     emailSent: false,
   } satisfies ExecDigestResult;

@@ -134,6 +134,13 @@
       "when": 1773093253405,
       "tag": "0018_brave_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1773146182187,
+      "tag": "0019_quick_pandemic",
+      "breakpoints": true
     }
   ]
 }

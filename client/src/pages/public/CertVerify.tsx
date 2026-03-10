@@ -9,7 +9,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useLocation } from "wouter";
 import {
   CheckCircle2, XCircle, AlertCircle, Loader2, Shield,
-  Calendar, Globe, Package, FileText, Building2, Search,
+  Calendar, Globe, Package, FileText, Building2, Search, Printer,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -285,6 +285,20 @@ export default function CertVerify() {
               </Card>
             )}
           </>
+        )}
+
+        {/* ── Print / Save as PDF button ───────────────────────────────── */}
+        {!loading && result && !result.error && (
+          <div className="flex justify-center print:hidden">
+            <Button
+              variant="outline"
+              className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white gap-2"
+              onClick={() => window.print()}
+            >
+              <Printer className="h-4 w-4" />
+              Print / Save as PDF
+            </Button>
+          </div>
         )}
 
         {/* ── Verify another certificate search bar ───────────────────────── */}

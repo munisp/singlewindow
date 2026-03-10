@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, type OriginCertificate } from "../../drizzle/schema";
 import { eq, desc, and, or, ilike } from "drizzle-orm";
@@ -220,6 +220,46 @@ export const rulesOfOriginRouter = router({
         mimeType: "application/pdf",
         certNumber: cert.certNumber,
         status: cert.status,
+      };
+    }),
+
+  // Admin: revoke an approved certificate
+  revokeCertificate: adminProcedure
+    .input(z.object({
+      id: z.number().int(),
+      reason: z.string().min(10, "Reason must be at least 10 characters").max(1000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [cert] = await db
+        .select()
+        .from(originCertificates)
+        .where(eq(originCertificates.id, input.id));
+      if (!cert) throw new TRPCError({ code: "NOT_FOUND", message: "Certificate not found" });
+      if (cert.status !== "approved") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Cannot revoke a certificate with status '${cert.status}'. Only approved certificates can be revoked.`,
+        });
+      }
+      const [updated] = await db
+        .update(originCertificates)
+        .set({
+          status: "revoked",
+          revokedAt: new Date(),
+          revokedBy: ctx.user.id,
+          revocationReason: input.reason,
+          updatedAt: new Date(),
+        })
+        .where(eq(originCertificates.id, input.id))
+        .returning();
+      return {
+        id: updated.id,
+        certNumber: updated.certNumber,
+        status: updated.status,
+        revokedAt: updated.revokedAt,
+        revocationReason: updated.revocationReason,
       };
     }),
 
