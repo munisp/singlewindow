@@ -7,8 +7,8 @@ import {
   getDb
 } from "../db";
 import { nanoid } from "nanoid";
-import { aeoApplications, users } from "../../drizzle/schema";
-import { eq, and, lte, gte } from "drizzle-orm";
+import { aeoApplications, aeoRenewalRequests, users } from "../../drizzle/schema";
+import { eq, and, lte, gte, desc } from "drizzle-orm";
 
 export const aeoRouter = router({
   // Get current user's AEO application
@@ -349,5 +349,139 @@ export const aeoRouter = router({
         entityId: input.applicationId,
       });
       return updated;
+    }),
+
+  // ── Trader self-service renewal request ──────────────────────────────────────
+  requestRenewal: protectedProcedure
+    .mutation(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [app] = await db
+        .select()
+        .from(aeoApplications)
+        .where(and(eq(aeoApplications.traderId, ctx.user.id), eq(aeoApplications.status, "approved")));
+      if (!app) throw new TRPCError({ code: "NOT_FOUND", message: "No approved AEO certificate found" });
+      if (!app.certificateExpiresAt) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Certificate has no expiry date set" });
+      }
+      const daysLeft = Math.ceil(
+        (app.certificateExpiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+      );
+      if (daysLeft > 90) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Renewal requests can only be submitted within 90 days of expiry. Your certificate expires in ${daysLeft} days.`,
+        });
+      }
+      const [existing] = await db
+        .select()
+        .from(aeoRenewalRequests)
+        .where(and(
+          eq(aeoRenewalRequests.applicationId, app.id),
+          eq(aeoRenewalRequests.status, "pending")
+        ));
+      if (existing) {
+        throw new TRPCError({ code: "CONFLICT", message: "A renewal request is already pending for this certificate" });
+      }
+      const [request] = await db
+        .insert(aeoRenewalRequests)
+        .values({ applicationId: app.id, traderId: ctx.user.id, status: "pending", requestedAt: new Date() })
+        .returning();
+      await logAuditEvent({
+        entityType: "aeo_application", entityId: app.id, action: "aeo_renewal_requested",
+        actorId: ctx.user.id, actorType: "trader", newState: { renewalRequestId: request.id, daysLeft },
+      });
+      await createNotification({
+        userId: ctx.user.id, type: "aeo_status_update",
+        title: "AEO Renewal Request Submitted",
+        message: `Your renewal request for certificate ${app.certificateNumber ?? app.applicationNumber} has been submitted. You will be notified once it is processed.`,
+        entityType: "aeo_application", entityId: app.id,
+      });
+      return request;
+    }),
+
+  myRenewalStatus: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+    const [request] = await db
+      .select()
+      .from(aeoRenewalRequests)
+      .where(eq(aeoRenewalRequests.traderId, ctx.user.id))
+      .orderBy(desc(aeoRenewalRequests.requestedAt))
+      .limit(1);
+    return request ?? null;
+  }),
+
+  listRenewalRequests: adminProcedure
+    .input(z.object({ status: z.enum(["pending", "approved", "rejected"]).optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const rows = await db
+        .select({
+          id: aeoRenewalRequests.id,
+          applicationId: aeoRenewalRequests.applicationId,
+          traderId: aeoRenewalRequests.traderId,
+          status: aeoRenewalRequests.status,
+          requestedAt: aeoRenewalRequests.requestedAt,
+          processedAt: aeoRenewalRequests.processedAt,
+          notes: aeoRenewalRequests.notes,
+          traderName: users.name,
+          traderEmail: users.email,
+          certNumber: aeoApplications.certificateNumber,
+          certExpiresAt: aeoApplications.certificateExpiresAt,
+          tier: aeoApplications.tier,
+        })
+        .from(aeoRenewalRequests)
+        .leftJoin(users, eq(aeoRenewalRequests.traderId, users.id))
+        .leftJoin(aeoApplications, eq(aeoRenewalRequests.applicationId, aeoApplications.id))
+        .where(input.status ? eq(aeoRenewalRequests.status, input.status) : undefined)
+        .orderBy(desc(aeoRenewalRequests.requestedAt));
+      return rows;
+    }),
+
+  processRenewalRequest: adminProcedure
+    .input(z.object({
+      requestId: z.number().int().positive(),
+      action: z.enum(["approved", "rejected"]),
+      notes: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [req] = await db.select().from(aeoRenewalRequests).where(eq(aeoRenewalRequests.id, input.requestId));
+      if (!req) throw new TRPCError({ code: "NOT_FOUND", message: "Renewal request not found" });
+      if (req.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Request is no longer pending" });
+      await db.update(aeoRenewalRequests)
+        .set({ status: input.action, processedAt: new Date(), processedBy: ctx.user.id, notes: input.notes ?? null })
+        .where(eq(aeoRenewalRequests.id, input.requestId));
+      if (input.action === "approved") {
+        const newCertNumber = `AEO-RNW-${nanoid(10).toUpperCase()}`;
+        const newExpiresAt = new Date();
+        newExpiresAt.setFullYear(newExpiresAt.getFullYear() + 3);
+        await updateAeoApplication(req.applicationId, {
+          certificateNumber: newCertNumber, certificateIssuedAt: new Date(),
+          certificateExpiresAt: newExpiresAt, updatedAt: new Date(),
+        });
+        await createNotification({
+          userId: req.traderId, type: "aeo_status_update",
+          title: "AEO Certificate Renewed",
+          message: `Your renewal request has been approved. New certificate: ${newCertNumber}. Valid until ${newExpiresAt.toLocaleDateString()}.`,
+          entityType: "aeo_application", entityId: req.applicationId,
+        });
+      } else {
+        await createNotification({
+          userId: req.traderId, type: "aeo_status_update",
+          title: "AEO Renewal Request Rejected",
+          message: `Your renewal request has been rejected.${input.notes ? ` Reason: ${input.notes}` : ""} Please contact the NCS AEO Unit for assistance.`,
+          entityType: "aeo_application", entityId: req.applicationId,
+        });
+      }
+      await logAuditEvent({
+        entityType: "aeo_application", entityId: req.applicationId,
+        action: `aeo_renewal_${input.action}`, actorId: ctx.user.id, actorType: "admin",
+        newState: { requestId: input.requestId, action: input.action, notes: input.notes },
+      });
+      return { success: true, action: input.action };
     }),
 });

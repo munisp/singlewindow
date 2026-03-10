@@ -85,6 +85,16 @@ export default function AdminAEO() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const { data: renewalRequestsData, refetch: refetchRenewalRequests } = trpc.aeo.listRenewalRequests.useQuery({ status: "pending" });
+  const processRenewalMutation = trpc.aeo.processRenewalRequest.useMutation({
+    onSuccess: (res: any) => {
+      toast.success(`Renewal request ${res.action}`);
+      utils.aeo.all.invalidate();
+      utils.aeo.getExpiringCertificates.invalidate();
+      refetchRenewalRequests();
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
   const apps = data ?? [];
   const pending = apps.filter((a: any) => a.status === "submitted" || a.status === "under_review");
   const approved = apps.filter((a: any) => a.status === "approved");
@@ -116,6 +126,46 @@ export default function AdminAEO() {
           </div>
         </div>
 
+        {/* Pending Renewal Requests Banner */}
+        {(renewalRequestsData ?? []).length > 0 && (
+          <Card className="border-blue-300 bg-blue-50">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <RefreshCw className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-blue-800">
+                    {(renewalRequestsData ?? []).length} pending renewal request{(renewalRequestsData ?? []).length !== 1 ? "s" : ""} from traders
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {(renewalRequestsData ?? []).map((r: any) => (
+                      <div key={r.id} className="flex items-center justify-between text-xs text-blue-700 gap-2 flex-wrap">
+                        <span className="font-mono truncate">{r.certNumber ?? `App #${r.applicationId}`}</span>
+                        <span className="shrink-0">{r.traderName ?? `Trader #${r.traderId}`}</span>
+                        {r.certExpiresAt && <span className="shrink-0 text-blue-500">Expires {new Date(r.certExpiresAt).toLocaleDateString()}</span>}
+                        <div className="flex gap-1.5 shrink-0">
+                          <Button size="sm" variant="outline"
+                            className="h-6 text-xs border-emerald-400 text-emerald-800 hover:bg-emerald-100"
+                            onClick={() => processRenewalMutation.mutate({ requestId: r.id, action: "approved" })}
+                            disabled={processRenewalMutation.isPending}
+                          >
+                            <CheckCircle2 className="h-3 w-3 mr-1" />Approve
+                          </Button>
+                          <Button size="sm" variant="outline"
+                            className="h-6 text-xs border-red-400 text-red-800 hover:bg-red-100"
+                            onClick={() => processRenewalMutation.mutate({ requestId: r.id, action: "rejected" })}
+                            disabled={processRenewalMutation.isPending}
+                          >
+                            <XCircle className="h-3 w-3 mr-1" />Reject
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {/* Expiring Certificates Alert Banner */}
         {expiring.length > 0 && (
           <Card className="border-amber-300 bg-amber-50">

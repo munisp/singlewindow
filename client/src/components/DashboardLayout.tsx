@@ -73,6 +73,7 @@ import {
   BarChart2,
   Zap,
   DollarSign,
+  Mail,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -195,6 +196,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: BarChart3, label: "Onboarding Analytics", path: "/app/admin/onboarding-analytics" },
           { icon: Activity, label: "Apapa Pilot Dashboard", path: "/app/admin/pilot-dashboard" },
           { icon: BarChart2, label: "Executive Revenue Dashboard", path: "/app/executive-dashboard" },
+          { icon: Mail, label: "Compliance Email Settings", path: "/app/admin/compliance-email-settings" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },

@@ -1818,3 +1818,25 @@
 - [x] Vitest tests for pilot.getReportDetail
 - [x] Vitest tests for rulesOfOrigin.exportCertificatesCsv and exportRevocationsCsv
 - [x] Save checkpoint
+
+## Sprint 86 — AEO Self-Service, Pilot Chart, CSV Email
+### AEO Renewal Self-Service (Trader Portal)
+- [x] Add aeo.requestRenewal tRPC mutation: trader can request renewal when cert expires within 90 days
+- [x] Add aeo.myRenewalStatus query: returns renewal request status for current trader
+- [x] Add "Renewal Pending" status badge in TraderAEO page
+- [x] Add "Request Renewal" button in TraderAEO approved status card (visible when expiry < 90 days)
+- [x] Admin AdminAEO page: show pending renewal requests with approve action
+### Pilot Drill-Down Bar Chart
+- [x] Add pilot.getOfficerWeeklyTrend tRPC query: returns 7-day declaration volume per officer
+- [x] Add recharts BarChart in PilotDashboard slide-over showing per-officer 7-day trend
+### Scheduled CSV Email Delivery
+- [x] Create server/lib/revocationCsvEmail.ts: builds CSV and sends via SendGrid SMTP
+- [x] Create server/jobs/revocationCsvExport.ts: runs nightly, exports revocation log CSV and emails it
+- [x] Register cron at 03:15 UTC in server/_core/index.ts
+- [x] Add COMPLIANCE_EMAIL env var for recipient address
+- [x] Add tRPC mutation aeo.triggerRevocationCsvExport for manual on-demand trigger (admin only)
+### Tests
+- [x] Vitest tests for aeo.requestRenewal and aeo.myRenewalStatus
+- [x] Vitest tests for pilot.getOfficerWeeklyTrend
+- [x] Vitest tests for revocationCsvExport job
+- [x] Save checkpoint

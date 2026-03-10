@@ -84,6 +84,7 @@ const ApiChangelog = lazy(() => import('./pages/app/ApiChangelog'));
 const RulesOfOrigin = lazy(() => import('./pages/app/RulesOfOrigin'));
 const PilotDashboard = lazy(() => import('./pages/app/PilotDashboard'));
 const ExecutiveDashboard = lazy(() => import('./pages/app/ExecutiveDashboard'));
+const ComplianceEmailSettings = lazy(() => import('./pages/app/ComplianceEmailSettings'));
 // Sprint 80 — Public certificate verification page (no auth required)
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 
@@ -373,6 +374,10 @@ function Router() {
       </Route>
       <Route path="/app/executive-dashboard">
         <Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense>
+      </Route>
+      {/* Sprint 86 — Compliance Email Settings */}
+      <Route path="/app/admin/compliance-email-settings">
+        <Suspense fallback={<LazyFallback />}><ComplianceEmailSettings /></Suspense>
       </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />

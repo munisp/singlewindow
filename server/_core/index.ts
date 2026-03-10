@@ -625,6 +625,15 @@ cron.schedule("0 10 3 * * *", async () => {
 }, { timezone: "UTC" });
 console.log("[Cron] AEO renewal reminders scheduled at 03:10 UTC daily");
 
+// ── Nightly Revocation CSV email cron ────────────────────────────────────────
+// Fires at 04:00 UTC every day. Emails yesterday's revocation log CSV to all
+// active compliance officer addresses in the compliance_email_schedule table.
+import { runNightlyRevocationCsv } from "../jobs/nightlyRevocationCsv";
+cron.schedule("0 0 4 * * *", async () => {
+  await runNightlyRevocationCsv();
+}, { timezone: "UTC" });
+console.log("[Cron] Nightly revocation CSV email scheduled at 04:00 UTC daily");
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();

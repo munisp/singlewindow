@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb, createNotification } from "../db";
-import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, type OriginCertificate } from "../../drizzle/schema";
+import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, complianceEmailSchedule, type OriginCertificate } from "../../drizzle/schema";
 import { eq, desc, and, or, ilike, count, gte, lte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { generateCertificatePdf } from "../lib/certificatePdf";
@@ -524,5 +524,66 @@ export const rulesOfOriginRouter = router({
         rowCount: rows.length,
         filename: `top-scanned-certs-${period}-${new Date().toISOString().slice(0, 10)}.csv`,
       };
+    }),
+
+  // ─── Sprint 86: Compliance email schedule CRUD ──────────────────────────────
+
+  // List all compliance email schedule entries (admin only)
+  listComplianceSchedules: adminProcedure
+    .query(async () => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      return db.select().from(complianceEmailSchedule).orderBy(desc(complianceEmailSchedule.createdAt));
+    }),
+
+  // Add a new compliance email recipient (admin only)
+  addComplianceRecipient: adminProcedure
+    .input(z.object({
+      recipientEmail: z.string().email(),
+      recipientName: z.string().max(256).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const [row] = await db.insert(complianceEmailSchedule).values({
+        recipientEmail: input.recipientEmail,
+        recipientName: input.recipientName ?? null,
+        isActive: true,
+        createdBy: ctx.user.id,
+      }).returning();
+      return row;
+    }),
+
+  // Toggle active status of a compliance email recipient (admin only)
+  toggleComplianceRecipient: adminProcedure
+    .input(z.object({ id: z.number().int().positive(), isActive: z.boolean() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const [row] = await db
+        .update(complianceEmailSchedule)
+        .set({ isActive: input.isActive, updatedAt: new Date() })
+        .where(eq(complianceEmailSchedule.id, input.id))
+        .returning();
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND' });
+      return row;
+    }),
+
+  // Delete a compliance email recipient (admin only)
+  deleteComplianceRecipient: adminProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      await db.delete(complianceEmailSchedule).where(eq(complianceEmailSchedule.id, input.id));
+      return { success: true };
+    }),
+
+  // Manually trigger the nightly CSV email (admin only, for testing)
+  triggerNightlyCsvEmail: adminProcedure
+    .mutation(async () => {
+      const { runNightlyRevocationCsv } = await import('../jobs/nightlyRevocationCsv');
+      const result = await runNightlyRevocationCsv();
+      return result;
     }),
 });

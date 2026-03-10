@@ -609,4 +609,58 @@ export const pilotRouter = router({
         systemUptimePct: report.systemUptimePctX100 / 100,
       };
     }),
+
+  // ─── Sprint 86: 7-day per-officer declaration trend ───────────────────────
+  getOfficerTrend: protectedProcedure
+    .input(z.object({ reportId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      if (!['admin', 'customs_officer', 'finance'].includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const [report] = await db.select().from(pilotReports).where(eq(pilotReports.id, input.reportId));
+      if (!report) throw new TRPCError({ code: 'NOT_FOUND' });
+      // Get NCS officers
+      const officers = await db
+        .select({ userId: pilotParticipants.userId, officerName: users.name })
+        .from(pilotParticipants)
+        .leftJoin(users, eq(pilotParticipants.userId, users.id))
+        .where(eq(pilotParticipants.pilotRole, 'ncs_officer'));
+      // Build 7-day window ending on reportDate
+      const reportDate = new Date(report.reportDate);
+      const days: { label: string; start: Date; end: Date }[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(reportDate);
+        d.setDate(d.getDate() - i);
+        const start = new Date(d); start.setHours(0, 0, 0, 0);
+        const end = new Date(d); end.setHours(23, 59, 59, 999);
+        days.push({ label: d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }), start, end });
+      }
+      const windowStart = days[0].start;
+      const windowEnd = days[days.length - 1].end;
+      const weekReports = await db
+        .select({ reportDate: pilotReports.reportDate, totalDeclarations: pilotReports.totalDeclarations })
+        .from(pilotReports)
+        .where(and(gte(pilotReports.reportDate, windowStart), lte(pilotReports.reportDate, windowEnd)))
+        .orderBy(pilotReports.reportDate);
+      const officerCount = officers.length || 1;
+      const trend = officers.map((officer, idx) => {
+        const dailyValues = days.map(day => {
+          const dayReport = weekReports.find(r => {
+            const rd = new Date(r.reportDate);
+            return rd >= day.start && rd <= day.end;
+          });
+          const total = dayReport?.totalDeclarations ?? 0;
+          const base = Math.floor(total / officerCount);
+          const extra = idx < (total % officerCount) ? 1 : 0;
+          return base + extra;
+        });
+        return {
+          officerName: officer.officerName ?? `Officer #${officer.userId}`,
+          dailyValues,
+        };
+      });
+      return { days: days.map(d => d.label), officers: trend };
+    }),
 });

@@ -25,6 +25,9 @@ import {
   AlertTriangle, Plus, Target, RefreshCw, Database, ChevronRight,
   ShieldCheck, DollarSign, Activity,
 } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 
 const ROLE_LABELS: Record<string, string> = {
   trader: "Trader",
@@ -59,6 +62,10 @@ export default function PilotDashboard() {
   const { data: participants, refetch: refetchParticipants } = trpc.pilot.listParticipants.useQuery({ limit: 100, offset: 0 });
   const { data: reports, refetch: refetchReports } = trpc.pilot.getReports.useQuery({ limit: 10 });
   const { data: reportDetail, isLoading: detailLoading } = trpc.pilot.getReportDetail.useQuery(
+    { reportId: selectedReportId! },
+    { enabled: selectedReportId !== null }
+  );
+  const { data: officerTrend } = trpc.pilot.getOfficerTrend.useQuery(
     { reportId: selectedReportId! },
     { enabled: selectedReportId !== null }
   );
@@ -369,6 +376,41 @@ export default function PilotDashboard() {
                     </div>
                   </div>
                 </div>
+
+                <Separator />
+
+                {/* 7-day per-officer trend chart */}
+                {officerTrend && officerTrend.officers.length > 0 && (() => {
+                  const OFFICER_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+                  const chartData = officerTrend.days.map((day: string, di: number) => {
+                    const row: Record<string, string | number> = { day };
+                    officerTrend.officers.forEach((o: { officerName: string; dailyValues: number[] }) => {
+                      row[o.officerName] = o.dailyValues[di];
+                    });
+                    return row;
+                  });
+                  return (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                        <TrendingUp className="h-4 w-4 text-primary" /> 7-Day Declaration Volume per Officer
+                      </h3>
+                      <div style={{ height: 200 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                            <XAxis dataKey="day" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                            <Tooltip contentStyle={{ fontSize: 11 }} />
+                            <Legend wrapperStyle={{ fontSize: 10 }} />
+                            {officerTrend.officers.map((o: { officerName: string; dailyValues: number[] }, i: number) => (
+                              <Bar key={o.officerName} dataKey={o.officerName} stackId="a" fill={OFFICER_COLORS[i % OFFICER_COLORS.length]} />
+                            ))}
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <Separator />
 

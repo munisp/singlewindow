@@ -14,7 +14,7 @@ import { toast } from "sonner";
 import {
   Shield, CheckCircle2, Clock, XCircle, Award, Star, Zap,
   FileText, DollarSign, Lock, TrendingUp, ChevronRight,
-  AlertTriangle, Info,
+  AlertTriangle, Info, RefreshCw,
 } from "lucide-react";
 
 const TIERS = [
@@ -68,6 +68,11 @@ export default function TraderAEO() {
     onSuccess: () => { toast.success("AEO application submitted. You will be notified of the outcome."); refetch(); },
     onError: (err) => toast.error(err.message),
   });
+  const { data: renewalStatus, refetch: refetchRenewal } = trpc.aeo.myRenewalStatus.useQuery();
+  const requestRenewalMutation = trpc.aeo.requestRenewal.useMutation({
+    onSuccess: () => { toast.success("Renewal request submitted. You will be notified once processed."); refetch(); refetchRenewal(); },
+    onError: (err) => toast.error(err.message),
+  });
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState({
     applicantType: "importer" as "importer" | "exporter" | "customs_broker" | "freight_forwarder" | "warehouse_operator",
@@ -109,8 +114,25 @@ export default function TraderAEO() {
                   <p className="text-sm text-muted-foreground">{app.applicationNumber}{app.certificateNumber && ` · Cert: ${app.certificateNumber}`}{app.certificateExpiresAt && ` · Expires: ${new Date(app.certificateExpiresAt).toLocaleDateString()}`}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 {appStatus && STATUS_CONFIG[appStatus] && <Badge variant="outline" className={STATUS_CONFIG[appStatus].color}>{STATUS_CONFIG[appStatus].label}</Badge>}
+                {renewalStatus?.status === "pending" && (
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30">Renewal Pending</Badge>
+                )}
+                {appStatus === "approved" && app.certificateExpiresAt && (() => {
+                  const daysLeft = Math.ceil((new Date(app.certificateExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                  if (daysLeft <= 90 && !renewalStatus) return (
+                    <button
+                      onClick={() => requestRenewalMutation.mutate()}
+                      disabled={requestRenewalMutation.isPending}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      {requestRenewalMutation.isPending ? "Submitting…" : `Request Renewal (${daysLeft}d left)`}
+                    </button>
+                  );
+                  return null;
+                })()}
                 <div className="text-right text-sm"><p className="text-muted-foreground text-xs">Compliance Score</p><p className="font-bold text-lg">{app.complianceScore ?? 0}%</p></div>
               </div>
             </CardContent>

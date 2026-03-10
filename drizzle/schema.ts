@@ -1276,3 +1276,42 @@ export const pilotReports = pgTable("pilot_reports", {
 ]);
 export type PilotReport = typeof pilotReports.$inferSelect;
 export type InsertPilotReport = typeof pilotReports.$inferInsert;
+
+// ─── AEO RENEWAL REQUESTS ─────────────────────────────────────────────────────
+// Tracks trader-initiated renewal requests. Admins process them via AdminAEO.
+export const aeoRenewalStatusEnum = pgEnum("aeo_renewal_status", [
+  "pending", "approved", "rejected"
+]);
+
+export const aeoRenewalRequests = pgTable("aeo_renewal_requests", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => aeoApplications.id),
+  traderId: integer("trader_id").notNull().references(() => users.id),
+  status: aeoRenewalStatusEnum("status").default("pending").notNull(),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+  processedBy: integer("processed_by").references(() => users.id),
+  notes: text("notes"),
+}, (t) => [
+  index("idx_aeo_renewal_app_id").on(t.applicationId),
+  index("idx_aeo_renewal_trader_id").on(t.traderId),
+]);
+export type AeoRenewalRequest = typeof aeoRenewalRequests.$inferSelect;
+export type InsertAeoRenewalRequest = typeof aeoRenewalRequests.$inferInsert;
+
+// ─── COMPLIANCE EMAIL SCHEDULE ────────────────────────────────────────────────
+// Stores the configurable nightly CSV delivery settings for the revocation log.
+// Only one active row is expected (id=1), managed by admins via the UI.
+export const complianceEmailSchedule = pgTable("compliance_email_schedule", {
+  id: serial("id").primaryKey(),
+  recipientEmail: varchar("recipient_email", { length: 256 }).notNull(),
+  recipientName: varchar("recipient_name", { length: 256 }),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastSentAt: timestamp("last_sent_at"),
+  lastSentRows: integer("last_sent_rows"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdBy: integer("created_by").references(() => users.id),
+});
+export type ComplianceEmailSchedule = typeof complianceEmailSchedule.$inferSelect;
+export type InsertComplianceEmailSchedule = typeof complianceEmailSchedule.$inferInsert;

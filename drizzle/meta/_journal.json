@@ -148,6 +148,20 @@
       "when": 1773146893525,
       "tag": "0020_sticky_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1773153821072,
+      "tag": "0021_abnormal_gambit",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1773154313659,
+      "tag": "0022_premium_iron_patriot",
+      "breakpoints": true
     }
   ]
 }
