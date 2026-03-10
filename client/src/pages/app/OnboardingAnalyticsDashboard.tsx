@@ -2,6 +2,7 @@
  * Onboarding Analytics Dashboard — Sprint 72
  * Admin view of trader onboarding funnel metrics, completion rates, and AEO tier distribution.
  */
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +28,7 @@ const AEO_COLORS = ["#D4A017", "#C0C0C0", "#CD7F32"];
 const AEO_TIERS = ["Gold", "Silver", "Standard"];
 
 export default function OnboardingAnalyticsDashboard() {
-  const { data: funnel, isLoading: funnelLoading } = trpc.onboardingAnalytics.funnel.useQuery();
+  const { data: funnel, isLoading: funnelLoading, isError} = trpc.onboardingAnalytics.funnel.useQuery();
   const { data: overview, isLoading: overviewLoading } = trpc.onboardingAnalytics.summary.useQuery();
   const { data: aeoTiersData } = trpc.onboardingAnalytics.aeoTiers.useQuery();
 
@@ -82,6 +83,11 @@ export default function OnboardingAnalyticsDashboard() {
 
   return (
     <DashboardLayout title="Onboarding Analytics">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-7xl">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">

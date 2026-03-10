@@ -58,6 +58,9 @@ export default function AdminUsers() {
                     <th className="text-left p-3 font-medium text-muted-foreground">Change Role</th>
                   </tr></thead>
                   <tbody className="divide-y">
+                    {(data ?? []).length === 0 && (
+                      <tr><td colSpan={5} className="p-8 text-center text-muted-foreground text-sm">No users found.</td></tr>
+                    )}
                     {(data ?? []).map((u: any) => (
                       <tr key={u.id} className="hover:bg-muted/20">
                         <td className="p-3 font-medium">{u.name ?? "—"}</td>

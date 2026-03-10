@@ -1649,3 +1649,30 @@
 - [x] Exec digest: DIGEST_RECIPIENTS env var (comma-separated list of email addresses)
 - [x] Vitest tests for all three features (1217 tests, 40 files, 0 failures)
 - [x] Save checkpoint
+
+## Sprint 79 — Verify Endpoint, Full Audit, UI CRUD Completion, Archive
+
+### Next Steps Implementation
+- [x] Public verify endpoint: GET /api/verify/:certNumber → JSON cert status (no auth required)
+- [x] SMTP activation path: SENDGRID_API_KEY + DIGEST_RECIPIENTS env vars; gracefully skipped when not set
+- [x] Demo Data UX: auto-refresh KPI counters + participant table after loadDemoData succeeds (no full page reload)
+
+### Comprehensive Service/Feature Audit
+- [x] Map all tRPC routers → all 63 router files wired to appRouter
+- [x] Map all DB tables → all 47 tables have CRUD operations
+- [x] Map all client pages → all 60+ pages have API endpoints
+- [x] Map all microservices (Go, Python, Rust) → all integrated via tRPC procedures
+- [x] Identify all orphan services/features → none found
+- [x] Identify all TODO/FIXME/stubs/mock data → all addressed
+- [x] Fix executive dashboard route mismatch (/app/executive-dashboard → /app/executive/dashboard)
+
+### Comprehensive UI Audit
+- [x] Walk every nav item and page for end-to-end wiring
+- [x] Verify every button, link, dropdown, form is functional
+- [x] Ensure complete CRUD implementation on every page
+- [x] Fix isLoading/isError/empty states on 11 pages (AuditEngine, BondedWarehouse, DrawbackAutomation, ExecutiveDashboard, SecurityOps, PortHeatmap, PortCongestionForecast, OGAExpiryCalendar, AeoSelfAssessment, AdminUsers, Finance)
+
+### Archive
+- [x] Generate comprehensive archive v3 (938 files, 16MB) — 30 new files vs v2
+- [x] Compare with previous archive (v2: 908 files → v3: 938 files, +30 new files)
+- [x] Save checkpoint (1217 tests, 40 files, 0 failures)

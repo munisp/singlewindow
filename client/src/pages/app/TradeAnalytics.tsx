@@ -5,6 +5,7 @@
  */
 
 import { useState } from "react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +31,7 @@ const fmt = (n: number | undefined) =>
 export default function TradeAnalytics() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly" | "quarterly">("monthly");
 
-  const { data: stats, isLoading: statsLoading, refetch: refetchStats } = trpc.analytics.getTradeStats.useQuery({ period });
+  const { data: stats, isLoading: statsLoading, refetch: refetchStats, isError} = trpc.analytics.getTradeStats.useQuery({ period });
   const { data: hsData } = trpc.analytics.getHsCodeVolume.useQuery({ period });
   const { data: traderData } = trpc.analytics.getTraderMetrics.useQuery({ period, limit: 10 });
   const { data: routeData } = trpc.analytics.getRouteFlow.useQuery({ period });
@@ -44,6 +45,11 @@ export default function TradeAnalytics() {
 
   return (
     <DashboardLayout>
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

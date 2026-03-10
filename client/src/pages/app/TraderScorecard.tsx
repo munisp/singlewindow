@@ -4,6 +4,7 @@
  */
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +54,7 @@ function StatCard({ title, value, sub, icon: Icon, color }: {
 
 export default function TraderScorecard() {
   const { user } = useAuth();
-  const { data: scorecard, isLoading: loadingScorecard } = trpc.traderScorecard.getScorecard.useQuery();
+  const { data: scorecard, isLoading: loadingScorecard, isError} = trpc.traderScorecard.getScorecard.useQuery();
   const { data: percentile } = trpc.traderScorecard.getClearancePercentile.useQuery({});
   const { data: trendData } = trpc.traderScorecard.getRejectionTrend.useQuery();
   const { data: benchmark } = trpc.traderScorecard.getBenchmark.useQuery();
@@ -77,6 +78,11 @@ export default function TraderScorecard() {
 
   return (
     <DashboardLayout>
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">

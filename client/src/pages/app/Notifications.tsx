@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 export default function Notifications() {
   const utils = trpc.useUtils();
-  const { data, isLoading, refetch } = trpc.notifications.list.useQuery({ limit: 50 });
+  const { data, isLoading, refetch, isError} = trpc.notifications.list.useQuery({ limit: 50 });
   const markRead = trpc.notifications.markRead.useMutation({
     onSuccess: () => {
       utils.notifications.list.invalidate();
@@ -24,6 +24,11 @@ export default function Notifications() {
 
   return (
     <DashboardLayout title="Notifications">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-3xl">
         <div className="flex items-center justify-between">
           <div>

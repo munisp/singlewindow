@@ -32,7 +32,7 @@ export default function SecurityOperationsCentre() {
   const [incidentStatus, setIncidentStatus] = useState<string>("all");
   const [selectedIncident, setSelectedIncident] = useState<string | null>(null);
 
-  const { data: alertsData, refetch: refetchAlerts } = trpc.soc.getAlerts.useQuery({
+  const { data: alertsData, isLoading, isError, refetch: refetchAlerts } = trpc.soc.getAlerts.useQuery({
     severity: alertSeverity === "all" ? undefined : (alertSeverity as "low" | "medium" | "high" | "critical"),
     limit: 50,
   });
@@ -66,8 +66,22 @@ export default function SecurityOperationsCentre() {
 
   const severityOrder = ["critical", "high", "medium", "low"];
 
+  if (isLoading) return (
+    <div className="p-6 flex items-center justify-center h-64">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        Loading security data...
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
+      {isError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load security data. Please refresh the page.
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">

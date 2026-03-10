@@ -73,7 +73,7 @@ export default function OGAExpiryCalendar() {
   const [windowDays, setWindowDays] = useState(90);
   const [search, setSearch] = useState("");
 
-  const { data, isLoading, refetch, isFetching } =
+  const { data, isLoading, isError, refetch, isFetching } =
     trpc.oga.expiryCalendar.useQuery({ days: windowDays });
 
   const filtered = (data ?? []).filter((p) => {
@@ -100,6 +100,11 @@ export default function OGAExpiryCalendar() {
   return (
     <DashboardLayout title="Permit Expiry Calendar">
       <div className="space-y-6 max-w-6xl">
+        {isError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            Failed to load permit expiry data. Please refresh the page.
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

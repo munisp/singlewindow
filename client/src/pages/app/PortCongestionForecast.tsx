@@ -68,6 +68,7 @@ export default function PortCongestionForecast() {
   );
   const allForecastsQ = trpc.portCongestion.getAllForecasts.useQuery(undefined, { refetchInterval: 60_000 });
 
+  const isError = summaryQ.isError || forecastQ.isError || allForecastsQ.isError;
   const forecast = forecastQ.data;
   const chartData = (() => {
     if (!forecast) return [];
@@ -86,6 +87,11 @@ export default function PortCongestionForecast() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
+        {isError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            Failed to load forecast data. Please refresh the page.
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

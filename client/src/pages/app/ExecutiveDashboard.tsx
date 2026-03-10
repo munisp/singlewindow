@@ -25,7 +25,7 @@ export default function ExecutiveDashboard() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [isExporting, setIsExporting] = useState(false);
 
-  const { data: revenue, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
+  const { data: revenue, isLoading, isError, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
   const { data: kpi, refetch: refetchKpi } = trpc.executiveDashboard.getKpiSummary.useQuery();
   const { data: daily } = trpc.executiveDashboard.getDailyCollectionVsTarget.useQuery({ dailyTargetNaira: 500_000_000 });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
@@ -55,9 +55,25 @@ export default function ExecutiveDashboard() {
 
   const dailyPct = daily ? Math.min(100, Math.round((daily.collectedNaira / daily.targetNaira) * 100)) : 0;
 
+  if (isLoading) return (
+    <DashboardLayout>
+      <div className="p-6 flex items-center justify-center h-64">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          Loading executive dashboard...
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
+        {isError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            Failed to load executive data. Please refresh the page.
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

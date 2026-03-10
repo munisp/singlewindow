@@ -698,6 +698,9 @@ async function startServer() {
   // Sprint 77: Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
   const { registerSanctionsWebhookRoute } = await import("../webhooks/sanctions");
   registerSanctionsWebhookRoute(app);
+  // Sprint 79: Public certificate verification endpoint (GET /api/verify/:certNumber)
+  const { registerCertVerifyRoute } = await import("../routes/certVerify");
+  registerCertVerifyRoute(app);
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

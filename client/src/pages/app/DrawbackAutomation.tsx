@@ -50,9 +50,16 @@ function EligibilityChecker() {
   }
 
   const result = eligibilityQ.data;
+  const isLoading = eligibilityQ.isLoading;
+  const isError = eligibilityQ.isError;
 
   return (
     <div className="space-y-6">
+      {isError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load drawback eligibility data. Please try again.
+        </div>
+      )}
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">

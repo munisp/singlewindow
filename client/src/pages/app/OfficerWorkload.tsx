@@ -10,6 +10,7 @@
 
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,7 +85,7 @@ export default function OfficerWorkload() {
   const [periodDays, setPeriodDays] = useState(30);
   const [slaTargetHours, setSlaTargetHours] = useState(24);
 
-  const { data, isLoading, error } = trpc.officerWorkload.getTeamSummary.useQuery({
+  const { data, isLoading, error, isError} = trpc.officerWorkload.getTeamSummary.useQuery({
     periodDays,
     slaTargetHours,
   });
@@ -94,6 +95,11 @@ export default function OfficerWorkload() {
 
   return (
     <DashboardLayout>
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="flex flex-col h-full overflow-hidden">
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/10 flex items-center justify-between">

@@ -19,7 +19,7 @@ export default function MyCertificates() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 20;
 
-  const { data, isLoading, refetch } = trpc.declarations.listMyCertificates.useQuery({
+  const { data, isLoading, refetch, isError} = trpc.declarations.listMyCertificates.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   });
@@ -52,6 +52,11 @@ export default function MyCertificates() {
 
   return (
     <DashboardLayout>
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="p-6 space-y-6 max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">

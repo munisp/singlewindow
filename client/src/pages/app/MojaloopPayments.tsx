@@ -1,6 +1,7 @@
 /**
  * Mojaloop Payment Flows — wired to real tRPC mojaloop router
  */
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
@@ -20,7 +21,7 @@ const STATUS_STYLES: Record<string, string> = {
 export default function MojaloopPayments() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 20;
-  const { data: mojaStatus } = trpc.mojaloop.getIntegrationStatus.useQuery();
+  const { data: mojaStatus, isError} = trpc.mojaloop.getIntegrationStatus.useQuery();
   const { data, isLoading, refetch } = trpc.payments.listAll.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
@@ -36,6 +37,11 @@ export default function MojaloopPayments() {
 
   return (
     <DashboardLayout title="Payment Flows">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-6xl">
         <div className="flex items-center justify-between">
           <div>

@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,7 @@ export default function CustomsDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [laneFilter, setLaneFilter] = useState("all");
 
-  const { data: declarations, isLoading } = trpc.declarations.all.useQuery({ limit: 50 });
+  const { data: declarations, isLoading, isError} = trpc.declarations.all.useQuery({ limit: 50 });
 
   const { data: stats } = trpc.declarations.stats.useQuery();
 
@@ -79,6 +80,11 @@ export default function CustomsDashboard() {
 
   return (
     <DashboardLayout title="Customs Dashboard">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-7xl">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Customs Officer Dashboard</h1>

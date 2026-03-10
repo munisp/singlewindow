@@ -364,6 +364,9 @@ function Router() {
       <Route path="/app/executive/dashboard">
         <Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense>
       </Route>
+      <Route path="/app/executive-dashboard">
+        <Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense>
+      </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

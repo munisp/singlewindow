@@ -3,6 +3,7 @@
  * Tracks API spec changes over time, shows diffs, and lets developers compare versions.
  */
 import { useState } from "react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -94,7 +95,7 @@ export default function ApiChangelog() {
   const [searchQuery, setSearchQuery] = useState("");
   const [changeTypeFilter, setChangeTypeFilter] = useState<string>("all");
 
-  const { data: versionList, isLoading } = trpc.apiChangelog.versions.useQuery();
+  const { data: versionList, isLoading, isError} = trpc.apiChangelog.versions.useQuery();
   const { data: detail, isLoading: detailLoading } = trpc.apiChangelog.list.useQuery(
     { version: selectedVersion! },
     { enabled: !!selectedVersion }
@@ -108,6 +109,11 @@ export default function ApiChangelog() {
 
   return (
     <DashboardLayout title="API Changelog">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-7xl">
         <div className="flex items-center justify-between">
           <div>

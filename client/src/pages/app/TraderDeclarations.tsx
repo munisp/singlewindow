@@ -1,6 +1,7 @@
 /**
  * Trader Declarations List — wired to real tRPC declarations router
  */
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,10 +30,15 @@ const STATUS_STYLES: Record<string, string> = {
 
 export default function TraderDeclarations() {
   const [, navigate] = useLocation();
-  const { data, isLoading, refetch } = trpc.declarations.myDeclarations.useQuery({ limit: 50, offset: 0 });
+  const { data, isLoading, refetch, isError} = trpc.declarations.myDeclarations.useQuery({ limit: 50, offset: 0 });
 
   return (
     <DashboardLayout title="My Declarations">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-6xl">
         <div className="flex items-center justify-between">
           <div>

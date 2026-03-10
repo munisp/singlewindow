@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,7 +78,7 @@ export default function AdminAnalytics() {
   const [throughputDays, setThroughputDays] = useState("30");
   const [revenueDays, setRevenueDays] = useState("30");
 
-  const { data: kpis, isLoading: kpiLoading } = trpc.adminAnalytics.kpiSummary.useQuery();
+  const { data: kpis, isLoading: kpiLoading, isError} = trpc.adminAnalytics.kpiSummary.useQuery();
   const { data: throughput, isLoading: throughputLoading } = trpc.adminAnalytics.declarationThroughput.useQuery({ days: parseInt(throughputDays) });
   const { data: clearanceTimes, isLoading: clearanceLoading } = trpc.adminAnalytics.clearanceTimeByLane.useQuery();
   const { data: revenueTrend, isLoading: revenueLoading } = trpc.adminAnalytics.dutyRevenueTrend.useQuery({ days: parseInt(revenueDays) });
@@ -88,6 +89,11 @@ export default function AdminAnalytics() {
 
   return (
     <DashboardLayout title="Analytics">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-6xl">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">

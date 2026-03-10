@@ -128,6 +128,28 @@ export default function AeoSelfAssessment() {
     toast.success("Assessment report downloaded");
   };
 
+  if (questionsQ.isLoading) return (
+    <DashboardLayout>
+      <div className="p-6 flex items-center justify-center h-64">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          Loading assessment questions...
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+
+  if (questionsQ.isError || pillars.length === 0) return (
+    <DashboardLayout>
+      <div className="p-6 flex items-center justify-center h-64">
+        <div className="text-center text-muted-foreground">
+          <p className="font-medium">No assessment questions available.</p>
+          <p className="text-sm mt-1">Please contact your administrator to configure the AEO self-assessment.</p>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+
   return (
     <DashboardLayout>
       <div className="p-6 max-w-3xl mx-auto space-y-6">

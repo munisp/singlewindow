@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,7 +51,7 @@ function DeclarationRow({ d }: { d: any }) {
 export default function CustomsRisk() {
   const [search, setSearch] = useState("");
   const [laneFilter, setLaneFilter] = useState<"all" | "red" | "yellow" | "green">("all");
-  const { data: all, isLoading, refetch, isFetching } = trpc.declarations.all.useQuery({ limit: 100, offset: 0 });
+  const { data: all, isLoading, refetch, isFetching, isError} = trpc.declarations.all.useQuery({ limit: 100, offset: 0 });
   const { data: modelStats } = trpc.riskModel.getModelStats.useQuery();
   const { data: featureImportance } = trpc.riskModel.getFeatureImportance.useQuery();
   const { data: modelMetrics } = trpc.riskModel.getModelMetrics.useQuery();
@@ -74,6 +75,11 @@ export default function CustomsRisk() {
   }));
   return (
     <DashboardLayout title="Risk Screening">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-7xl">
         <div className="flex items-center justify-between">
           <div>

@@ -50,7 +50,7 @@ export default function PilotDashboard() {
 
   const { data: kpi, refetch: refetchKpi } = trpc.pilot.getKpiSummary.useQuery();
   const { data: participants, refetch: refetchParticipants } = trpc.pilot.listParticipants.useQuery({ limit: 100, offset: 0 });
-  const { data: reports } = trpc.pilot.getReports.useQuery({ limit: 10 });
+  const { data: reports, refetch: refetchReports } = trpc.pilot.getReports.useQuery({ limit: 10 });
 
   const registerMutation = trpc.pilot.registerParticipant.useMutation({
     onSuccess: () => {
@@ -85,6 +85,7 @@ export default function PilotDashboard() {
       toast.success(`Demo data loaded — ${summary}`);
       refetchKpi();
       refetchParticipants();
+      refetchReports();
     },
     onError: (e) => toast.error(`Demo load failed: ${e.message}`),
   });

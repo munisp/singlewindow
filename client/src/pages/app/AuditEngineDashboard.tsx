@@ -35,7 +35,7 @@ export default function AuditEngineDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
 
-  const { data: tasksData, refetch: refetchTasks } = trpc.auditEngine.getAuditTasks.useQuery({
+  const { data: tasksData, isLoading, isError, refetch: refetchTasks } = trpc.auditEngine.getAuditTasks.useQuery({
     status: statusFilter === "all" ? undefined : (statusFilter as any),
     limit: 50,
   });
@@ -55,8 +55,22 @@ export default function AuditEngineDashboard() {
   const auditStats = stats as any;
   const discrepancyReport = report as any;
 
+  if (isLoading) return (
+    <div className="p-6 flex items-center justify-center h-64">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        Loading audit data...
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
+      {isError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load audit data. Please refresh the page.
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">

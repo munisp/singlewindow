@@ -186,7 +186,7 @@ function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) 
   }, [selectedPort]);
 
   // Dynamic port list from DB
-  const { data: portList } = trpc.portCongestion.listPorts.useQuery();
+  const { data: portList, isError} = trpc.portCongestion.listPorts.useQuery();
 
   const { data: vessels, isLoading } = trpc.geospatial.getVesselTrack.useQuery(
     { portCode: portFilter || undefined, limit: 100 },
@@ -365,7 +365,7 @@ export default function PortHeatmap() {
     }
   }, [liveVessels, mapReady]);
 
-  const { data: heatmapData, isLoading, refetch, isFetching, dataUpdatedAt } = trpc.geospatial.heatmapData.useQuery(undefined, {
+  const { data: heatmapData, isLoading, isError, refetch, isFetching, dataUpdatedAt } = trpc.geospatial.heatmapData.useQuery(undefined, {
     refetchInterval: autoRefresh ? 30_000 : false, // 30-second polling when auto-refresh is on
   });
 
@@ -476,6 +476,11 @@ export default function PortHeatmap() {
   return (
     <DashboardLayout title="Port Heatmap">
       <div className="space-y-4">
+        {isError && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+            Failed to load heatmap data. Please refresh the page.
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

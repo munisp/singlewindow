@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,7 +36,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function TraderDashboard() {
   const [, setLocation] = useLocation();
-  const { data: stats, isLoading: statsLoading } = trpc.declarations.stats.useQuery();
+  const { data: stats, isLoading: statsLoading, isError} = trpc.declarations.stats.useQuery();
   const { data: declarations, isLoading: declLoading } = trpc.declarations.myDeclarations.useQuery({ limit: 5 });
   const { data: profile } = trpc.profiles.me.useQuery();
   const { data: aeoApp } = trpc.aeo.myApplication.useQuery();
@@ -43,6 +44,11 @@ export default function TraderDashboard() {
 
   return (
     <DashboardLayout title="My Dashboard">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-6xl">
         {/* Header */}
         <div className="flex items-center justify-between">

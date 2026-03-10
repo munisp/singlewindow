@@ -142,6 +142,7 @@ export default function Finance() {
 
   const kpis = kpisQuery.data;
   const isLoading = kpisQuery.isLoading;
+  const isError = kpisQuery.isError || hsChapterQuery.isError || trendQuery.isError;
 
   // Derive pie chart data for revenue composition
   const revenueComposition = useMemo(() => {

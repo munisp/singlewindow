@@ -39,7 +39,7 @@ export default function BondedWarehouseManagement() {
   const [inventoryStatus, setInventoryStatus] = useState("all");
   const [selectedWarehouse, setSelectedWarehouse] = useState<string | null>(null);
 
-  const { data: warehousesData } = trpc.bondedWarehouse.listWarehouses.useQuery({
+  const { data: warehousesData, isLoading, isError } = trpc.bondedWarehouse.listWarehouses.useQuery({
     status: warehouseFilter === "all" ? undefined : (warehouseFilter as any),
   });
 
@@ -69,8 +69,22 @@ export default function BondedWarehouseManagement() {
   const criticalAlerts = alerts.filter((a: any) => a.severity === "critical");
   const warningAlerts = alerts.filter((a: any) => a.severity === "warning");
 
+  if (isLoading) return (
+    <div className="p-6 flex items-center justify-center h-64">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        Loading warehouse data...
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
+      {isError && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load warehouse data. Please refresh the page.
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">

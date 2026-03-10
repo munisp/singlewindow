@@ -3,6 +3,7 @@
  * Wired to real tRPC declarations.list.
  */
 import { useState } from "react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,7 +38,7 @@ export default function AdminDeclarations() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
 
-  const { data, isLoading, refetch } = trpc.declarations.all.useQuery({
+  const { data, isLoading, refetch, isError} = trpc.declarations.all.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   });
@@ -51,6 +52,11 @@ export default function AdminDeclarations() {
 
   return (
     <DashboardLayout title="All Declarations">
+      {isError && (
+        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+          Failed to load data. Please refresh the page.
+        </div>
+      )}
       <div className="space-y-6 max-w-7xl">
         <div className="flex items-center justify-between">
           <div>
