@@ -484,4 +484,41 @@ export const aeoRouter = router({
       });
       return { success: true, action: input.action };
     }),
+
+  /** Get compliance score trend across the last N renewal cycles for an AEO application */
+  getComplianceScoreTrend: adminProcedure
+    .input(z.object({ applicationId: z.number() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const app = await db.select({
+        id: aeoApplications.id,
+        complianceScore: aeoApplications.complianceScore,
+        createdAt: aeoApplications.createdAt,
+      }).from(aeoApplications).where(eq(aeoApplications.id, input.applicationId)).limit(1);
+      if (!app.length) return [];
+      const renewals = await db.select({
+        processedAt: aeoRenewalRequests.processedAt,
+        complianceScoreAtRenewal: aeoRenewalRequests.complianceScoreAtRenewal,
+        status: aeoRenewalRequests.status,
+      }).from(aeoRenewalRequests)
+        .where(and(
+          eq(aeoRenewalRequests.applicationId, input.applicationId),
+          eq(aeoRenewalRequests.status, "approved"),
+        ))
+        .orderBy(aeoRenewalRequests.processedAt);
+      const points: { label: string; score: number }[] = [];
+      if (app[0].complianceScore != null) {
+        points.push({ label: "Initial", score: app[0].complianceScore });
+      }
+      renewals.forEach((r, i) => {
+        if (r.complianceScoreAtRenewal != null) {
+          const label = r.processedAt
+            ? new Date(r.processedAt).toLocaleDateString("en-GB", { month: "short", year: "2-digit" })
+            : `Renewal ${i + 1}`;
+          points.push({ label, score: r.complianceScoreAtRenewal });
+        }
+      });
+      return points;
+    }),
 });

@@ -541,6 +541,8 @@ export const rulesOfOriginRouter = router({
     .input(z.object({
       recipientEmail: z.string().email(),
       recipientName: z.string().max(256).optional(),
+      timezone: z.string().max(64).default("UTC"),
+      sendHourLocal: z.number().int().min(0).max(23).default(4),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -550,7 +552,33 @@ export const rulesOfOriginRouter = router({
         recipientName: input.recipientName ?? null,
         isActive: true,
         createdBy: ctx.user.id,
+        timezone: input.timezone,
+        sendHourLocal: input.sendHourLocal,
       }).returning();
+      return row;
+    }),
+
+  // Update timezone/send-hour for a recipient (admin only)
+  updateComplianceRecipient: adminProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      timezone: z.string().max(64).optional(),
+      sendHourLocal: z.number().int().min(0).max(23).optional(),
+      recipientName: z.string().max(256).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.timezone !== undefined) updates.timezone = input.timezone;
+      if (input.sendHourLocal !== undefined) updates.sendHourLocal = input.sendHourLocal;
+      if (input.recipientName !== undefined) updates.recipientName = input.recipientName;
+      const [row] = await db
+        .update(complianceEmailSchedule)
+        .set(updates)
+        .where(eq(complianceEmailSchedule.id, input.id))
+        .returning();
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND' });
       return row;
     }),
 

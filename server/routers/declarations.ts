@@ -670,4 +670,51 @@ export const declarationsRouter = router({
         try { unlinkSync(tmpPdf); } catch { /* ignore */ }
       }
     }),
+
+  /** Export declarations as CSV with optional date/status filters */
+  exportCsv: protectedProcedure
+    .input(z.object({
+      dateFrom: z.date().optional(),
+      dateTo: z.date().optional(),
+      status: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const allowedRoles = ["admin", "customs_officer", "finance", "inspector"];
+      if (!allowedRoles.includes(ctx.user.role))
+        throw new TRPCError({ code: "FORBIDDEN" });
+      const rows = await getAllDeclarations(5000, 0, {
+        dateFrom: input.dateFrom,
+        dateTo: input.dateTo,
+        status: input.status,
+      });
+      const header = [
+        "Declaration Number", "Status", "Trader ID",
+        "HS Code", "Goods Description", "Invoice Value",
+        "Invoice Currency", "Total Due", "Country of Origin",
+        "Port of Entry", "Risk Lane", "Risk Score", "Submitted At", "Cleared At",
+      ].join(",");
+      const esc = (v: unknown) => {
+        if (v == null) return "";
+        const s = String(v).replace(/"/g, '""');
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s}"` : s;
+      };
+      const lines = rows.map(r => [
+        esc(r.declarationNumber), esc(r.status), esc(r.traderId),
+        esc(r.hsCode), esc(r.goodsDescription),
+        esc(r.invoiceValue), esc(r.invoiceCurrency),
+        esc(r.totalDue), esc(r.countryOfOrigin), esc(r.portOfEntry),
+        esc(r.riskLane), esc(r.riskScore),
+        esc(r.submittedAt ? new Date(r.submittedAt).toISOString() : ""),
+        esc(r.clearedAt ? new Date(r.clearedAt).toISOString() : ""),
+      ].join(","));
+      const csv = [header, ...lines].join("\n");
+      await logAuditEvent({
+        actorId: ctx.user.id,
+        action: "declarations.exportCsv",
+        entityType: "declaration",
+        entityId: 0,
+        metadata: { rows: rows.length, dateFrom: input.dateFrom, dateTo: input.dateTo, status: input.status },
+      });
+      return { csv, rowCount: rows.length };
+    }),
 });

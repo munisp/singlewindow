@@ -12,6 +12,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
+import helmet from "helmet";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
@@ -701,6 +702,24 @@ async function startServer() {
   runPermifySeedOnStartup().catch(() => {});
   // Sprint 63: WebSocket server for real-time notifications
   setupWebSocketServer(server);
+  // ── Security headers (helmet) ─────────────────────────────────────────────
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://fonts.googleapis.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        connectSrc: ["'self'", "wss:", "https:"],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+    crossOriginEmbedderPolicy: false, // Required for map/media embeds
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  }));
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

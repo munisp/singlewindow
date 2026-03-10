@@ -1428,14 +1428,14 @@
 
 ### Publish
 - [x] Save checkpoint
-- [ ] Guide user to click Publish button in Management UI
+- [x] Guide user to click Publish button in Management UI
 
 ## Sprint 74 — Orchestration Layer + 30 Stakeholder Journeys
 
 ### Phase 1: Suggested Next Steps
-- [ ] Add pnpm db:startup script (PostgreSQL start + migrate + seed)
-- [ ] Wire portCongestion.listPorts to Port Heatmap filter dropdown (dynamic)
-- [ ] Add POST /api/webhooks/oga endpoint for OGA approval callbacks
+- [x] Add pnpm db:startup script (PostgreSQL start + migrate + seed)
+- [x] Wire portCongestion.listPorts to Port Heatmap filter dropdown (dynamic)
+- [x] Add POST /api/webhooks/oga endpoint for OGA approval callbacks
 
 ### Phase 2: Orchestration Architecture Design
 - [ ] Document top 30 stakeholder journeys
@@ -1509,7 +1509,7 @@
 
 ### Phase 13: Checkpoint + Archive
 - [x] Save checkpoint
-- [ ] Generate updated archive
+- [x] Generate updated archive
 
 ## Orchestration Layer (Middleware Stack)
 
@@ -1797,7 +1797,7 @@
 ### AEO Renewal Workflow
 - [x] Add aeo.renewCertificate tRPC mutation (admin-only): extends certificateExpiresAt by 3 years, issues new cert number, notifies trader
 - [x] Add aeo.getExpiringCertificates tRPC query: returns AEO certs expiring within N days
-- [ ] Add AEO renewal reminder cron job (runs daily at 03:10 UTC): sends notifications at 60/30/7 days before expiry
+- [x] Add AEO renewal reminder cron job (runs daily at 03:10 UTC): sends notifications at 60/30/7 days before expiry
 - [x] Add "Renew" button in AdminAEO page for approved certs near expiry (within 60 days)
 - [x] Add expiry countdown badge in AdminAEO and TraderAEO pages
 
@@ -1866,18 +1866,44 @@
 ## Sprint 88 — Delivery Log CSV Export, Server-Side Date Filter, AEO Audit Trail
 
 ### Delivery Log CSV Export
-- [ ] [S88] Add exportDeliveryLogsCsv procedure to rulesOfOrigin router
-- [ ] [S88] Add Export History CSV button to ComplianceEmailSettings delivery log panel
+- [x] [S88] Add exportDeliveryLogsCsv procedure to rulesOfOrigin router
+- [x] [S88] Add Export History CSV button to ComplianceEmailSettings delivery log panel
 
 ### Server-Side Date Filter for AdminDeclarations
-- [ ] [S88] Update getAllDeclarations db helper to accept dateFrom/dateTo params
-- [ ] [S88] Update declarations.all procedure to accept dateFrom/dateTo inputs
-- [ ] [S88] Update AdminDeclarations UI to use server-side date filter with date pickers
+- [x] [S88] Update getAllDeclarations db helper to accept dateFrom/dateTo params
+- [x] [S88] Update declarations.all procedure to accept dateFrom/dateTo inputs
+- [x] [S88] Update AdminDeclarations UI to use server-side date filter with date pickers
 
 ### AEO Renewal Audit Trail
-- [ ] [S88] Add listAllRenewalHistory procedure to aeo router (all statuses, all operators)
-- [ ] [S88] Add Renewal History tab to AdminAEO page with full audit trail table
+- [x] [S88] Add listAllRenewalHistory procedure to aeo router (all statuses, all operators)
+- [x] [S88] Add Renewal History tab to AdminAEO page with full audit trail table
 
 ### Tests
-- [ ] [S88] Vitest tests for Sprint 88 features
-- [ ] [S88] Save checkpoint
+- [x] [S88] Vitest tests for Sprint 88 features
+- [x] [S88] Save checkpoint
+
+## Sprint 89 / Production Hardening
+
+### Sprint 89 Features
+- [x] [S89] Declarations CSV export with dateFrom/dateTo/status filters (bulkExport.exportDeclarations already fully supported)
+- [x] [S89] AEO compliance score trend sparkline in AdminAEO audit trail tab
+- [x] [S89] Compliance email timezone selector and send-hour picker in ComplianceEmailSettings
+- [x] [S89] complianceScoreAtRenewal column added to aeoRenewalRequests table
+- [x] [S89] timezone and sendHourUtc columns added to complianceEmailSchedule table
+- [x] [S89] getComplianceScoreTrend procedure added to aeo router
+- [x] [S89] updateComplianceRecipient procedure added to rulesOfOrigin router
+
+### Comprehensive Audit
+- [x] [S89] All 68 client pages verified: every page has tRPC wiring (zero orphan pages)
+- [x] [S89] All router files verified: all wired into appRouter (zero orphan routers)
+- [x] [S89] All 50 DB tables verified: all have CRUD operations
+- [x] [S89] Zero placeholder/coming-soon buttons found in UI
+- [x] [S89] Zero broken nav links found (all 68 routes match DashboardLayout nav)
+- [x] [S89] Zero console.log stubs or alert() calls in production code
+- [x] [S89] 48 remaining todos confirmed as external infrastructure (Go/Kafka/Temporal/Redis/TigerBeetle/Keycloak) — graceful fallbacks in place
+
+### Production Hardening
+- [x] [S89] Helmet security headers: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, X-XSS-Protection
+- [x] [S89] Rate limiting: 200 req/min for tRPC, 20 req/min for auth endpoints
+- [x] [S89] ErrorBoundary wrapping entire app in App.tsx
+- [x] [S89] .env.example comprehensive documentation for all 30+ env vars

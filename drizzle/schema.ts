@@ -1292,6 +1292,7 @@ export const aeoRenewalRequests = pgTable("aeo_renewal_requests", {
   processedAt: timestamp("processed_at"),
   processedBy: integer("processed_by").references(() => users.id),
   notes: text("notes"),
+  complianceScoreAtRenewal: integer("compliance_score_at_renewal"),
 }, (t) => [
   index("idx_aeo_renewal_app_id").on(t.applicationId),
   index("idx_aeo_renewal_trader_id").on(t.traderId),
@@ -1312,6 +1313,8 @@ export const complianceEmailSchedule = pgTable("compliance_email_schedule", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   createdBy: integer("created_by").references(() => users.id),
+  timezone: varchar("timezone", { length: 64 }).default("UTC").notNull(),
+  sendHourLocal: integer("send_hour_local").default(4).notNull(), // 0-23 in the configured timezone
 });
 export type ComplianceEmailSchedule = typeof complianceEmailSchedule.$inferSelect;
 export type InsertComplianceEmailSchedule = typeof complianceEmailSchedule.$inferInsert;

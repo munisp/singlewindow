@@ -169,6 +169,13 @@
       "when": 1773154983493,
       "tag": "0023_same_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1773157380851,
+      "tag": "0024_colossal_phalanx",
+      "breakpoints": true
     }
   ]
 }

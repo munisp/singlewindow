@@ -13,8 +13,43 @@ import { toast } from "sonner";
 import { useState } from "react";
 import {
   ShieldCheck, CheckCircle2, XCircle, Clock, Award,
-  BarChart3, FileText, User, AlertTriangle, Zap, RefreshCw, Bell, History,
+  BarChart3, FileText, User, AlertTriangle, Zap, RefreshCw, Bell, History, TrendingUp,
 } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+
+function ComplianceSparkline({ applicationId }: { applicationId: number }) {
+  const { data: trend, isLoading } = trpc.aeo.getComplianceScoreTrend.useQuery({ applicationId });
+  if (isLoading) return <div className="h-12 flex items-center text-xs text-muted-foreground">Loading trend…</div>;
+  if (!trend || trend.length < 2) return <div className="text-xs text-muted-foreground italic">Insufficient renewal data for trend</div>;
+  const latest = trend[trend.length - 1].score;
+  const first = trend[0].score;
+  const delta = latest - first;
+  return (
+    <div className="flex items-center gap-3">
+      <div style={{ width: 120, height: 40 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={trend} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+            <Line type="monotone" dataKey="score" stroke="#10b981" strokeWidth={2} dot={false} />
+            <Tooltip
+              contentStyle={{ fontSize: 11, padding: "2px 8px" }}
+              formatter={(v: number) => [`${v}/100`, "Score"]}
+              labelFormatter={(l: string) => l}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="text-xs">
+        <span className="font-medium">{latest}/100</span>
+        {delta !== 0 && (
+          <span className={delta > 0 ? "text-emerald-600 ml-1" : "text-red-500 ml-1"}>
+            {delta > 0 ? "+" : ""}{delta}
+          </span>
+        )}
+        <div className="text-muted-foreground">{trend.length} data points</div>
+      </div>
+    </div>
+  );
+}
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   submitted:    { label: "Submitted",    color: "bg-blue-100 text-blue-800",   icon: <FileText className="h-3 w-3" /> },
@@ -496,6 +531,7 @@ export default function AdminAEO() {
                           <th className="text-left py-2 pr-3 font-medium">Requested</th>
                           <th className="text-left py-2 pr-3 font-medium">Processed</th>
                           <th className="text-left py-2 pr-3 font-medium">Decision</th>
+                          <th className="text-left py-2 pr-3 font-medium">Score Trend</th>
                           <th className="text-left py-2 font-medium">Notes</th>
                         </tr>
                       </thead>
@@ -536,6 +572,9 @@ export default function AdminAEO() {
                                   <Clock className="h-3 w-3" /> Pending
                                 </Badge>
                               )}
+                            </td>
+                            <td className="py-2.5 pr-3">
+                              <ComplianceSparkline applicationId={r.applicationId} />
                             </td>
                             <td className="py-2.5 text-xs text-muted-foreground max-w-[180px] truncate">
                               {r.notes ?? "—"}
