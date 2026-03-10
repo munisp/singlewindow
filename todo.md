@@ -1676,3 +1676,27 @@
 - [x] Generate comprehensive archive v3 (938 files, 16MB) — 30 new files vs v2
 - [x] Compare with previous archive (v2: 908 files → v3: 938 files, +30 new files)
 - [x] Save checkpoint (1217 tests, 40 files, 0 failures)
+
+## Sprint 80 — SMTP Activation, Public Cert Verify Page, Onboarding Wizard
+
+### SMTP Delivery Activation
+- [x] SENDGRID_API_KEY + DIGEST_RECIPIENTS: gracefully skipped when not set (defaults used)
+- [x] digestEmail.ts validated: uses env vars, sends HTML email via Nodemailer + SendGrid SMTP
+- [x] Vitest tests for email helper included in sprint78.test.ts
+
+### Public Certificate Verify Page
+- [x] GET /api/verify/:certNumber public route registered in server/_core/index.ts
+- [x] client/src/pages/public/CertVerify.tsx created — public page (no auth required)
+- [x] CertVerify page: fetches /api/verify/:certNumber, shows green/red badge + cert details
+- [x] /verify/:certNumber route registered in App.tsx (outside auth guard)
+- [x] QR-scannable mobile-friendly layout with responsive card design
+
+### Role-Based Onboarding Wizard
+- [x] Sprint 69 already built useOnboardingRedirect (auto-redirects new traders to /app/onboarding)
+- [x] auth.me already returns hasCompletedOnboarding; onboarding.selectRole procedure added
+- [x] TraderOnboarding.tsx: RoleSelectionStep added as Step 0 before the 5-step wizard
+- [x] Non-trader roles (customs_officer, oga_officer, inspector, finance) skip wizard and go to their portal
+- [x] Trader role proceeds through full 5-step wizard (company profile → KYC → bank → declaration → AEO)
+- [x] /app/onboarding route already registered in App.tsx
+- [x] After completion, onboardingCompleted=true and redirect to /app/trader
+- [x] 1217 tests, 40 files, 0 failures

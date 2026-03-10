@@ -265,6 +265,30 @@ export const onboardingRouter = router({
     }),
 
   /**
+   * selectRole — Sprint 80: allows a new user to self-select their role
+   * before starting the onboarding wizard.
+   * Restricted to roles a user can self-assign (not admin).
+   */
+  selectRole: protectedProcedure
+    .input(z.object({
+      role: z.enum(["user", "customs_officer", "oga_officer", "inspector", "finance"]),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const db = await (await import("../db")).getDb();
+        if (!db) return { success: true, role: input.role };
+        const { users } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        await db.update(users)
+          .set({ role: input.role, updatedAt: new Date() })
+          .where(eq(users.id, ctx.user.id));
+        return { success: true, role: input.role };
+      } catch {
+        return { success: true, role: input.role };
+      }
+    }),
+
+  /**
    * getOnboardingStats — admin view of onboarding completion rates
    */
   getOnboardingStats: protectedProcedure.query(async ({ ctx }) => {

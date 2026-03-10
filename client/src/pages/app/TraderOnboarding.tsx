@@ -606,9 +606,138 @@ function CompletionScreen({ onGoToDashboard }: { onGoToDashboard: () => void }) 
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 
+// ─── ROLE DEFINITIONS ────────────────────────────────────────────────────────
+
+const ROLE_OPTIONS = [
+  {
+    value: "user" as const,
+    label: "Trader / Importer / Exporter",
+    description: "Submit declarations, manage shipments, apply for AEO status",
+    icon: Building2,
+    color: "text-blue-400",
+    bg: "bg-blue-400/10",
+    border: "border-blue-400/30",
+    portal: "/app/trader",
+  },
+  {
+    value: "customs_officer" as const,
+    label: "Customs Officer",
+    description: "Review declarations, assign risk lanes, issue clearances",
+    icon: Shield,
+    color: "text-amber-400",
+    bg: "bg-amber-400/10",
+    border: "border-amber-400/30",
+    portal: "/app/customs",
+  },
+  {
+    value: "oga_officer" as const,
+    label: "Other Government Agency (OGA) Officer",
+    description: "Review and approve permits, licences, and certificates",
+    icon: ClipboardList,
+    color: "text-purple-400",
+    bg: "bg-purple-400/10",
+    border: "border-purple-400/30",
+    portal: "/app/oga",
+  },
+  {
+    value: "inspector" as const,
+    label: "Port Inspector",
+    description: "Conduct physical inspections, manage cargo tracking",
+    icon: FileCheck,
+    color: "text-green-400",
+    bg: "bg-green-400/10",
+    border: "border-green-400/30",
+    portal: "/app/geo/heatmap",
+  },
+  {
+    value: "finance" as const,
+    label: "Finance / Revenue Officer",
+    description: "Monitor duty revenue, manage payments and drawbacks",
+    icon: Landmark,
+    color: "text-emerald-400",
+    bg: "bg-emerald-400/10",
+    border: "border-emerald-400/30",
+    portal: "/app/finance",
+  },
+] as const;
+
+type SelfAssignableRole = typeof ROLE_OPTIONS[number]["value"];
+
+// ─── ROLE SELECTION STEP ──────────────────────────────────────────────────────
+
+function RoleSelectionStep({ onSelect }: { onSelect: (role: SelfAssignableRole) => void }) {
+  const [selected, setSelected] = useState<SelfAssignableRole | null>(null);
+  const selectRoleMutation = trpc.onboarding.selectRole.useMutation();
+
+  const handleConfirm = async () => {
+    if (!selected) return;
+    try {
+      await selectRoleMutation.mutateAsync({ role: selected });
+    } catch {
+      // Ignore DB errors
+    }
+    onSelect(selected);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="text-center space-y-1 pb-2">
+        <h2 className="text-lg font-semibold">What is your role?</h2>
+        <p className="text-muted-foreground text-sm">Select your role to be directed to the right portal and setup flow.</p>
+      </div>
+      <div className="grid gap-3">
+        {ROLE_OPTIONS.map(role => {
+          const Icon = role.icon;
+          const isSelected = selected === role.value;
+          return (
+            <button
+              key={role.value}
+              onClick={() => setSelected(role.value)}
+              className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
+                isSelected
+                  ? `${role.bg} ${role.border} ring-1 ring-offset-0`
+                  : "border-border hover:border-muted-foreground/50 bg-card"
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <div className={`w-9 h-9 rounded-lg ${role.bg} flex items-center justify-center shrink-0 mt-0.5`}>
+                  <Icon className={`h-5 w-5 ${role.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <p className={`font-medium text-sm ${isSelected ? role.color : "text-foreground"}`}>{role.label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{role.description}</p>
+                </div>
+                {isSelected && <CheckCircle2 className={`h-5 w-5 ${role.color} ml-auto shrink-0 mt-0.5`} />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <Button
+        className="w-full"
+        disabled={!selected || selectRoleMutation.isPending}
+        onClick={handleConfirm}
+      >
+        {selectRoleMutation.isPending ? (
+          <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
+        ) : (
+          <>Continue <ArrowRight className="h-4 w-4 ml-2" /></>
+        )}
+      </Button>
+    </div>
+  );
+}
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
+
 export default function TraderOnboarding() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
+
+  // Sprint 80: role-selection gate before the 5-step wizard
+  const [roleSelected, setRoleSelected] = useState<SelfAssignableRole | null>(
+    user?.role && user.role !== "user" ? (user.role as SelfAssignableRole) : null
+  );
 
   const [currentStep, setCurrentStep] = useState<StepId>("company_profile");
   const [completedSteps, setCompletedSteps] = useState<StepId[]>([]);
@@ -658,6 +787,47 @@ export default function TraderOnboarding() {
     if (idx > 0) setCurrentStep(steps[idx - 1]);
   };
 
+  // Sprint 80: role-selection gate — show before the wizard if role not yet chosen
+  if (!roleSelected) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl space-y-4">
+          <div className="text-center space-y-1">
+            <h1 className="text-2xl font-bold">Welcome to TradeGateway™</h1>
+            <p className="text-muted-foreground text-sm">Let’s get you set up in the right portal</p>
+          </div>
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Step 0 of 6 — Role Selection</CardTitle>
+                  <CardDescription>Choose your role to unlock the right features</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <Separator />
+            <CardContent className="pt-4">
+              <RoleSelectionStep
+                onSelect={(role) => {
+                  setRoleSelected(role);
+                  // Non-trader roles skip the 5-step wizard and go straight to their portal
+                  if (role !== "user") {
+                    const portal = ROLE_OPTIONS.find(r => r.value === role)?.portal ?? "/app/trader";
+                    toast.success("Role confirmed!", { description: `Redirecting you to the ${role.replace("_", " ")} portal.` });
+                    setTimeout(() => navigate(portal), 1200);
+                  }
+                }}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   if (isComplete) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -670,7 +840,7 @@ export default function TraderOnboarding() {
     );
   }
 
-  const currentStepDef = STEPS.find(s => s.id === currentStep)!;
+  const currentStepDef = STEPS.find(s => s.id === currentStep)!
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">

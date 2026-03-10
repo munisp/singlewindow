@@ -84,6 +84,8 @@ const ApiChangelog = lazy(() => import('./pages/app/ApiChangelog'));
 const RulesOfOrigin = lazy(() => import('./pages/app/RulesOfOrigin'));
 const PilotDashboard = lazy(() => import('./pages/app/PilotDashboard'));
 const ExecutiveDashboard = lazy(() => import('./pages/app/ExecutiveDashboard'));
+// Sprint 80 — Public certificate verification page (no auth required)
+const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -96,6 +98,11 @@ function Router() {
     <Switch>
       {/* Public landing page */}
       <Route path="/" component={Home} />
+
+      {/* Sprint 80 — Public certificate verification (no auth required, QR-scannable) */}
+      <Route path="/verify/:certNumber">
+        <Suspense fallback={<LazyFallback />}><CertVerify /></Suspense>
+      </Route>
 
       {/* Architecture specification (all 29 interactive components) */}
       <Route path="/specification">
