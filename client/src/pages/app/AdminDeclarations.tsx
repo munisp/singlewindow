@@ -1,14 +1,14 @@
 /**
  * Admin Declarations — All declarations across all traders.
- * Wired to real tRPC declarations.list.
+ * Wired to real tRPC declarations.all with server-side dateFrom/dateTo filtering.
  * Supports ?date=YYYY-MM-DD query param for drill-through from Pilot Dashboard trend chart.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,43 +39,67 @@ export default function AdminDeclarations() {
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
 
-  // Read ?date=YYYY-MM-DD from the URL for drill-through from Pilot Dashboard
-  const [dateFilter, setDateFilter] = useState<string | null>(() => {
+  // Date filter state — initialised from ?date= query param for drill-through
+  const [dateFromStr, setDateFromStr] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("date");
+    const d = params.get("date");
+    return d ?? "";
+  });
+  const [dateToStr, setDateToStr] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const d = params.get("date");
+    return d ?? "";
   });
 
-  // Sync dateFilter if the URL changes (e.g., back navigation)
+  // Sync date filter if URL changes (e.g., back navigation from drill-through)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const d = params.get("date");
-    setDateFilter(d);
+    if (d) {
+      setDateFromStr(d);
+      setDateToStr(d);
+    }
   }, [location]);
 
+  // Convert string dates to Date objects for the tRPC query
+  const dateFrom = useMemo(() => {
+    if (!dateFromStr) return undefined;
+    const d = new Date(dateFromStr + "T00:00:00.000Z");
+    return isNaN(d.getTime()) ? undefined : d;
+  }, [dateFromStr]);
+
+  const dateTo = useMemo(() => {
+    if (!dateToStr) return undefined;
+    const d = new Date(dateToStr + "T23:59:59.999Z");
+    return isNaN(d.getTime()) ? undefined : d;
+  }, [dateToStr]);
+
+  const isDrillThrough = !!(new URLSearchParams(window.location.search).get("date"));
+  const hasDateFilter = !!(dateFromStr || dateToStr);
+
   const clearDateFilter = () => {
-    setDateFilter(null);
+    setDateFromStr("");
+    setDateToStr("");
+    setPage(0);
     setLocation("/app/admin/declarations");
   };
 
   const { data, isLoading, refetch, isError } = trpc.declarations.all.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
+    status: statusFilter !== "ALL" ? statusFilter.toLowerCase() : undefined,
+    dateFrom,
+    dateTo,
   });
 
   type DeclarationItem = NonNullable<typeof data>[number];
 
-  const filtered = (data ?? []).filter((d: DeclarationItem) => {
-    if (statusFilter !== "ALL" && d.status.toUpperCase() !== statusFilter) return false;
-    if (search && !d.declarationNumber.toLowerCase().includes(search.toLowerCase()) &&
-      !(d.goodsDescription ?? "").toLowerCase().includes(search.toLowerCase())) return false;
-    if (dateFilter) {
-      // Filter by submittedAt date matching the ISO date string
-      if (!d.submittedAt) return false;
-      const submittedDate = new Date(d.submittedAt).toISOString().slice(0, 10);
-      if (submittedDate !== dateFilter) return false;
-    }
-    return true;
-  });
+  // Client-side text search only (date/status filter is server-side)
+  const filtered = (data ?? []).filter((d: DeclarationItem) =>
+    !search ||
+    d.declarationNumber.toLowerCase().includes(search.toLowerCase()) ||
+    (d.goodsDescription ?? "").toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <DashboardLayout title="All Declarations">
@@ -110,15 +134,15 @@ export default function AdminDeclarations() {
           </div>
         </div>
 
-        {/* Date filter banner (shown when navigating from Pilot Dashboard trend chart) */}
-        {dateFilter && (
+        {/* Date drill-through banner */}
+        {isDrillThrough && (
           <div className="flex items-center gap-3 p-3 rounded-lg border border-blue-200 bg-blue-50/60 text-sm">
             <CalendarDays className="h-4 w-4 text-blue-600 shrink-0" />
             <span className="text-blue-800 font-medium">
-              Filtered to declarations submitted on <strong>{dateFilter}</strong>
+              Filtered to declarations submitted on <strong>{dateFromStr}</strong>
             </span>
             <span className="text-blue-600 text-xs">
-              — {filtered.length} result{filtered.length !== 1 ? "s" : ""} shown
+              — {filtered.length} result{filtered.length !== 1 ? "s" : ""} shown (server-side)
             </span>
             <Button
               variant="ghost"
@@ -132,8 +156,8 @@ export default function AdminDeclarations() {
         )}
 
         {/* Filters */}
-        <div className="flex gap-3">
-          <div className="relative flex-1 max-w-sm">
+        <div className="flex flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search by declaration number or goods..."
@@ -142,7 +166,7 @@ export default function AdminDeclarations() {
               className="pl-9"
             />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(0); }}>
             <SelectTrigger className="w-44">
               <SelectValue />
             </SelectTrigger>
@@ -155,6 +179,30 @@ export default function AdminDeclarations() {
               <SelectItem value="CLEARED">Cleared</SelectItem>
             </SelectContent>
           </Select>
+          {/* Server-side date range pickers */}
+          <div className="flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
+            <Input
+              type="date"
+              value={dateFromStr}
+              onChange={(e) => { setDateFromStr(e.target.value); setPage(0); }}
+              className="w-36 text-sm"
+              title="From date (submitted)"
+            />
+            <span className="text-muted-foreground text-xs">to</span>
+            <Input
+              type="date"
+              value={dateToStr}
+              onChange={(e) => { setDateToStr(e.target.value); setPage(0); }}
+              className="w-36 text-sm"
+              title="To date (submitted)"
+            />
+            {hasDateFilter && !isDrillThrough && (
+              <Button variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground" onClick={clearDateFilter}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Table */}
@@ -167,8 +215,8 @@ export default function AdminDeclarations() {
             ) : filtered.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p>No declarations found{dateFilter ? ` for ${dateFilter}` : ""}</p>
-                {dateFilter && (
+                <p>No declarations found{hasDateFilter ? ` for the selected date range` : ""}</p>
+                {hasDateFilter && (
                   <Button variant="link" size="sm" onClick={clearDateFilter} className="mt-2">
                     Clear date filter
                   </Button>
@@ -196,14 +244,14 @@ export default function AdminDeclarations() {
                         <td className="p-3 text-sm">{d.countryOfOrigin ?? "—"}</td>
                         <td className="p-3 font-mono text-xs">{d.hsCode ?? "—"}</td>
                         <td className="p-3">
-                          <Badge variant="outline" className={STATUS_COLORS[d.status] ?? ""}>
-                            {d.status.replace(/_/g, " ")}
+                          <Badge variant="outline" className={STATUS_COLORS[d.status?.toUpperCase()] ?? ""}>
+                            {d.status?.replace(/_/g, " ") ?? "—"}
                           </Badge>
                         </td>
                         <td className="p-3">
                           {d.riskLane ? (
-                            <Badge variant="outline" className={RISK_COLORS[d.riskLane] ?? ""}>
-                              {d.riskLane}
+                            <Badge variant="outline" className={RISK_COLORS[d.riskLane?.toUpperCase()] ?? ""}>
+                              {d.riskLane?.toUpperCase()}
                             </Badge>
                           ) : "—"}
                         </td>

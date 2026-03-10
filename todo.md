@@ -1862,3 +1862,22 @@
 - [x] [S87] Vitest tests for complianceEmailDeliveryLog procedures
 - [x] [S87] Vitest tests for pilot trend drill-through logic
 - [x] [S87] Save checkpoint
+
+## Sprint 88 — Delivery Log CSV Export, Server-Side Date Filter, AEO Audit Trail
+
+### Delivery Log CSV Export
+- [ ] [S88] Add exportDeliveryLogsCsv procedure to rulesOfOrigin router
+- [ ] [S88] Add Export History CSV button to ComplianceEmailSettings delivery log panel
+
+### Server-Side Date Filter for AdminDeclarations
+- [ ] [S88] Update getAllDeclarations db helper to accept dateFrom/dateTo params
+- [ ] [S88] Update declarations.all procedure to accept dateFrom/dateTo inputs
+- [ ] [S88] Update AdminDeclarations UI to use server-side date filter with date pickers
+
+### AEO Renewal Audit Trail
+- [ ] [S88] Add listAllRenewalHistory procedure to aeo router (all statuses, all operators)
+- [ ] [S88] Add Renewal History tab to AdminAEO page with full audit trail table
+
+### Tests
+- [ ] [S88] Vitest tests for Sprint 88 features
+- [ ] [S88] Save checkpoint

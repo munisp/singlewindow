@@ -250,11 +250,22 @@ export const declarationsRouter = router({
 
   // Get all declarations (customs officers / admin / finance / inspector / oga_officer)
   all: protectedProcedure
-    .input(z.object({ limit: z.number().default(50), offset: z.number().default(0), status: z.string().optional(), riskLane: z.string().optional() }))
+    .input(z.object({
+      limit: z.number().default(50),
+      offset: z.number().default(0),
+      status: z.string().optional(),
+      riskLane: z.string().optional(),
+      dateFrom: z.date().optional(),
+      dateTo: z.date().optional(),
+    }))
     .query(async ({ ctx, input }) => {
       const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
-      return getAllDeclarations(input.limit, input.offset);
+      return getAllDeclarations(input.limit, input.offset, {
+        dateFrom: input.dateFrom,
+        dateTo: input.dateTo,
+        status: input.status,
+      });
     }),
 
   // Update declaration status (customs officer action)

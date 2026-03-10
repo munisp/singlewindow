@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Mail, Plus, Trash2, ToggleLeft, ToggleRight, RefreshCw,
-  Clock, CheckCircle, XCircle, Send, History, AlertCircle,
+  Clock, CheckCircle, XCircle, Send, History, AlertCircle, Download,
 } from "lucide-react";
 
 export default function ComplianceEmailSettings() {
@@ -19,6 +19,26 @@ export default function ComplianceEmailSettings() {
 
   const { data: schedules, refetch } = trpc.rulesOfOrigin.listComplianceSchedules.useQuery();
   const { data: deliveryLogs, refetch: refetchLogs } = trpc.rulesOfOrigin.listDeliveryLogs.useQuery({ limit: 30 });
+  const exportLogsMutation = trpc.rulesOfOrigin.exportDeliveryLogsCsv.useQuery(
+    { limit: 100 },
+    { enabled: false }
+  );
+
+  const handleExportHistory = async () => {
+    const result = await exportLogsMutation.refetch();
+    if (!result.data?.csv) {
+      toast.error("No delivery history to export");
+      return;
+    }
+    const blob = new Blob([result.data.csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `compliance-email-delivery-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Delivery history exported");
+  };
 
   const addMutation = trpc.rulesOfOrigin.addComplianceRecipient.useMutation({
     onSuccess: () => {
@@ -246,9 +266,21 @@ export default function ComplianceEmailSettings() {
                   Last 30 nightly delivery attempts — both scheduled (cron) and manual (Send Test Now).
                 </CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={() => refetchLogs()}>
-                <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => refetchLogs()}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                  onClick={handleExportHistory}
+                  disabled={exportLogsMutation.isFetching}
+                >
+                  <Download className="h-3.5 w-3.5 mr-1" />
+                  {exportLogsMutation.isFetching ? "Exporting…" : "Export History"}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent>

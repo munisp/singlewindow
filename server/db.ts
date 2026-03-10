@@ -1,4 +1,4 @@
-import { eq, desc, and, sql, count } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -191,12 +191,20 @@ export async function getDeclarationsByTrader(traderId: number, limit = 20, offs
     .limit(limit).offset(offset);
 }
 
-export async function getAllDeclarations(limit = 50, offset = 0) {
+export async function getAllDeclarations(
+  limit = 50,
+  offset = 0,
+  opts?: { dateFrom?: Date; dateTo?: Date; status?: string }
+) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(declarations)
-    .orderBy(desc(declarations.createdAt))
-    .limit(limit).offset(offset);
+  const conditions: any[] = [];
+  if (opts?.dateFrom) conditions.push(gte(declarations.submittedAt, opts.dateFrom));
+  if (opts?.dateTo) conditions.push(lte(declarations.submittedAt, opts.dateTo));
+  if (opts?.status) conditions.push(eq(declarations.status, opts.status as any));
+  const base = db.select().from(declarations);
+  const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+  return filtered.orderBy(desc(declarations.submittedAt)).limit(limit).offset(offset);
 }
 
 export async function updateDeclaration(id: number, data: Partial<typeof declarations.$inferInsert>) {

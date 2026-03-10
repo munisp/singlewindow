@@ -599,4 +599,31 @@ export const rulesOfOriginRouter = router({
         .orderBy(desc(complianceEmailDeliveryLog.triggeredAt))
         .limit(input.limit);
     }),
+
+  // Export compliance email delivery history as CSV
+  exportDeliveryLogsCsv: adminProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(500).default(100) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { csv: '' };
+      const rows = await db
+        .select()
+        .from(complianceEmailDeliveryLog)
+        .orderBy(desc(complianceEmailDeliveryLog.triggeredAt))
+        .limit(input.limit);
+      const header = 'ID,Triggered At,Triggered By,Date Label,Row Count,Recipient Count,Recipients,Success,Error,Duration (ms)';
+      const csvRows = rows.map(r => [
+        r.id,
+        new Date(r.triggeredAt).toISOString(),
+        r.triggeredBy,
+        r.dateLabel,
+        r.rowCount,
+        r.recipientCount,
+        `"${r.recipients.replace(/"/g, '""')}"`,
+        r.success ? 'Yes' : 'No',
+        r.errorMessage ? `"${r.errorMessage.replace(/"/g, '""')}"` : '',
+        r.durationMs ?? '',
+      ].join(','));
+      return { csv: [header, ...csvRows].join('\n') };
+    }),
 });
