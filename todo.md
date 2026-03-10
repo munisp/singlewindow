@@ -1629,3 +1629,10 @@
 - [x] Vitest tests: 1192 tests passing (39 files, 0 failures)
 - [x] Full test suite passing — 1192 tests, 0 failures
 - [x] Save checkpoint
+
+## Sprint 78 Follow-up — Pilot Seed, PDF Generation, Exec Digest Cron
+- [x] Apapa Port pilot live-demo seed script (scripts/seed-pilot-demo.mjs): 5 NCS officers, 20 traders, 30 days of reports, 15 declarations, 9 payments
+- [x] AfCFTA certificate PDF generation: server/lib/certificatePdf.ts (pdfkit), rulesOfOrigin.generatePdf tRPC procedure, Download PDF button in RulesOfOrigin.tsx
+- [x] Executive Dashboard daily email digest cron job: server/jobs/execDigest.ts, fires at 03:05 UTC daily, collects yesterday's KPIs (declarations, revenue, SLA, AEO, sanctions, pilot)
+- [x] Vitest tests: server/sprint78.test.ts — 17 new tests, all 1207 tests passing (40 files, 0 failures)
+- [x] Save checkpoint

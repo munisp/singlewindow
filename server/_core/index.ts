@@ -608,6 +608,15 @@ export async function runDocumentExpiryCron() {
 cron.schedule("0 0 3 * * *", runDocumentExpiryCron, { timezone: "UTC" });
 console.log("[Cron] Document expiry enforcement scheduled at 03:00 UTC daily");
 
+// ── Executive Dashboard daily digest ─────────────────────────────────────────
+// Fires at 03:05 UTC every day (5 min after document expiry to avoid DB contention).
+// Collects yesterday's KPIs and sends a structured owner notification.
+import { runExecDailyDigest } from "../jobs/execDigest";
+cron.schedule("0 5 3 * * *", async () => {
+  await runExecDailyDigest();
+}, { timezone: "UTC" });
+console.log("[Cron] Executive daily digest scheduled at 03:05 UTC daily");
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();

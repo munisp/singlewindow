@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, type OriginCertificate } from "../../drizzle/schema";
 import { eq, desc, and, or, ilike } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { generateCertificatePdf } from "../lib/certificatePdf";
 
 const certTypeValues = originCertTypeEnum.enumValues;
 const certStatusValues = originCertStatusEnum.enumValues;
@@ -194,6 +195,32 @@ export const rulesOfOriginRouter = router({
         .where(eq(originCertificates.certNumber, input.certNumber));
       if (!cert) throw new TRPCError({ code: "NOT_FOUND", message: "Certificate not found" });
       return cert;
+    }),
+
+  // Generate a WTO-compliant PDF for an approved certificate
+  generatePdf: protectedProcedure
+    .input(z.object({ id: z.number().int() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [cert] = await db
+        .select()
+        .from(originCertificates)
+        .where(eq(originCertificates.id, input.id));
+      if (!cert) throw new TRPCError({ code: "NOT_FOUND", message: "Certificate not found" });
+      // Traders can only download their own; OGA officers and admins can download any
+      if (cert.traderId !== ctx.user.id && !["oga_officer", "admin", "customs_officer"].includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const pdfBuffer = await generateCertificatePdf(cert);
+      // Return as base64 so it can be decoded and downloaded in the browser
+      return {
+        base64: pdfBuffer.toString("base64"),
+        filename: `CO-${cert.certNumber ?? cert.id}.pdf`,
+        mimeType: "application/pdf",
+        certNumber: cert.certNumber,
+        status: cert.status,
+      };
     }),
 
   // Get summary stats for the OGA dashboard

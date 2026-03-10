@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  FileCheck, Search, Plus, CheckCircle, XCircle, Globe, AlertTriangle,
+  FileCheck, Search, Plus, CheckCircle, XCircle, Globe, AlertTriangle, Download,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -104,6 +104,26 @@ export default function RulesOfOrigin() {
       utils.rulesOfOrigin.getMyCertificates.invalidate();
     },
     onError: (e) => toast.error(e.message),
+  });
+
+  const generatePdfMutation = trpc.rulesOfOrigin.generatePdf.useMutation({
+    onSuccess: (data) => {
+      // Decode base64 and trigger browser download
+      const byteChars = atob(data.base64);
+      const byteNums = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([new Uint8Array(byteNums)], { type: data.mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`PDF downloaded: ${data.filename}`);
+    },
+    onError: (e) => toast.error(`PDF generation failed: ${e.message}`),
   });
 
   const handleCreate = () => {
@@ -279,6 +299,20 @@ export default function RulesOfOrigin() {
                                   <XCircle className="h-3 w-3 mr-1" /> Reject
                                 </Button>
                               </>
+                            )}
+                            {/* Download PDF — available for approved certs */}
+                            {(cert.status as string) === "approved" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => generatePdfMutation.mutate({ id: cert.id as number })}
+                                disabled={generatePdfMutation.isPending}
+                                title="Download Certificate PDF"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                {generatePdfMutation.isPending ? "Generating..." : "PDF"}
+                              </Button>
                             )}
                           </div>
                         </td>
