@@ -1700,3 +1700,22 @@
 - [x] /app/onboarding route already registered in App.tsx
 - [x] After completion, onboardingCompleted=true and redirect to /app/trader
 - [x] 1217 tests, 40 files, 0 failures
+
+## Sprint 81 — SMTP Secrets, Cert Verify Branding, Onboarding Analytics Funnel
+
+### SMTP Delivery Activation
+- [x] SENDGRID_API_KEY + DIGEST_RECIPIENTS: gracefully skipped when not set (defaults used)
+- [x] digestEmail.ts validated: uses env vars, sends HTML email via Nodemailer + SendGrid SMTP
+- [x] Vitest tests for SMTP graceful-skip path in sprint81.test.ts
+
+### Cert Verify Page Upgrade
+- [x] NCS logo (CDN) + AfCFTA logo (CDN) added to /verify/:certNumber page header
+- [x] "Verify another certificate" search bar added (input + amber Submit button)
+- [x] Search bar navigates to /verify/:newCertNumber on submit
+- [x] Mobile-first responsive layout with logo row + centered title
+
+### Onboarding Analytics Funnel
+- [x] OnboardingAnalyticsDashboard.tsx already fully wired (Sprint 72) — funnel bar chart, step breakdown with drop-off rates, AEO tier pie chart
+- [x] trpc.onboardingAnalytics.funnel / summary / aeoTiers all wired and rendering
+- [x] Vitest tests for all three onboardingAnalytics procedures in sprint81.test.ts
+- [x] 1232 tests, 41 files, 0 failures

@@ -1,15 +1,24 @@
 /**
- * Sprint 80 — Public Certificate Verification Page
+ * Sprint 81 — Public Certificate Verification Page (upgraded)
  * Route: /verify/:certNumber (no auth required)
  * Accessible via QR code on AfCFTA certificates of origin.
  * Mobile-first layout for border agency use.
+ * Sprint 81 additions: NCS/AfCFTA logos + "Verify another certificate" search bar.
  */
-import { useEffect, useState } from "react";
-import { useParams } from "wouter";
-import { CheckCircle2, XCircle, AlertCircle, Loader2, Shield, Calendar, Globe, Package, FileText, Building2 } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { useParams, useLocation } from "wouter";
+import {
+  CheckCircle2, XCircle, AlertCircle, Loader2, Shield,
+  Calendar, Globe, Package, FileText, Building2, Search,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
+const NCS_LOGO   = "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA/ncs-logo_737868a6.png";
+const AFCFTA_LOGO = "https://d2xsxph8kpxj0f.cloudfront.net/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA/afcfta-logo_232871fd.png";
 
 interface CertVerifyResult {
   valid: boolean;
@@ -93,15 +102,21 @@ function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label:
 export default function CertVerify() {
   const params = useParams<{ certNumber: string }>();
   const certNumber = params.certNumber;
+  const [, navigate] = useLocation();
 
   const [result, setResult] = useState<CertVerifyResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  // Search bar state
+  const [searchInput, setSearchInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!certNumber) return;
     setLoading(true);
     setFetchError(null);
+    setResult(null);
     fetch(`/api/verify/${encodeURIComponent(certNumber)}`)
       .then(async (res) => {
         const data = await res.json();
@@ -113,29 +128,64 @@ export default function CertVerify() {
       .finally(() => setLoading(false));
   }, [certNumber]);
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = searchInput.trim();
+    if (!trimmed) return;
+    navigate(`/verify/${encodeURIComponent(trimmed)}`);
+    setSearchInput("");
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 flex flex-col items-center justify-start px-4 py-8">
-      {/* Header */}
-      <div className="w-full max-w-lg mb-6 text-center">
-        <div className="flex items-center justify-center gap-2 mb-2">
-          <Shield className="h-7 w-7 text-amber-400" />
-          <span className="text-white font-bold text-xl tracking-tight">TradeGateway™ NGSWTP</span>
+
+      {/* ── Header with official logos ──────────────────────────────────── */}
+      <div className="w-full max-w-lg mb-6">
+        {/* Logo row */}
+        <div className="flex items-center justify-between mb-4">
+          <img
+            src={NCS_LOGO}
+            alt="Nigeria Customs Service"
+            className="h-14 w-auto object-contain"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+          <div className="text-center px-2">
+            <div className="flex items-center justify-center gap-1.5 mb-0.5">
+              <Shield className="h-5 w-5 text-amber-400" />
+              <span className="text-white font-bold text-base tracking-tight">TradeGateway™</span>
+            </div>
+            <p className="text-slate-400 text-xs">Certificate Registry</p>
+          </div>
+          <img
+            src={AFCFTA_LOGO}
+            alt="AfCFTA Secretariat"
+            className="h-14 w-auto object-contain"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
         </div>
-        <p className="text-slate-400 text-sm">Certificate of Origin Registry — Verification Service</p>
+
+        {/* Title */}
+        <div className="text-center">
+          <h1 className="text-white font-semibold text-lg">Certificate of Origin Verification</h1>
+          <p className="text-slate-400 text-sm mt-0.5">
+            Verifying: <span className="font-mono text-amber-300">{certNumber}</span>
+          </p>
+        </div>
       </div>
 
       <div className="w-full max-w-lg space-y-4">
-        {/* Loading state */}
+
+        {/* ── Loading state ───────────────────────────────────────────────── */}
         {loading && (
           <Card className="border-slate-700 bg-slate-800/60 backdrop-blur">
             <CardContent className="p-8 flex flex-col items-center gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
-              <p className="text-slate-300 text-sm">Verifying certificate <span className="font-mono text-amber-300">{certNumber}</span>…</p>
+              <p className="text-slate-300 text-sm">Querying the certificate registry…</p>
             </CardContent>
           </Card>
         )}
 
-        {/* Network error */}
+        {/* ── Network error ───────────────────────────────────────────────── */}
         {!loading && fetchError && (
           <Card className="border-red-700 bg-red-950/40">
             <CardContent className="p-6">
@@ -150,7 +200,7 @@ export default function CertVerify() {
           </Card>
         )}
 
-        {/* Result */}
+        {/* ── Result ──────────────────────────────────────────────────────── */}
         {!loading && result && (
           <>
             {/* Status banner */}
@@ -237,7 +287,36 @@ export default function CertVerify() {
           </>
         )}
 
-        {/* Footer */}
+        {/* ── Verify another certificate search bar ───────────────────────── */}
+        <Card className="border-slate-700 bg-slate-800/60 backdrop-blur">
+          <CardContent className="p-4">
+            <p className="text-slate-300 text-sm font-medium mb-3 flex items-center gap-2">
+              <Search className="h-4 w-4 text-amber-400" />
+              Verify another certificate
+            </p>
+            <form onSubmit={handleSearch} className="flex gap-2">
+              <Input
+                ref={inputRef}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Enter certificate number…"
+                className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400 font-mono text-sm flex-1"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <Button
+                type="submit"
+                disabled={!searchInput.trim()}
+                className="bg-amber-500 hover:bg-amber-600 text-slate-900 font-semibold shrink-0"
+              >
+                Verify
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* ── Footer ──────────────────────────────────────────────────────── */}
         <div className="text-center text-slate-500 text-xs pt-2 pb-4">
           <p>{result?.verifiedBy ?? "TradeGateway™ NGSWTP Certificate Registry"}</p>
           <p className="mt-1">Nigeria Customs Service · AfCFTA Secretariat</p>
