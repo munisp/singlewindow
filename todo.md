@@ -1907,3 +1907,23 @@
 - [x] [S89] Rate limiting: 200 req/min for tRPC, 20 req/min for auth endpoints
 - [x] [S89] ErrorBoundary wrapping entire app in App.tsx
 - [x] [S89] .env.example comprehensive documentation for all 30+ env vars
+
+## Sprint 90 — Final Production Go-Live
+
+### SENDGRID Email Wiring
+- [ ] [S90] Request SENDGRID_API_KEY secret via webdev_request_secrets
+- [ ] [S90] Update nightlyRevocationCsv.ts to use env SENDGRID_API_KEY with graceful fallback
+- [ ] [S90] Update execDigest.ts to use env SENDGRID_API_KEY with graceful fallback
+- [ ] [S90] Add sendTestEmail tRPC procedure for admin to verify email delivery
+- [ ] [S90] Add Send Test Email button to ComplianceEmailSettings page
+
+### Pilot Demo Seed Data
+- [ ] [S90] Verify and run seed-pilot-demo.mjs script end-to-end
+- [ ] [S90] Confirm PilotDashboard populates with seeded data
+- [ ] [S90] Add db:seed script to package.json
+
+### Production Hardening
+- [ ] [S90] Add AdminProductionChecklist page showing live system health
+- [ ] [S90] Write PRODUCTION_RUNBOOK.md with go-live steps
+- [ ] [S90] Verify HSTS preload configuration in helmet
+- [ ] [S90] Final test suite run and production checkpoint

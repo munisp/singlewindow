@@ -58,6 +58,7 @@ export default function ComplianceEmailSettings() {
   const [newSendHour, setNewSendHour] = useState("4");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTz, setEditTz] = useState("UTC");
+  const [testEmailAddr, setTestEmailAddr] = useState("");
   const [editHour, setEditHour] = useState("4");
 
   const { data: schedules, refetch } = trpc.rulesOfOrigin.listComplianceSchedules.useQuery();
@@ -126,6 +127,17 @@ export default function ComplianceEmailSettings() {
         toast.info(`Email skipped: ${result.reason ?? "unknown reason"}`);
       }
       refetchLogs();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const sendTestEmailMutation = trpc.rulesOfOrigin.sendTestEmail.useMutation({
+    onSuccess: (result: any) => {
+      if (result.sent) {
+        toast.success(result.reason);
+      } else {
+        toast.error(result.reason);
+      }
     },
     onError: (e) => toast.error(e.message),
   });
@@ -239,6 +251,44 @@ export default function ComplianceEmailSettings() {
               <Plus className="h-4 w-4 mr-1" />
               {addMutation.isPending ? "Adding…" : "Add Recipient"}
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* SENDGRID verification */}
+        <Card className="border-blue-200 bg-blue-50/30">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Send className="h-4 w-4 text-blue-600" /> Verify Email Delivery (SENDGRID)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Send a test email to confirm your <code className="bg-muted px-1 rounded">SENDGRID_API_KEY</code> is correctly configured.
+              If not set, add it via <strong>Settings → Secrets</strong>.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="test-email" className="text-xs">Send test email to</Label>
+                <Input
+                  id="test-email"
+                  type="email"
+                  placeholder="admin@tradegateway.ng"
+                  value={testEmailAddr}
+                  onChange={(e) => setTestEmailAddr(e.target.value)}
+                />
+              </div>
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={() => {
+                  if (!testEmailAddr) { toast.error("Enter a recipient email address"); return; }
+                  sendTestEmailMutation.mutate({ toEmail: testEmailAddr });
+                }}
+                disabled={sendTestEmailMutation.isPending}
+              >
+                <Send className="h-3.5 w-3.5 mr-1" />
+                {sendTestEmailMutation.isPending ? "Sending…" : "Send Test Email"}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

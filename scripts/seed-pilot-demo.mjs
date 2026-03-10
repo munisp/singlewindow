@@ -22,22 +22,21 @@ import pg from "pg";
 import crypto from "crypto";
 
 // ── Connection ────────────────────────────────────────────────────────────────
-// Use explicit params to avoid SSL/socket confusion with connection strings
-const DB_HOST = process.env.DB_HOST || "127.0.0.1";
-const DB_PORT = parseInt(process.env.DB_PORT || "5432");
-const DB_NAME = process.env.DB_NAME || "tradegateway";
-const DB_USER = process.env.DB_USER || "tradegateway";
-const DB_PASS = process.env.DB_PASS || "tradegateway_secure_2026";
-
-const pool = new pg.Pool({
-  host: DB_HOST,
-  port: DB_PORT,
-  database: DB_NAME,
-  user: DB_USER,
-  password: DB_PASS,
-  ssl: false,
-  max: 5,
-});
+// Supports DATABASE_URL (TiDB Cloud / production) and individual DB_* vars (local dev)
+const DATABASE_URL = process.env.DATABASE_URL;
+const pool = new pg.Pool(
+  DATABASE_URL
+    ? { connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 5 }
+    : {
+        host: process.env.DB_HOST || "127.0.0.1",
+        port: parseInt(process.env.DB_PORT || "5432"),
+        database: process.env.DB_NAME || "tradegateway",
+        user: process.env.DB_USER || "tradegateway",
+        password: process.env.DB_PASS || "tradegateway_secure_2026",
+        ssl: false,
+        max: 5,
+      }
+);
 
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;

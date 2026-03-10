@@ -654,4 +654,50 @@ export const rulesOfOriginRouter = router({
       ].join(','));
       return { csv: [header, ...csvRows].join('\n') };
     }),
+
+  /**
+   * Admin: send a test email to verify SENDGRID_API_KEY is working.
+   * Returns { sent: boolean, reason: string } — never throws.
+   */
+  sendTestEmail: adminProcedure
+    .input(z.object({ toEmail: z.string().email() }))
+    .mutation(async ({ input }) => {
+      const apiKey = process.env.SENDGRID_API_KEY ?? '';
+      if (!apiKey) {
+        return {
+          sent: false,
+          reason: 'SENDGRID_API_KEY is not configured. Add it via the Secrets panel then retry.',
+        };
+      }
+      try {
+        const nodemailer = await import('nodemailer');
+        const transporter = nodemailer.default.createTransport({
+          host: 'smtp.sendgrid.net',
+          port: 587,
+          secure: false,
+          auth: { user: 'apikey', pass: apiKey },
+        });
+        const fromEmail = process.env.DIGEST_FROM_EMAIL ?? 'noreply@tradegateway.ng';
+        await transporter.sendMail({
+          from: `TradeGateway™ NGSWTP <${fromEmail}>`,
+          to: input.toEmail,
+          subject: 'TradeGateway™ — Email Delivery Test Confirmed',
+          html: [
+            '<div style="font-family:sans-serif;max-width:600px;margin:auto;">',
+            '<h2 style="color:#0A1628;">TradeGateway™ NGSWTP</h2>',
+            '<p>This is a test email confirming that your <strong>SendGrid integration is working correctly</strong>.</p>',
+            '<p>The following automated email jobs are now active:</p>',
+            '<ul>',
+            '<li><strong>04:00 UTC daily</strong> — Nightly Revocation Log CSV to compliance officers</li>',
+            '<li><strong>03:00 UTC daily</strong> — Executive Dashboard KPI Digest to platform owner</li>',
+            '</ul>',
+            `<hr/><small style="color:#888;">Sent at ${new Date().toISOString()} from TradeGateway™ NGSWTP</small>`,
+            '</div>',
+          ].join(''),
+        });
+        return { sent: true, reason: `Test email successfully delivered to ${input.toEmail}` };
+      } catch (err: any) {
+        return { sent: false, reason: err?.message ?? 'Unknown SMTP error' };
+      }
+    }),
 });
