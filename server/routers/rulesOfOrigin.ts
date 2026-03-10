@@ -2,7 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, type OriginCertificate } from "../../drizzle/schema";
-import { eq, desc, and, or, ilike } from "drizzle-orm";
+import { eq, desc, and, or, ilike, count } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { generateCertificatePdf } from "../lib/certificatePdf";
 
@@ -261,6 +261,64 @@ export const rulesOfOriginRouter = router({
         revokedAt: updated.revokedAt,
         revocationReason: updated.revocationReason,
       };
+    }),
+
+  // Admin: list all revoked certificates (paginated)
+  listRevoked: protectedProcedure
+    .input(z.object({
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(25),
+    }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const offset = (input.page - 1) * input.pageSize;
+      const rows = await db
+        .select({
+          id: originCertificates.id,
+          certNumber: originCertificates.certNumber,
+          certType: originCertificates.certType,
+          exporterName: originCertificates.exporterName,
+          importerName: originCertificates.importerName,
+          originCountry: originCertificates.originCountry,
+          approvedAt: originCertificates.approvedAt,
+          revokedAt: originCertificates.revokedAt,
+          revokedBy: originCertificates.revokedBy,
+          revocationReason: originCertificates.revocationReason,
+        })
+        .from(originCertificates)
+        .where(eq(originCertificates.status, "revoked"))
+        .orderBy(desc(originCertificates.revokedAt))
+        .limit(input.pageSize)
+        .offset(offset);
+      const [{ total }] = await db
+        .select({ total: count() })
+        .from(originCertificates)
+        .where(eq(originCertificates.status, "revoked"));
+      return {
+        rows,
+        total: Number(total),
+        page: input.page,
+        pageSize: input.pageSize,
+        totalPages: Math.ceil(Number(total) / input.pageSize),
+      };
+    }),
+
+  // Get scan count for a certificate (public)
+  getCertScanCount: protectedProcedure
+    .input(z.object({ id: z.number().int() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [cert] = await db
+        .select({ scanCount: originCertificates.scanCount })
+        .from(originCertificates)
+        .where(eq(originCertificates.id, input.id));
+      if (!cert) throw new TRPCError({ code: "NOT_FOUND" });
+      return { scanCount: cert.scanCount ?? 0 };
     }),
 
   // Get summary stats for the OGA dashboard

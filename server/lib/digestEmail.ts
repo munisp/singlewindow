@@ -59,6 +59,38 @@ function buildHtml(result: ExecDigestResult): string {
     `
     : "";
 
+  // Onboarding drop-off table — colour-coded by severity
+  const dropOffSection = (result.onboardingDropOff && result.onboardingDropOff.length > 0)
+    ? `
+      <tr><td colspan="2" style="padding:16px 0 8px;font-weight:700;color:#0A1628;border-top:2px solid #E5E7EB;">
+        Onboarding Drop-off (Last 7 Days)
+      </td></tr>
+      <tr><td colspan="2" style="padding-bottom:8px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#F9FAFB;">
+              <th style="padding:6px 8px;text-align:left;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB;">Step</th>
+              <th style="padding:6px 8px;text-align:right;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB;">Completions</th>
+              <th style="padding:6px 8px;text-align:right;color:#6B7280;font-weight:600;border-bottom:1px solid #E5E7EB;">Drop-off</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${result.onboardingDropOff.map(s => {
+              const rate = s.dropOffRate;
+              const bg   = rate >= 50 ? "#FEF2F2" : rate >= 25 ? "#FFFBEB" : "#F0FDF4";
+              const col  = rate >= 50 ? "#991B1B" : rate >= 25 ? "#92400E" : "#065F46";
+              return `<tr style="background:${bg};">
+                <td style="padding:6px 8px;color:#0A1628;border-bottom:1px solid #E5E7EB;">${s.step}</td>
+                <td style="padding:6px 8px;text-align:right;color:#0A1628;border-bottom:1px solid #E5E7EB;">${s.completions}</td>
+                <td style="padding:6px 8px;text-align:right;font-weight:700;color:${col};border-bottom:1px solid #E5E7EB;">${rate}%</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </td></tr>
+    `
+    : "";
+
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -166,6 +198,8 @@ function buildHtml(result: ExecDigestResult): string {
               </tr>
 
               ${pilotSection}
+
+              ${dropOffSection}
 
             </table>
           </td>

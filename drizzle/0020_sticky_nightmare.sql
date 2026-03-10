@@ -1,0 +1,1 @@
+ALTER TABLE "origin_certificates" ADD COLUMN "scan_count" integer DEFAULT 0 NOT NULL;

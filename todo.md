@@ -1744,3 +1744,27 @@
 
 ### Tests
 - [x] 1232 tests, 41 files, 0 failures (all passing)
+
+## Sprint 83 — Revocation Audit Log, Drop-off Email, QR Scan Counter
+
+### Revocation Audit Log Admin Page
+- [x] /app/admin/cert-revocations route added to App.tsx
+- [x] CertRevocationLog.tsx created with paginated table (cert number, type, exporter, revokedAt, revokedBy, revocationReason)
+- [x] rulesOfOrigin.listRevoked tRPC procedure added (admin-only, paginated, with revokedBy user name join)
+- [x] Admin sidebar nav item added in DashboardLayout
+
+### Onboarding Drop-off Email Section
+- [x] digestEmail.ts extended: dropOffSection HTML colour-coded table (green/amber/red rows by rate)
+- [x] ExecDigestResult.onboardingDropOff consumed in buildHtml() and rendered after pilot section
+- [x] execDigest.ts passes onboardingDropOff to sendDigestEmail()
+
+### Cert Verify QR Scan Counter
+- [x] scanCount integer column added to originCertificates in drizzle/schema.ts
+- [x] DB migration applied (0020_sticky_nightmare.sql)
+- [x] certVerify.ts increments scanCount (fire-and-forget) on every GET /api/verify/:certNumber
+- [x] scanCount returned in verify response JSON
+- [x] "Verified N×" badge shown on cert number cell in RulesOfOrigin.tsx
+- [x] "Verified N×" badge shown on public CertVerify.tsx page
+
+### Tests
+- [x] 1232 tests, 41 files, 0 failures (all passing)

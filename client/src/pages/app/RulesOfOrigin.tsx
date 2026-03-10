@@ -275,7 +275,15 @@ export default function RulesOfOrigin() {
                   <tbody>
                     {displayCerts.map((cert: Record<string, unknown>) => (
                       <tr key={cert.id as number} className="border-b hover:bg-muted/30 transition-colors">
-                        <td className="py-2 px-3 font-mono text-xs font-semibold">{(cert.certNumber as string) ?? "—"}</td>
+                        <td className="py-2 px-3">
+                          <span className="font-mono text-xs font-semibold block">{(cert.certNumber as string) ?? "—"}</span>
+                          {(cert.scanCount as number) > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1 mt-0.5">
+                              <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                              Verified {cert.scanCount as number}×
+                            </span>
+                          )}
+                        </td>
                         <td className="py-2 px-3">
                           <Badge variant="outline" className="text-xs">
                             {CERT_TYPE_LABELS[cert.certType as string] ?? (cert.certType as string)}

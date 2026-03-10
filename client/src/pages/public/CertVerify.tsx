@@ -36,6 +36,7 @@ interface CertVerifyResult {
   originCriteria?: string;
   approvedAt?: string | null;
   expiresAt?: string | null;
+  scanCount?: number;
   verifiedAt: string;
   verifiedBy?: string;
   error?: string;
@@ -264,18 +265,26 @@ export default function CertVerify() {
                   </div>
 
                   <div className="flex items-center justify-between pt-1">
-                    <Badge
-                      variant="outline"
-                      className={
-                        result.valid
-                          ? "border-emerald-500 text-emerald-400 bg-emerald-500/10"
-                          : result.isExpired
-                          ? "border-amber-500 text-amber-400 bg-amber-500/10"
-                          : "border-red-500 text-red-400 bg-red-500/10"
-                      }
-                    >
-                      {result.status?.toUpperCase() ?? "UNKNOWN"}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={
+                          result.valid
+                            ? "border-emerald-500 text-emerald-400 bg-emerald-500/10"
+                            : result.isExpired
+                            ? "border-amber-500 text-amber-400 bg-amber-500/10"
+                            : "border-red-500 text-red-400 bg-red-500/10"
+                        }
+                      >
+                        {result.status?.toUpperCase() ?? "UNKNOWN"}
+                      </Badge>
+                      {(result.scanCount ?? 0) > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded px-1.5 py-0.5">
+                          <CheckCircle2 className="h-2.5 w-2.5" />
+                          Verified {result.scanCount}×
+                        </span>
+                      )}
+                    </div>
                     <span className="text-xs text-slate-500">
                       {result.isExpired && "EXPIRED · "}
                       Verified {new Date(result.verifiedAt).toLocaleString()}

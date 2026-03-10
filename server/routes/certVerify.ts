@@ -2,11 +2,12 @@
  * Sprint 79 — Public Certificate Verification Endpoint
  * GET /api/verify/:certNumber → JSON cert status (no auth required)
  * Used by QR codes on AfCFTA certificates of origin.
+ * Sprint 83 — increment scanCount on every verification hit.
  */
 import type { Express } from "express";
 import { getDb } from "../db";
 import { originCertificates } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 export function registerCertVerifyRoute(app: Express) {
   app.get("/api/verify/:certNumber", async (req, res) => {
@@ -23,6 +24,7 @@ export function registerCertVerifyRoute(app: Express) {
 
       const [cert] = await db
         .select({
+          id: originCertificates.id,
           certNumber: originCertificates.certNumber,
           certType: originCertificates.certType,
           status: originCertificates.status,
@@ -36,6 +38,7 @@ export function registerCertVerifyRoute(app: Express) {
           expiresAt: originCertificates.expiresAt,
           invoiceNumber: originCertificates.invoiceNumber,
           originCriteria: originCertificates.originCriteria,
+          scanCount: originCertificates.scanCount,
         })
         .from(originCertificates)
         .where(eq(originCertificates.certNumber, certNumber))
@@ -49,6 +52,12 @@ export function registerCertVerifyRoute(app: Express) {
           verifiedAt: new Date().toISOString(),
         });
       }
+
+      // Increment scan counter asynchronously (fire-and-forget, non-blocking)
+      db.update(originCertificates)
+        .set({ scanCount: sql`${originCertificates.scanCount} + 1` })
+        .where(eq(originCertificates.id, cert.id))
+        .catch((e: unknown) => console.error("[CertVerify] scanCount increment failed:", e));
 
       const now = new Date();
       const isExpired = cert.expiresAt ? cert.expiresAt < now : false;
@@ -70,6 +79,7 @@ export function registerCertVerifyRoute(app: Express) {
         originCriteria: cert.originCriteria,
         approvedAt: cert.approvedAt?.toISOString() ?? null,
         expiresAt: cert.expiresAt?.toISOString() ?? null,
+        scanCount: (cert.scanCount ?? 0) + 1, // return the post-increment count
         verifiedAt: now.toISOString(),
         verifiedBy: "TradeGateway™ NGSWTP Certificate Registry",
       });

@@ -141,6 +141,13 @@
       "when": 1773146182187,
       "tag": "0019_quick_pandemic",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1773146893525,
+      "tag": "0020_sticky_nightmare",
+      "breakpoints": true
     }
   ]
 }
