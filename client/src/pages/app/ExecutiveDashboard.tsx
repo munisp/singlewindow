@@ -29,6 +29,7 @@ export default function ExecutiveDashboard() {
   const { data: kpi, refetch: refetchKpi } = trpc.executiveDashboard.getKpiSummary.useQuery();
   const { data: daily } = trpc.executiveDashboard.getDailyCollectionVsTarget.useQuery({ dailyTargetNaira: 500_000_000 });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
+  const { data: topScanned } = trpc.rulesOfOrigin.topScanned.useQuery({ limit: 10, days: 30 });
 
   const exportCsvMutation = trpc.executiveDashboard.exportRevenueCsv.useMutation({
     onSuccess: (data) => {
@@ -213,6 +214,46 @@ export default function ExecutiveDashboard() {
                       </div>
                       <span className="text-xs font-semibold text-foreground w-20 text-right">{fmt(ch.totalNaira as number)}</span>
                       <span className="text-xs text-muted-foreground w-12 text-right">{(ch.declarationCount as number).toLocaleString()} decls</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Most-Verified Certificates (QR scan counter) */}
+        {topScanned && topScanned.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="h-4 w-4 text-emerald-600" />
+                Most-Verified Certificates (Last 30 Days)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {topScanned.map((cert, i) => {
+                  const maxScans = topScanned[0]?.scanCount ?? 1;
+                  const pct = Math.round(((cert.scanCount ?? 0) / maxScans) * 100);
+                  return (
+                    <div key={cert.id} className="flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground w-4">{i + 1}</span>
+                      <span className="font-mono text-xs bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200 w-40 truncate" title={cert.certNumber ?? ""}>
+                        {cert.certNumber}
+                      </span>
+                      <span className="text-xs text-muted-foreground w-28 truncate" title={cert.exporterName ?? ""}>
+                        {cert.exporterName ?? "—"}
+                      </span>
+                      <div className="flex-1 bg-gray-100 rounded-full h-2">
+                        <div
+                          className="bg-emerald-500 h-2 rounded-full"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-foreground w-16 text-right">
+                        {(cert.scanCount ?? 0).toLocaleString()}× scanned
+                      </span>
                     </div>
                   );
                 })}

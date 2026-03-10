@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, createNotification } from "../db";
 import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, type OriginCertificate } from "../../drizzle/schema";
-import { eq, desc, and, or, ilike, count } from "drizzle-orm";
+import { eq, desc, and, or, ilike, count, gte, lte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { generateCertificatePdf } from "../lib/certificatePdf";
+import { notifyOwner } from "../_core/notification";
 
 const certTypeValues = originCertTypeEnum.enumValues;
 const certStatusValues = originCertStatusEnum.enumValues;
@@ -254,6 +255,21 @@ export const rulesOfOriginRouter = router({
         })
         .where(eq(originCertificates.id, input.id))
         .returning();
+      // Notify the certificate owner (trader) about the revocation
+      if (cert.traderId) {
+        await createNotification({
+          userId: cert.traderId,
+          type: "system",
+          title: "Certificate of Origin Revoked",
+          message: `Your certificate ${updated.certNumber ?? `#${updated.id}`} has been revoked. Reason: ${input.reason}`,
+          read: false,
+        }).catch(() => {/* non-fatal */});
+      }
+      // Also notify the platform owner
+      await notifyOwner({
+        title: `Certificate Revoked: ${updated.certNumber ?? updated.id}`,
+        content: `Admin ${ctx.user.name ?? ctx.user.id} revoked certificate ${updated.certNumber ?? updated.id}. Reason: ${input.reason}`,
+      }).catch(() => {/* non-fatal */});
       return {
         id: updated.id,
         certNumber: updated.certNumber,
@@ -263,11 +279,14 @@ export const rulesOfOriginRouter = router({
       };
     }),
 
-  // Admin: list all revoked certificates (paginated)
+  // Admin: list all revoked certificates (paginated, with optional search + date filters)
   listRevoked: protectedProcedure
     .input(z.object({
       page: z.number().int().min(1).default(1),
       pageSize: z.number().int().min(1).max(100).default(25),
+      search: z.string().optional(),
+      revokedFrom: z.date().optional(),
+      revokedTo: z.date().optional(),
     }))
     .query(async ({ ctx, input }) => {
       if (ctx.user.role !== "admin") {
@@ -276,6 +295,20 @@ export const rulesOfOriginRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
       const offset = (input.page - 1) * input.pageSize;
+      // Build filter conditions
+      const conditions = [eq(originCertificates.status, "revoked")];
+      if (input.search) {
+        conditions.push(
+          or(
+            ilike(originCertificates.certNumber, `%${input.search}%`),
+            ilike(originCertificates.exporterName, `%${input.search}%`),
+            ilike(originCertificates.importerName, `%${input.search}%`)
+          )!
+        );
+      }
+      if (input.revokedFrom) conditions.push(gte(originCertificates.revokedAt, input.revokedFrom));
+      if (input.revokedTo) conditions.push(lte(originCertificates.revokedAt, input.revokedTo));
+      const whereClause = and(...conditions);
       const rows = await db
         .select({
           id: originCertificates.id,
@@ -290,14 +323,14 @@ export const rulesOfOriginRouter = router({
           revocationReason: originCertificates.revocationReason,
         })
         .from(originCertificates)
-        .where(eq(originCertificates.status, "revoked"))
+        .where(whereClause)
         .orderBy(desc(originCertificates.revokedAt))
         .limit(input.pageSize)
         .offset(offset);
       const [{ total }] = await db
         .select({ total: count() })
         .from(originCertificates)
-        .where(eq(originCertificates.status, "revoked"));
+        .where(whereClause);
       return {
         rows,
         total: Number(total),
@@ -305,6 +338,41 @@ export const rulesOfOriginRouter = router({
         pageSize: input.pageSize,
         totalPages: Math.ceil(Number(total) / input.pageSize),
       };
+    }),
+
+  // Top scanned certificates (by scanCount, last 30 days or all-time)
+  topScanned: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(50).default(10),
+      days: z.number().int().min(1).max(365).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      if (!['admin', 'customs_officer', 'oga_officer', 'finance'].includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const conditions = [sql`${originCertificates.scanCount} > 0`];
+      if (input.days) {
+        const cutoff = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+        conditions.push(gte(originCertificates.approvedAt, cutoff));
+      }
+      const rows = await db
+        .select({
+          id: originCertificates.id,
+          certNumber: originCertificates.certNumber,
+          certType: originCertificates.certType,
+          exporterName: originCertificates.exporterName,
+          originCountry: originCertificates.originCountry,
+          destinationCountry: originCertificates.destinationCountry,
+          scanCount: originCertificates.scanCount,
+          approvedAt: originCertificates.approvedAt,
+        })
+        .from(originCertificates)
+        .where(and(...conditions))
+        .orderBy(desc(originCertificates.scanCount))
+        .limit(input.limit);
+      return rows;
     }),
 
   // Get scan count for a certificate (public)

@@ -1768,3 +1768,26 @@
 
 ### Tests
 - [x] 1232 tests, 41 files, 0 failures (all passing)
+
+## Sprint 84 — Revocation Notification, Revocation Log Filters, Top-Scanned Chart
+
+### Revocation Notification
+- [x] revokeCertificate now calls createNotification() to notify the trader (non-fatal catch)
+- [x] Notification body includes cert number and revocation reason
+- [x] Also calls notifyOwner() for the platform owner (non-fatal catch)
+
+### CertRevocationLog Search/Filter
+- [x] Search input added (cert number / exporter / importer name, Enter key support)
+- [x] Date-range filter added (revokedAt from/to date pickers)
+- [x] listRevoked procedure updated to accept search + revokedFrom + revokedTo filters
+- [x] Filtered empty state with "Clear filters" button
+- [x] Filter badge shows "(filtered)" in table description
+
+### Top-Scanned Certificates Chart on Executive Dashboard
+- [x] rulesOfOrigin.topScanned tRPC procedure added (top N by scanCount, optional days filter)
+- [x] "Most-Verified Certificates (Last 30 Days)" horizontal bar chart added to ExecutiveDashboard
+- [x] Chart shows rank, cert number, exporter, proportional bar, scan count
+
+### Tests
+- [x] 1232 tests, 41 files, 0 failures (all passing)
+- [x] 0 TypeScript errors

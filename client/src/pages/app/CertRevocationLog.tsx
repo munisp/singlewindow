@@ -1,17 +1,18 @@
 /**
- * Sprint 83 — Certificate Revocation Audit Log
+ * Sprint 83/84 — Certificate Revocation Audit Log
  * Route: /app/admin/cert-revocations (admin-only)
- * Lists all revoked AfCFTA certificates with revocation reason, timestamp, and officer.
+ * Lists all revoked AfCFTA certificates with search + date-range filter.
  */
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from "@/components/ui/card";
-import { Loader2, ShieldOff, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { Loader2, ShieldOff, ChevronLeft, ChevronRight, AlertTriangle, Search, X } from "lucide-react";
 
 const CERT_TYPE_LABELS: Record<string, string> = {
   afcfta_co: "AfCFTA CO",
@@ -26,8 +27,35 @@ export default function CertRevocationLog() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 25;
 
+  // Filter state
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState<string | undefined>(undefined);
+  const [revokedFrom, setRevokedFrom] = useState("");
+  const [revokedTo, setRevokedTo] = useState("");
+
+  const applyFilters = useCallback(() => {
+    setPage(1);
+    setSearch(searchInput.trim() || undefined);
+  }, [searchInput]);
+
+  const clearFilters = useCallback(() => {
+    setSearchInput("");
+    setSearch(undefined);
+    setRevokedFrom("");
+    setRevokedTo("");
+    setPage(1);
+  }, []);
+
+  const hasActiveFilters = !!(search || revokedFrom || revokedTo);
+
   const { data, isLoading, isError } = trpc.rulesOfOrigin.listRevoked.useQuery(
-    { page, pageSize: PAGE_SIZE },
+    {
+      page,
+      pageSize: PAGE_SIZE,
+      search: search || undefined,
+      revokedFrom: revokedFrom ? new Date(revokedFrom) : undefined,
+      revokedTo: revokedTo ? new Date(revokedTo + "T23:59:59") : undefined,
+    },
     {}
   );
 
@@ -52,6 +80,59 @@ export default function CertRevocationLog() {
           )}
         </div>
 
+        {/* Search + Date Filters */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex flex-wrap gap-3 items-end">
+              {/* Search */}
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                  Search (cert number / exporter / importer)
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="e.g. CO-1234 or Dangote…"
+                    value={searchInput}
+                    onChange={e => setSearchInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && applyFilters()}
+                  />
+                </div>
+              </div>
+              {/* Revoked From */}
+              <div className="min-w-[160px]">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Revoked from</label>
+                <Input
+                  type="date"
+                  value={revokedFrom}
+                  onChange={e => { setRevokedFrom(e.target.value); setPage(1); }}
+                />
+              </div>
+              {/* Revoked To */}
+              <div className="min-w-[160px]">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Revoked to</label>
+                <Input
+                  type="date"
+                  value={revokedTo}
+                  onChange={e => { setRevokedTo(e.target.value); setPage(1); }}
+                />
+              </div>
+              {/* Actions */}
+              <div className="flex gap-2">
+                <Button onClick={applyFilters} size="sm">
+                  <Search className="h-4 w-4 mr-1" /> Search
+                </Button>
+                {hasActiveFilters && (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    <X className="h-4 w-4 mr-1" /> Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Loading */}
         {isLoading && (
           <div className="flex items-center justify-center py-16">
@@ -74,10 +155,19 @@ export default function CertRevocationLog() {
           <Card>
             <CardContent className="p-12 text-center">
               <ShieldOff className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-40" />
-              <p className="text-muted-foreground font-medium">No revoked certificates</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Revoked certificates will appear here with their revocation reason and officer details.
+              <p className="text-muted-foreground font-medium">
+                {hasActiveFilters ? "No matching revocations" : "No revoked certificates"}
               </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {hasActiveFilters
+                  ? "Try adjusting your search or date filters."
+                  : "Revoked certificates will appear here with their revocation reason and officer details."}
+              </p>
+              {hasActiveFilters && (
+                <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -89,6 +179,7 @@ export default function CertRevocationLog() {
               <CardTitle className="text-base">Revoked Certificates</CardTitle>
               <CardDescription>
                 Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, data.total)} of {data.total} records
+                {hasActiveFilters && " (filtered)"}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-0">
