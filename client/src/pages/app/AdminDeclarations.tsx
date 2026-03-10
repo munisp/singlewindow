@@ -1,8 +1,9 @@
 /**
  * Admin Declarations — All declarations across all traders.
  * Wired to real tRPC declarations.list.
+ * Supports ?date=YYYY-MM-DD query param for drill-through from Pilot Dashboard trend chart.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
-import { ClipboardList, Search, Eye, RefreshCw, Download } from "lucide-react";
+import { ClipboardList, Search, Eye, RefreshCw, Download, CalendarDays, X } from "lucide-react";
 import { ExportDeclarationsDialog } from "@/components/ExportDeclarationsDialog";
 
 const RISK_COLORS: Record<string, string> = {
@@ -32,23 +33,49 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function AdminDeclarations() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
 
-  const { data, isLoading, refetch, isError} = trpc.declarations.all.useQuery({
+  // Read ?date=YYYY-MM-DD from the URL for drill-through from Pilot Dashboard
+  const [dateFilter, setDateFilter] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("date");
+  });
+
+  // Sync dateFilter if the URL changes (e.g., back navigation)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const d = params.get("date");
+    setDateFilter(d);
+  }, [location]);
+
+  const clearDateFilter = () => {
+    setDateFilter(null);
+    setLocation("/app/admin/declarations");
+  };
+
+  const { data, isLoading, refetch, isError } = trpc.declarations.all.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   });
 
   type DeclarationItem = NonNullable<typeof data>[number];
-  const filtered = (data ?? []).filter((d: DeclarationItem) =>
-    (statusFilter === "ALL" || d.status.toUpperCase() === statusFilter) &&
-    (!search || d.declarationNumber.toLowerCase().includes(search.toLowerCase()) ||
-    (d.goodsDescription ?? "").toLowerCase().includes(search.toLowerCase()))
-  );
+
+  const filtered = (data ?? []).filter((d: DeclarationItem) => {
+    if (statusFilter !== "ALL" && d.status.toUpperCase() !== statusFilter) return false;
+    if (search && !d.declarationNumber.toLowerCase().includes(search.toLowerCase()) &&
+      !(d.goodsDescription ?? "").toLowerCase().includes(search.toLowerCase())) return false;
+    if (dateFilter) {
+      // Filter by submittedAt date matching the ISO date string
+      if (!d.submittedAt) return false;
+      const submittedDate = new Date(d.submittedAt).toISOString().slice(0, 10);
+      if (submittedDate !== dateFilter) return false;
+    }
+    return true;
+  });
 
   return (
     <DashboardLayout title="All Declarations">
@@ -83,12 +110,33 @@ export default function AdminDeclarations() {
           </div>
         </div>
 
+        {/* Date filter banner (shown when navigating from Pilot Dashboard trend chart) */}
+        {dateFilter && (
+          <div className="flex items-center gap-3 p-3 rounded-lg border border-blue-200 bg-blue-50/60 text-sm">
+            <CalendarDays className="h-4 w-4 text-blue-600 shrink-0" />
+            <span className="text-blue-800 font-medium">
+              Filtered to declarations submitted on <strong>{dateFilter}</strong>
+            </span>
+            <span className="text-blue-600 text-xs">
+              — {filtered.length} result{filtered.length !== 1 ? "s" : ""} shown
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-6 px-2 text-blue-700 hover:bg-blue-100"
+              onClick={clearDateFilter}
+            >
+              <X className="h-3.5 w-3.5 mr-1" /> Clear filter
+            </Button>
+          </div>
+        )}
+
         {/* Filters */}
         <div className="flex gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search by declaration number or trader..."
+              placeholder="Search by declaration number or goods..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
@@ -119,7 +167,12 @@ export default function AdminDeclarations() {
             ) : filtered.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
                 <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p>No declarations found</p>
+                <p>No declarations found{dateFilter ? ` for ${dateFilter}` : ""}</p>
+                {dateFilter && (
+                  <Button variant="link" size="sm" onClick={clearDateFilter} className="mt-2">
+                    Clear date filter
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">

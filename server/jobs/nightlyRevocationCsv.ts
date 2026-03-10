@@ -5,6 +5,8 @@
  * CSV attachment to all active compliance officer email addresses stored in the
  * `compliance_email_schedule` table.
  *
+ * Every run (success or failure) is recorded in `compliance_email_delivery_log`.
+ *
  * Gracefully skipped if:
  *   - SENDGRID_API_KEY is not set
  *   - No active recipients are configured
@@ -16,6 +18,7 @@ import nodemailer from "nodemailer";
 import { getDb } from "../db";
 import {
   complianceEmailSchedule,
+  complianceEmailDeliveryLog,
   originCertificates,
 } from "../../drizzle/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
@@ -27,7 +30,10 @@ export interface NightlyRevocationCsvResult {
   reason?: string;
 }
 
-export async function runNightlyRevocationCsv(): Promise<NightlyRevocationCsvResult> {
+export async function runNightlyRevocationCsv(
+  triggeredBy: string = "cron"
+): Promise<NightlyRevocationCsvResult> {
+  const startMs  = Date.now();
   const apiKey    = process.env.SENDGRID_API_KEY ?? "";
   const fromEmail = process.env.DIGEST_FROM_EMAIL ?? "noreply@tradegateway.ng";
 
@@ -107,6 +113,23 @@ export async function runNightlyRevocationCsv(): Promise<NightlyRevocationCsvRes
 
   const recipientEmails = schedules.map(s => s.recipientEmail);
 
+  const logDelivery = async (success: boolean, errorMessage?: string) => {
+    try {
+      await db.insert(complianceEmailDeliveryLog).values({
+        triggeredBy,
+        dateLabel,
+        rowCount: rows.length,
+        recipientCount: recipientEmails.length,
+        recipients: recipientEmails.join(", "),
+        success,
+        errorMessage: errorMessage ?? null,
+        durationMs: Date.now() - startMs,
+      });
+    } catch (logErr) {
+      console.warn("[NightlyRevocationCsv] Failed to write delivery log:", logErr);
+    }
+  };
+
   try {
     const transporter = nodemailer.createTransport({
       host:   "smtp.sendgrid.net",
@@ -180,6 +203,8 @@ export async function runNightlyRevocationCsv(): Promise<NightlyRevocationCsvRes
       .set({ lastSentAt: now, lastSentRows: rows.length, updatedAt: now })
       .where(eq(complianceEmailSchedule.isActive, true));
 
+    await logDelivery(true);
+
     console.log(
       `[NightlyRevocationCsv] Sent ${filename} (${rows.length} rows) to ${recipientEmails.join(", ")}`
     );
@@ -187,6 +212,7 @@ export async function runNightlyRevocationCsv(): Promise<NightlyRevocationCsvRes
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[NightlyRevocationCsv] Email failed: ${msg}`);
+    await logDelivery(false, msg);
     return { sent: false, recipients: [], rowCount: rows.length, reason: msg };
   }
 }

@@ -1315,3 +1315,23 @@ export const complianceEmailSchedule = pgTable("compliance_email_schedule", {
 });
 export type ComplianceEmailSchedule = typeof complianceEmailSchedule.$inferSelect;
 export type InsertComplianceEmailSchedule = typeof complianceEmailSchedule.$inferInsert;
+
+// ─── COMPLIANCE EMAIL DELIVERY LOG ───────────────────────────────────────────
+// Immutable audit trail of every nightly revocation CSV email attempt.
+export const complianceEmailDeliveryLog = pgTable("compliance_email_delivery_log", {
+  id: serial("id").primaryKey(),
+  triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
+  triggeredBy: varchar("triggered_by", { length: 64 }).default("cron").notNull(), // "cron" | "manual:<userId>"
+  dateLabel: varchar("date_label", { length: 16 }).notNull(),   // "2026-03-09"
+  rowCount: integer("row_count").notNull(),
+  recipientCount: integer("recipient_count").notNull(),
+  recipients: text("recipients").notNull(),                      // comma-separated emails
+  success: boolean("success").notNull(),
+  errorMessage: text("error_message"),
+  durationMs: integer("duration_ms"),
+}, (t) => [
+  index("idx_cedl_triggered_at").on(t.triggeredAt),
+  index("idx_cedl_success").on(t.success),
+]);
+export type ComplianceEmailDeliveryLog = typeof complianceEmailDeliveryLog.$inferSelect;
+export type InsertComplianceEmailDeliveryLog = typeof complianceEmailDeliveryLog.$inferInsert;

@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Mail, Plus, Trash2, ToggleLeft, ToggleRight, RefreshCw,
-  Clock, CheckCircle, XCircle, Send,
+  Clock, CheckCircle, XCircle, Send, History, AlertCircle,
 } from "lucide-react";
 
 export default function ComplianceEmailSettings() {
@@ -18,6 +18,8 @@ export default function ComplianceEmailSettings() {
   const [newName, setNewName] = useState("");
 
   const { data: schedules, refetch } = trpc.rulesOfOrigin.listComplianceSchedules.useQuery();
+  const { data: deliveryLogs, refetch: refetchLogs } = trpc.rulesOfOrigin.listDeliveryLogs.useQuery({ limit: 30 });
+
   const addMutation = trpc.rulesOfOrigin.addComplianceRecipient.useMutation({
     onSuccess: () => {
       toast.success("Compliance recipient added");
@@ -48,6 +50,7 @@ export default function ComplianceEmailSettings() {
       } else {
         toast.info(`Email skipped: ${result.reason ?? "unknown reason"}`);
       }
+      refetchLogs();
     },
     onError: (e) => toast.error(e.message),
   });
@@ -231,6 +234,86 @@ export default function ComplianceEmailSettings() {
           </CardContent>
         </Card>
 
+        {/* Delivery history log */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <History className="h-4 w-4" /> Delivery History
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Last 30 nightly delivery attempts — both scheduled (cron) and manual (Send Test Now).
+                </CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => refetchLogs()}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {!deliveryLogs || deliveryLogs.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No delivery history yet. The log is populated after each nightly run or manual trigger.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b text-muted-foreground">
+                      <th className="text-left py-2 pr-3 font-medium">Date</th>
+                      <th className="text-left py-2 pr-3 font-medium">Triggered</th>
+                      <th className="text-right py-2 pr-3 font-medium">Rows</th>
+                      <th className="text-right py-2 pr-3 font-medium">Recipients</th>
+                      <th className="text-right py-2 pr-3 font-medium">Duration</th>
+                      <th className="text-left py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deliveryLogs.map((log: any) => (
+                      <tr key={log.id} className="border-b last:border-0 hover:bg-muted/30">
+                        <td className="py-2 pr-3 font-mono whitespace-nowrap">
+                          <span className="font-medium">{log.dateLabel}</span>
+                          <span className="text-muted-foreground ml-1">
+                            {new Date(log.triggeredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3">
+                          <Badge variant="outline" className="text-xs font-normal">
+                            {log.triggeredBy.startsWith("manual:") ? "Manual" : "Cron"}
+                          </Badge>
+                        </td>
+                        <td className="py-2 pr-3 text-right font-mono">{log.rowCount}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{log.recipientCount}</td>
+                        <td className="py-2 pr-3 text-right text-muted-foreground">
+                          {log.durationMs != null ? `${log.durationMs}ms` : "—"}
+                        </td>
+                        <td className="py-2">
+                          {log.success ? (
+                            <span className="flex items-center gap-1 text-emerald-600">
+                              <CheckCircle className="h-3.5 w-3.5" /> Sent
+                            </span>
+                          ) : (
+                            <span
+                              className="flex items-center gap-1 text-red-600"
+                              title={log.errorMessage ?? "Unknown error"}
+                            >
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              <span className="truncate max-w-[120px]">
+                                {log.errorMessage ? log.errorMessage.slice(0, 40) : "Failed"}
+                              </span>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <Separator />
 
         {/* Schedule info */}
@@ -240,7 +323,8 @@ export default function ComplianceEmailSettings() {
           <p>2. A CSV file is generated and emailed to all active recipients as an attachment.</p>
           <p>3. If no certificates were revoked, an empty log is still sent for audit completeness.</p>
           <p>4. Use "Send Test Now" to trigger an immediate delivery (uses yesterday's data).</p>
-          <p>5. Delivery requires <code className="bg-muted px-1 rounded">SENDGRID_API_KEY</code> to be set in the environment.</p>
+          <p>5. Every delivery attempt (success or failure) is recorded in the Delivery History log above.</p>
+          <p>6. Delivery requires <code className="bg-muted px-1 rounded">SENDGRID_API_KEY</code> to be set in the environment.</p>
         </div>
       </div>
     </DashboardLayout>

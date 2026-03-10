@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -47,6 +48,7 @@ const PILOT_ROLE_LABELS: Record<string, string> = {
 };
 
 export default function PilotDashboard() {
+  const [, setLocation] = useLocation();
   const [showRegister, setShowRegister] = useState(false);
   const [showDemoConfirm, setShowDemoConfirm] = useState(false);
   const [selectedReportId, setSelectedReportId] = useState<number | null>(null);
@@ -389,18 +391,47 @@ export default function PilotDashboard() {
                     });
                     return row;
                   });
+                  // Build ISO date labels for drill-through navigation
+                  const reportDate = reportDetail?.report?.reportDate
+                    ? new Date(reportDetail.report.reportDate)
+                    : new Date();
+                  const dayIsoLabels = Array.from({ length: 7 }, (_, i) => {
+                    const d = new Date(reportDate);
+                    d.setDate(d.getDate() - (6 - i));
+                    return d.toISOString().slice(0, 10);
+                  });
                   return (
                     <div>
                       <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
                         <TrendingUp className="h-4 w-4 text-primary" /> 7-Day Declaration Volume per Officer
+                        <span className="text-xs font-normal text-muted-foreground">(click a bar to view declarations)</span>
                       </h3>
                       <div style={{ height: 200 }}>
                         <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+                          <BarChart
+                            data={chartData}
+                            margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+                            onClick={(payload) => {
+                              if (!payload?.activeLabel) return;
+                              const dayIndex = officerTrend.days.indexOf(payload.activeLabel as string);
+                              if (dayIndex < 0) return;
+                              const isoDate = dayIsoLabels[dayIndex];
+                              setLocation(`/app/admin/declarations?date=${isoDate}`);
+                            }}
+                            style={{ cursor: "pointer" }}
+                          >
                             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                             <XAxis dataKey="day" tick={{ fontSize: 10 }} />
                             <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-                            <Tooltip contentStyle={{ fontSize: 11 }} />
+                            <Tooltip
+                              contentStyle={{ fontSize: 11 }}
+                              labelFormatter={(label) => {
+                                const idx = officerTrend.days.indexOf(label as string);
+                                return idx >= 0
+                                  ? `${label} (${dayIsoLabels[idx]}) — click to view declarations`
+                                  : label;
+                              }}
+                            />
                             <Legend wrapperStyle={{ fontSize: 10 }} />
                             {officerTrend.officers.map((o: { officerName: string; dailyValues: number[] }, i: number) => (
                               <Bar key={o.officerName} dataKey={o.officerName} stackId="a" fill={OFFICER_COLORS[i % OFFICER_COLORS.length]} />

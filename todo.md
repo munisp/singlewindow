@@ -1840,3 +1840,25 @@
 - [x] Vitest tests for pilot.getOfficerWeeklyTrend
 - [x] Vitest tests for revocationCsvExport job
 - [x] Save checkpoint
+
+## Sprint 87 — AEO Notification, Compliance Log, Pilot Drill-Through
+
+### AEO Renewal Notification (already done in Sprint 86 processRenewalRequest)
+- [x] [S87] Verify processRenewalRequest sends in-app notification on approve/reject
+
+### Compliance Email Delivery History Log
+- [x] [S87] Add complianceEmailDeliveryLog table to schema.ts
+- [x] [S87] Run db:push to apply migration
+- [x] [S87] Update nightlyRevocationCsv.ts to insert a delivery log row after each attempt
+- [x] [S87] Add listDeliveryLogs procedure to rulesOfOrigin router
+- [x] [S87] Add delivery history panel to ComplianceEmailSettings page
+
+### Pilot Trend Chart Drill-Through
+- [x] [S87] Add onClick handler to PilotDashboard trend BarChart bars
+- [x] [S87] Navigate to /app/admin/declarations with officer + date filters pre-applied
+- [x] [S87] Ensure AdminDeclarations page accepts officer/date query params and pre-filters
+
+### Tests
+- [x] [S87] Vitest tests for complianceEmailDeliveryLog procedures
+- [x] [S87] Vitest tests for pilot trend drill-through logic
+- [x] [S87] Save checkpoint

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb, createNotification } from "../db";
-import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, complianceEmailSchedule, type OriginCertificate } from "../../drizzle/schema";
+import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, complianceEmailSchedule, complianceEmailDeliveryLog, type OriginCertificate } from "../../drizzle/schema";
 import { eq, desc, and, or, ilike, count, gte, lte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { generateCertificatePdf } from "../lib/certificatePdf";
@@ -581,9 +581,22 @@ export const rulesOfOriginRouter = router({
 
   // Manually trigger the nightly CSV email (admin only, for testing)
   triggerNightlyCsvEmail: adminProcedure
-    .mutation(async () => {
+    .mutation(async ({ ctx }) => {
       const { runNightlyRevocationCsv } = await import('../jobs/nightlyRevocationCsv');
-      const result = await runNightlyRevocationCsv();
+      const result = await runNightlyRevocationCsv(`manual:${ctx.user.id}`);
       return result;
+    }),
+
+  // List compliance email delivery history (last N entries)
+  listDeliveryLogs: adminProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(30) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db
+        .select()
+        .from(complianceEmailDeliveryLog)
+        .orderBy(desc(complianceEmailDeliveryLog.triggeredAt))
+        .limit(input.limit);
     }),
 });

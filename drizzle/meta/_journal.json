@@ -162,6 +162,13 @@
       "when": 1773154313659,
       "tag": "0022_premium_iron_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1773154983493,
+      "tag": "0023_same_valkyrie",
+      "breakpoints": true
     }
   ]
 }
