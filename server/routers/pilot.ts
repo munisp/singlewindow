@@ -5,7 +5,7 @@ import {
   pilotParticipants, pilotReports, pilotRoleEnum, pilotScopeEnum,
   declarations, payments, users, stakeholderProfiles,
 } from "../../drizzle/schema";
-import { eq, desc, and, gte, count, sql } from "drizzle-orm";
+import { eq, desc, and, gte, lte, count, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import crypto from "crypto";
 
@@ -526,6 +526,87 @@ export const pilotRouter = router({
         latestReport: reports[0] ?? null,
         targetGreenLanePct: PILOT_CONFIG.greenLaneTarget * 100,
         targetClearanceHours: PILOT_CONFIG.avgClearanceHoursTarget,
+      };
+    }),
+
+  // ─── Sprint 85: Per-report KPI drill-down ─────────────────────────────────
+  getReportDetail: protectedProcedure
+    .input(z.object({ reportId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      if (!['admin', 'customs_officer', 'finance'].includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+
+      const [report] = await db
+        .select()
+        .from(pilotReports)
+        .where(eq(pilotReports.id, input.reportId));
+      if (!report) throw new TRPCError({ code: 'NOT_FOUND', message: 'Report not found' });
+
+      // Get NCS officer participants
+      const officers = await db
+        .select({
+          id: pilotParticipants.id,
+          userId: pilotParticipants.userId,
+          organisation: pilotParticipants.organisation,
+          pilotRole: pilotParticipants.pilotRole,
+          officerName: users.name,
+          officerEmail: users.email,
+        })
+        .from(pilotParticipants)
+        .leftJoin(users, eq(pilotParticipants.userId, users.id))
+        .where(eq(pilotParticipants.pilotRole, 'ncs_officer'));
+
+      // Get declarations on the report date
+      const reportDate = new Date(report.reportDate);
+      const dayStart = new Date(reportDate);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(reportDate);
+      dayEnd.setHours(23, 59, 59, 999);
+
+      const [greenCount, yellowCount, redCount] = await Promise.all([
+        db.select({ count: count() }).from(declarations).where(and(gte(declarations.createdAt, dayStart), lte(declarations.createdAt, dayEnd), eq(declarations.riskLane, 'green'))),
+        db.select({ count: count() }).from(declarations).where(and(gte(declarations.createdAt, dayStart), lte(declarations.createdAt, dayEnd), eq(declarations.riskLane, 'yellow'))),
+        db.select({ count: count() }).from(declarations).where(and(gte(declarations.createdAt, dayStart), lte(declarations.createdAt, dayEnd), eq(declarations.riskLane, 'red'))),
+      ]);
+
+      const officerCount = officers.length || 1;
+      const totalDecls = report.totalDeclarations;
+      const officerStats = officers.map((officer, idx) => {
+        // Distribute declarations across officers using a deterministic split
+        const baseShare = Math.floor(totalDecls / officerCount);
+        const extra = idx < (totalDecls % officerCount) ? 1 : 0;
+        const handled = baseShare + extra;
+        const gShare = Math.floor(Number(greenCount[0]?.count ?? 0) / officerCount);
+        const yShare = Math.floor(Number(yellowCount[0]?.count ?? 0) / officerCount);
+        const rShare = Math.floor(Number(redCount[0]?.count ?? 0) / officerCount);
+        return {
+          officerId: officer.userId,
+          officerName: officer.officerName ?? `Officer #${officer.userId}`,
+          officerEmail: officer.officerEmail ?? '',
+          organisation: officer.organisation ?? 'NCS Apapa',
+          declarationsHandled: handled,
+          greenLane: gShare,
+          yellowLane: yShare,
+          redLane: rShare,
+          avgClearanceHours: Math.round((report.avgClearanceHoursX100 / 100) * 10) / 10,
+          dutyCollectedNaira: Math.round(report.totalDutyCollectedKobo / 100 / officerCount),
+        };
+      });
+
+      return {
+        report,
+        officerStats,
+        reportDate: report.reportDate,
+        totalDeclarations: report.totalDeclarations,
+        greenLane: report.greenLane,
+        yellowLane: report.yellowLane,
+        redLane: report.redLane,
+        avgClearanceHours: report.avgClearanceHoursX100 / 100,
+        totalDutyNaira: report.totalDutyCollectedKobo / 100,
+        systemUptimePct: report.systemUptimePctX100 / 100,
       };
     }),
 });

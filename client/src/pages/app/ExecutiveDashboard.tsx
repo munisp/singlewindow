@@ -30,6 +30,19 @@ export default function ExecutiveDashboard() {
   const { data: daily } = trpc.executiveDashboard.getDailyCollectionVsTarget.useQuery({ dailyTargetNaira: 500_000_000 });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
   const { data: topScanned } = trpc.rulesOfOrigin.topScanned.useQuery({ limit: 10, days: 30 });
+  const exportTopScannedMutation = trpc.rulesOfOrigin.exportTopScannedCsv.useMutation({
+    onSuccess: (result) => {
+      const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${result.rowCount} certificates to CSV`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const exportCsvMutation = trpc.executiveDashboard.exportRevenueCsv.useMutation({
     onSuccess: (data) => {
@@ -226,10 +239,22 @@ export default function ExecutiveDashboard() {
         {topScanned && topScanned.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="h-4 w-4 text-emerald-600" />
-                Most-Verified Certificates (Last 30 Days)
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-emerald-600" />
+                  Most-Verified Certificates (Last 30 Days)
+                </CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={exportTopScannedMutation.isPending}
+                  onClick={() => exportTopScannedMutation.mutate({ limit: 100, days: 30 })}
+                >
+                  {exportTopScannedMutation.isPending
+                    ? <><span className="mr-1 h-3 w-3 animate-spin inline-block border-2 border-current border-t-transparent rounded-full" />Exporting…</>
+                    : <><Download className="h-4 w-4 mr-1" />Export CSV</>}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">

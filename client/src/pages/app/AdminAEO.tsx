@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useState } from "react";
 import {
   ShieldCheck, CheckCircle2, XCircle, Clock, Award,
-  BarChart3, FileText, User, AlertTriangle, Zap,
+  BarChart3, FileText, User, AlertTriangle, Zap, RefreshCw, Bell,
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
@@ -38,9 +38,18 @@ function ScoreBar({ label, score }: { label: string; score: number | null }) {
   );
 }
 
+function ExpiryBadge({ daysLeft }: { daysLeft: number | null }) {
+  if (daysLeft === null) return null;
+  if (daysLeft <= 7) return <Badge className="bg-red-100 text-red-800 text-xs">Expires in {daysLeft}d ⚠️</Badge>;
+  if (daysLeft <= 30) return <Badge className="bg-orange-100 text-orange-800 text-xs">Expires in {daysLeft}d</Badge>;
+  if (daysLeft <= 60) return <Badge className="bg-amber-100 text-amber-800 text-xs">Expires in {daysLeft}d</Badge>;
+  return null;
+}
+
 export default function AdminAEO() {
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.aeo.all.useQuery({ limit: 100, offset: 0 });
+  const { data: expiringData } = trpc.aeo.getExpiringCertificates.useQuery({ withinDays: 60 });
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [showRejectForm, setShowRejectForm] = useState(false);
@@ -49,6 +58,7 @@ export default function AdminAEO() {
     onSuccess: (updated: any) => {
       toast.success(`AEO certificate ${updated?.certificateNumber} issued`);
       utils.aeo.all.invalidate();
+      utils.aeo.getExpiringCertificates.invalidate();
       setSelectedId(null);
     },
     onError: (e: any) => toast.error(e.message),
@@ -65,15 +75,31 @@ export default function AdminAEO() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const renewMutation = trpc.aeo.renewCertificate.useMutation({
+    onSuccess: (updated: any) => {
+      toast.success(`Certificate renewed — new number: ${updated?.certificateNumber}`);
+      utils.aeo.all.invalidate();
+      utils.aeo.getExpiringCertificates.invalidate();
+      setSelectedId(null);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const apps = data ?? [];
   const pending = apps.filter((a: any) => a.status === "submitted" || a.status === "under_review");
   const approved = apps.filter((a: any) => a.status === "approved");
   const rejected = apps.filter((a: any) => a.status === "rejected");
   const selected = apps.find((a: any) => a.id === selectedId) as any;
+  const expiring = expiringData ?? [];
 
   const avgCompliance = approved.length > 0
     ? Math.round(approved.reduce((s: number, a: any) => s + (a.complianceScore ?? 0), 0) / approved.length)
     : 0;
+
+  // Compute days until expiry for selected cert
+  const selectedDaysLeft = selected?.certificateExpiresAt
+    ? Math.ceil((new Date(selected.certificateExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
 
   return (
     <DashboardLayout title="AEO Management">
@@ -89,6 +115,44 @@ export default function AdminAEO() {
             </p>
           </div>
         </div>
+
+        {/* Expiring Certificates Alert Banner */}
+        {expiring.length > 0 && (
+          <Card className="border-amber-300 bg-amber-50">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <Bell className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">
+                    {expiring.length} AEO certificate{expiring.length !== 1 ? "s" : ""} expiring within 60 days
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {expiring.slice(0, 5).map((c: any) => (
+                      <div key={c.id} className="flex items-center justify-between text-xs text-amber-700 gap-2">
+                        <span className="font-mono truncate">{c.certificateNumber ?? `App #${c.id}`}</span>
+                        <span className="shrink-0">{c.traderName ?? `Trader #${c.traderId}`}</span>
+                        <ExpiryBadge daysLeft={c.daysUntilExpiry} />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-xs border-amber-400 text-amber-800 hover:bg-amber-100 shrink-0"
+                          onClick={() => renewMutation.mutate({ applicationId: c.id })}
+                          disabled={renewMutation.isPending}
+                        >
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Renew
+                        </Button>
+                      </div>
+                    ))}
+                    {expiring.length > 5 && (
+                      <p className="text-xs text-amber-600 mt-1">…and {expiring.length - 5} more</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -119,6 +183,9 @@ export default function AdminAEO() {
             ) : (
               apps.map((a: any) => {
                 const cfg = STATUS_CONFIG[a.status] ?? STATUS_CONFIG.submitted;
+                const daysLeft = a.certificateExpiresAt
+                  ? Math.ceil((new Date(a.certificateExpiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                  : null;
                 return (
                   <Card
                     key={a.id}
@@ -134,9 +201,12 @@ export default function AdminAEO() {
                             Trader #{a.traderId}
                           </p>
                         </div>
-                        <Badge className={`text-xs shrink-0 flex items-center gap-1 ${cfg.color}`}>
-                          {cfg.icon}{cfg.label}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge className={`text-xs shrink-0 flex items-center gap-1 ${cfg.color}`}>
+                            {cfg.icon}{cfg.label}
+                          </Badge>
+                          {daysLeft !== null && daysLeft <= 60 && <ExpiryBadge daysLeft={daysLeft} />}
+                        </div>
                       </div>
                       {(a.complianceScore !== null) && (
                         <div className="mt-2">
@@ -169,14 +239,19 @@ export default function AdminAEO() {
                         {selected.tier && <span className="ml-2">· Tier: <strong>{selected.tier}</strong></span>}
                       </CardDescription>
                     </div>
-                    {(() => {
-                      const cfg = STATUS_CONFIG[selected.status] ?? STATUS_CONFIG.submitted;
-                      return (
-                        <Badge className={`flex items-center gap-1 ${cfg.color}`}>
-                          {cfg.icon}{cfg.label}
-                        </Badge>
-                      );
-                    })()}
+                    <div className="flex flex-col items-end gap-1">
+                      {(() => {
+                        const cfg = STATUS_CONFIG[selected.status] ?? STATUS_CONFIG.submitted;
+                        return (
+                          <Badge className={`flex items-center gap-1 ${cfg.color}`}>
+                            {cfg.icon}{cfg.label}
+                          </Badge>
+                        );
+                      })()}
+                      {selectedDaysLeft !== null && selectedDaysLeft <= 60 && (
+                        <ExpiryBadge daysLeft={selectedDaysLeft} />
+                      )}
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-5">
@@ -219,6 +294,18 @@ export default function AdminAEO() {
                           <Zap className="h-4 w-4 shrink-0" />
                           <span>Green-lane fast-track clearance is <strong>active</strong> for this trader</span>
                         </div>
+                        {/* Renew button for certs expiring within 60 days */}
+                        {selectedDaysLeft !== null && selectedDaysLeft <= 60 && (
+                          <Button
+                            size="sm"
+                            className="bg-amber-600 hover:bg-amber-700 text-white w-full"
+                            onClick={() => renewMutation.mutate({ applicationId: selected.id })}
+                            disabled={renewMutation.isPending}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            {renewMutation.isPending ? "Renewing…" : `Renew Certificate (${selectedDaysLeft} days left)`}
+                          </Button>
+                        )}
                       </div>
                     </>
                   )}

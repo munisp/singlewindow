@@ -617,6 +617,14 @@ cron.schedule("0 5 3 * * *", async () => {
 }, { timezone: "UTC" });
 console.log("[Cron] Executive daily digest scheduled at 03:05 UTC daily");
 
+// ── AEO Certificate Renewal Reminder cron ────────────────────────────────────
+// Fires at 03:10 UTC every day. Sends renewal reminders at 60/30/7 days before expiry.
+import { runAeoRenewalReminders } from "../jobs/aeoRenewalReminders";
+cron.schedule("0 10 3 * * *", async () => {
+  await runAeoRenewalReminders();
+}, { timezone: "UTC" });
+console.log("[Cron] AEO renewal reminders scheduled at 03:10 UTC daily");
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();

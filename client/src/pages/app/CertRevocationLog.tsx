@@ -12,7 +12,8 @@ import { Input } from "@/components/ui/input";
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from "@/components/ui/card";
-import { Loader2, ShieldOff, ChevronLeft, ChevronRight, AlertTriangle, Search, X } from "lucide-react";
+import { Loader2, ShieldOff, ChevronLeft, ChevronRight, AlertTriangle, Search, X, Download } from "lucide-react";
+import { toast } from "sonner";
 
 const CERT_TYPE_LABELS: Record<string, string> = {
   afcfta_co: "AfCFTA CO",
@@ -47,6 +48,20 @@ export default function CertRevocationLog() {
   }, []);
 
   const hasActiveFilters = !!(search || revokedFrom || revokedTo);
+
+  const exportCsvMutation = trpc.rulesOfOrigin.exportRevokedCsv.useMutation({
+    onSuccess: (result) => {
+      const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${result.rowCount} records to CSV`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
 
   const { data, isLoading, isError } = trpc.rulesOfOrigin.listRevoked.useQuery(
     {
@@ -128,6 +143,21 @@ export default function CertRevocationLog() {
                     <X className="h-4 w-4 mr-1" /> Clear
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={exportCsvMutation.isPending}
+                  onClick={() => exportCsvMutation.mutate({
+                    search: search || undefined,
+                    revokedFrom: revokedFrom ? new Date(revokedFrom) : undefined,
+                    revokedTo: revokedTo ? new Date(revokedTo + 'T23:59:59') : undefined,
+                  })}
+                >
+                  {exportCsvMutation.isPending
+                    ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    : <Download className="h-4 w-4 mr-1" />}
+                  Export CSV
+                </Button>
               </div>
             </div>
           </CardContent>

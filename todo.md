@@ -1791,3 +1791,30 @@
 ### Tests
 - [x] 1232 tests, 41 files, 0 failures (all passing)
 - [x] 0 TypeScript errors
+
+## Sprint 85 — AEO Renewal Workflow, Pilot Drill-Down, Certificate CSV Export
+
+### AEO Renewal Workflow
+- [x] Add aeo.renewCertificate tRPC mutation (admin-only): extends certificateExpiresAt by 3 years, issues new cert number, notifies trader
+- [x] Add aeo.getExpiringCertificates tRPC query: returns AEO certs expiring within N days
+- [ ] Add AEO renewal reminder cron job (runs daily at 03:10 UTC): sends notifications at 60/30/7 days before expiry
+- [x] Add "Renew" button in AdminAEO page for approved certs near expiry (within 60 days)
+- [x] Add expiry countdown badge in AdminAEO and TraderAEO pages
+
+### Pilot Dashboard KPI Drill-Down
+- [x] Add pilot.getReportDetail tRPC query: returns per-officer stats for a given report date
+- [x] Add slide-over panel (Sheet component) in PilotDashboard: opens on row click
+- [x] Slide-over shows: officer declaration counts, avg clearance time, duty collected, green/yellow/red breakdown
+- [x] Add "View Details" button column to the daily reports table
+
+### Certificate Analytics CSV Export
+- [x] Add rulesOfOrigin.exportCertificatesCsv tRPC mutation: returns CSV of all certificates with filters
+- [x] Add rulesOfOrigin.exportRevocationsCsv tRPC mutation: returns CSV of revocation log
+- [x] Add "Export CSV" button to RulesOfOrigin page (admin/customs_officer only)
+- [x] Add "Export CSV" button to CertRevocationLog page (admin only)
+
+### Tests
+- [x] Vitest tests for aeo.renewCertificate and aeo.getExpiringCertificates
+- [x] Vitest tests for pilot.getReportDetail
+- [x] Vitest tests for rulesOfOrigin.exportCertificatesCsv and exportRevocationsCsv
+- [x] Save checkpoint

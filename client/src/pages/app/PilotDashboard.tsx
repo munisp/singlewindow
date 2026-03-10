@@ -9,15 +9,21 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
   Anchor, Users, FileText, TrendingUp, Clock, CheckCircle,
-  AlertTriangle, Plus, Target, RefreshCw, Database,
+  AlertTriangle, Plus, Target, RefreshCw, Database, ChevronRight,
+  ShieldCheck, DollarSign, Activity,
 } from "lucide-react";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -40,6 +46,7 @@ const PILOT_ROLE_LABELS: Record<string, string> = {
 export default function PilotDashboard() {
   const [showRegister, setShowRegister] = useState(false);
   const [showDemoConfirm, setShowDemoConfirm] = useState(false);
+  const [selectedReportId, setSelectedReportId] = useState<number | null>(null);
   const [newParticipant, setNewParticipant] = useState({
     pilotRole: "trader" as "trader" | "ncs_officer" | "oga_officer" | "port_operator",
     scope: "both" as "apapa_apmt" | "tin_can_island" | "both",
@@ -51,6 +58,10 @@ export default function PilotDashboard() {
   const { data: kpi, refetch: refetchKpi } = trpc.pilot.getKpiSummary.useQuery();
   const { data: participants, refetch: refetchParticipants } = trpc.pilot.listParticipants.useQuery({ limit: 100, offset: 0 });
   const { data: reports, refetch: refetchReports } = trpc.pilot.getReports.useQuery({ limit: 10 });
+  const { data: reportDetail, isLoading: detailLoading } = trpc.pilot.getReportDetail.useQuery(
+    { reportId: selectedReportId! },
+    { enabled: selectedReportId !== null }
+  );
 
   const registerMutation = trpc.pilot.registerParticipant.useMutation({
     onSuccess: () => {
@@ -185,6 +196,7 @@ export default function PilotDashboard() {
               <CardTitle className="text-base flex items-center gap-2">
                 <FileText className="h-4 w-4" /> Recent Daily Reports
               </CardTitle>
+              <CardDescription className="text-xs">Click any row to view per-officer KPI breakdown</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -198,11 +210,16 @@ export default function PilotDashboard() {
                       <th className="text-left py-2 px-3">Red Lane</th>
                       <th className="text-left py-2 px-3">Avg Clearance</th>
                       <th className="text-left py-2 px-3">Duty (₦)</th>
+                      <th className="text-left py-2 px-3"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {reports.map((r: Record<string, unknown>) => (
-                      <tr key={r.id as number} className="border-b hover:bg-muted/30">
+                      <tr
+                        key={r.id as number}
+                        className="border-b hover:bg-muted/30 cursor-pointer"
+                        onClick={() => setSelectedReportId(r.id as number)}
+                      >
                         <td className="py-2 px-3">{new Date(r.reportDate as string).toLocaleDateString()}</td>
                         <td className="py-2 px-3">{r.totalDeclarations as number}</td>
                         <td className="py-2 px-3 text-green-700">{r.greenLane as number}</td>
@@ -210,6 +227,11 @@ export default function PilotDashboard() {
                         <td className="py-2 px-3 text-red-700">{r.redLane as number}</td>
                         <td className="py-2 px-3">{((r.avgClearanceHoursX100 as number) / 100).toFixed(1)}h</td>
                         <td className="py-2 px-3">₦{((r.totalDutyCollectedKobo as number) / 100).toLocaleString()}</td>
+                        <td className="py-2 px-3">
+                          <Button size="sm" variant="ghost" className="h-6 text-xs gap-1 text-primary hover:text-primary">
+                            Details <ChevronRight className="h-3 w-3" />
+                          </Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -275,6 +297,135 @@ export default function PilotDashboard() {
             )}
           </CardContent>
         </Card>
+
+        {/* ── KPI Drill-Down Slide-Over ─────────────────────────────────────── */}
+        <Sheet open={selectedReportId !== null} onOpenChange={(open) => { if (!open) setSelectedReportId(null); }}>
+          <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+            <SheetHeader className="mb-4">
+              <SheetTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-blue-600" />
+                Daily Report — KPI Drill-Down
+              </SheetTitle>
+              <SheetDescription>
+                {reportDetail
+                  ? `${new Date(reportDetail.reportDate as unknown as string).toLocaleDateString("en-NG", { weekday: "long", year: "numeric", month: "long", day: "numeric" })} · Apapa Port Pilot`
+                  : "Loading report details…"}
+              </SheetDescription>
+            </SheetHeader>
+
+            {detailLoading ? (
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+              </div>
+            ) : reportDetail ? (
+              <div className="space-y-6">
+                {/* Summary KPI row */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: "Total Declarations", value: reportDetail.totalDeclarations, color: "text-blue-700", icon: <FileText className="h-4 w-4 text-blue-500" /> },
+                    { label: "Avg Clearance", value: `${reportDetail.avgClearanceHours.toFixed(1)}h`, color: "text-yellow-700", icon: <Clock className="h-4 w-4 text-yellow-500" /> },
+                    { label: "Duty Collected", value: `₦${(reportDetail.totalDutyNaira / 1_000_000).toFixed(2)}M`, color: "text-emerald-700", icon: <DollarSign className="h-4 w-4 text-emerald-500" /> },
+                    { label: "System Uptime", value: `${reportDetail.systemUptimePct.toFixed(2)}%`, color: "text-purple-700", icon: <Activity className="h-4 w-4 text-purple-500" /> },
+                  ].map(item => (
+                    <div key={item.label} className="bg-muted/50 rounded-lg p-3">
+                      <div className="flex items-center gap-1.5 mb-1">{item.icon}<span className="text-xs text-muted-foreground">{item.label}</span></div>
+                      <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Lane breakdown */}
+                <div>
+                  <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-primary" /> Risk Lane Breakdown
+                  </h3>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-green-700">{reportDetail.greenLane}</p>
+                      <p className="text-xs text-green-600 mt-0.5">Green Lane</p>
+                      <p className="text-xs text-muted-foreground">
+                        {reportDetail.totalDeclarations > 0
+                          ? `${Math.round((reportDetail.greenLane / reportDetail.totalDeclarations) * 100)}%`
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-yellow-700">{reportDetail.yellowLane}</p>
+                      <p className="text-xs text-yellow-600 mt-0.5">Yellow Lane</p>
+                      <p className="text-xs text-muted-foreground">
+                        {reportDetail.totalDeclarations > 0
+                          ? `${Math.round((reportDetail.yellowLane / reportDetail.totalDeclarations) * 100)}%`
+                          : "—"}
+                      </p>
+                    </div>
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-red-700">{reportDetail.redLane}</p>
+                      <p className="text-xs text-red-600 mt-0.5">Red Lane</p>
+                      <p className="text-xs text-muted-foreground">
+                        {reportDetail.totalDeclarations > 0
+                          ? `${Math.round((reportDetail.redLane / reportDetail.totalDeclarations) * 100)}%`
+                          : "—"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Per-officer breakdown */}
+                <div>
+                  <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-primary" /> Per-Officer Performance
+                  </h3>
+                  {reportDetail.officerStats.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No NCS officers registered for this pilot yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {reportDetail.officerStats.map((officer: any) => (
+                        <div key={officer.officerId} className="border rounded-lg p-3 space-y-2">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-medium text-sm">{officer.officerName}</p>
+                              <p className="text-xs text-muted-foreground">{officer.organisation}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-blue-700">{officer.declarationsHandled}</p>
+                              <p className="text-xs text-muted-foreground">declarations</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-4 gap-2 text-xs">
+                            <div className="text-center">
+                              <p className="font-semibold text-green-700">{officer.greenLane}</p>
+                              <p className="text-muted-foreground">Green</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="font-semibold text-yellow-700">{officer.yellowLane}</p>
+                              <p className="text-muted-foreground">Yellow</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="font-semibold text-red-700">{officer.redLane}</p>
+                              <p className="text-muted-foreground">Red</p>
+                            </div>
+                            <div className="text-center">
+                              <p className="font-semibold text-emerald-700">₦{(officer.dutyCollectedNaira / 1000).toFixed(0)}K</p>
+                              <p className="text-muted-foreground">Duty</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            Avg clearance: <span className="font-medium text-foreground">{officer.avgClearanceHours}h</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </SheetContent>
+        </Sheet>
 
         {/* Register Participant Dialog */}
         <Dialog open={showRegister} onOpenChange={setShowRegister}>

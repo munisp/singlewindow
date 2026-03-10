@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import {
   createAeoApplication, getAeoApplicationsByTrader, getAllAeoApplications,
-  updateAeoApplication, logAuditEvent, createNotification, getProfileByUserId
+  updateAeoApplication, logAuditEvent, createNotification, getProfileByUserId,
+  getDb
 } from "../db";
 import { nanoid } from "nanoid";
+import { aeoApplications, users } from "../../drizzle/schema";
+import { eq, and, lte, gte } from "drizzle-orm";
 
 export const aeoRouter = router({
   // Get current user's AEO application
@@ -264,5 +267,87 @@ export const aeoRouter = router({
         registrationNo: input.registrationNo,
         targetTier: input.targetTier,
       };
+    }),
+
+  // ─── Sprint 85: AEO Renewal Workflow ─────────────────────────────────────
+
+  // Admin: get AEO certificates expiring within N days
+  getExpiringCertificates: adminProcedure
+    .input(z.object({ withinDays: z.number().int().min(1).max(365).default(60) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + input.withinDays * 24 * 60 * 60 * 1000);
+      const rows = await db
+        .select({
+          id: aeoApplications.id,
+          traderId: aeoApplications.traderId,
+          applicationNumber: aeoApplications.applicationNumber,
+          certificateNumber: aeoApplications.certificateNumber,
+          tier: aeoApplications.tier,
+          certificateIssuedAt: aeoApplications.certificateIssuedAt,
+          certificateExpiresAt: aeoApplications.certificateExpiresAt,
+          traderName: users.name,
+          traderEmail: users.email,
+        })
+        .from(aeoApplications)
+        .leftJoin(users, eq(aeoApplications.traderId, users.id))
+        .where(
+          and(
+            eq(aeoApplications.status, "approved"),
+            lte(aeoApplications.certificateExpiresAt, cutoff),
+            gte(aeoApplications.certificateExpiresAt, now)
+          )
+        )
+        .orderBy(aeoApplications.certificateExpiresAt);
+      return rows.map(r => ({
+        ...r,
+        daysUntilExpiry: r.certificateExpiresAt
+          ? Math.ceil((r.certificateExpiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          : null,
+      }));
+    }),
+
+  // Admin: renew an approved AEO certificate (extends by 3 years)
+  renewCertificate: adminProcedure
+    .input(z.object({ applicationId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const [app] = await db
+        .select()
+        .from(aeoApplications)
+        .where(eq(aeoApplications.id, input.applicationId));
+      if (!app) throw new TRPCError({ code: "NOT_FOUND", message: "AEO application not found" });
+      if (app.status !== "approved") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only approved certificates can be renewed" });
+      }
+      const newCertNumber = `AEO-RNW-${nanoid(10).toUpperCase()}`;
+      const newExpiresAt = new Date();
+      newExpiresAt.setFullYear(newExpiresAt.getFullYear() + 3);
+      const updated = await updateAeoApplication(input.applicationId, {
+        certificateNumber: newCertNumber,
+        certificateIssuedAt: new Date(),
+        certificateExpiresAt: newExpiresAt,
+        updatedAt: new Date(),
+      });
+      await logAuditEvent({
+        entityType: "aeo_application",
+        entityId: input.applicationId,
+        action: "aeo_certificate_renewed",
+        actorId: ctx.user.id,
+        actorType: "admin",
+        newState: { certificateNumber: newCertNumber, expiresAt: newExpiresAt.toISOString() },
+      });
+      await createNotification({
+        userId: app.traderId,
+        type: "aeo_status_update",
+        title: "AEO Certificate Renewed",
+        message: `Your AEO certificate has been renewed. New certificate number: ${newCertNumber}. Valid until ${newExpiresAt.toLocaleDateString()}. Thank you for your continued compliance.`,
+        entityType: "aeo_application",
+        entityId: input.applicationId,
+      });
+      return updated;
     }),
 });

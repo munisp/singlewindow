@@ -411,4 +411,118 @@ export const rulesOfOriginRouter = router({
       };
       return stats;
     }),
+
+  // ─── Sprint 85: CSV export for revocation log ─────────────────────────────────────
+  exportRevokedCsv: protectedProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      revokedFrom: z.date().optional(),
+      revokedTo: z.date().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== 'admin') {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const conditions = [eq(originCertificates.status, 'revoked')];
+      if (input.search) {
+        conditions.push(
+          or(
+            ilike(originCertificates.certNumber, `%${input.search}%`),
+            ilike(originCertificates.exporterName, `%${input.search}%`),
+            ilike(originCertificates.importerName, `%${input.search}%`)
+          )!
+        );
+      }
+      if (input.revokedFrom) conditions.push(gte(originCertificates.revokedAt, input.revokedFrom));
+      if (input.revokedTo) conditions.push(lte(originCertificates.revokedAt, input.revokedTo));
+      const rows = await db
+        .select({
+          id: originCertificates.id,
+          certNumber: originCertificates.certNumber,
+          certType: originCertificates.certType,
+          exporterName: originCertificates.exporterName,
+          importerName: originCertificates.importerName,
+          originCountry: originCertificates.originCountry,
+          approvedAt: originCertificates.approvedAt,
+          revokedAt: originCertificates.revokedAt,
+          revokedBy: originCertificates.revokedBy,
+          revocationReason: originCertificates.revocationReason,
+        })
+        .from(originCertificates)
+        .where(and(...conditions))
+        .orderBy(desc(originCertificates.revokedAt))
+        .limit(5000);
+      const escape = (v: unknown) => {
+        const s = v == null ? '' : String(v);
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = 'Cert Number,Type,Exporter,Importer,Origin Country,Approved At,Revoked At,Revoked By (User ID),Reason';
+      const lines = rows.map(r =>
+        [
+          r.certNumber, r.certType, r.exporterName, r.importerName ?? '',
+          r.originCountry ?? '', r.approvedAt ? new Date(r.approvedAt).toISOString() : '',
+          r.revokedAt ? new Date(r.revokedAt).toISOString() : '',
+          r.revokedBy ?? '', r.revocationReason ?? '',
+        ].map(escape).join(',')
+      );
+      return {
+        csv: [header, ...lines].join('\n'),
+        rowCount: rows.length,
+        filename: `revocation-log-${new Date().toISOString().slice(0, 10)}.csv`,
+      };
+    }),
+
+  // ─── Sprint 85: CSV export for top-scanned certificates ───────────────────────────
+  exportTopScannedCsv: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(500).default(100),
+      days: z.number().int().min(1).max(365).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!['admin', 'customs_officer', 'oga_officer', 'finance'].includes(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      const conditions = [sql`${originCertificates.scanCount} > 0`];
+      if (input.days) {
+        const cutoff = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
+        conditions.push(gte(originCertificates.approvedAt, cutoff));
+      }
+      const rows = await db
+        .select({
+          id: originCertificates.id,
+          certNumber: originCertificates.certNumber,
+          certType: originCertificates.certType,
+          exporterName: originCertificates.exporterName,
+          originCountry: originCertificates.originCountry,
+          destinationCountry: originCertificates.destinationCountry,
+          scanCount: originCertificates.scanCount,
+          approvedAt: originCertificates.approvedAt,
+        })
+        .from(originCertificates)
+        .where(and(...conditions))
+        .orderBy(desc(originCertificates.scanCount))
+        .limit(input.limit);
+      const escape = (v: unknown) => {
+        const s = v == null ? '' : String(v);
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const header = 'Rank,Cert Number,Type,Exporter,Origin Country,Destination Country,Scan Count,Approved At';
+      const lines = rows.map((r, idx) =>
+        [
+          idx + 1, r.certNumber, r.certType, r.exporterName,
+          r.originCountry ?? '', r.destinationCountry ?? '',
+          r.scanCount ?? 0, r.approvedAt ? new Date(r.approvedAt).toISOString() : '',
+        ].map(escape).join(',')
+      );
+      const period = input.days ? `last-${input.days}d` : 'all-time';
+      return {
+        csv: [header, ...lines].join('\n'),
+        rowCount: rows.length,
+        filename: `top-scanned-certs-${period}-${new Date().toISOString().slice(0, 10)}.csv`,
+      };
+    }),
 });
