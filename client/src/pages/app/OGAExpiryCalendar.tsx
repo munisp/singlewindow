@@ -87,15 +87,15 @@ export default function OGAExpiryCalendar() {
     );
   });
 
-  // Summary counts by urgency band
-  const critical = filtered.filter((p) => p.daysUntilExpiry <= 7).length;
+  // Summary counts by urgency band (null = no expiry = treated as upcoming)
+  const critical = filtered.filter((p) => p.daysUntilExpiry != null && p.daysUntilExpiry <= 7).length;
   const urgent = filtered.filter(
-    (p) => p.daysUntilExpiry > 7 && p.daysUntilExpiry <= 30
+    (p) => p.daysUntilExpiry != null && p.daysUntilExpiry > 7 && p.daysUntilExpiry <= 30
   ).length;
   const dueSoon = filtered.filter(
-    (p) => p.daysUntilExpiry > 30 && p.daysUntilExpiry <= 60
+    (p) => p.daysUntilExpiry != null && p.daysUntilExpiry > 30 && p.daysUntilExpiry <= 60
   ).length;
-  const upcoming = filtered.filter((p) => p.daysUntilExpiry > 60).length;
+  const upcoming = filtered.filter((p) => p.daysUntilExpiry == null || p.daysUntilExpiry > 60).length;
 
   return (
     <DashboardLayout title="Permit Expiry Calendar">
@@ -254,7 +254,7 @@ export default function OGAExpiryCalendar() {
                   </thead>
                   <tbody className="divide-y">
                     {filtered.map((p) => {
-                      const urg = urgencyConfig(p.daysUntilExpiry);
+                      const urg = urgencyConfig(p.daysUntilExpiry ?? 999);
                       return (
                         <tr
                           key={p.id}
@@ -311,19 +311,23 @@ export default function OGAExpiryCalendar() {
                               : "—"}
                           </td>
                           <td className="p-3">
-                            <span
-                              className={`text-sm font-bold ${
-                                p.daysUntilExpiry <= 7
-                                  ? "text-red-400"
-                                  : p.daysUntilExpiry <= 30
-                                  ? "text-amber-400"
-                                  : p.daysUntilExpiry <= 60
-                                  ? "text-yellow-400"
-                                  : "text-emerald-400"
-                              }`}
-                            >
-                              {p.daysUntilExpiry}d
-                            </span>
+                            {p.daysUntilExpiry != null ? (
+                              <span
+                                className={`text-sm font-bold ${
+                                  p.daysUntilExpiry <= 7
+                                    ? "text-red-400"
+                                    : p.daysUntilExpiry <= 30
+                                    ? "text-amber-400"
+                                    : p.daysUntilExpiry <= 60
+                                    ? "text-yellow-400"
+                                    : "text-emerald-400"
+                                }`}
+                              >
+                                {p.daysUntilExpiry}d
+                              </span>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">—</span>
+                            )}
                           </td>
                         </tr>
                       );

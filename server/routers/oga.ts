@@ -4,7 +4,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   createOgaPermit, getPermitsByDeclaration, updateOgaPermit,
   getPermitsByOfficer, getDeclarationById, logAuditEvent, createNotification,
-  getDb
+  getDb, withRlsContext
 } from "../db";
 import { assertCan, setOwner } from "../_core/permify";
 import { ogaPermits, declarations } from "../../drizzle/schema";
@@ -89,11 +89,23 @@ export const ogaRouter = router({
       return permits;
     }),
 
-  // Get permits for a declaration
+  // Get permits for a declaration — RLS-enforced for traders
   byDeclaration: protectedProcedure
     .input(z.object({ declarationId: z.number() }))
     .query(async ({ ctx, input }) => {
-      return getPermitsByDeclaration(input.declarationId);
+      const officerRoles = ["admin", "customs_officer", "oga_officer", "inspector"];
+      if (officerRoles.includes(ctx.user.role)) {
+        return getPermitsByDeclaration(input.declarationId);
+      }
+      // Trader path: verify ownership first, then RLS-enforced query
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl || decl.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+      }
+      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, (db) =>
+        db.select().from(ogaPermits)
+          .where(eq(ogaPermits.declarationId, input.declarationId))
+      );
     }),
 
   // OGA officer: get assigned permits
@@ -197,41 +209,52 @@ export const ogaRouter = router({
   expiryCalendar: protectedProcedure
     .input(z.object({ days: z.number().int().min(1).max(365).default(90) }))
     .query(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) return [];
       const now = new Date();
       const horizon = new Date(now.getTime() + input.days * 24 * 60 * 60 * 1000);
-
       const baseWhere = and(
         isNotNull(ogaPermits.expiresAt),
         gte(ogaPermits.expiresAt, now),
         lte(ogaPermits.expiresAt, horizon),
       );
-
-      const rows = await db
-        .select({
-          id: ogaPermits.id,
-          permitNumber: ogaPermits.permitNumber,
-          agencyCode: ogaPermits.agencyCode,
-          agencyName: ogaPermits.agencyName,
-          permitType: ogaPermits.permitType,
-          status: ogaPermits.status,
-          expiresAt: ogaPermits.expiresAt,
-          declarationId: ogaPermits.declarationId,
-          declarationNumber: declarations.declarationNumber,
-          traderId: declarations.traderId,
-        })
-        .from(ogaPermits)
-        .innerJoin(declarations, eq(ogaPermits.declarationId, declarations.id))
-        .where(baseWhere)
-        .orderBy(asc(ogaPermits.expiresAt))
-        .limit(200);
-
+      type CalendarRow = {
+        id: number; permitNumber: string | null; agencyCode: string; agencyName: string;
+        permitType: string | null; status: string; expiresAt: Date | null;
+        declarationId: number; declarationNumber: string; traderId: number;
+      };
+      const selectShape = {
+        id: ogaPermits.id,
+        permitNumber: ogaPermits.permitNumber,
+        agencyCode: ogaPermits.agencyCode,
+        agencyName: ogaPermits.agencyName,
+        permitType: ogaPermits.permitType,
+        status: ogaPermits.status,
+        expiresAt: ogaPermits.expiresAt,
+        declarationId: ogaPermits.declarationId,
+        declarationNumber: declarations.declarationNumber,
+        traderId: declarations.traderId,
+      };
+      const adminRoles = ["admin", "oga_officer", "customs_officer"];
+      let rows: CalendarRow[];
+      if (adminRoles.includes(ctx.user.role)) {
+        const db = await getDb();
+        if (!db) return [];
+        rows = (await db.select(selectShape).from(ogaPermits)
+          .innerJoin(declarations, eq(ogaPermits.declarationId, declarations.id))
+          .where(baseWhere).orderBy(asc(ogaPermits.expiresAt)).limit(200)) as CalendarRow[];
+      } else {
+        // Trader: RLS enforces row-level ownership; also filter by traderId in WHERE
+        rows = (await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, (db) =>
+          db.select(selectShape).from(ogaPermits)
+            .innerJoin(declarations, eq(ogaPermits.declarationId, declarations.id))
+            .where(and(baseWhere, eq(declarations.traderId, ctx.user.id)))
+            .orderBy(asc(ogaPermits.expiresAt)).limit(200)
+        )) as CalendarRow[];
+      }
       return rows.map((r) => ({
         ...r,
-        daysUntilExpiry: Math.ceil(
-          (r.expiresAt!.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-        ),
+        daysUntilExpiry: r.expiresAt
+          ? Math.ceil((r.expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          : null,
       }));
     }),
 });

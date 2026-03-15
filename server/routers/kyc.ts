@@ -32,8 +32,11 @@ import {
   listKYCVerifications,
   createUserNotification,
   logAuditEvent,
+  withRlsContext,
 } from "../db";
 import { storagePut } from "../storage";
+import { kycVerifications, kycDocuments } from "../../drizzle/schema";
+import { eq, desc } from "drizzle-orm";
 
 const KYC_SERVICE_URL = process.env.KYC_SERVICE_URL || "http://localhost:8091";
 
@@ -357,11 +360,21 @@ export const kycRouter = router({
    * Get the current KYC/KYB verification status for the authenticated user.
    */
   getVerification: protectedProcedure.query(async ({ ctx }) => {
-    const verification = await getLatestKYCVerification(ctx.user.id);
-    const documents = await listKYCDocuments(ctx.user.id);
-
+    // RLS-enforced: trader sees only their own verification records
+    const verifications = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, (db) =>
+      db.select().from(kycVerifications)
+        .where(eq(kycVerifications.userId, ctx.user.id))
+        .orderBy(desc(kycVerifications.createdAt))
+        .limit(1)
+    ) as (typeof kycVerifications.$inferSelect)[];
+    const verification = verifications[0] ?? null;
+    const documents = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, (db) =>
+      db.select().from(kycDocuments)
+        .where(eq(kycDocuments.userId, ctx.user.id))
+        .orderBy(desc(kycDocuments.createdAt))
+    ) as (typeof kycDocuments.$inferSelect)[];
     return {
-      verification: verification ?? null,
+      verification,
       documents,
       isVerified: verification?.status === "APPROVED",
       verificationLevel: verification?.verificationType ?? null,
@@ -369,10 +382,14 @@ export const kycRouter = router({
   }),
 
   /**
-   * List all KYC documents for the authenticated user.
+   * List all KYC documents for the authenticated user — RLS-enforced.
    */
   listDocuments: protectedProcedure.query(async ({ ctx }) => {
-    return listKYCDocuments(ctx.user.id);
+    return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, (db) =>
+      db.select().from(kycDocuments)
+        .where(eq(kycDocuments.userId, ctx.user.id))
+        .orderBy(desc(kycDocuments.createdAt))
+    ) as Promise<(typeof kycDocuments.$inferSelect)[]>;
   }),
 
   /**

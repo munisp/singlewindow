@@ -4,17 +4,22 @@ import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import {
   createAeoApplication, getAeoApplicationsByTrader, getAllAeoApplications,
   updateAeoApplication, logAuditEvent, createNotification, getProfileByUserId,
-  getDb
+  withRlsContext, getDb
 } from "../db";
 import { nanoid } from "nanoid";
 import { aeoApplications, aeoRenewalRequests, users } from "../../drizzle/schema";
 import { eq, and, lte, gte, desc } from "drizzle-orm";
 
 export const aeoRouter = router({
-  // Get current user's AEO application
+  // Get current user's AEO application — RLS-enforced at DB layer
   myApplication: protectedProcedure.query(async ({ ctx }) => {
-    const apps = await getAeoApplicationsByTrader(ctx.user.id);
-    return apps[0] ?? null;
+    const apps = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, (db) =>
+      db.select().from(aeoApplications)
+        .where(eq(aeoApplications.traderId, ctx.user.id))
+        .orderBy(desc(aeoApplications.createdAt))
+        .limit(1)
+    );
+    return (apps as (typeof aeoApplications.$inferSelect)[])[0] ?? null;
   }),
 
   // Submit AEO application
