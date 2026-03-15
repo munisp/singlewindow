@@ -4,6 +4,8 @@ import { adminProcedure, publicProcedure, router, getRateLimitStats } from "./tr
 import { getServiceHealthSummary } from "../grpc-clients";
 import { redisHealthCheck } from "./redis";
 import { getDb } from "../db";
+import { desc, eq, and, gte, lte, like, sql } from "drizzle-orm";
+import { auditEvents } from "../../drizzle/schema";
 
 export const systemRouter = router({
   /**
@@ -72,6 +74,67 @@ export const systemRouter = router({
         redis: redisHealth,
         inMemory,
         checkedAt: Date.now(),
+      };
+    }),
+
+  /**
+   * Paginated audit log query for the admin Audit Log viewer page.
+   * Supports filtering by entityType, actorId, action keyword, and date range.
+   */
+  auditLog: adminProcedure
+    .input(
+      z.object({
+        page:       z.number().int().min(1).default(1),
+        pageSize:   z.number().int().min(1).max(100).default(25),
+        entityType: z.enum(["declaration", "user", "payment", "permit", "document", "aeo_application", "kyc_verification"]).optional(),
+        actorId:    z.number().int().positive().optional(),
+        action:     z.string().max(128).optional(),
+        fromDate:   z.number().optional(), // UTC ms
+        toDate:     z.number().optional(), // UTC ms
+      })
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { rows: [], total: 0, page: input.page, pageSize: input.pageSize };
+
+      const conditions = [];
+      if (input.entityType) conditions.push(eq(auditEvents.entityType, input.entityType));
+      if (input.actorId)    conditions.push(eq(auditEvents.actorId, input.actorId));
+      if (input.action)     conditions.push(like(auditEvents.action, `%${input.action}%`));
+      if (input.fromDate)   conditions.push(gte(auditEvents.createdAt, new Date(input.fromDate)));
+      if (input.toDate)     conditions.push(lte(auditEvents.createdAt, new Date(input.toDate)));
+
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [rows, countResult] = await Promise.all([
+        db
+          .select({
+            id:         auditEvents.id,
+            entityType: auditEvents.entityType,
+            entityId:   auditEvents.entityId,
+            action:     auditEvents.action,
+            actorId:    auditEvents.actorId,
+            actorType:  auditEvents.actorType,
+            ipAddress:  auditEvents.ipAddress,
+            metadata:   auditEvents.metadata,
+            createdAt:  auditEvents.createdAt,
+          })
+          .from(auditEvents)
+          .where(where)
+          .orderBy(desc(auditEvents.createdAt))
+          .limit(input.pageSize)
+          .offset((input.page - 1) * input.pageSize),
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(auditEvents)
+          .where(where),
+      ]);
+
+      return {
+        rows,
+        total: countResult[0]?.count ?? 0,
+        page: input.page,
+        pageSize: input.pageSize,
       };
     }),
 

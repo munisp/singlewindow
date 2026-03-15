@@ -201,6 +201,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Mail, label: "Compliance Email Settings", path: "/app/admin/compliance-email-settings" },
           { icon: Rocket, label: "Go-Live Checklist", path: "/app/admin/go-live-checklist" },
           { icon: Server, label: "Service Health", path: "/app/admin/service-health" },
+          { icon: ClipboardList, label: "Audit Log", path: "/app/admin/audit-log" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },

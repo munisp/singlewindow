@@ -1,15 +1,23 @@
 /**
  * grpc-clients.ts — Node.js gRPC client stubs for calling Go microservices
  *
- * The tRPC API server calls these clients to delegate business logic to the
- * specialized Go services. Each client connects to the corresponding gRPC port:
- *   declaration-service: 9081
- *   payment-service:     9082
- *   oga-service:         9083
- *   profile-service:     9084
+ * All 18 microservices are covered. Each service address is driven by an
+ * environment variable so Kubernetes deployments can override the defaults
+ * without code changes.
  *
- * In development, the Go services may not be running — all clients gracefully
- * fall back to direct DB operations in that case.
+ * Default port allocation (matches services/GRPC_ARCHITECTURE.md):
+ *   declaration-service   9081    payment-service       9082
+ *   oga-service           9083    profile-service       9084
+ *   risk-engine           9085    cargo-tracking        9086
+ *   document-vault        9087    workflow-engine       9088
+ *   notification-service  9089    audit-service         9090
+ *   bonded-warehouse      9091    asean-gateway         9092
+ *   sedona-geo            9093    flink-stream          9094
+ *   kubecost-proxy        9095    wazuh-proxy           9096
+ *   opencti-proxy         9097    keycloak-proxy        8080
+ *
+ * In development the Go services may not be running — all clients and health
+ * checks gracefully fall back (return false / null) rather than throwing.
  */
 
 import * as grpc from "@grpc/grpc-js";
@@ -22,10 +30,24 @@ const PROTO_DIR = path.resolve(__dirname, "../services/proto");
 
 // ─── SERVICE ADDRESSES ────────────────────────────────────────────────────────
 
-const DECLARATION_GRPC = process.env.DECLARATION_GRPC_ADDR || "localhost:9081";
-const PAYMENT_GRPC = process.env.PAYMENT_GRPC_ADDR || "localhost:9082";
-const OGA_GRPC = process.env.OGA_GRPC_ADDR || "localhost:9083";
-const PROFILE_GRPC = process.env.PROFILE_GRPC_ADDR || "localhost:9084";
+const DECLARATION_GRPC        = process.env.DECLARATION_GRPC_ADDR        || "localhost:9081";
+const PAYMENT_GRPC            = process.env.PAYMENT_GRPC_ADDR            || "localhost:9082";
+const OGA_GRPC                = process.env.OGA_GRPC_ADDR                || "localhost:9083";
+const PROFILE_GRPC            = process.env.PROFILE_GRPC_ADDR            || "localhost:9084";
+const RISK_ENGINE_GRPC        = process.env.RISK_ENGINE_GRPC_ADDR        || "localhost:9085";
+const CARGO_TRACKING_GRPC     = process.env.CARGO_TRACKING_GRPC_ADDR     || "localhost:9086";
+const DOCUMENT_VAULT_GRPC     = process.env.DOCUMENT_VAULT_GRPC_ADDR     || "localhost:9087";
+const WORKFLOW_ENGINE_GRPC    = process.env.WORKFLOW_ENGINE_GRPC_ADDR    || "localhost:9088";
+const NOTIFICATION_SVC_GRPC   = process.env.NOTIFICATION_SVC_GRPC_ADDR   || "localhost:9089";
+const AUDIT_SVC_GRPC          = process.env.AUDIT_SVC_GRPC_ADDR          || "localhost:9090";
+const BONDED_WAREHOUSE_GRPC   = process.env.BONDED_WAREHOUSE_GRPC_ADDR   || "localhost:9091";
+const ASEAN_GATEWAY_GRPC      = process.env.ASEAN_GATEWAY_GRPC_ADDR      || "localhost:9092";
+const SEDONA_GEO_GRPC         = process.env.SEDONA_GEO_GRPC_ADDR         || "localhost:9093";
+const FLINK_STREAM_GRPC       = process.env.FLINK_STREAM_GRPC_ADDR       || "localhost:9094";
+const KUBECOST_PROXY_GRPC     = process.env.KUBECOST_PROXY_GRPC_ADDR     || "localhost:9095";
+const WAZUH_PROXY_GRPC        = process.env.WAZUH_PROXY_GRPC_ADDR        || "localhost:9096";
+const OPENCTI_PROXY_GRPC      = process.env.OPENCTI_PROXY_GRPC_ADDR      || "localhost:9097";
+const KEYCLOAK_PROXY_GRPC     = process.env.KEYCLOAK_PROXY_GRPC_ADDR     || "localhost:8080";
 
 // ─── PROTO LOADER ─────────────────────────────────────────────────────────────
 
@@ -48,24 +70,31 @@ function loadProto(protoFile: string): grpc.GrpcObject | null {
 
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 
+/**
+ * Attempts a gRPC channel connectivity probe against `addr`.
+ * Resolves to `true` if the channel reaches READY within 2 seconds,
+ * `false` otherwise (service not running, network unreachable, etc.).
+ */
 export async function checkGRPCHealth(addr: string): Promise<boolean> {
   return new Promise((resolve) => {
+    let settled = false;
+    const settle = (v: boolean) => {
+      if (settled) return;
+      settled = true;
+      try { channel.close(); } catch { /* ignore */ }
+      resolve(v);
+    };
+
     const channel = new grpc.Channel(addr, grpc.credentials.createInsecure(), {});
     const deadline = new Date();
     deadline.setSeconds(deadline.getSeconds() + 2);
     channel.watchConnectivityState(
       grpc.connectivityState.IDLE,
       deadline,
-      (err) => {
-        channel.close();
-        resolve(!err);
-      }
+      (err) => settle(!err),
     );
     channel.getConnectivityState(true);
-    setTimeout(() => {
-      try { channel.close(); } catch { /* ignore */ }
-      resolve(false);
-    }, 2000);
+    setTimeout(() => settle(false), 2000);
   });
 }
 
@@ -162,18 +191,41 @@ export function getOGAGRPCClient(): grpc.Client | null {
 
 // ─── SERVICE HEALTH SUMMARY ───────────────────────────────────────────────────
 
+/**
+ * Probes all 18 Go microservices via gRPC connectivity checks.
+ * Returns a map of service-name → healthy (boolean).
+ * All checks run in parallel; individual failures do not block others.
+ */
 export async function getServiceHealthSummary(): Promise<Record<string, boolean>> {
-  const [decl, pay, oga, prof] = await Promise.allSettled([
-    checkGRPCHealth(DECLARATION_GRPC),
-    checkGRPCHealth(PAYMENT_GRPC),
-    checkGRPCHealth(OGA_GRPC),
-    checkGRPCHealth(PROFILE_GRPC),
-  ]);
+  const checks: Array<[string, string]> = [
+    ["declaration-service",  DECLARATION_GRPC],
+    ["payment-service",      PAYMENT_GRPC],
+    ["oga-service",          OGA_GRPC],
+    ["profile-service",      PROFILE_GRPC],
+    ["risk-engine",          RISK_ENGINE_GRPC],
+    ["cargo-tracking",       CARGO_TRACKING_GRPC],
+    ["document-vault",       DOCUMENT_VAULT_GRPC],
+    ["workflow-engine",      WORKFLOW_ENGINE_GRPC],
+    ["notification-service", NOTIFICATION_SVC_GRPC],
+    ["audit-service",        AUDIT_SVC_GRPC],
+    ["bonded-warehouse",     BONDED_WAREHOUSE_GRPC],
+    ["asean-gateway",        ASEAN_GATEWAY_GRPC],
+    ["sedona-geo",           SEDONA_GEO_GRPC],
+    ["flink-stream",         FLINK_STREAM_GRPC],
+    ["kubecost-proxy",       KUBECOST_PROXY_GRPC],
+    ["wazuh-proxy",          WAZUH_PROXY_GRPC],
+    ["opencti-proxy",        OPENCTI_PROXY_GRPC],
+    ["keycloak-proxy",       KEYCLOAK_PROXY_GRPC],
+  ];
 
-  return {
-    "declaration-service": decl.status === "fulfilled" ? decl.value : false,
-    "payment-service": pay.status === "fulfilled" ? pay.value : false,
-    "oga-service": oga.status === "fulfilled" ? oga.value : false,
-    "profile-service": prof.status === "fulfilled" ? prof.value : false,
-  };
+  const results = await Promise.allSettled(
+    checks.map(([, addr]) => checkGRPCHealth(addr))
+  );
+
+  return Object.fromEntries(
+    checks.map(([name], i) => [
+      name,
+      results[i].status === "fulfilled" ? results[i].value : false,
+    ])
+  );
 }
