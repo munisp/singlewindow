@@ -4,8 +4,11 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
-  logAuditEvent, createNotification, createUserNotification, getProfileByUserId
+  logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
+  withRlsContext
 } from "../db";
+import { declarations } from "../../drizzle/schema";
+import { eq, desc, and } from "drizzle-orm";
 import { clearanceCertificates } from "../../drizzle/schema";
 import { invokeLLM } from "../_core/llm";
 import { assertCan, setOwner } from "../_core/permify";
@@ -228,24 +231,37 @@ export const declarationsRouter = router({
       return updated;
     }),
 
-  // Get trader's own declarations
+  // Get trader's own declarations — RLS-enforced at the database level
   myDeclarations: protectedProcedure
     .input(z.object({ limit: z.number().default(20), offset: z.number().default(0) }))
     .query(async ({ ctx, input }) => {
-      return getDeclarationsByTrader(ctx.user.id, input.limit, input.offset);
+      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
+        db.select().from(declarations)
+          .where(eq(declarations.traderId, ctx.user.id))
+          .orderBy(desc(declarations.createdAt))
+          .limit(input.limit)
+          .offset(input.offset)
+      );
     }),
 
-  // Get a single declaration (trader sees own, officer sees all)
+  // Get a single declaration — officers bypass RLS; traders go through RLS context
   byId: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
-      const decl = await getDeclarationById(input.id);
-      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
       const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
-      if (decl.traderId !== ctx.user.id && !officerRoles.includes(ctx.user.role)) {
-        throw new TRPCError({ code: "FORBIDDEN" });
+      if (officerRoles.includes(ctx.user.role)) {
+        const decl = await getDeclarationById(input.id);
+        if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+        return decl;
       }
-      return decl;
+      // Trader path: withRlsContext enforces row-level security — only own rows returned
+      const results = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
+        db.select().from(declarations)
+          .where(and(eq(declarations.id, input.id), eq(declarations.traderId, ctx.user.id)))
+          .limit(1)
+      );
+      if (!results[0]) throw new TRPCError({ code: "NOT_FOUND" });
+      return results[0];
     }),
 
   // Get all declarations (customs officers / admin / finance / inspector / oga_officer)

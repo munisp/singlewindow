@@ -66,6 +66,17 @@ vi.mock("./db", () => ({
   getNotificationsByUser: vi.fn().mockResolvedValue([]),
   createUserNotification: vi.fn().mockResolvedValue(undefined),
   getDeclarationStatsByTrader: vi.fn().mockResolvedValue({ total: 5, green: 3, yellow: 1, red: 1, cleared: 2, rejected: 0 }),
+  // withRlsContext: in tests, invoke the callback with a stub Drizzle-like db that returns empty arrays
+  withRlsContext: vi.fn().mockImplementation(async (_user: unknown, callback: (db: any) => Promise<unknown>) => {
+    const stubSelect = () => ({
+      from: () => ({
+        where: () => ({ orderBy: () => ({ limit: () => ({ offset: () => Promise.resolve([]) }) }) }),
+        orderBy: () => ({ limit: () => ({ offset: () => Promise.resolve([]) }) }),
+        limit: () => ({ offset: () => Promise.resolve([]) }),
+      }),
+    });
+    return callback({ select: stubSelect });
+  }),
 }));
 
 vi.mock("./_core/llm", () => ({

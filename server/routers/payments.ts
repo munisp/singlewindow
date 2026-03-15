@@ -4,8 +4,10 @@ import { protectedProcedure, router } from "../_core/trpc";
 import {
   createPayment, updatePayment, getPaymentsByDeclaration,
   getDeclarationById, updateDeclaration, logAuditEvent, createNotification,
-  getAllPayments, createUserNotification
+  getAllPayments, createUserNotification, withRlsContext
 } from "../db";
+import { payments } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { assertCan, setOwner } from "../_core/permify";
 
@@ -16,7 +18,8 @@ export const paymentsRouter = router({
       declarationId: z.number(),
       paymentMethod: z.enum(["bank_transfer", "mobile_money", "card", "bond"]),
     }))
-    .mutation(async ({ ctx, input }) => {      const decl = await getDeclarationById(input.declarationId);
+    .mutation(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.declarationId);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
       if (decl.traderId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
       if (!["under_assessment", "payment_pending"].includes(decl.status)) {
@@ -47,7 +50,7 @@ export const paymentsRouter = router({
   confirm: protectedProcedure
     .input(z.object({ paymentId: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const payments = await getPaymentsByDeclaration(0); // We need to look up by id
+      const _payments = await getPaymentsByDeclaration(0); // We need to look up by id
       // Simplified: update payment status to confirmed
       const updated = await updatePayment(input.paymentId, {
         status: "confirmed",
@@ -90,7 +93,7 @@ export const paymentsRouter = router({
       return updated;
     }),
 
-  // List all payments (admin)
+  // List all payments (admin / finance)
   listAll: protectedProcedure
     .input(z.object({ limit: z.number().default(50), offset: z.number().default(0) }))
     .query(async ({ ctx, input }) => {
@@ -101,15 +104,23 @@ export const paymentsRouter = router({
       return { transactions: txs, total: txs.length };
     }),
 
-  // Get payments for a declaration
+  // Get payments for a declaration — RLS-enforced for traders, direct query for admin/finance
   byDeclaration: protectedProcedure
     .input(z.object({ declarationId: z.number() }))
     .query(async ({ ctx, input }) => {
-      const decl = await getDeclarationById(input.declarationId);
-      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
-      if (decl.traderId !== ctx.user.id && ctx.user.role !== "admin") {
-        throw new TRPCError({ code: "FORBIDDEN" });
+      const adminRoles = ["admin", "finance"];
+      if (adminRoles.includes(ctx.user.role)) {
+        return getPaymentsByDeclaration(input.declarationId);
       }
-      return getPaymentsByDeclaration(input.declarationId);
+      // Trader path: verify declaration exists and belongs to this trader first
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl || decl.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+      }
+      // withRlsContext enforces row-level security at the DB layer as a second line of defence
+      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
+        db.select().from(payments)
+          .where(eq(payments.declarationId, input.declarationId))
+      );
     }),
 });

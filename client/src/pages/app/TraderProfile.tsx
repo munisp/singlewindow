@@ -1,12 +1,16 @@
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Building2, Pencil, Save, X, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
+import {
+  Building2, Pencil, Save, X, CheckCircle2, Clock, AlertTriangle,
+  ShieldCheck, ShieldAlert, Fingerprint, ExternalLink, Loader2
+} from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
@@ -16,6 +20,110 @@ const STATUS_BADGE: Record<string, { label: string; className: string; icon: Rea
   rejected: { label: "Rejected", className: "bg-red-100 text-red-700 border-red-200", icon: <AlertTriangle className="h-3 w-3" /> },
   suspended: { label: "Suspended", className: "bg-slate-100 text-slate-700 border-slate-200", icon: <AlertTriangle className="h-3 w-3" /> },
 };
+
+// ─── NIN Verification Card ────────────────────────────────────────────────────
+function NinVerificationCard() {
+  const { data: ninStatus, isLoading: ninLoading, refetch: refetchNin } = trpc.nigeriaId.getVerificationStatus.useQuery();
+  const initiateMutation = trpc.nigeriaId.initiateAuth.useMutation({
+    onSuccess: (data) => {
+      window.location.href = data.authUrl;
+    },
+    onError: (err) => toast.error("Failed to start NIN verification", { description: err.message }),
+  });
+
+  const handleVerify = () => {
+    initiateMutation.mutate({
+      returnPath: "/app/trader/profile",
+      origin: window.location.origin,
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Fingerprint className="h-4 w-4 text-primary" />
+          National Identity Verification (NIN)
+        </CardTitle>
+        <CardDescription>
+          Verify your identity using your National Identification Number via the NIMC portal to unlock full platform access.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {ninLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-4 w-64" />
+          </div>
+        ) : ninStatus?.verified ? (
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+              <ShieldCheck className="h-5 w-5 text-emerald-600" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-semibold text-emerald-700">NIN Verified</span>
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
+                  NIMC Confirmed
+                </Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Your National Identification Number has been verified and linked to this account.
+              </p>
+              {ninStatus.verifiedAt && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Verified on {new Date(ninStatus.verifiedAt).toLocaleDateString("en-GB", {
+                    day: "numeric", month: "long", year: "numeric"
+                  })}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+              <ShieldAlert className="h-5 w-5 text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-semibold text-amber-700">Identity Not Verified</span>
+                {ninStatus?.status && ninStatus.status !== "not_started" && ninStatus.status !== "unknown" && (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs capitalize">
+                    {String(ninStatus.status).replace(/_/g, " ")}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground mb-4">
+                Verify your NIN to unlock full platform access, including AEO applications and higher declaration limits.
+                You will be redirected to the NIMC portal to complete verification.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button
+                  onClick={handleVerify}
+                  disabled={initiateMutation.isPending}
+                  className="gap-2"
+                >
+                  {initiateMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ExternalLink className="h-4 w-4" />
+                  )}
+                  {initiateMutation.isPending ? "Redirecting to NIMC…" : "Verify with NIMC"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => refetchNin()} className="text-xs">
+                  Refresh Status
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                You will be redirected to the official NIMC portal. Your NIN is never stored in plain text.
+              </p>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function TraderProfile() {
   const { data, isLoading, refetch } = trpc.profiles.me.useQuery();
@@ -183,6 +291,8 @@ export default function TraderProfile() {
             )}
           </CardContent>
         </Card>
+        {/* NIN Identity Verification Card */}
+        <NinVerificationCard />
       </div>
     </DashboardLayout>
   );
