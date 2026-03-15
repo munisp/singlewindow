@@ -115,9 +115,12 @@ export const systemRouter = router({
             action:     auditEvents.action,
             actorId:    auditEvents.actorId,
             actorType:  auditEvents.actorType,
-            ipAddress:  auditEvents.ipAddress,
-            metadata:   auditEvents.metadata,
-            createdAt:  auditEvents.createdAt,
+            ipAddress:     auditEvents.ipAddress,
+            userAgent:     auditEvents.userAgent,
+            previousState: auditEvents.previousState,
+            newState:      auditEvents.newState,
+            metadata:      auditEvents.metadata,
+            createdAt:     auditEvents.createdAt,
           })
           .from(auditEvents)
           .where(where)
