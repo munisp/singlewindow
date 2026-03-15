@@ -8,18 +8,151 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import {
+  Activity,
   Building2,
   CheckCircle,
   Database,
   RefreshCw,
   Search,
+  Server,
   Shield,
   ShieldCheck,
   Users,
   XCircle,
+  Zap,
 } from "lucide-react";
+import { Link } from "wouter";
 import { useState } from "react";
 import { toast } from "sonner";
+
+function RateLimitStatsCard() {
+  const { data, isLoading, refetch, isRefetching } = trpc.system.rateLimitStats.useQuery(undefined, {
+    refetchInterval: 30_000,
+  });
+
+  const isRedis = data?.backend === "redis";
+  const redisOk = data?.redis?.ok ?? false;
+  const latencyMs = data?.redis?.latencyMs;
+  const inMemoryActive = data?.inMemory?.active ?? 0;
+  const inMemoryExpired = data?.inMemory?.expired ?? 0;
+  const inMemoryTotal = data?.inMemory?.total ?? 0;
+  const checkedAt = data?.checkedAt ? new Date(data.checkedAt) : null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Zap className="h-4 w-4 text-amber-500" />
+            Rate Limiter Status
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            {checkedAt && (
+              <span className="text-xs text-muted-foreground">
+                Updated {checkedAt.toLocaleTimeString()}
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isLoading || isRefetching}
+              className="h-7 w-7 p-0"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-3/4" />
+          </div>
+        ) : (
+          <>
+            {/* Backend indicator */}
+            <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+              <Server className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">
+                  Backend:{" "}
+                  <span className={isRedis ? "text-green-500" : "text-amber-500"}>
+                    {isRedis ? "Redis (production)" : "In-memory (fallback)"}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {isRedis
+                    ? "Distributed rate limiting active across all nodes"
+                    : "Redis unavailable — single-node in-memory fallback active"}
+                </p>
+              </div>
+              <Badge
+                variant="outline"
+                className={isRedis
+                  ? "text-green-500 border-green-500/30 bg-green-500/5"
+                  : "text-amber-500 border-amber-500/30 bg-amber-500/5"}
+              >
+                {isRedis ? "Connected" : "Fallback"}
+              </Badge>
+            </div>
+
+            {/* Redis health */}
+            {isRedis && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg border">
+                  <p className="text-xs text-muted-foreground">Redis Status</p>
+                  <p className="text-sm font-semibold flex items-center gap-1.5 mt-1">
+                    {redisOk ? (
+                      <><CheckCircle className="h-3.5 w-3.5 text-green-500" /> Healthy</>
+                    ) : (
+                      <><XCircle className="h-3.5 w-3.5 text-destructive" /> Offline</>
+                    )}
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg border">
+                  <p className="text-xs text-muted-foreground">Latency</p>
+                  <p className="text-sm font-semibold mt-1">
+                    {latencyMs != null ? `${latencyMs} ms` : "—"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* In-memory stats */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3 rounded-lg border text-center">
+                <p className="text-xs text-muted-foreground">Active Keys</p>
+                <p className="text-lg font-bold text-foreground mt-1">{inMemoryActive}</p>
+              </div>
+              <div className="p-3 rounded-lg border text-center">
+                <p className="text-xs text-muted-foreground">Expired Keys</p>
+                <p className="text-lg font-bold text-muted-foreground mt-1">{inMemoryExpired}</p>
+              </div>
+              <div className="p-3 rounded-lg border text-center">
+                <p className="text-xs text-muted-foreground">Total Store</p>
+                <p className="text-lg font-bold text-foreground mt-1">{inMemoryTotal}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <p className="text-xs text-muted-foreground">
+                <Activity className="h-3 w-3 inline mr-1" />
+                Window: 60 s / 300 req per user
+              </p>
+              <Link href="/app/admin/service-health">
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs">
+                  View full service health →
+                </Button>
+              </Link>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function PortDataCard() {
   const utils = trpc.useUtils();
@@ -386,6 +519,7 @@ export default function AdminConsole() {
           </TabsContent>
           {/* System Settings tab */}
           <TabsContent value="system" className="space-y-4 mt-4">
+            <RateLimitStatsCard />
             <PortDataCard />
           </TabsContent>
         </Tabs>

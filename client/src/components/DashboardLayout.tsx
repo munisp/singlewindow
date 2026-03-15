@@ -75,6 +75,7 @@ import {
   DollarSign,
   Mail,
   Rocket,
+  Server,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -199,6 +200,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: BarChart2, label: "Executive Revenue Dashboard", path: "/app/executive-dashboard" },
           { icon: Mail, label: "Compliance Email Settings", path: "/app/admin/compliance-email-settings" },
           { icon: Rocket, label: "Go-Live Checklist", path: "/app/admin/go-live-checklist" },
+          { icon: Server, label: "Service Health", path: "/app/admin/service-health" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
         ],
       },

@@ -13,6 +13,14 @@ import type { TrpcContext } from "./_core/context";
 
 vi.mock("./db", () => ({
   getDb: vi.fn(),
+  // withRlsContext: pass-through in tests — calls fn with the mock db,
+  // or throws "Database unavailable" if getDb() returns null (matching production behaviour).
+  withRlsContext: vi.fn(async (_user: unknown, fn: (db: unknown) => unknown) => {
+    const { getDb } = await import("./db");
+    const db = await getDb();
+    if (!db) throw new Error("Database unavailable");
+    return fn(db);
+  }),
 }));
 
 vi.mock("./rustfsSvcClient", () => ({
@@ -218,11 +226,10 @@ describe("documentVault router", () => {
   });
 
   describe("list", () => {
-    it("returns empty array when db is unavailable", async () => {
+    it("throws when db is unavailable", async () => {
       vi.mocked(getDb).mockResolvedValue(null as never);
       const caller = appRouter.createCaller(makeCtx());
-      const result = await caller.documentVault.list({ status: "active" });
-      expect(result).toEqual([]);
+      await expect(caller.documentVault.list({ status: "active" })).rejects.toThrow();
     });
 
     it("queries the database with correct parameters", async () => {

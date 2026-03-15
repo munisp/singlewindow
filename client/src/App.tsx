@@ -87,6 +87,7 @@ const ExecutiveDashboard = lazy(() => import('./pages/app/ExecutiveDashboard'));
 const ComplianceEmailSettings = lazy(() => import('./pages/app/ComplianceEmailSettings'));
 // Sprint 80 — Public certificate verification page (no auth required)
 const GoLiveChecklist = lazy(() => import('./pages/app/GoLiveChecklist'));
+const ServiceHealth = lazy(() => import('./pages/app/ServiceHealth'));
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 
 const LazyFallback = () => (
@@ -382,6 +383,9 @@ function Router() {
       </Route>
       <Route path="/app/admin/go-live-checklist">
         <Suspense fallback={<LazyFallback />}><GoLiveChecklist /></Suspense>
+      </Route>
+      <Route path="/app/admin/service-health">
+        <Suspense fallback={<LazyFallback />}><ServiceHealth /></Suspense>
       </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />

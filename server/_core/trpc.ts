@@ -49,6 +49,21 @@ export const adminProcedure = t.procedure.use(
 
 // In-memory fallback store for when Redis is unavailable
 const _rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * Returns a snapshot of the in-memory rate limit store for admin monitoring.
+ * In production with Redis, the authoritative counters are in Redis;
+ * this reflects only the local in-memory fallback.
+ */
+export function getRateLimitStats() {
+  const now = Date.now();
+  let active = 0; let expired = 0;
+  Array.from(_rateLimitStore.values()).forEach((entry) => {
+    if (now > entry.resetAt) { expired++; } else { active++; }
+  });
+  return { active, expired, total: _rateLimitStore.size };
+}
+
 function _inMemoryRateLimit(key: string, windowMs: number, max: number): boolean {
   const now = Date.now();
   const e = _rateLimitStore.get(key);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
-import { adminProcedure, publicProcedure, router } from "./trpc";
+import { adminProcedure, publicProcedure, router, getRateLimitStats } from "./trpc";
 import { getServiceHealthSummary } from "../grpc-clients";
 import { redisHealthCheck } from "./redis";
 import { getDb } from "../db";
@@ -55,6 +55,22 @@ export const systemRouter = router({
       return {
         services: allServices,
         allHealthy: Object.values(allServices).every(Boolean),
+        checkedAt: Date.now(),
+      };
+    }),
+
+  /**
+   * Rate-limit statistics for the admin overview widget.
+   * Returns in-memory fallback stats (when Redis is unavailable) or Redis key counts.
+   */
+  rateLimitStats: adminProcedure
+    .query(async () => {
+      const inMemory = getRateLimitStats();
+      const redisHealth = await redisHealthCheck();
+      return {
+        backend: redisHealth.ok ? "redis" : "in-memory",
+        redis: redisHealth,
+        inMemory,
         checkedAt: Date.now(),
       };
     }),

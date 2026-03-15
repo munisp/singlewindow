@@ -9,7 +9,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, withRlsContext } from "../db";
 import { documentVault, documentShares } from "../../drizzle/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck, rustfsScan } from "../rustfsSvcClient";
@@ -107,21 +107,18 @@ export const documentVaultRouter = router({
       limit: z.number().int().min(1).max(100).default(50),
       offset: z.number().int().min(0).default(0),
     }))
-    .query(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) return [];
-
-      const conditions = [eq(documentVault.ownerId, ctx.user.id)];
-      if (input.status) conditions.push(eq(documentVault.status, input.status));
-      if (input.category) conditions.push(eq(documentVault.category, input.category));
-
-      return db.select().from(documentVault)
-        .where(and(...conditions))
-        .orderBy(desc(documentVault.createdAt))
-        .limit(input.limit)
-        .offset(input.offset);
+      .query(async ({ ctx, input }) => {
+      return withRlsContext(ctx.user, async (db) => {
+        const conditions = [eq(documentVault.ownerId, ctx.user.id)];
+        if (input.status) conditions.push(eq(documentVault.status, input.status));
+        if (input.category) conditions.push(eq(documentVault.category, input.category));
+        return db.select().from(documentVault)
+          .where(and(...conditions))
+          .orderBy(desc(documentVault.createdAt))
+          .limit(input.limit)
+          .offset(input.offset);
+      });
     }),
-
   getById: protectedProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ ctx, input }) => {
