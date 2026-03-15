@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { redisRateLimit } from './redis';
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -44,10 +45,11 @@ export const adminProcedure = t.procedure.use(
   }),
 );
 
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
-// In-memory rate limiter — replace with Redis in production
+// ─── Rate Limiting (Redis-backed sliding window, in-memory fallback) ──────────
+
+// In-memory fallback store for when Redis is unavailable
 const _rateLimitStore = new Map<string, { count: number; resetAt: number }>();
-function _checkRateLimit(key: string, windowMs: number, max: number): boolean {
+function _inMemoryRateLimit(key: string, windowMs: number, max: number): boolean {
   const now = Date.now();
   const e = _rateLimitStore.get(key);
   if (!e || now > e.resetAt) { _rateLimitStore.set(key, { count: 1, resetAt: now + windowMs }); return true; }
@@ -55,13 +57,31 @@ function _checkRateLimit(key: string, windowMs: number, max: number): boolean {
   e.count++; return true;
 }
 
+/**
+ * Checks rate limit using Redis INCR+EXPIRE sliding window.
+ * Falls back to in-memory Map when Redis is unavailable.
+ */
+async function _checkRateLimit(
+  namespace: string,
+  identifier: string,
+  windowMs: number,
+  max: number
+): Promise<boolean> {
+  try {
+    return await redisRateLimit(namespace, identifier, windowMs, max);
+  } catch {
+    return _inMemoryRateLimit(`${namespace}:${identifier}`, windowMs, max);
+  }
+}
+
 export const rateLimitedProcedure = protectedProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
     const ip = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
       ?? (ctx.req.socket as any)?.remoteAddress ?? "unknown";
-    const key = ctx.user ? `std:user:${ctx.user.id}` : `std:ip:${ip}`;
-    if (!_checkRateLimit(key, 60_000, 300)) {
+    const identifier = ctx.user ? `user:${ctx.user.id}` : `ip:${ip}`;
+    const allowed = await _checkRateLimit("std", identifier, 60_000, 300);
+    if (!allowed) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded. Try again in 60 seconds." });
     }
     return next({ ctx });

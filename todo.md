@@ -1927,3 +1927,20 @@
 - [ ] [S90] Write PRODUCTION_RUNBOOK.md with go-live steps
 - [ ] [S90] Verify HSTS preload configuration in helmet
 - [ ] [S90] Final test suite run and production checkpoint
+
+## Sprint 93 — RLS Transaction Wrapper, Redis Rate Limiter, NIN IDP
+### PostgreSQL RLS Transaction Wrapper
+- [ ] [S93] Add withRlsContext() helper in server/db.ts that sets app.current_user_id and app.current_user_role via SET LOCAL
+- [ ] [S93] Export getPool() from server/db.ts for raw client access
+- [ ] [S93] Wire withRlsContext into declarationProcedure, paymentProcedure, ogaPermitProcedure, aeoProcedure, kycProcedure
+
+### Redis-Backed Rate Limiter
+- [ ] [S93] Add Redis client singleton in server/_core/redis.ts
+- [ ] [S93] Replace in-memory _rateLimitStore Map in trpc.ts with Redis INCR + EXPIRE sliding window
+- [ ] [S93] Add Redis health check to /api/health endpoint
+
+### NIN Identity Provider
+- [ ] [S93] Add nigeriaId router in server/routers/nigeriaId.ts with initiateNinAuth, handleNinCallback, verifyNinToken procedures
+- [ ] [S93] Wire nigeriaId router into appRouter in server/routers.ts
+- [ ] [S93] Add NIN verification step to KYC flow in kyc.ts
+- [ ] [S93] Add NIN login button to TraderRegistration page

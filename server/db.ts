@@ -1084,3 +1084,49 @@ export async function upsertKeycloakConfig(data: Partial<typeof import("../drizz
     return result[0];
   }
 }
+
+// ─── RLS CONTEXT HELPERS ──────────────────────────────────────────────────────
+/**
+ * Export the raw pg Pool so callers can acquire a client for SET LOCAL.
+ */
+export function getPool(): Pool | null {
+  return _pool;
+}
+
+/**
+ * withRlsContext — runs a callback inside a PostgreSQL transaction with
+ * app.current_user_id and app.current_user_role set via SET LOCAL so that
+ * all RLS policies on multi-tenant tables are enforced for the duration.
+ *
+ * Usage:
+ *   const result = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+ *     return db.select().from(declarations).where(eq(declarations.traderId, ctx.user.id));
+ *   });
+ */
+export async function withRlsContext<T>(
+  user: { id: number; role: string },
+  callback: (db: NonNullable<Awaited<ReturnType<typeof getDb>>>) => Promise<T>
+): Promise<T> {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const pool = getPool();
+  if (!pool) throw new Error("Database pool unavailable");
+
+  // Acquire a dedicated client so SET LOCAL is scoped to this transaction only
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_user_id', $1, true)", [String(user.id)]);
+    await client.query("SELECT set_config('app.current_user_role', $1, true)", [user.role]);
+    // Create a Drizzle instance bound to this specific client
+    const txDb = drizzle(client as any);
+    const result = await callback(txDb as any);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
