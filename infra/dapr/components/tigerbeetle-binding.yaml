@@ -1,0 +1,13 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: tigerbeetle-binding
+  namespace: tradegateway
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+  - name: url
+    value: "http://tigerbeetle-bridge:8099"
+  - name: method
+    value: "POST"

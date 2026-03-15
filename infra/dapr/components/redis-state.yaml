@@ -1,0 +1,21 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: redis-state
+  namespace: tradegateway
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+  - name: redisHost
+    value: "redis:6379"
+  - name: redisPassword
+    secretKeyRef:
+      name: redis-secret
+      key: password
+  - name: actorStateStore
+    value: "true"
+  - name: keyPrefix
+    value: "dapr"
+  - name: ttlInSeconds
+    value: "3600"

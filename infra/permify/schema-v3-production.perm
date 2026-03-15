@@ -1,0 +1,283 @@
+// =============================================================================
+// TradeGateway™ NGSWTP — Permify ReBAC Authorization Schema v3 (Production)
+// =============================================================================
+// Extends schema.perm (v2) with:
+//   - Freezone and Warehouse entities
+//   - Report and API Key entities
+//   - Notification entity
+//   - Post-Clearance Audit entity
+//   - System Config entity
+//   - Supervisor role across all declaration operations
+//   - OGA Admin role
+//   - AEO Manager role
+// Apply via: permify schema write --schema-file schema-v3-production.perm
+// =============================================================================
+
+entity user {}
+
+entity organization {
+  relation member  @user
+  relation admin   @user
+  relation owner   @user
+
+  permission manage = admin or owner
+  permission view   = member or admin or owner
+  permission manage_members = admin or owner
+}
+
+// ── Declaration ───────────────────────────────────────────────────────────────
+entity declaration {
+  relation owner           @user
+  relation customs_officer @user
+  relation customs_supervisor @user
+  relation oga_officer     @user
+  relation admin           @user
+
+  permission view          = owner or customs_officer or customs_supervisor or oga_officer or admin
+  permission edit          = owner
+  permission submit        = owner
+  permission amend         = owner
+  permission cancel        = owner or customs_supervisor or admin
+  permission withdraw      = owner
+  permission assess        = customs_officer or customs_supervisor or admin
+  permission release       = customs_officer or customs_supervisor or admin
+  permission reject        = customs_officer or customs_supervisor or admin
+  permission override_risk = customs_supervisor or admin
+  permission assign_lane   = customs_officer or customs_supervisor or admin
+  permission add_note      = customs_officer or customs_supervisor or oga_officer or admin
+  permission request_docs  = customs_officer or customs_supervisor or admin
+  permission audit         = admin
+  permission view_timeline = owner or customs_officer or customs_supervisor or oga_officer or admin
+  permission export_pdf    = owner or customs_officer or customs_supervisor or admin
+}
+
+// ── OGA Permit ────────────────────────────────────────────────────────────────
+entity permit {
+  relation oga_officer       @user
+  relation oga_admin         @user
+  relation admin             @user
+  relation declaration_owner @user
+
+  permission view     = oga_officer or oga_admin or admin or declaration_owner
+  permission approve  = oga_officer or oga_admin or admin
+  permission reject   = oga_officer or oga_admin or admin
+  permission revoke   = oga_admin or admin
+  permission escalate = oga_admin or admin
+  permission delegate = oga_admin or admin
+}
+
+// ── Payment ───────────────────────────────────────────────────────────────────
+entity payment {
+  relation owner           @user
+  relation finance_officer @user
+  relation admin           @user
+
+  permission view         = owner or finance_officer or admin
+  permission initiate     = owner
+  permission confirm      = admin
+  permission refund       = finance_officer or admin
+  permission reconcile    = finance_officer or admin
+  permission cancel       = admin
+  permission export       = finance_officer or admin
+}
+
+// ── Trader Profile ────────────────────────────────────────────────────────────
+entity profile {
+  relation owner    @user
+  relation reviewer @user
+  relation admin    @user
+
+  permission view       = owner or reviewer or admin
+  permission edit       = owner
+  permission approve    = reviewer or admin
+  permission suspend    = admin
+  permission kyc_verify = reviewer or admin
+  permission delete     = admin
+}
+
+// ── Security Alert ────────────────────────────────────────────────────────────
+entity security_alert {
+  relation analyst            @user
+  relation compliance_officer @user
+  relation admin              @user
+
+  permission view        = analyst or compliance_officer or admin
+  permission acknowledge = analyst or compliance_officer or admin
+  permission escalate    = analyst or compliance_officer or admin
+  permission resolve     = compliance_officer or admin
+  permission export      = compliance_officer or admin
+}
+
+// ── AEO Application ───────────────────────────────────────────────────────────
+entity aeo_application {
+  relation applicant  @user
+  relation aeo_manager @user
+  relation auditor    @user
+  relation admin      @user
+
+  permission view    = applicant or aeo_manager or auditor or admin
+  permission submit  = applicant
+  permission review  = aeo_manager or admin
+  permission approve = aeo_manager or admin
+  permission reject  = aeo_manager or admin
+  permission revoke  = aeo_manager or admin
+  permission audit   = auditor or admin
+}
+
+// ── Cargo ─────────────────────────────────────────────────────────────────────
+entity cargo {
+  relation declaration_owner  @user
+  relation port_operator      @user
+  relation inspector          @user
+  relation customs_officer    @user
+  relation admin              @user
+
+  permission view           = declaration_owner or port_operator or inspector or customs_officer or admin
+  permission release        = port_operator or customs_officer or admin
+  permission hold           = inspector or customs_officer or admin
+  permission schedule_berth = port_operator or admin
+  permission track          = declaration_owner or port_operator or inspector or customs_officer or admin
+  permission inspect        = inspector or customs_officer or admin
+}
+
+// ── Post-Clearance Audit ──────────────────────────────────────────────────────
+entity audit_record {
+  relation subject            @user
+  relation auditor            @user
+  relation compliance_officer @user
+  relation admin              @user
+
+  permission view          = auditor or compliance_officer or admin
+  permission view_subject  = subject or auditor or compliance_officer or admin
+  permission create        = admin
+  permission update        = auditor or admin
+  permission close         = auditor or admin
+  permission issue_penalty = auditor or admin
+  permission appeal        = subject
+  permission export        = auditor or compliance_officer or admin
+}
+
+// ── Duty Drawback ─────────────────────────────────────────────────────────────
+entity drawback_claim {
+  relation claimant        @user
+  relation finance_officer @user
+  relation admin           @user
+
+  permission submit         = claimant
+  permission view           = claimant or finance_officer or admin
+  permission approve        = finance_officer or admin
+  permission reject         = finance_officer or admin
+  permission process_refund = finance_officer or admin
+}
+
+// ── Sanctions Entry ───────────────────────────────────────────────────────────
+entity sanctions_entry {
+  relation compliance_officer @user
+  relation admin              @user
+
+  permission screen = compliance_officer or admin
+  permission manage = admin
+  permission view   = compliance_officer or admin
+  permission alert  = compliance_officer or admin
+  permission export = compliance_officer or admin
+}
+
+// ── Document ──────────────────────────────────────────────────────────────────
+entity document {
+  relation owner           @user
+  relation customs_officer @user
+  relation oga_officer     @user
+  relation admin           @user
+
+  permission upload  = owner or admin
+  permission view    = owner or customs_officer or oga_officer or admin
+  permission delete  = owner or admin
+  permission share   = owner or admin
+  permission verify  = customs_officer or admin
+}
+
+// ── Freezone ──────────────────────────────────────────────────────────────────
+entity freezone {
+  relation operator @user
+  relation admin    @user
+
+  permission manage       = admin
+  permission operate      = operator or admin
+  permission view         = operator or admin
+  permission admit_cargo  = operator or admin
+  permission release_cargo = operator or admin
+  permission report       = operator or admin
+}
+
+// ── Warehouse ─────────────────────────────────────────────────────────────────
+entity warehouse {
+  relation operator @user
+  relation admin    @user
+
+  permission manage  = admin
+  permission operate = operator or admin
+  permission view    = operator or admin
+  permission store   = operator or admin
+  permission release = operator or admin
+  permission audit   = admin
+}
+
+// ── Report ────────────────────────────────────────────────────────────────────
+entity report {
+  relation creator @user
+  relation viewer  @user
+  relation admin   @user
+
+  permission create = creator or admin
+  permission view   = creator or viewer or admin
+  permission export = creator or viewer or admin
+  permission delete = creator or admin
+  permission share  = creator or admin
+}
+
+// ── API Key ───────────────────────────────────────────────────────────────────
+entity api_key {
+  relation owner @user
+  relation admin @user
+
+  permission create = owner or admin
+  permission view   = owner or admin
+  permission revoke = owner or admin
+  permission rotate = owner or admin
+}
+
+// ── Notification ──────────────────────────────────────────────────────────────
+entity notification {
+  relation recipient @user
+  relation admin     @user
+
+  permission view    = recipient or admin
+  permission dismiss = recipient or admin
+  permission delete  = admin
+}
+
+// ── Risk Score ────────────────────────────────────────────────────────────────
+entity risk_score {
+  relation analyst            @user
+  relation customs_supervisor @user
+  relation admin              @user
+
+  permission view     = analyst or customs_supervisor or admin
+  permission override = customs_supervisor or admin
+  permission export   = analyst or customs_supervisor or admin
+}
+
+// ── System Configuration ──────────────────────────────────────────────────────
+entity system {
+  relation admin @user
+
+  permission manage_users     = admin
+  permission view_analytics   = admin
+  permission configure        = admin
+  permission audit_all        = admin
+  permission manage_routes    = admin
+  permission manage_topics    = admin
+  permission manage_workflows = admin
+  permission manage_roles     = admin
+  permission manage_api_keys  = admin
+}

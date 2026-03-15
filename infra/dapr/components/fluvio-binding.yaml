@@ -1,0 +1,13 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: fluvio-binding
+  namespace: tradegateway
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+  - name: url
+    value: "http://fluvio:9003"
+  - name: method
+    value: "POST"

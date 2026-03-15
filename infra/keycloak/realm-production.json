@@ -1,0 +1,248 @@
+{
+  "id": "tradegateway",
+  "realm": "tradegateway",
+  "displayName": "TradeGateway™ NGSWTP",
+  "displayNameHtml": "<b>TradeGateway™</b> NGSWTP",
+  "enabled": true,
+  "sslRequired": "all",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "defaultSignatureAlgorithm": "RS256",
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 5184000,
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail and passwordHistory(5)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpSupportedApplications": ["FreeOTP", "Google Authenticator", "Microsoft Authenticator"],
+  "roles": {
+    "realm": [
+      { "name": "trader",             "description": "Registered trader / importer / exporter" },
+      { "name": "customs_officer",    "description": "Customs authority officer" },
+      { "name": "customs_supervisor", "description": "Customs supervisor with override rights" },
+      { "name": "oga_officer",        "description": "Other Government Agency officer" },
+      { "name": "oga_admin",          "description": "OGA administrator" },
+      { "name": "admin",              "description": "System administrator" },
+      { "name": "security_analyst",   "description": "Security operations center analyst" },
+      { "name": "auditor",            "description": "Post-clearance auditor" },
+      { "name": "finance_officer",    "description": "Finance officer managing duties and invoices" },
+      { "name": "port_operator",      "description": "Port operator managing cargo release" },
+      { "name": "compliance_officer", "description": "Compliance officer managing sanctions screening" },
+      { "name": "inspector",          "description": "Physical inspection officer" },
+      { "name": "aeo_manager",        "description": "AEO programme manager" },
+      { "name": "api_consumer",       "description": "Third-party API consumer" },
+      { "name": "readonly",           "description": "Read-only access for reporting" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "tradegateway-web",
+      "name": "TradeGateway Web Portal",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "https://tradegateway.gov.ng/*",
+        "https://www.tradegateway.gov.ng/*"
+      ],
+      "webOrigins": [
+        "https://tradegateway.gov.ng",
+        "https://www.tradegateway.gov.ng"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "900",
+        "backchannel.logout.session.required": "true"
+      }
+    },
+    {
+      "clientId": "tradegateway-api",
+      "name": "TradeGateway API Gateway",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "secret": "${KEYCLOAK_API_CLIENT_SECRET}",
+      "redirectUris": [
+        "https://api.tradegateway.gov.ng/*"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "900",
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "tradegateway-services",
+      "name": "TradeGateway Microservices",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "${KEYCLOAK_SERVICES_CLIENT_SECRET}",
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "tradegateway-internal",
+      "name": "Internal Service-to-Service",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "${KEYCLOAK_INTERNAL_SECRET}",
+      "protocol": "openid-connect"
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "tradegateway-roles",
+      "description": "TradeGateway platform roles included in tokens",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" },
+      "protocolMappers": [
+        {
+          "name": "roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "company-name-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "company_name",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "company_name",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tin-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tin",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tin",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "aeo-status-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "aeo_status",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "aeo_status",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "trader-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "trader_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "trader_id",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "identityProviders": [
+    {
+      "alias": "nigeria-id",
+      "displayName": "Nigeria National Identity (NIN)",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": false,
+      "storeToken": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "clientId": "${NIGERIA_ID_CLIENT_ID}",
+        "clientSecret": "${NIGERIA_ID_CLIENT_SECRET}",
+        "authorizationUrl": "https://id.gov.ng/oauth/authorize",
+        "tokenUrl": "https://id.gov.ng/oauth/token",
+        "userInfoUrl": "https://id.gov.ng/oauth/userinfo",
+        "defaultScopes": "openid profile email",
+        "validateSignature": "true",
+        "useJwksUrl": "true",
+        "jwksUrl": "https://id.gov.ng/.well-known/jwks.json",
+        "syncMode": "IMPORT"
+      }
+    }
+  ],
+  "smtpServer": {
+    "host": "smtp.sendgrid.net",
+    "port": "587",
+    "from": "noreply@tradegateway.gov.ng",
+    "fromDisplayName": "TradeGateway™ NGSWTP",
+    "replyTo": "support@tradegateway.gov.ng",
+    "starttls": "true",
+    "auth": "true",
+    "user": "apikey",
+    "password": "${SENDGRID_API_KEY}"
+  },
+  "browserSecurityHeaders": {
+    "xContentTypeOptions": "nosniff",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains; preload"
+  },
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en", "fr", "ar", "ha", "yo", "ig"],
+  "defaultLocale": "en",
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "enabledEventTypes": [
+    "LOGIN", "LOGIN_ERROR", "LOGOUT", "LOGOUT_ERROR",
+    "REGISTER", "REGISTER_ERROR",
+    "UPDATE_PASSWORD", "UPDATE_PASSWORD_ERROR",
+    "UPDATE_PROFILE", "UPDATE_TOTP", "REMOVE_TOTP",
+    "SEND_VERIFY_EMAIL", "VERIFY_EMAIL", "VERIFY_EMAIL_ERROR",
+    "SEND_RESET_PASSWORD", "RESET_PASSWORD", "RESET_PASSWORD_ERROR",
+    "CLIENT_LOGIN", "CLIENT_LOGIN_ERROR",
+    "IMPERSONATE", "IMPERSONATE_ERROR"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true
+}

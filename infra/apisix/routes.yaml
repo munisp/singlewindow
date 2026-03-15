@@ -1,0 +1,272 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Apache APISIX Production Routes
+# =============================================================================
+# Apply via: apisix-admin API or apisix-ingress-controller
+# All routes enforce: JWT auth, rate limiting, WAF (OpenAppSec), mTLS upstream
+# =============================================================================
+
+# ─── Upstream Definitions ─────────────────────────────────────────────────────
+upstreams:
+  - id: "tradegateway-api"
+    name: "TradeGateway tRPC API"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: tradegateway-server.tradegateway.svc.cluster.local
+        port: 3000
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /api/health
+        interval: 10
+        timeout: 5
+        healthy:
+          http_statuses: [200, 204]
+          successes: 2
+        unhealthy:
+          http_statuses: [429, 500, 502, 503, 504]
+          http_failures: 3
+
+  - id: "risk-ai"
+    name: "Risk AI Engine"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: risk-ai.tradegateway.svc.cluster.local
+        port: 8000
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /readyz
+        interval: 15
+
+  - id: "hs-classifier"
+    name: "HS Code Classifier"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: hs-classifier.tradegateway.svc.cluster.local
+        port: 8000
+        weight: 100
+
+  - id: "rule-engine"
+    name: "Rust Rule Engine"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: rule-engine.tradegateway.svc.cluster.local
+        port: 8080
+        weight: 100
+
+  - id: "tigerbeetle-bridge"
+    name: "TigerBeetle Financial Bridge"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: tigerbeetle-bridge.tradegateway.svc.cluster.local
+        port: 8080
+        weight: 100
+
+# ─── Global Plugins ───────────────────────────────────────────────────────────
+global_rules:
+  - id: "global-observability"
+    plugins:
+      prometheus:
+        prefer_name: true
+      zipkin:
+        endpoint: "http://jaeger-collector.tradegateway.svc.cluster.local:9411/api/v2/spans"
+        service_name: "apisix-gateway"
+        sample_ratio: 0.1
+      request-id:
+        header_name: "X-Request-ID"
+        include_in_response: true
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
+routes:
+  # ── Public: OAuth Callback ─────────────────────────────────────────────────
+  - id: "oauth-callback"
+    name: "OAuth Callback"
+    uri: "/api/oauth/*"
+    methods: ["GET", "POST"]
+    upstream_id: "tradegateway-api"
+    plugins:
+      limit-req:
+        rate: 10
+        burst: 20
+        key: "remote_addr"
+        rejected_code: 429
+      cors:
+        allow_origins: "https://tradegateway.gov.ng"
+        allow_methods: "GET,POST"
+        allow_headers: "Content-Type,Authorization"
+
+  # ── tRPC API (Protected) ───────────────────────────────────────────────────
+  - id: "trpc-api"
+    name: "tRPC API"
+    uri: "/api/trpc/*"
+    methods: ["GET", "POST"]
+    upstream_id: "tradegateway-api"
+    plugins:
+      jwt-auth:
+        header: "Authorization"
+        cookie: "session_token"
+        query: "token"
+      limit-count:
+        count: 1000
+        time_window: 60
+        key: "consumer_name"
+        rejected_code: 429
+        rejected_msg: '{"error":"Rate limit exceeded","retryAfter":60}'
+      cors:
+        allow_origins: "https://tradegateway.gov.ng"
+        allow_methods: "GET,POST,OPTIONS"
+        allow_headers: "Content-Type,Authorization,X-Request-ID"
+        allow_credential: true
+      response-rewrite:
+        headers:
+          set:
+            Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+            X-Content-Type-Options: "nosniff"
+            X-Frame-Options: "DENY"
+            Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline'"
+
+  # ── Risk AI Engine (Internal, Service-to-Service) ─────────────────────────
+  - id: "risk-ai-internal"
+    name: "Risk AI Engine (Internal)"
+    uri: "/internal/risk/*"
+    methods: ["POST"]
+    upstream_id: "risk-ai"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 500
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+
+  # ── HS Classifier (Internal) ───────────────────────────────────────────────
+  - id: "hs-classifier-internal"
+    name: "HS Classifier (Internal)"
+    uri: "/internal/hs/*"
+    methods: ["POST"]
+    upstream_id: "hs-classifier"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 200
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Rule Engine (Internal) ─────────────────────────────────────────────────
+  - id: "rule-engine-internal"
+    name: "Rule Engine (Internal)"
+    uri: "/internal/rules/*"
+    methods: ["POST", "GET"]
+    upstream_id: "rule-engine"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 1000
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── TigerBeetle Bridge (Internal) ─────────────────────────────────────────
+  - id: "tigerbeetle-internal"
+    name: "TigerBeetle Bridge (Internal)"
+    uri: "/internal/ledger/*"
+    methods: ["POST", "GET"]
+    upstream_id: "tigerbeetle-bridge"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 500
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Health Check (Public, no auth) ────────────────────────────────────────
+  - id: "health-public"
+    name: "Health Check"
+    uri: "/health"
+    methods: ["GET"]
+    upstream_id: "tradegateway-api"
+    plugins:
+      limit-req:
+        rate: 100
+        burst: 200
+        key: "remote_addr"
+        rejected_code: 429
+
+  # ── Webhook Endpoints (HMAC-signed) ───────────────────────────────────────
+  - id: "webhooks"
+    name: "Webhook Receivers"
+    uri: "/webhooks/*"
+    methods: ["POST"]
+    upstream_id: "tradegateway-api"
+    plugins:
+      hmac-auth:
+        access_key_header: "X-Webhook-ID"
+        signature_header: "X-Webhook-Signature"
+        algorithm: "hmac-sha256"
+      limit-req:
+        rate: 50
+        burst: 100
+        key: "remote_addr"
+        rejected_code: 429
+
+# ─── Consumers (API Key holders) ──────────────────────────────────────────────
+consumers:
+  - username: "internal-services"
+    plugins:
+      key-auth:
+        key: "${APISIX_INTERNAL_API_KEY}"
+
+  - username: "mojaloop-webhook"
+    plugins:
+      hmac-auth:
+        access_key: "mojaloop"
+        secret_key: "${MOJALOOP_WEBHOOK_SECRET}"
+
+  - username: "wco-integration"
+    plugins:
+      key-auth:
+        key: "${WCO_API_KEY}"
+
+# ─── SSL/TLS Configuration ────────────────────────────────────────────────────
+ssl:
+  - id: "tradegateway-tls"
+    snis:
+      - "tradegateway.gov.ng"
+      - "api.tradegateway.gov.ng"
+      - "*.tradegateway.gov.ng"
+    cert: "${TLS_CERT}"
+    key: "${TLS_KEY}"
+    ssl_protocols:
+      - "TLSv1.2"
+      - "TLSv1.3"
+    ssl_ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"

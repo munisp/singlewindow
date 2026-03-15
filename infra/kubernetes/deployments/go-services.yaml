@@ -1,0 +1,365 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — Kubernetes Deployments: Go Microservices
+# =============================================================================
+# Applies to: audit-service, cen-service, asean-sw-service, freezone-service,
+#             warehouse-service, opencti-svc, wazuh-svc, kubecost-svc,
+#             profile-service, keycloak-svc, tigerbeetle-bridge, rustfs-svc
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  namespace: tradegateway
+  labels:
+    app: audit-service
+    tier: backend
+    language: go
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: audit-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: audit-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "audit-service"
+        dapr.io/app-port: "8080"
+        dapr.io/log-level: "info"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: audit-service
+          image: tradegateway/audit-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: HTTP_PORT
+              value: "8080"
+            - name: METRICS_PORT
+              value: "9090"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: SERVICE_NAME
+              value: "audit-service"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: keycloak-url
+            - name: PERMIFY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: permify-url
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["audit-service"]
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+  namespace: tradegateway
+spec:
+  selector:
+    app: audit-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: audit-service-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: audit-service
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: audit-service-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: audit-service
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# ─── CEN Service ──────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cen-service
+  namespace: tradegateway
+  labels:
+    app: cen-service
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cen-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: cen-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "cen-service"
+        dapr.io/app-port: "8080"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: cen-service
+          image: tradegateway/cen-service:latest
+          ports:
+            - containerPort: 8080
+            - containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: tradegateway-config
+            - secretRef:
+                name: tradegateway-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "cen-service"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cen-service
+  namespace: tradegateway
+spec:
+  selector:
+    app: cen-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+# ─── ASEAN Single Window Service ──────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asean-sw-service
+  namespace: tradegateway
+  labels:
+    app: asean-sw-service
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: asean-sw-service
+  template:
+    metadata:
+      labels:
+        app: asean-sw-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "asean-sw-service"
+        dapr.io/app-port: "8080"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: asean-sw-service
+          image: tradegateway/asean-sw-service:latest
+          ports:
+            - containerPort: 8080
+            - containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: tradegateway-config
+            - secretRef:
+                name: tradegateway-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "asean-sw-service"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: asean-sw-service
+  namespace: tradegateway
+spec:
+  selector:
+    app: asean-sw-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

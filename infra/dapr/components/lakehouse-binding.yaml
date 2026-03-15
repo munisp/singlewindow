@@ -1,0 +1,13 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: lakehouse-binding
+  namespace: tradegateway
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+  - name: url
+    value: "http://lakehouse-ingest:8097"
+  - name: method
+    value: "POST"

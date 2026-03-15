@@ -1,0 +1,591 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — Kubernetes Deployments: Python AI + Rust Services
+# =============================================================================
+
+# ─── Risk AI Engine (Python) ──────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-ai
+  namespace: tradegateway
+  labels:
+    app: risk-ai
+    tier: ai
+    language: python
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: risk-ai
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: risk-ai
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "risk-ai"
+        dapr.io/app-port: "8000"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: model-downloader
+          image: tradegateway/model-downloader:latest
+          command: ["python", "-m", "model_downloader", "--service", "risk-ai"]
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+          envFrom:
+            - secretRef:
+                name: tradegateway-secrets
+      containers:
+        - name: risk-ai
+          image: tradegateway/risk-ai:latest
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: SERVICE_NAME
+              value: "risk-ai"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: MODEL_PATH
+              value: "/models/risk-ai"
+            - name: WORKERS
+              value: "4"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: keycloak-url
+            - name: FLUVIO_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: fluvio-endpoint
+            - name: TEMPORAL_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: temporal-host
+            - name: LAKEHOUSE_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: lakehouse-endpoint
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            failureThreshold: 60
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["risk-ai"]
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-ai
+  namespace: tradegateway
+spec:
+  selector:
+    app: risk-ai
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-ai-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-ai
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+---
+# ─── HS Classifier (Python) ───────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hs-classifier
+  namespace: tradegateway
+  labels:
+    app: hs-classifier
+    tier: ai
+    language: python
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hs-classifier
+  template:
+    metadata:
+      labels:
+        app: hs-classifier
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "hs-classifier"
+        dapr.io/app-port: "8000"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: hs-classifier
+          image: tradegateway/hs-classifier:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: tradegateway-config
+            - secretRef:
+                name: tradegateway-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "hs-classifier"
+            - name: MODEL_PATH
+              value: "/models/hs-classifier"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "2000m"
+              memory: "8Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            failureThreshold: 120
+            periodSeconds: 5
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hs-classifier
+  namespace: tradegateway
+spec:
+  selector:
+    app: hs-classifier
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+# ─── Rust Rule Engine ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rule-engine
+  namespace: tradegateway
+  labels:
+    app: rule-engine
+    tier: backend
+    language: rust
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: rule-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: rule-engine
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "rule-engine"
+        dapr.io/app-port: "8080"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: rule-engine
+          image: tradegateway/rule-engine:latest
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: tradegateway-config
+            - secretRef:
+                name: tradegateway-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "rule-engine"
+            - name: RUST_LOG
+              value: "info"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rule-engine
+  namespace: tradegateway
+spec:
+  selector:
+    app: rule-engine
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rule-engine-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: rule-engine
+---
+# ─── TigerBeetle Bridge (Rust) ────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tigerbeetle-bridge
+  namespace: tradegateway
+  labels:
+    app: tigerbeetle-bridge
+    tier: backend
+    language: rust
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tigerbeetle-bridge
+  template:
+    metadata:
+      labels:
+        app: tigerbeetle-bridge
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "tigerbeetle-bridge"
+        dapr.io/app-port: "8080"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: tigerbeetle-bridge
+          image: tradegateway/tigerbeetle-bridge:latest
+          ports:
+            - containerPort: 8080
+            - containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: tradegateway-config
+            - secretRef:
+                name: tradegateway-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "tigerbeetle-bridge"
+            - name: RUST_LOG
+              value: "info"
+            - name: TIGERBEETLE_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: tigerbeetle-address
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle-bridge
+  namespace: tradegateway
+spec:
+  selector:
+    app: tigerbeetle-bridge
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+# ─── Vision Preprocessor (Rust) ───────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vision-preprocessor
+  namespace: tradegateway
+  labels:
+    app: vision-preprocessor
+    tier: backend
+    language: rust
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vision-preprocessor
+  template:
+    metadata:
+      labels:
+        app: vision-preprocessor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "vision-preprocessor"
+        dapr.io/app-port: "8080"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: vision-preprocessor
+          image: tradegateway/vision-preprocessor:latest
+          ports:
+            - containerPort: 8080
+            - containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: tradegateway-config
+            - secretRef:
+                name: tradegateway-secrets
+          env:
+            - name: SERVICE_NAME
+              value: "vision-preprocessor"
+            - name: RUST_LOG
+              value: "info"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vision-preprocessor
+  namespace: tradegateway
+spec:
+  selector:
+    app: vision-preprocessor
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+# ─── Persistent Volume Claim for ML Models ────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: tradegateway
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: nfs-client
+  resources:
+    requests:
+      storage: 50Gi

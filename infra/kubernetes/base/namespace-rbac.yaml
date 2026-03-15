@@ -1,0 +1,255 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — Kubernetes Base: Namespace, RBAC, ConfigMap, Secrets
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tradegateway
+  labels:
+    app.kubernetes.io/name: tradegateway
+    app.kubernetes.io/managed-by: helm
+    istio-injection: enabled
+---
+# ─── Service Account ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tradegateway-sa
+  namespace: tradegateway
+  annotations:
+    # AWS EKS IRSA — bind to IAM role for S3 access
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/tradegateway-role"
+---
+# ─── RBAC ─────────────────────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tradegateway-role
+  namespace: tradegateway
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tradegateway-rolebinding
+  namespace: tradegateway
+subjects:
+  - kind: ServiceAccount
+    name: tradegateway-sa
+    namespace: tradegateway
+roleRef:
+  kind: Role
+  name: tradegateway-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ─── ConfigMap ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradegateway-config
+  namespace: tradegateway
+data:
+  # Kafka
+  kafka-brokers: "kafka-0.kafka-headless.tradegateway.svc.cluster.local:9092,kafka-1.kafka-headless.tradegateway.svc.cluster.local:9092,kafka-2.kafka-headless.tradegateway.svc.cluster.local:9092"
+  kafka-consumer-group: "tradegateway-consumers"
+  kafka-schema-registry: "http://schema-registry.tradegateway.svc.cluster.local:8081"
+
+  # Fluvio
+  fluvio-endpoint: "fluvio-sc.tradegateway.svc.cluster.local:9003"
+
+  # Temporal
+  temporal-host: "temporal-frontend.tradegateway.svc.cluster.local:7233"
+  temporal-namespace: "tradegateway-production"
+
+  # Keycloak
+  keycloak-url: "http://keycloak.tradegateway.svc.cluster.local:8080"
+  keycloak-realm: "tradegateway"
+  keycloak-client-id: "tradegateway-api"
+
+  # Permify
+  permify-url: "http://permify.tradegateway.svc.cluster.local:3476"
+
+  # APISIX
+  apisix-admin-url: "http://apisix-admin.tradegateway.svc.cluster.local:9180"
+  apisix-gateway-url: "http://apisix-gateway.tradegateway.svc.cluster.local:9080"
+
+  # TigerBeetle
+  tigerbeetle-address: "tigerbeetle.tradegateway.svc.cluster.local:3000"
+
+  # Lakehouse
+  lakehouse-endpoint: "http://lakehouse.tradegateway.svc.cluster.local:8080"
+  delta-lake-path: "s3://tradegateway-lakehouse/delta"
+  spark-master: "spark://spark-master.tradegateway.svc.cluster.local:7077"
+
+  # OpenSearch
+  opensearch-url: "http://opensearch.tradegateway.svc.cluster.local:9200"
+
+  # Dapr
+  dapr-pubsub-component: "kafka-pubsub"
+  dapr-state-component: "redis-state"
+
+  # Application
+  environment: "production"
+  log-level: "info"
+  cors-origins: "https://tradegateway.gov.ng,https://api.tradegateway.gov.ng"
+---
+# ─── Secret Template (values injected by external-secrets or Vault) ───────────
+# In production, use External Secrets Operator or Vault Agent Injector.
+# This template shows the expected keys; actual values come from the secret store.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tradegateway-secrets
+  namespace: tradegateway
+  annotations:
+    # If using External Secrets Operator:
+    # external-secrets.io/backend: vault
+    # external-secrets.io/path: secret/tradegateway/production
+type: Opaque
+stringData:
+  # PostgreSQL
+  database-url: "postgresql://app_user:CHANGE_ME@postgres-primary.tradegateway.svc.cluster.local:5432/tradegateway?sslmode=require"
+  database-url-readonly: "postgresql://readonly_user:CHANGE_ME@postgres-replica.tradegateway.svc.cluster.local:5432/tradegateway?sslmode=require"
+
+  # Redis
+  redis-url: "rediss://default:CHANGE_ME@redis-master.tradegateway.svc.cluster.local:6379"
+
+  # Kafka SASL
+  kafka-sasl-username: "CHANGE_ME"
+  kafka-sasl-password: "CHANGE_ME"
+
+  # Keycloak
+  keycloak-admin-password: "CHANGE_ME"
+  keycloak-client-secret: "CHANGE_ME"
+
+  # JWT
+  jwt-secret: "CHANGE_ME_256_BIT_RANDOM_KEY"
+
+  # Permify
+  permify-api-key: "CHANGE_ME"
+
+  # APISIX
+  apisix-admin-key: "CHANGE_ME"
+
+  # SendGrid
+  sendgrid-api-key: "CHANGE_ME"
+
+  # Mojaloop
+  mojaloop-hub-url: "https://mojaloop-hub.tradegateway.gov.ng"
+  mojaloop-client-cert: "CHANGE_ME"
+  mojaloop-client-key: "CHANGE_ME"
+
+  # WCO
+  wco-api-key: "CHANGE_ME"
+
+  # OpenCTI
+  opencti-token: "CHANGE_ME"
+
+  # Wazuh
+  wazuh-api-user: "CHANGE_ME"
+  wazuh-api-password: "CHANGE_ME"
+---
+# ─── Network Policy ───────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: tradegateway
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: tradegateway
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tradegateway
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tradegateway
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow external HTTPS (for Keycloak, Mojaloop, WCO APIs)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# ─── Resource Quotas ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tradegateway-quota
+  namespace: tradegateway
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+    limits.cpu: "100"
+    limits.memory: "200Gi"
+    pods: "200"
+    services: "50"
+    persistentvolumeclaims: "30"
+---
+# ─── Limit Range ──────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tradegateway-limits
+  namespace: tradegateway
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "4"
+        memory: "16Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    - type: Pod
+      max:
+        cpu: "8"
+        memory: "32Gi"
