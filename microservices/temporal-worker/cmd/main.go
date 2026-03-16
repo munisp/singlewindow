@@ -2,7 +2,7 @@
 // Registers and runs all Temporal workflow and activity workers.
 // Workflows: CustomsClearance, PaymentProcessing, OGAApproval, RiskAssessment,
 //            CargoRelease, AEOApplication, DutyDrawback, PostClearanceAudit,
-//            ASEANSingleWindow, SanctionsScreening
+//            ASEANSingleWindow, SanctionsScreening, ConfirmPayment
 package main
 
 import (
@@ -53,6 +53,7 @@ func main() {
 	w.RegisterWorkflow(workflows.PostClearanceAuditWorkflow)
 	w.RegisterWorkflow(workflows.ASEANSingleWindowWorkflow)
 	w.RegisterWorkflow(workflows.SanctionsScreeningWorkflow)
+	w.RegisterWorkflow(workflows.ConfirmPaymentWorkflow)
 
 	// ── Register activities ───────────────────────────────────────────────────
 	acts := activities.New(getEnv("DATABASE_URL",

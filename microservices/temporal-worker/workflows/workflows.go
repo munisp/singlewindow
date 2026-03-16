@@ -474,3 +474,45 @@ func SanctionsScreeningWorkflow(ctx workflow.Context, input DeclarationInput) (*
 	err := workflow.ExecuteActivity(ctx, (*activities.Activities).ScreenSanctions, input.DeclarationId, input.TraderId).Get(ctx, &result)
 	return &result, err
 }
+
+// ── Workflow 11: Confirm Payment (Mojaloop fulfilment → TigerBeetle post) ─────
+// Called by the Mojaloop gateway after transfer fulfilment.
+// Retries the ConfirmPayment activity with exponential backoff so that
+// transient TigerBeetle / Postgres failures do not lose the payment event.
+func ConfirmPaymentWorkflow(ctx workflow.Context, input activities.ConfirmPaymentInput) (*activities.ConfirmPaymentResult, error) {
+	logger := workflow.GetLogger(ctx)
+	logger.Info("ConfirmPaymentWorkflow started",
+		"invoiceId", input.InvoiceID,
+		"mojaloopTxId", input.MojaloopTxID,
+	)
+
+	// Dedicated activity options: 5 attempts, 2s initial, 2× backoff, 5 min max.
+	// Non-retryable errors (4xx) are propagated immediately without further retries.
+	ao := workflow.ActivityOptions{
+		StartToCloseTimeout: 30 * time.Second,
+		HeartbeatTimeout:    10 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:        2 * time.Second,
+			BackoffCoefficient:     2.0,
+			MaximumInterval:        5 * time.Minute,
+			MaximumAttempts:        5,
+			NonRetryableErrorTypes: []string{"NON_RETRYABLE_PAYMENT_ERROR"},
+		},
+	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
+
+	var result *activities.ConfirmPaymentResult
+	if err := workflow.ExecuteActivity(ctx, (*activities.Activities).ConfirmPayment, input).Get(ctx, &result); err != nil {
+		logger.Error("ConfirmPaymentWorkflow: all retries exhausted",
+			"invoiceId", input.InvoiceID,
+			"error", err,
+		)
+		return nil, err
+	}
+
+	logger.Info("ConfirmPaymentWorkflow completed",
+		"invoiceId", result.InvoiceID,
+		"status", result.Status,
+	)
+	return result, nil
+}

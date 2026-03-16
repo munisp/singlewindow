@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	temporal "go.temporal.io/sdk/temporal"
 )
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -257,6 +258,60 @@ func (a *Activities) CheckPaymentStatus(ctx context.Context, invoiceId int64) (*
 		MojaloopTxID: mojaloopTxID.String,
 		PaidAt:       paidAt.Time,
 	}, nil
+}
+
+// ConfirmPaymentInput holds the parameters for the ConfirmPayment activity.
+type ConfirmPaymentInput struct {
+	InvoiceID    int64  `json:"invoiceId"`
+	MojaloopTxID string `json:"mojaloopTxId"`
+	TBTxID       string `json:"tbTxId"`
+	Method       string `json:"method"`
+}
+
+// ConfirmPaymentResult is returned by the ConfirmPayment activity.
+type ConfirmPaymentResult struct {
+	InvoiceID int64  `json:"invoiceId"`
+	Status    string `json:"status"` // "paid" or "already_confirmed"
+}
+
+// ConfirmPayment calls the payment-service /confirm endpoint.
+// Returns a non-retryable error on 4xx (bad request / not found).
+// Returns a retryable error on 5xx (TigerBeetle unavailable, DB error).
+func (a *Activities) ConfirmPayment(ctx context.Context, input ConfirmPaymentInput) (*ConfirmPaymentResult, error) {
+	payload, _ := json.Marshal(map[string]string{
+		"mojaloopTxId": input.MojaloopTxID,
+		"tbTxId":       input.TBTxID,
+		"method":       input.Method,
+	})
+	url := fmt.Sprintf("%s/api/payments/invoices/%d/confirm", a.paymentSvcURL, input.InvoiceID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("build confirm request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		// Network error — retryable
+		return nil, fmt.Errorf("confirm payment network error: %w", err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		return &ConfirmPaymentResult{InvoiceID: input.InvoiceID, Status: "paid"}, nil
+	case resp.StatusCode == http.StatusConflict:
+		// 409 = already confirmed (idempotent) — treat as success
+		return &ConfirmPaymentResult{InvoiceID: input.InvoiceID, Status: "already_confirmed"}, nil
+	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+		// 4xx = bad request / not found — non-retryable
+		return nil, temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("confirm payment rejected: HTTP %d", resp.StatusCode),
+			"NON_RETRYABLE_PAYMENT_ERROR",
+			nil,
+		)
+	default:
+		// 5xx = TigerBeetle / DB error — retryable
+		return nil, fmt.Errorf("confirm payment server error: HTTP %d (retryable)", resp.StatusCode)
+	}
 }
 
 func (a *Activities) SendPaymentReminder(ctx context.Context, traderId, invoiceId int64) error {

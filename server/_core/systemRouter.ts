@@ -142,6 +142,64 @@ export const systemRouter = router({
     }),
 
   /**
+   * Financial ledger statistics — fetches live account balances from the
+   * Go TigerBeetle bridge /api/ledger/summary endpoint.
+   * Used by the Admin Overview financial summary widget.
+   */
+  ledgerStats: adminProcedure
+    .query(async () => {
+      const tbBridgeURL = process.env.TB_GO_BRIDGE_HTTP_ADDR ?? "http://localhost:9100";
+      try {
+        const res = await fetch(`${tbBridgeURL}/api/ledger/summary`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json() as {
+          summary: {
+            totalRevenueConfirmed: string;
+            totalRevenuePending:   string;
+            currency:              string;
+            mode:                  string;
+            timestamp:             string;
+          };
+          accounts: Array<{
+            id:             string;
+            accountType:    string;
+            creditsPosted:  string;
+            debitsPending:  string;
+            creditsPending: string;
+          }>;
+          recentTransfers: unknown[];
+        };
+        return {
+          ok:                    true,
+          mode:                  data.summary.mode,
+          currency:              data.summary.currency,
+          totalRevenueConfirmed: data.summary.totalRevenueConfirmed,
+          totalRevenuePending:   data.summary.totalRevenuePending,
+          accounts:              data.accounts,
+          recentTransferCount:   data.recentTransfers?.length ?? 0,
+          checkedAt:             Date.now(),
+        };
+      } catch (err) {
+        return {
+          ok:                    false,
+          mode:                  "unavailable",
+          currency:              "GHS",
+          totalRevenueConfirmed: "0",
+          totalRevenuePending:   "0",
+          accounts:              [] as Array<{
+            id: string; accountType: string;
+            creditsPosted: string; debitsPending: string; creditsPending: string;
+          }>,
+          recentTransferCount:   0,
+          checkedAt:             Date.now(),
+          error:                 String(err),
+        };
+      }
+    }),
+
+  /**
    * TigerBeetle bridge mode query — returns whether each bridge is in
    * "live" (real TigerBeetle binary) or "simulation" (in-memory) mode.
    * Used by the Service Health page to show production readiness.

@@ -43,6 +43,9 @@ func main() {
 		log.Printf("[payment-service] Warning: TigerBeetle unavailable (%v) — ledger operations will be simulated", tbErr)
 		tb = tigerbeetle.NewMock()
 	}
+	// Seed the five standard ledger accounts (idempotent — safe to call on every startup).
+	// Runs in a goroutine so it does not block the HTTP server from starting.
+	go tigerbeetle.SeedAccounts(tb)
 
 	// Initialize Dapr pub/sub client
 	ps := pubsub.New(daprPort)

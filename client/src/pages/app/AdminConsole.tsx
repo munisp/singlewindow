@@ -12,11 +12,13 @@ import {
   Building2,
   CheckCircle,
   Database,
+  DollarSign,
   RefreshCw,
   Search,
   Server,
   Shield,
   ShieldCheck,
+  TrendingUp,
   Users,
   XCircle,
   Zap,
@@ -24,6 +26,83 @@ import {
 import { Link } from "wouter";
 import { useState } from "react";
 import { toast } from "sonner";
+
+function LedgerStatsCard() {
+  const { data, isLoading, refetch, isRefetching } = trpc.system.ledgerStats.useQuery(undefined, {
+    refetchInterval: 30_000,
+  });
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <DollarSign className="h-4 w-4 text-yellow-500" />
+            Financial Ledger (TigerBeetle)
+          </CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isLoading || isRefetching} className="h-7 w-7 p-0">
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefetching ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-3/4" />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={data?.mode === "live" ? "default" : "secondary"}
+                className={data?.mode === "live" ? "bg-green-600" : ""}
+              >
+                {data?.mode === "live" ? "Live" : data?.mode === "unavailable" ? "Unavailable" : "Simulation"}
+              </Badge>
+              {data?.ok === false && (
+                <span className="text-xs text-muted-foreground">Bridge unreachable — showing cached zero</span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border p-3">
+                <p className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                  <TrendingUp className="h-3 w-3" /> Confirmed Revenue
+                </p>
+                <p className="font-mono text-lg font-semibold">
+                  {data?.currency} {parseFloat(data?.totalRevenueConfirmed ?? "0").toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="rounded-lg border p-3">
+                <p className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                  <Activity className="h-3 w-3" /> Pending Revenue
+                </p>
+                <p className="font-mono text-lg font-semibold">
+                  {data?.currency} {parseFloat(data?.totalRevenuePending ?? "0").toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+            {data?.accounts && data.accounts.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Accounts</p>
+                {data.accounts.map((acc) => (
+                  <div key={acc.id} className="flex items-center justify-between text-sm py-1 border-b border-border/50 last:border-0">
+                    <span className="font-mono text-xs text-muted-foreground truncate max-w-[180px]">{acc.accountType}</span>
+                    <span className="font-mono text-xs">
+                      {data.currency} {parseFloat(acc.creditsPosted ?? "0").toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {data?.recentTransferCount ?? 0} recent transfers &middot; refreshes every 30s
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function RateLimitStatsCard() {
   const { data, isLoading, refetch, isRefetching } = trpc.system.rateLimitStats.useQuery(undefined, {
@@ -519,6 +598,7 @@ export default function AdminConsole() {
           </TabsContent>
           {/* System Settings tab */}
           <TabsContent value="system" className="space-y-4 mt-4">
+            <LedgerStatsCard />
             <RateLimitStatsCard />
             <PortDataCard />
           </TabsContent>
