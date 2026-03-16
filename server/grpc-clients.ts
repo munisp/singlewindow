@@ -49,6 +49,10 @@ const WAZUH_PROXY_GRPC        = process.env.WAZUH_PROXY_GRPC_ADDR        || "loc
 const OPENCTI_PROXY_GRPC      = process.env.OPENCTI_PROXY_GRPC_ADDR      || "localhost:9097";
 const KEYCLOAK_PROXY_GRPC     = process.env.KEYCLOAK_PROXY_GRPC_ADDR     || "localhost:8080";
 
+// TigerBeetle bridges expose HTTP (not gRPC) health endpoints
+const TB_GO_BRIDGE_HTTP       = process.env.TB_GO_BRIDGE_HTTP_ADDR        || "localhost:8086";
+const TB_RUST_BRIDGE_HTTP     = process.env.TB_RUST_BRIDGE_HTTP_ADDR      || "localhost:8093";
+
 // ─── PROTO LOADER ─────────────────────────────────────────────────────────────
 
 function loadProto(protoFile: string): grpc.GrpcObject | null {
@@ -192,12 +196,34 @@ export function getOGAGRPCClient(): grpc.Client | null {
 // ─── SERVICE HEALTH SUMMARY ───────────────────────────────────────────────────
 
 /**
- * Probes all 18 Go microservices via gRPC connectivity checks.
+ * Checks TigerBeetle bridge health via HTTP GET /health.
+ * Returns { healthy, mode } where mode is "live" or "simulation".
+ */
+export async function checkTigerBeetleBridgeHealth(
+  addr: string
+): Promise<{ healthy: boolean; mode: string }> {
+  const url = `http://${addr}/health`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return { healthy: false, mode: "unknown" };
+    const body = await res.json() as { mode?: string; status?: string };
+    return {
+      healthy: body.status === "healthy",
+      mode: body.mode ?? "unknown",
+    };
+  } catch {
+    return { healthy: false, mode: "unreachable" };
+  }
+}
+
+/**
+ * Probes all 18 Go microservices via gRPC connectivity checks,
+ * plus both TigerBeetle bridges via HTTP health endpoints.
  * Returns a map of service-name → healthy (boolean).
  * All checks run in parallel; individual failures do not block others.
  */
 export async function getServiceHealthSummary(): Promise<Record<string, boolean>> {
-  const checks: Array<[string, string]> = [
+  const grpcChecks: Array<[string, string]> = [
     ["declaration-service",  DECLARATION_GRPC],
     ["payment-service",      PAYMENT_GRPC],
     ["oga-service",          OGA_GRPC],
@@ -218,14 +244,39 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
     ["keycloak-proxy",       KEYCLOAK_PROXY_GRPC],
   ];
 
-  const results = await Promise.allSettled(
-    checks.map(([, addr]) => checkGRPCHealth(addr))
-  );
+  // Run gRPC checks and TB HTTP checks in parallel
+  const [grpcResults, tbGoResult, tbRustResult] = await Promise.all([
+    Promise.allSettled(grpcChecks.map(([, addr]) => checkGRPCHealth(addr))),
+    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
+    checkTigerBeetleBridgeHealth(TB_RUST_BRIDGE_HTTP),
+  ]);
 
-  return Object.fromEntries(
-    checks.map(([name], i) => [
+  const summary: Record<string, boolean> = Object.fromEntries(
+    grpcChecks.map(([name], i) => [
       name,
-      results[i].status === "fulfilled" ? results[i].value : false,
+      grpcResults[i].status === "fulfilled" ? grpcResults[i].value : false,
     ])
   );
+
+  // Add TigerBeetle bridge health (HTTP)
+  summary["tigerbeetle-go-bridge"]   = tbGoResult.healthy;
+  summary["tigerbeetle-rust-bridge"] = tbRustResult.healthy;
+
+  return summary;
+}
+
+/**
+ * Returns the TigerBeetle bridge mode ("live" | "simulation" | "unreachable")
+ * for both bridges. Used by the Service Health dashboard to show whether
+ * the production TigerBeetle binary is connected.
+ */
+export async function getTigerBeetleBridgeModes(): Promise<{
+  go: { healthy: boolean; mode: string };
+  rust: { healthy: boolean; mode: string };
+}> {
+  const [go, rust] = await Promise.all([
+    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
+    checkTigerBeetleBridgeHealth(TB_RUST_BRIDGE_HTTP),
+  ]);
+  return { go, rust };
 }

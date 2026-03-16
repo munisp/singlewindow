@@ -8,6 +8,14 @@ description = "TigerBeetle financial ledger bridge — double-entry bookkeeping 
 name = "tigerbeetle-bridge"
 path = "src/main.rs"
 
+# ─── Feature flags ─────────────────────────────────────────────────────────────
+# Default: in-memory simulation (no TigerBeetle binary required)
+# Production: cargo build --release --features tigerbeetle-live
+# See PRODUCTION-GUIDE.md for full setup instructions.
+[features]
+default = []
+tigerbeetle-live = ["dep:tigerbeetle"]
+
 [dependencies]
 # HTTP server
 axum = { version = "0.7", features = ["json", "macros"] }
@@ -30,6 +38,11 @@ anyhow = "1"
 thiserror = "1"
 dotenvy = "0.15"
 rust_decimal = { version = "1", features = ["serde-with-str"] }
+
+# TigerBeetle client — optional, enabled by the tigerbeetle-live feature flag.
+# Requires the TigerBeetle binary to be installed on the build host.
+# See PRODUCTION-GUIDE.md for setup instructions.
+tigerbeetle = { version = "0.16", optional = true }
 
 [profile.release]
 opt-level = 3

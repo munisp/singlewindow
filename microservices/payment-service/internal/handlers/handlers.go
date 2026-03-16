@@ -258,10 +258,17 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Post TigerBeetle transfer (confirm the pending transfer)
+	// ── Step 1: Post TigerBeetle transfer (confirm the pending reserve) ──────────
+	// TigerBeetle is the gate: if this fails we do NOT update Postgres.
+	// The invoice stays in "processing" so the Temporal workflow can retry.
+	//
+	// Idempotency: TigerBeetle rejects duplicate transfer IDs with
+	// TransferAlreadyExists. We treat that as success so that a Temporal
+	// retry after a Postgres write failure does not double-post the ledger.
+	tbPostID := body.TBTxID + "-post"
 	tbErr := h.tb.CreateTransfers(ctx, []tigerbeetle.Transfer{
 		{
-			ID:              body.TBTxID + "-post",
+			ID:              tbPostID,
 			DebitAccountID:  fmt.Sprintf("trader-%d", inv.TraderId),
 			CreditAccountID: "customs-duty-revenue",
 			Amount:          uint64(inv.TotalAmount * 100),
@@ -271,12 +278,25 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 			Flags:           2, // POST_PENDING_TRANSFER
 		},
 	})
+	if tbErr != nil && !strings.Contains(tbErr.Error(), "already exists") {
+		// Genuine TB failure — return 503 so Temporal retries with backoff.
+		log.Printf("[payment-service] TigerBeetle post-pending FAILED invoice=%d tbPostId=%s: %v", id, tbPostID, tbErr)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("ledger unavailable — payment not confirmed: %v", tbErr))
+		return
+	}
 	if tbErr != nil {
-		log.Printf("[payment-service] TigerBeetle post-pending failed: %v", tbErr)
+		// TransferAlreadyExists — idempotent retry, TB already committed this transfer.
+		log.Printf("[payment-service] TigerBeetle idempotent re-post OK invoice=%d tbPostId=%s", id, tbPostID)
+	} else {
+		log.Printf("[payment-service] TigerBeetle post-pending OK invoice=%d tbPostId=%s", id, tbPostID)
 	}
 
-	// Update invoice as paid
+	// ── Step 2: Update Postgres (only reached if TB committed) ────────────────
+	// If this write fails, the invoice stays in "processing".
+	// Temporal retries ConfirmPayment — TB returns AlreadyExists (idempotent),
+	// and we proceed to update Postgres again.
 	if err := h.store.UpdateInvoicePayment(ctx, id, body.MojaloopTxID, body.TBTxID, body.Method); err != nil {
+		log.Printf("[payment-service] Postgres update FAILED after TB success invoice=%d: %v — stays processing for retry", id, err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

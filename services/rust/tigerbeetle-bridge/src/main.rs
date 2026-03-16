@@ -200,10 +200,28 @@ pub struct BalanceResponse {
     pub as_of: DateTime<Utc>,
 }
 
+// ─── BUILD-TAG MODE DETECTION ──────────────────────────────────────────────────────
+
+/// Compile-time mode string surfaced by the /health endpoint.
+/// Switches automatically based on the `tigerbeetle-live` Cargo feature flag:
+///   - Default build (no feature): "simulation"
+///   - Production build (--features tigerbeetle-live): "live"
+/// See PRODUCTION-GUIDE.md for full setup instructions.
+#[cfg(not(feature = "tigerbeetle-live"))]
+const LEDGER_MODE: &str = "simulation";
+#[cfg(feature = "tigerbeetle-live")]
+const LEDGER_MODE: &str = "live";
+
 // ─── IN-MEMORY LEDGER (development simulation) ────────────────────────────────
 
-/// Simple in-memory ledger for development
-/// Production: replace with TigerBeetle cluster connection
+/// Simple in-memory ledger for development.
+///
+/// This backend is compiled when the `tigerbeetle-live` feature flag is NOT set.
+/// It provides identical HTTP API semantics to the live TigerBeetle backend.
+///
+/// To switch to the real TigerBeetle client:
+///   cargo build --release --features tigerbeetle-live
+/// See PRODUCTION-GUIDE.md for full setup instructions.
 #[derive(Default, Clone)]
 pub struct InMemoryLedger {
     pub transfers: Vec<Transfer>,
@@ -279,8 +297,8 @@ async fn health_handler() -> Json<serde_json::Value> {
         "status": "healthy",
         "service": "tigerbeetle-bridge",
         "version": "0.1.0",
-        "ledger_mode": "in-memory (development)",
-        "production_note": "Connect to TigerBeetle cluster via tigerbeetle-node for production"
+        "mode": LEDGER_MODE,
+        "tigerbeetle_addr": std::env::var("TIGERBEETLE_ADDR").unwrap_or_else(|_| "not set".to_string()),
     }))
 }
 

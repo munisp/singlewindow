@@ -1,0 +1,51 @@
+# ── TigerBeetle Rust Bridge — Production Dockerfile ───────────────────────────
+#
+# Builds with the real TigerBeetle Rust client (tigerbeetle-rs crate).
+# Used in production Kubernetes deployments where the TigerBeetle binary
+# is available.
+#
+# Key difference from the development Dockerfile:
+#   --features tigerbeetle-live  (selects the live backend, not simulation)
+#
+# Build:
+#   docker build -f Dockerfile.production -t tigerbeetle-bridge-rs:prod .
+#
+# Environment variables required at runtime:
+#   TIGERBEETLE_ADDR        — TB cluster address, e.g. tigerbeetle-0.tigerbeetle:3000
+#   TIGERBEETLE_CLUSTER     — TB cluster ID (uint64, default: 0)
+#   TIGERBEETLE_BRIDGE_PORT — HTTP listen port (default: 8093)
+
+# ── Stage 1: Build ─────────────────────────────────────────────────────────────
+FROM rust:1.82-bookworm AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock* ./
+COPY src ./src
+
+# Build with the tigerbeetle-live feature flag
+RUN cargo build --release --features tigerbeetle-live
+
+# ── Stage 2: Runtime ───────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -r -u 1001 -g root tigerbeetle-bridge
+
+COPY --from=builder /app/target/release/tigerbeetle-bridge /usr/local/bin/tigerbeetle-bridge
+
+USER 1001
+
+EXPOSE 8093
+
+ENTRYPOINT ["/usr/local/bin/tigerbeetle-bridge"]

@@ -197,6 +197,11 @@ const CATEGORY_COLORS: Record<string, string> = {
 export default function ServiceHealth() {
   const [refreshKey, setRefreshKey] = useState(0);
 
+  const { data: tbModes } = trpc.system.tigerbeetleModes.useQuery(undefined, {
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
+  });
+
   const { data, isLoading, error } = trpc.system.serviceHealth.useQuery(undefined, {
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
@@ -370,9 +375,64 @@ export default function ServiceHealth() {
             })}
           </div>
         </div>
-      ))}
+      ))}      {/* ── TigerBeetle Bridge Mode ────────────────────────────────────────── */}
+      <div>
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+          Financial Ledger
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {([
+            { label: "TigerBeetle Go Bridge",   bd: tbModes?.go,   port: 8086 },
+            { label: "TigerBeetle Rust Bridge", bd: tbModes?.rust, port: 8093 },
+          ] as const).map(({ label, bd, port }) => {
+            const mode = (bd as { mode?: string } | undefined)?.mode ?? "checking...";
+            const isLive = mode === "live";
+            const isSim  = mode === "simulation";
+            const isHealthy = (bd as { healthy?: boolean } | undefined)?.healthy ?? false;
+            return (
+              <div
+                key={label}
+                className={`rounded-lg border p-4 flex items-start gap-3 ${
+                  isHealthy ? "border-border bg-card" : "border-destructive/30 bg-destructive/5"
+                }`}
+              >
+                <div className={`rounded-md p-2 border shrink-0 ${
+                  isLive ? "border-green-500/30 bg-green-500/5 text-green-500" :
+                  isSim  ? "border-amber-500/30 bg-amber-500/5 text-amber-500" :
+                           "border-muted text-muted-foreground"
+                }`}>
+                  <Database className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium text-sm text-foreground truncate">{label}</p>
+                    <Badge
+                      variant="outline"
+                      className={`shrink-0 text-xs ${
+                        isLive ? "text-green-500 border-green-500/30 bg-green-500/5" :
+                        isSim  ? "text-amber-500 border-amber-500/30 bg-amber-500/5" :
+                                 "text-muted-foreground"
+                      }`}
+                    >
+                      {isLive ? "Live" : isSim ? "Simulation" : isHealthy ? mode : "Offline"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                    {isLive
+                      ? "Connected to TigerBeetle cluster — production ledger active"
+                      : isSim
+                      ? "In-memory simulation — see PRODUCTION-GUIDE.md to enable live mode"
+                      : "Bridge unreachable"}
+                  </p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">:{port}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-      {/* ── Production Note ─────────────────────────────────────────────── */}
+      {/* ── Production Note ───────────────────────────────────────────────── */}
       <Card className="border-dashed">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">

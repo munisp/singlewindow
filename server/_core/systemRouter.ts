@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router, getRateLimitStats } from "./trpc";
-import { getServiceHealthSummary } from "../grpc-clients";
+import { getServiceHealthSummary, getTigerBeetleBridgeModes } from "../grpc-clients";
 import { redisHealthCheck } from "./redis";
 import { getDb } from "../db";
 import { desc, eq, and, gte, lte, like, sql } from "drizzle-orm";
@@ -138,6 +138,21 @@ export const systemRouter = router({
         total: countResult[0]?.count ?? 0,
         page: input.page,
         pageSize: input.pageSize,
+      };
+    }),
+
+  /**
+   * TigerBeetle bridge mode query — returns whether each bridge is in
+   * "live" (real TigerBeetle binary) or "simulation" (in-memory) mode.
+   * Used by the Service Health page to show production readiness.
+   */
+  tigerbeetleModes: adminProcedure
+    .query(async () => {
+      const modes = await getTigerBeetleBridgeModes();
+      return {
+        go:   modes.go,
+        rust: modes.rust,
+        checkedAt: Date.now(),
       };
     }),
 

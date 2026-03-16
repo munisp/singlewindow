@@ -1,0 +1,66 @@
+# ── TigerBeetle Bridge — Production Dockerfile ────────────────────────────────
+#
+# This Dockerfile builds the bridge with the real TigerBeetle CGo client.
+# It is used in production Kubernetes deployments where the TigerBeetle
+# binary is available.
+#
+# Key differences from the development Dockerfile:
+#   - CGO_ENABLED=1 (required for the tigerbeetle-go CGo wrapper)
+#   - -tags tigerbeetle (selects backend_live.go instead of backend_sim.go)
+#   - Uses debian-based image (not alpine) for glibc compatibility with CGo
+#   - Installs TigerBeetle client library headers at build time
+#
+# Build:
+#   docker build -f Dockerfile.production -t tigerbeetle-bridge:prod .
+#
+# Environment variables required at runtime:
+#   TIGERBEETLE_ADDR    — TB cluster address, e.g. tigerbeetle-0.tigerbeetle:3000
+#   TIGERBEETLE_CLUSTER — TB cluster ID (uint64, default: 0)
+#   TB_BRIDGE_HTTP_PORT — HTTP listen port (default: 8086)
+#   TB_BRIDGE_GRPC_PORT — gRPC listen port (default: 9086)
+
+# ── Stage 1: Build ─────────────────────────────────────────────────────────────
+FROM golang:1.23-bookworm AS builder
+
+WORKDIR /app
+
+# Install build dependencies for CGo
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY go.mod go.sum* ./
+
+# Add tigerbeetle-go dependency
+RUN go get github.com/tigerbeetle/tigerbeetle-go@latest
+
+RUN go mod download
+
+COPY . .
+
+# Build with CGo enabled and the tigerbeetle build tag
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -tags tigerbeetle \
+    -ldflags="-s -w" \
+    -o tigerbeetle-bridge \
+    ./cmd/main.go
+
+# ── Stage 2: Runtime ───────────────────────────────────────────────────────────
+# Use debian slim for glibc (required by CGo-linked binary)
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -r -u 1001 -g root tigerbeetle-bridge
+
+COPY --from=builder /app/tigerbeetle-bridge /usr/local/bin/tigerbeetle-bridge
+
+USER 1001
+
+EXPOSE 8086 9086
+
+ENTRYPOINT ["/usr/local/bin/tigerbeetle-bridge"]
