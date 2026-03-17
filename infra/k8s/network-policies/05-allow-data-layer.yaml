@@ -1,0 +1,197 @@
+---
+# TradeGateway™ NGSWTP — Data Layer Access Policies
+# Controls which services may reach the data infrastructure:
+# Kafka, Redis, PostgreSQL, TigerBeetle, Temporal, Keycloak.
+
+# ─── Allow Kafka Egress ───────────────────────────────────────────────────────
+# All tradegateway microservices may produce/consume from Kafka brokers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-kafka-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: data-layer
+spec:
+  podSelector: {}   # All pods in namespace
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+      ports:
+        - port: 9092
+          protocol: TCP
+        - port: 9093
+          protocol: TCP   # TLS listener
+---
+# ─── Allow Redis Egress ───────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: data-layer
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+        - port: 6380
+          protocol: TCP   # TLS port
+---
+# ─── Allow PostgreSQL Egress ──────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: data-layer
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# ─── Allow Temporal Egress ────────────────────────────────────────────────────
+# temporal-worker and declaration-service need to reach Temporal frontend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-temporal-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: data-layer
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - temporal-worker
+          - declaration-service
+          - payment-service
+          - oga-service
+          - cargo-tracking-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: temporal
+      ports:
+        - port: 7233
+          protocol: TCP
+---
+# ─── Allow TigerBeetle Bridge Egress ─────────────────────────────────────────
+# Only payment-service and temporal-worker may reach the TigerBeetle bridge.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-tigerbeetle-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: data-layer
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - payment-service
+          - temporal-worker
+          - tradegateway-web
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tigerbeetle-bridge
+      ports:
+        - port: 9100
+          protocol: TCP
+        - port: 3000
+          protocol: TCP   # TigerBeetle native port
+---
+# ─── Allow Keycloak Egress ────────────────────────────────────────────────────
+# All services validate JWTs against Keycloak JWKS endpoint.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-keycloak-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: identity
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: keycloak
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+---
+# ─── Allow Permify Egress ─────────────────────────────────────────────────────
+# Services performing fine-grained authorization checks call Permify.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-permify-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: identity
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - tradegateway-web
+          - declaration-service
+          - oga-service
+          - payment-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: permify
+      ports:
+        - port: 3476
+          protocol: TCP
+        - port: 3478
+          protocol: TCP   # gRPC port

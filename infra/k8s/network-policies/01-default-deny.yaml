@@ -1,0 +1,22 @@
+---
+# TradeGateway™ NGSWTP — Kubernetes Network Policy
+# Default deny-all: blocks all ingress and egress within the tradegateway namespace
+# unless explicitly permitted by subsequent NetworkPolicy resources.
+#
+# Security rationale:
+#   - Enforces micro-segmentation between microservices
+#   - Prevents lateral movement in case of pod compromise
+#   - Complies with WCO/UNCTAD single-window security requirements
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: baseline
+spec:
+  podSelector: {}   # applies to ALL pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress

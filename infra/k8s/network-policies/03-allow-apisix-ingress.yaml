@@ -1,0 +1,81 @@
+---
+# TradeGateway™ NGSWTP — Allow APISIX → Web API Ingress
+# Only the APISIX API Gateway pod (in the apisix namespace) may reach
+# the tradegateway-web service on port 3000. All other ingress is denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apisix-to-web
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: ingress-control
+spec:
+  podSelector:
+    matchLabels:
+      app: tradegateway-web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: apisix
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+# Allow Prometheus (monitoring namespace) to scrape metrics from all services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: observability
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9090
+          protocol: TCP
+---
+# Allow Promtail (log shipping) to reach Loki
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-promtail-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: promtail
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: loki
+      ports:
+        - port: 3100
+          protocol: TCP

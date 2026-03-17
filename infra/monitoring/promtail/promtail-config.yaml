@@ -1,0 +1,239 @@
+---
+# TradeGateway™ NGSWTP — Promtail Configuration
+# Ships structured logs from all tradegateway pods to Loki.
+# Deploy as a DaemonSet in the monitoring namespace.
+#
+# Log pipeline:
+#   Pod stdout/stderr → Promtail (node-level) → Loki → Grafana
+#
+# Label strategy:
+#   - namespace, pod, container: standard K8s labels
+#   - service: extracted from pod label app
+#   - level: extracted from JSON log field "level"
+#   - trace_id: extracted for distributed tracing correlation
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+    tenant_id: tradegateway
+    batchwait: 1s
+    batchsize: 1048576
+    timeout: 10s
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+    tls_config:
+      insecure_skip_verify: false
+
+scrape_configs:
+  # ─── TradeGateway Namespace — All Pods ───────────────────────────────────────
+  - job_name: tradegateway-pods
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - tradegateway
+    pipeline_stages:
+      # Parse JSON logs (Go services use zerolog/zap structured JSON)
+      - json:
+          expressions:
+            level: level
+            msg: msg
+            service: service
+            trace_id: trace_id
+            span_id: span_id
+            declaration_id: declaration_id
+            payment_id: payment_id
+            trader_id: trader_id
+            error: error
+            duration_ms: duration_ms
+      # Map log level to Loki label
+      - labels:
+          level:
+          service:
+          trace_id:
+      # Drop DEBUG logs in production to reduce storage costs
+      - match:
+          selector: '{level="debug"}'
+          action: drop
+          drop_counter_reason: debug_log_dropped
+      # Add timestamp from log field if present
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+            - UnixMs
+      # Enrich with static labels
+      - static_labels:
+          environment: production
+          platform: tradegateway-ngswtp
+      # Limit line size to prevent Loki ingestion errors
+      - limit:
+          rate: 10000
+          burst: 20000
+          drop: true
+    relabel_configs:
+      # Keep only tradegateway pods
+      - source_labels: [__meta_kubernetes_namespace]
+        action: keep
+        regex: tradegateway
+      # Extract pod name
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      # Extract container name
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+      # Extract app label as service
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        target_label: service
+      # Extract namespace
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      # Extract node name
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: node
+      # Drop sidecar containers (Dapr, Promtail itself)
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        action: drop
+        regex: daprd|promtail|istio-proxy
+
+  # ─── Temporal Workers — Workflow Logs ────────────────────────────────────────
+  - job_name: temporal-workers
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - tradegateway
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            workflow_type: workflow_type
+            workflow_id: workflow_id
+            run_id: run_id
+            activity_type: activity_type
+            error: error
+      - labels:
+          level:
+          workflow_type:
+      - static_labels:
+          job: temporal-worker
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: temporal-worker
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+  # ─── Risk Engine — AI Inference Logs ─────────────────────────────────────────
+  - job_name: risk-engine
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - tradegateway
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            risk_score: risk_score
+            lane: lane
+            model_version: model_version
+            inference_ms: inference_ms
+            declaration_id: declaration_id
+      - labels:
+          level:
+          lane:
+          model_version:
+      - static_labels:
+          job: risk-engine
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: risk-engine-service
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+  # ─── Security Audit Logs — High Priority ─────────────────────────────────────
+  - job_name: security-audit
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - tradegateway
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            event_type: event_type
+            actor_id: actor_id
+            entity_type: entity_type
+            entity_id: entity_id
+            ip_address: ip_address
+            action: action
+      - labels:
+          level:
+          event_type:
+          entity_type:
+      # Never drop security audit logs regardless of level
+      - static_labels:
+          job: security-audit
+          priority: high
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: audit-service|wazuh.*
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+  # ─── APISIX Access Logs ───────────────────────────────────────────────────────
+  - job_name: apisix-access
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - apisix
+    pipeline_stages:
+      - json:
+          expressions:
+            status: status
+            method: request.method
+            uri: request.uri
+            latency: latency
+            remote_addr: remote_addr
+            route_id: route_id
+            service_id: service_id
+      - labels:
+          status:
+          method:
+          route_id:
+      # Alert on 5xx responses
+      - match:
+          selector: '{status=~"5.."}'
+          stages:
+            - static_labels:
+                alert: gateway_5xx
+      - static_labels:
+          job: apisix-access
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+        action: keep
+        regex: apisix
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace

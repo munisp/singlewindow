@@ -1,0 +1,26 @@
+---
+# TradeGateway™ NGSWTP — Allow DNS Egress
+# All pods in the tradegateway namespace must be able to resolve DNS.
+# Without this, service discovery (Kubernetes DNS) fails entirely.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: baseline
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system

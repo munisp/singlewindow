@@ -1,0 +1,217 @@
+---
+# TradeGateway™ NGSWTP — Inter-Service Communication Policies
+# Governs which microservices may communicate with each other.
+# Principle: only explicitly permitted service-to-service calls are allowed.
+
+# ─── Declaration Service ──────────────────────────────────────────────────────
+# Receives calls from: web-api, temporal-worker
+# Calls out to: risk-engine, oga-service, notification-service, audit-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-declaration-service
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: service-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: declaration-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tradegateway-web
+        - podSelector:
+            matchLabels:
+              app: temporal-worker
+      ports:
+        - port: 8083
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: risk-engine-service
+      ports:
+        - port: 8087
+    - to:
+        - podSelector:
+            matchLabels:
+              app: oga-service
+      ports:
+        - port: 8084
+    - to:
+        - podSelector:
+            matchLabels:
+              app: notification-service
+      ports:
+        - port: 8089
+    - to:
+        - podSelector:
+            matchLabels:
+              app: audit-service
+      ports:
+        - port: 8096
+    - to:
+        - podSelector:
+            matchLabels:
+              app: document-management-service
+      ports:
+        - port: 8097
+---
+# ─── Payment Service ──────────────────────────────────────────────────────────
+# Receives calls from: web-api, temporal-worker
+# Calls out to: tigerbeetle-bridge, mojaloop-gateway, notification-service, audit-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-payment-service
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: service-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: payment-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tradegateway-web
+        - podSelector:
+            matchLabels:
+              app: temporal-worker
+      ports:
+        - port: 8082
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tigerbeetle-bridge
+      ports:
+        - port: 9100
+    - to:
+        - podSelector:
+            matchLabels:
+              app: mojaloop-gateway
+      ports:
+        - port: 8085
+    - to:
+        - podSelector:
+            matchLabels:
+              app: notification-service
+      ports:
+        - port: 8089
+    - to:
+        - podSelector:
+            matchLabels:
+              app: audit-service
+      ports:
+        - port: 8096
+---
+# ─── Risk Engine Service ──────────────────────────────────────────────────────
+# Receives calls from: declaration-service, temporal-worker
+# Calls out to: sanctions-service, anomaly-detection-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-risk-engine
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: service-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: risk-engine-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: declaration-service
+        - podSelector:
+            matchLabels:
+              app: temporal-worker
+      ports:
+        - port: 8087
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: sanctions-service
+      ports:
+        - port: 8088
+    - to:
+        - podSelector:
+            matchLabels:
+              app: anomaly-detection-service
+      ports:
+        - port: 8091
+---
+# ─── OGA Service ─────────────────────────────────────────────────────────────
+# Receives calls from: declaration-service, temporal-worker, web-api
+# Calls out to: notification-service, audit-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-oga-service
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    security.tradegateway.gov/policy-type: service-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app: oga-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: declaration-service
+        - podSelector:
+            matchLabels:
+              app: temporal-worker
+        - podSelector:
+            matchLabels:
+              app: tradegateway-web
+      ports:
+        - port: 8084
+          protocol: TCP
+        - port: 9090
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: notification-service
+      ports:
+        - port: 8089
+    - to:
+        - podSelector:
+            matchLabels:
+              app: audit-service
+      ports:
+        - port: 8096

@@ -1,0 +1,48 @@
+{{- /*
+TradeGateway™ NGSWTP — Helm ConfigMap Template
+Non-sensitive configuration shared across all services.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradegateway-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: tradegateway
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/managed-by: Helm
+data:
+  environment: {{ .Values.global.environment | quote }}
+  kafka-brokers: {{ .Values.kafka.brokers | quote }}
+  temporal-address: {{ .Values.temporal.address | quote }}
+  tigerbeetle-address: {{ .Values.tigerbeetle.address | quote }}
+  keycloak-url: {{ .Values.keycloak.url | quote }}
+  keycloak-realm: {{ .Values.keycloak.realm | quote }}
+  permify-url: {{ .Values.permify.url | quote }}
+  apisix-admin-url: {{ .Values.apisix.adminUrl | quote }}
+  opencti-url: {{ .Values.opencti.url | quote }}
+  wazuh-url: {{ .Values.wazuh.url | quote }}
+  mojaloop-hub-url: {{ .Values.mojaloop.hubUrl | quote }}
+  log-level: {{ .Values.global.logLevel | default "info" | quote }}
+  otel-exporter-endpoint: {{ .Values.observability.otlpEndpoint | default "http://jaeger-collector:4317" | quote }}
+  # gRPC service addresses (used by Node.js tRPC server for health checks)
+  declaration-grpc-addr: "declaration-service:9090"
+  payment-grpc-addr: "payment-service:9090"
+  oga-grpc-addr: "oga-service:9090"
+  cargo-grpc-addr: "cargo-tracking-service:9090"
+  workflow-grpc-addr: "workflow-service:9090"
+  notification-grpc-addr: "notification-service:9090"
+  audit-grpc-addr: "audit-service:9090"
+  risk-engine-grpc-addr: "risk-engine-service:9090"
+  hs-classifier-grpc-addr: "hs-classifier-service:9090"
+  sanctions-grpc-addr: "sanctions-service:9090"
+  anomaly-detection-grpc-addr: "anomaly-detection-service:9090"
+  kyc-grpc-addr: "kyc-service:9090"
+  bond-grpc-addr: "bond-service:9090"
+  drawback-grpc-addr: "drawback-service:9090"
+  tariff-grpc-addr: "tariff-service:9090"
+  trader-registry-grpc-addr: "trader-registry-service:9090"
+  asean-grpc-addr: "asean-sw-service:9090"
+  cen-grpc-addr: "cen-service:9090"
+  tb-go-bridge-http-addr: "http://tigerbeetle-bridge:9100"

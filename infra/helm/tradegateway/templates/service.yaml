@@ -1,0 +1,40 @@
+{{- /*
+TradeGateway™ NGSWTP — Helm Service Template
+Generates a ClusterIP Service for each enabled microservice.
+*/}}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ $svc.metricsPort | default "9090" | quote }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ $svc.port | default 8080 }}
+      protocol: TCP
+    - name: metrics
+      port: {{ $svc.metricsPort | default 9090 }}
+      targetPort: {{ $svc.metricsPort | default 9090 }}
+      protocol: TCP
+    {{- if $svc.grpcPort }}
+    - name: grpc
+      port: {{ $svc.grpcPort }}
+      targetPort: {{ $svc.grpcPort }}
+      protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}

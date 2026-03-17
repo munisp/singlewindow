@@ -90,6 +90,7 @@ const GoLiveChecklist = lazy(() => import('./pages/app/GoLiveChecklist'));
 const ServiceHealth = lazy(() => import('./pages/app/ServiceHealth'));
 const AuditLog = lazy(() => import('./pages/app/AuditLog'));
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
+const SystemStatus = lazy(() => import('./pages/SystemStatus'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -106,6 +107,11 @@ function Router() {
       {/* Sprint 80 — Public certificate verification (no auth required, QR-scannable) */}
       <Route path="/verify/:certNumber">
         <Suspense fallback={<LazyFallback />}><CertVerify /></Suspense>
+      </Route>
+
+      {/* Public system status page — no authentication required */}
+      <Route path="/status">
+        <Suspense fallback={<LazyFallback />}><SystemStatus /></Suspense>
       </Route>
 
       {/* Architecture specification (all 29 interactive components) */}
