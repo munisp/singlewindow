@@ -1,0 +1,327 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Helm Chart Default Values
+# =============================================================================
+# Override per environment:
+#   helm upgrade tradegateway ./tradegateway -f values-production.yaml
+# =============================================================================
+
+global:
+  imageRegistry: "registry.tradegateway.gov"
+  imagePullPolicy: IfNotPresent
+  namespace: tradegateway
+  environment: production
+  # Shared labels applied to all resources
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/managed-by: helm
+
+# ─── Image Tags ──────────────────────────────────────────────────────────────
+images:
+  # Web/API
+  webApi:
+    repository: tradegateway/web-api
+    tag: "1.0.0"
+  # Core Go microservices
+  declarationService:
+    repository: tradegateway/declaration-service
+    tag: "1.0.0"
+  ogaService:
+    repository: tradegateway/oga-service
+    tag: "1.0.0"
+  profileService:
+    repository: tradegateway/profile-service
+    tag: "1.0.0"
+  paymentService:
+    repository: tradegateway/payment-service
+    tag: "1.0.0"
+  temporalWorker:
+    repository: tradegateway/temporal-worker
+    tag: "1.0.0"
+  mojaloopGateway:
+    repository: tradegateway/mojaloop-gateway
+    tag: "1.0.0"
+  cargoTrackingService:
+    repository: tradegateway/cargo-tracking-service
+    tag: "1.0.0"
+  analyticsService:
+    repository: tradegateway/analytics-service
+    tag: "1.0.0"
+  fluvioConsumer:
+    repository: tradegateway/fluvio-consumer
+    tag: "1.0.0"
+  # TigerBeetle bridges
+  tigerbeetleBridgeGo:
+    repository: tradegateway/tigerbeetle-bridge-go
+    tag: "1.0.0"
+  tigerbeetleBridgeRs:
+    repository: tradegateway/tigerbeetle-bridge-rs
+    tag: "1.0.0"
+  # Python AI/ML services
+  riskEngine:
+    repository: tradegateway/risk-engine
+    tag: "1.0.0"
+  sanctionsService:
+    repository: tradegateway/sanctions-service
+    tag: "1.0.0"
+  anomalyDetection:
+    repository: tradegateway/anomaly-detection
+    tag: "1.0.0"
+  kycService:
+    repository: tradegateway/kyc-service
+    tag: "1.0.0"
+  deltalakeSvc:
+    repository: tradegateway/deltalake-svc
+    tag: "1.0.0"
+  sedonaSvc:
+    repository: tradegateway/sedona-svc
+    tag: "1.0.0"
+
+# ─── Replica Counts ──────────────────────────────────────────────────────────
+replicaCount:
+  webApi: 3
+  declarationService: 3
+  ogaService: 3
+  profileService: 2
+  paymentService: 3
+  temporalWorker: 3
+  mojaloopGateway: 2
+  cargoTrackingService: 2
+  analyticsService: 2
+  fluvioConsumer: 2
+  tigerbeetleBridgeGo: 2
+  tigerbeetleBridgeRs: 2
+  riskEngine: 3
+  sanctionsService: 2
+  anomalyDetection: 2
+  kycService: 2
+
+# ─── Resource Requests/Limits ────────────────────────────────────────────────
+resources:
+  webApi:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "512Mi" }
+  declarationService:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "512Mi" }
+  ogaService:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "512Mi" }
+  paymentService:
+    requests: { cpu: "500m", memory: "512Mi" }
+    limits:   { cpu: "2000m", memory: "1Gi" }
+  temporalWorker:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "512Mi" }
+  riskEngine:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "2000m", memory: "4Gi" }
+  sanctionsService:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "2Gi" }
+  anomalyDetection:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "2000m", memory: "4Gi" }
+  analyticsService:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "2000m", memory: "2Gi" }
+  deltalakeSvc:
+    requests: { cpu: "500m", memory: "2Gi" }
+    limits:   { cpu: "4000m", memory: "8Gi" }
+  sedonaSvc:
+    requests: { cpu: "1000m", memory: "4Gi" }
+    limits:   { cpu: "4000m", memory: "16Gi" }
+
+# ─── Autoscaling ─────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: true
+  declarationService:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  ogaService:
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+  paymentService:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  riskEngine:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  temporalWorker:
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+
+# ─── Service Ports ───────────────────────────────────────────────────────────
+ports:
+  webApi: 3000
+  declarationService: 8083
+  ogaService: 8084
+  profileService: 8086
+  paymentService: 8082
+  temporalWorker: 8090
+  mojaloopGateway: 8085
+  cargoTrackingService: 8092
+  analyticsService: 8093
+  fluvioConsumer: 8094
+  riskEngine: 8087
+  sanctionsService: 8088
+  anomalyDetection: 8091
+  kycService: 8095
+  tigerbeetleBridgeGo: 8200
+  tigerbeetleBridgeRs: 8201
+
+# ─── Infrastructure Addresses ────────────────────────────────────────────────
+infrastructure:
+  temporal:
+    address: "temporal-frontend.temporal.svc.cluster.local:7233"
+    namespace: "tradegateway"
+    taskQueue: "tradegateway-main"
+  kafka:
+    brokers: "kafka-0.kafka-headless.kafka.svc.cluster.local:9092,kafka-1.kafka-headless.kafka.svc.cluster.local:9092,kafka-2.kafka-headless.kafka.svc.cluster.local:9092"
+  redis:
+    host: "redis-master.redis.svc.cluster.local"
+    port: 6379
+  keycloak:
+    url: "https://auth.tradegateway.gov"
+    realm: "tradegateway"
+  fluvio:
+    endpoint: "fluvio-sc.fluvio.svc.cluster.local:9003"
+  tigerbeetle:
+    address: "tigerbeetle-0.tigerbeetle.svc.cluster.local:3000"
+    clusterId: 0
+  goBridgeHttpAddr: "http://tigerbeetle-bridge-go.tradegateway.svc.cluster.local:8200"
+  mojaloop:
+    hubUrl: "https://hub.mojaloop.io"
+  spark:
+    master: "spark://spark-master.spark.svc.cluster.local:7077"
+  s3:
+    endpoint: "https://s3.tradegateway.gov"
+  deltaLake:
+    url: "http://deltalake-svc.tradegateway.svc.cluster.local:8096"
+
+# ─── Ingress ─────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    cert-manager.io/cluster-issuer: "letsencrypt-production"
+  hosts:
+    - host: tradegateway.gov
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web-api
+          port: 3000
+    - host: api.tradegateway.gov
+      paths:
+        - path: /api/
+          pathType: Prefix
+          service: web-api
+          port: 3000
+  tls:
+    - secretName: tradegateway-tls
+      hosts:
+        - tradegateway.gov
+        - api.tradegateway.gov
+
+# ─── Secrets (override with sealed-secrets or external-secrets) ──────────────
+secrets:
+  # These are placeholder values — use Sealed Secrets or External Secrets Operator
+  # in production. Never commit real values to version control.
+  databaseUrl: ""           # postgresql://user:pass@host:5432/tradegateway
+  redisUrl: ""              # redis://:password@redis-master:6379/0
+  jwtSecret: ""             # 256-bit random hex
+  mojaloopDfspId: ""        # Your DFSP identifier
+  s3AccessKey: ""
+  s3SecretKey: ""
+  tigerbeetleClusterId: "0"
+
+# ─── PostgreSQL (Bitnami subchart) ───────────────────────────────────────────
+postgresql:
+  enabled: false  # Set true for dev; use external managed DB in production
+  auth:
+    username: tradegateway
+    database: tradegateway
+    existingSecret: tradegateway-db-secret
+  primary:
+    persistence:
+      enabled: true
+      size: 100Gi
+      storageClass: "fast-ssd"
+    resources:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits:   { cpu: "2000m", memory: "4Gi" }
+  readReplicas:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 100Gi
+
+# ─── Redis (Bitnami subchart) ────────────────────────────────────────────────
+redis:
+  enabled: false  # Set true for dev; use external managed Redis in production
+  auth:
+    enabled: true
+    existingSecret: tradegateway-redis-secret
+  master:
+    persistence:
+      enabled: true
+      size: 20Gi
+  replica:
+    replicaCount: 2
+
+# ─── Kafka (Bitnami subchart) ────────────────────────────────────────────────
+kafka:
+  enabled: false  # Set true for dev; use external managed Kafka in production
+  replicaCount: 3
+  persistence:
+    enabled: true
+    size: 50Gi
+  zookeeper:
+    replicaCount: 3
+
+# ─── Monitoring ──────────────────────────────────────────────────────────────
+monitoring:
+  prometheus:
+    enabled: true
+    scrapeInterval: "15s"
+  grafana:
+    enabled: true
+    adminPassword: ""  # Override in production
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: "15s"
+
+# ─── Security ────────────────────────────────────────────────────────────────
+security:
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  networkPolicy:
+    enabled: true
+  podDisruptionBudget:
+    enabled: true
+
+# ─── Service Account ─────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: tradegateway-sa
+  annotations: {}
+
+# ─── ConfigMap ───────────────────────────────────────────────────────────────
+configMap:
+  name: tradegateway-config

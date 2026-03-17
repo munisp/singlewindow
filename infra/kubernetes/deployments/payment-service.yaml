@@ -1,0 +1,213 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — Kubernetes Deployment: payment-service
+# =============================================================================
+# Handles Mojaloop callbacks, TigerBeetle dual-write, and Temporal workflow
+# dispatch for payment confirmation.
+#
+# Key env vars:
+#   TEMPORAL_ADDRESS        — Temporal frontend gRPC (set per environment)
+#   TIGERBEETLE_ADDRESS     — TigerBeetle binary gRPC
+#   TB_GO_BRIDGE_HTTP_ADDR  — TigerBeetle Go bridge HTTP
+#   MOJALOOP_URL            — Mojaloop gateway URL
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-service-config
+  namespace: tradegateway
+  labels:
+    app: payment-service
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+data:
+  PORT: "8082"
+  METRICS_PORT: "9082"
+  DAPR_HTTP_PORT: "3502"
+  TEMPORAL_ADDRESS: "temporal-frontend.tradegateway.svc.cluster.local:7233"
+  TB_GO_BRIDGE_HTTP_ADDR: "http://tigerbeetle-bridge.tradegateway.svc.cluster.local:8085"
+  TIGERBEETLE_ADDRESS: "tigerbeetle.tradegateway.svc.cluster.local:3000"
+  MOJALOOP_URL: "http://mojaloop-gateway.tradegateway.svc.cluster.local:3001"
+  ENVIRONMENT: "production"
+  SERVICE_NAME: "payment-service"
+  LOG_LEVEL: "info"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: tradegateway
+  labels:
+    app: payment-service
+    tier: backend
+    language: go
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+    app.kubernetes.io/component: payment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # Zero-downtime rolling update
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9082"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "payment-service"
+        dapr.io/app-port: "8082"
+        dapr.io/log-level: "info"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60   # Allow in-flight payment confirmations to complete
+      containers:
+        - name: payment-service
+          image: tradegateway/payment-service:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8082
+              protocol: TCP
+            - name: metrics
+              containerPort: 9082
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: payment-service-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: TIGERBEETLE_CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: tigerbeetle-cluster-id
+                  optional: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Drain in-flight requests before shutdown
+                command: ["/bin/sh", "-c", "sleep 5"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["payment-service"]
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: tradegateway
+  labels:
+    app: payment-service
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  selector:
+    app: payment-service
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9082
+      targetPort: metrics
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: payment-service-hpa
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-service
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-service-pdb
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  minAvailable: 2          # Always keep at least 2 replicas during disruptions
+  selector:
+    matchLabels:
+      app: payment-service

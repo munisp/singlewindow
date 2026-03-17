@@ -1,0 +1,1020 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Kubernetes Deployments: Core Go Microservices
+# =============================================================================
+# Covers: declaration-service, oga-service, profile-service, temporal-worker,
+#         mojaloop-gateway, cargo-tracking-service, analytics-service,
+#         workflow-service, temporal-query-service, fluvio-consumer
+# =============================================================================
+
+# ─── declaration-service ─────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: declaration-service
+  namespace: tradegateway
+  labels:
+    app: declaration-service
+    tier: backend
+    language: go
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: declaration-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: declaration-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9083"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "declaration-service"
+        dapr.io/app-port: "8083"
+        dapr.io/log-level: "info"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: declaration-service
+          image: tradegateway/declaration-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8083
+            - name: metrics
+              containerPort: 9083
+          env:
+            - name: PORT
+              value: "8083"
+            - name: METRICS_PORT
+              value: "9083"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: TEMPORAL_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: temporal-address
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: keycloak-url
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8083
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: declaration-service
+  namespace: tradegateway
+  labels:
+    app: declaration-service
+spec:
+  selector:
+    app: declaration-service
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+    - name: metrics
+      port: 9083
+      targetPort: 9083
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: declaration-service-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: declaration-service
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: declaration-service-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: declaration-service
+---
+
+# ─── oga-service ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oga-service
+  namespace: tradegateway
+  labels:
+    app: oga-service
+    tier: backend
+    language: go
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: oga-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: oga-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9084"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "oga-service"
+        dapr.io/app-port: "8084"
+        dapr.io/log-level: "info"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: oga-service
+          image: tradegateway/oga-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8084
+            - name: metrics
+              containerPort: 9084
+          env:
+            - name: PORT
+              value: "8084"
+            - name: METRICS_PORT
+              value: "9084"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: OGA_TIMEOUT_SECONDS
+              value: "30"
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: keycloak-url
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8084
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oga-service
+  namespace: tradegateway
+  labels:
+    app: oga-service
+spec:
+  selector:
+    app: oga-service
+  ports:
+    - name: http
+      port: 8084
+      targetPort: 8084
+    - name: metrics
+      port: 9084
+      targetPort: 9084
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: oga-service-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: oga-service
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oga-service-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: oga-service
+---
+
+# ─── profile-service ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: profile-service
+  namespace: tradegateway
+  labels:
+    app: profile-service
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: profile-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: profile-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9086"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "profile-service"
+        dapr.io/app-port: "8086"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: profile-service
+          image: tradegateway/profile-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8086
+            - name: metrics
+              containerPort: 9086
+          env:
+            - name: PORT
+              value: "8086"
+            - name: METRICS_PORT
+              value: "9086"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: keycloak-url
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8086
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8086
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: profile-service
+  namespace: tradegateway
+  labels:
+    app: profile-service
+spec:
+  selector:
+    app: profile-service
+  ports:
+    - name: http
+      port: 8086
+      targetPort: 8086
+    - name: metrics
+      port: 9086
+      targetPort: 9086
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: profile-service-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: profile-service
+---
+
+# ─── temporal-worker ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+  labels:
+    app: temporal-worker
+    tier: backend
+    language: go
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: temporal-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: temporal-worker
+          image: tradegateway/temporal-worker:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8090
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: PORT
+              value: "8090"
+            - name: METRICS_PORT
+              value: "9090"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: TEMPORAL_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: temporal-address
+            - name: PAYMENT_SERVICE_URL
+              value: "http://payment-service.tradegateway.svc.cluster.local:8082"
+            - name: DECLARATION_SERVICE_URL
+              value: "http://declaration-service.tradegateway.svc.cluster.local:8083"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8090
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+  labels:
+    app: temporal-worker
+spec:
+  selector:
+    app: temporal-worker
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: temporal-worker-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: temporal-worker
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: temporal-worker-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: temporal-worker
+---
+
+# ─── mojaloop-gateway ────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mojaloop-gateway
+  namespace: tradegateway
+  labels:
+    app: mojaloop-gateway
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mojaloop-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: mojaloop-gateway
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9085"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "mojaloop-gateway"
+        dapr.io/app-port: "8085"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: mojaloop-gateway
+          image: tradegateway/mojaloop-gateway:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8085
+            - name: metrics
+              containerPort: 9085
+          env:
+            - name: PORT
+              value: "8085"
+            - name: METRICS_PORT
+              value: "9085"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: TEMPORAL_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: temporal-address
+            - name: PAYMENT_SERVICE_URL
+              value: "http://payment-service.tradegateway.svc.cluster.local:8082"
+            - name: MOJALOOP_HUB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: mojaloop-hub-url
+            - name: MOJALOOP_DFSP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: mojaloop-dfsp-id
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8085
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8085
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mojaloop-gateway
+  namespace: tradegateway
+  labels:
+    app: mojaloop-gateway
+spec:
+  selector:
+    app: mojaloop-gateway
+  ports:
+    - name: http
+      port: 8085
+      targetPort: 8085
+    - name: metrics
+      port: 9085
+      targetPort: 9085
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mojaloop-gateway-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: mojaloop-gateway
+---
+
+# ─── cargo-tracking-service ──────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cargo-tracking-service
+  namespace: tradegateway
+  labels:
+    app: cargo-tracking-service
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cargo-tracking-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: cargo-tracking-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9092"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "cargo-tracking-service"
+        dapr.io/app-port: "8092"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: cargo-tracking-service
+          image: tradegateway/cargo-tracking-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8092
+            - name: metrics
+              containerPort: 9092
+          env:
+            - name: PORT
+              value: "8092"
+            - name: METRICS_PORT
+              value: "9092"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8092
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8092
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cargo-tracking-service
+  namespace: tradegateway
+  labels:
+    app: cargo-tracking-service
+spec:
+  selector:
+    app: cargo-tracking-service
+  ports:
+    - name: http
+      port: 8092
+      targetPort: 8092
+    - name: metrics
+      port: 9092
+      targetPort: 9092
+---
+
+# ─── analytics-service ───────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: tradegateway
+  labels:
+    app: analytics-service
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analytics-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9093"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: analytics-service
+          image: tradegateway/analytics-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8093
+            - name: metrics
+              containerPort: 9093
+          env:
+            - name: PORT
+              value: "8093"
+            - name: METRICS_PORT
+              value: "9093"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: DELTA_LAKE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: delta-lake-url
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8093
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8093
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-service
+  namespace: tradegateway
+  labels:
+    app: analytics-service
+spec:
+  selector:
+    app: analytics-service
+  ports:
+    - name: http
+      port: 8093
+      targetPort: 8093
+    - name: metrics
+      port: 9093
+      targetPort: 9093
+---
+
+# ─── fluvio-consumer ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fluvio-consumer
+  namespace: tradegateway
+  labels:
+    app: fluvio-consumer
+    tier: backend
+    language: go
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fluvio-consumer
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: fluvio-consumer
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9094"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: fluvio-consumer
+          image: tradegateway/fluvio-consumer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8094
+            - name: metrics
+              containerPort: 9094
+          env:
+            - name: PORT
+              value: "8094"
+            - name: METRICS_PORT
+              value: "9094"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: FLUVIO_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: fluvio-endpoint
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8094
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8094
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fluvio-consumer
+  namespace: tradegateway
+  labels:
+    app: fluvio-consumer
+spec:
+  selector:
+    app: fluvio-consumer
+  ports:
+    - name: http
+      port: 8094
+      targetPort: 8094
+    - name: metrics
+      port: 9094
+      targetPort: 9094

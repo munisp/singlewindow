@@ -31,7 +31,7 @@ import {
   pilotReports,
   onboardingAnalytics,
 } from "../../drizzle/schema";
-import { eq, gte, lt, and, count, sql, avg, desc } from "drizzle-orm";
+import { eq, gte, lt, and, count, sql, avg, desc, inArray, isNotNull } from "drizzle-orm";
 
 export interface OnboardingDropOffStep {
   step: string;
@@ -166,7 +166,7 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
       submittedAt: declarations.submittedAt,
     })
     .from(declarations)
-    .where(sql`${declarations.status} = ANY(ARRAY[${sql.raw(processingStatuses.map(s => `'${s}'`).join(","))}]::text[]) AND ${declarations.submittedAt} IS NOT NULL`);
+    .where(and(inArray(declarations.status, processingStatuses as any[]), isNotNull(declarations.submittedAt)));
 
   let activeSlaBreaches = 0;
   for (const d of processingDecls) {

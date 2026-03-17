@@ -1,0 +1,82 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Development Environment Overrides
+# =============================================================================
+# Usage: helm upgrade tradegateway-dev ./tradegateway \
+#          -f values.yaml -f values-dev.yaml \
+#          --namespace tradegateway-dev
+# =============================================================================
+
+global:
+  environment: development
+  imagePullPolicy: Always  # Always pull latest in dev
+
+# Dev uses subcharts for all infrastructure
+postgresql:
+  enabled: true
+redis:
+  enabled: true
+kafka:
+  enabled: true
+
+# Dev: single replica for everything
+replicaCount:
+  webApi: 1
+  declarationService: 1
+  ogaService: 1
+  profileService: 1
+  paymentService: 1
+  temporalWorker: 1
+  mojaloopGateway: 1
+  cargoTrackingService: 1
+  analyticsService: 1
+  riskEngine: 1
+  sanctionsService: 1
+  anomalyDetection: 1
+  kycService: 1
+  tigerbeetleBridgeGo: 1
+  tigerbeetleBridgeRs: 1
+
+# Dev: autoscaling disabled
+autoscaling:
+  enabled: false
+
+# Dev: minimal resources
+resources:
+  webApi:
+    requests: { cpu: "50m", memory: "64Mi" }
+    limits:   { cpu: "200m", memory: "128Mi" }
+  declarationService:
+    requests: { cpu: "50m", memory: "64Mi" }
+    limits:   { cpu: "200m", memory: "128Mi" }
+  paymentService:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "500m", memory: "256Mi" }
+  riskEngine:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "1Gi" }
+
+# Dev: no TLS, simple ingress
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: tradegateway.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web-api
+          port: 3000
+  tls: []
+
+# Dev: PDB and network policy disabled
+security:
+  networkPolicy:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+
+monitoring:
+  prometheus:
+    scrapeInterval: "60s"
+  grafana:
+    enabled: false

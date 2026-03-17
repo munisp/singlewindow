@@ -1,0 +1,426 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Main CI/CD Pipeline
+# =============================================================================
+# Triggers:
+#   - Push to main → full build + deploy to production
+#   - Push to staging → full build + deploy to staging
+#   - Pull request → build + test + security scan (no deploy)
+#
+# Required GitHub Secrets:
+#   REGISTRY_URL          — Container registry URL (e.g. ghcr.io/tradegateway)
+#   REGISTRY_USERNAME     — Registry username
+#   REGISTRY_PASSWORD     — Registry password / token
+#   KUBECONFIG_STAGING    — Base64-encoded kubeconfig for staging cluster
+#   KUBECONFIG_PRODUCTION — Base64-encoded kubeconfig for production cluster
+#   DATABASE_URL_STAGING  — Staging database connection string
+#   DATABASE_URL_PRODUCTION — Production database connection string
+#   SNYK_TOKEN            — Snyk security scanning token
+#   SLACK_WEBHOOK_URL     — Slack notifications webhook
+# =============================================================================
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  REGISTRY: ${{ secrets.REGISTRY_URL || 'ghcr.io/tradegateway' }}
+  GO_VERSION: "1.22"
+  NODE_VERSION: "22"
+  RUST_VERSION: "1.78"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ─── 1. Detect Changes ──────────────────────────────────────────────────
+  changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    outputs:
+      web-api: ${{ steps.filter.outputs.web-api }}
+      go-services: ${{ steps.filter.outputs.go-services }}
+      rust-services: ${{ steps.filter.outputs.rust-services }}
+      python-services: ${{ steps.filter.outputs.python-services }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            web-api:
+              - 'client/**'
+              - 'server/**'
+              - 'drizzle/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+            go-services:
+              - 'services/go/**'
+              - 'microservices/**'
+            rust-services:
+              - 'services/rust/**'
+            python-services:
+              - 'microservices/risk-engine/**'
+              - 'microservices/sanctions-service/**'
+              - 'microservices/hs-classifier/**'
+              - 'microservices/anomaly-detection/**'
+            infra:
+              - 'infra/**'
+              - '.github/workflows/**'
+
+  # ─── 2. Web API: Test & Build ───────────────────────────────────────────
+  web-api-test:
+    name: Web API — Test & Typecheck
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.web-api == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: TypeScript check
+        run: pnpm exec tsc --noEmit
+      - name: Run tests
+        run: pnpm test
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_TEST || 'mysql://test:test@localhost:3306/test' }}
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: coverage/
+
+  web-api-build:
+    name: Web API — Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [changes, web-api-test]
+    if: needs.changes.outputs.web-api == 'true' || github.ref == 'refs/heads/main'
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/web-api
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_VERSION=${{ env.NODE_VERSION }}
+
+  # ─── 3. Go Services: Test & Build ──────────────────────────────────────
+  go-services-test:
+    name: Go Services — Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.go-services == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            services/go/**/go.sum
+            microservices/**/go.sum
+      - name: Test Go bridge (simulation mode)
+        run: |
+          cd services/go/tigerbeetle-bridge
+          go test ./... -v -race -timeout 60s
+      - name: Test temporal-worker
+        run: |
+          cd microservices/temporal-worker
+          go test ./... -v -race -timeout 120s
+      - name: Test payment-service
+        run: |
+          cd microservices/payment-service
+          go test ./... -v -race -timeout 60s
+      - name: Vet all Go services
+        run: |
+          for dir in services/go/*/  microservices/*/; do
+            if [ -f "${dir}go.mod" ]; then
+              echo "Vetting ${dir}..."
+              (cd "${dir}" && go vet ./...)
+            fi
+          done
+
+  go-services-build:
+    name: Go Services — Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [changes, go-services-test]
+    if: |
+      (needs.changes.outputs.go-services == 'true' || github.ref == 'refs/heads/main') &&
+      github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        service:
+          - { name: declaration-service, path: microservices/declaration-service }
+          - { name: payment-service, path: microservices/payment-service }
+          - { name: oga-hub, path: microservices/oga-hub }
+          - { name: cargo-tracking, path: microservices/cargo-tracking }
+          - { name: aeo-service, path: microservices/aeo-service }
+          - { name: post-clearance, path: microservices/post-clearance }
+          - { name: bond-service, path: microservices/bond-service }
+          - { name: free-zone, path: microservices/free-zone }
+          - { name: warehouse, path: microservices/warehouse }
+          - { name: temporal-worker, path: microservices/temporal-worker }
+          - { name: tigerbeetle-bridge-go, path: services/go/tigerbeetle-bridge }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Build and push ${{ matrix.service.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.path }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ matrix.service.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
+
+  # ─── 4. Python Services: Test & Build ──────────────────────────────────
+  python-services-test:
+    name: Python Services — Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.python-services == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Test risk-engine
+        run: |
+          cd microservices/risk-engine
+          pip install -r requirements.txt pytest pytest-asyncio
+          pytest tests/ -v --tb=short
+      - name: Test sanctions-service
+        run: |
+          cd microservices/sanctions-service
+          pip install -r requirements.txt pytest
+          pytest tests/ -v --tb=short
+
+  # ─── 5. Rust Services: Test & Build ────────────────────────────────────
+  rust-services-test:
+    name: Rust Services — Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust-services == 'true' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/rust/tigerbeetle-bridge
+      - name: Test Rust bridge (simulation mode)
+        run: |
+          cd services/rust/tigerbeetle-bridge
+          cargo test --no-default-features
+
+  # ─── 6. Security Scanning ───────────────────────────────────────────────
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [web-api-test]
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Snyk for Node.js dependencies
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --fail-on=all
+        continue-on-error: true
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          format: sarif
+          output: trivy-results.sarif
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+      - name: Secret scanning with Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── 7. Database Migration ──────────────────────────────────────────────
+  db-migrate-staging:
+    name: DB Migration — Staging
+    runs-on: ubuntu-latest
+    needs: [web-api-build]
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run migrations
+        run: pnpm db:push
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_STAGING }}
+
+  db-migrate-production:
+    name: DB Migration — Production
+    runs-on: ubuntu-latest
+    needs: [web-api-build]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run migrations
+        run: pnpm db:push
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+
+  # ─── 8. Deploy to Staging ───────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy — Staging
+    runs-on: ubuntu-latest
+    needs: [web-api-build, go-services-build, db-migrate-staging]
+    if: github.ref == 'refs/heads/staging'
+    environment:
+      name: staging
+      url: https://staging.tradegateway.gov
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install tradegateway ./infra/helm/tradegateway \
+            --namespace tradegateway \
+            --create-namespace \
+            -f ./infra/helm/tradegateway/values-staging.yaml \
+            --set global.image.tag=${{ github.sha }} \
+            --wait \
+            --timeout 10m
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/tradegateway-web-api -n tradegateway --timeout=5m
+          kubectl get pods -n tradegateway
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: "Staging deploy ${{ job.status }}: ${{ github.sha }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # ─── 9. Deploy to Production ────────────────────────────────────────────
+  deploy-production:
+    name: Deploy — Production
+    runs-on: ubuntu-latest
+    needs: [web-api-build, go-services-build, db-migrate-production, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://tradegateway.gov
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+      - name: Deploy with Helm (rolling update)
+        run: |
+          helm upgrade --install tradegateway ./infra/helm/tradegateway \
+            --namespace tradegateway \
+            --create-namespace \
+            -f ./infra/helm/tradegateway/values-production.yaml \
+            --set global.image.tag=${{ github.sha }} \
+            --wait \
+            --timeout 15m \
+            --atomic
+      - name: Verify production health
+        run: |
+          kubectl rollout status deployment/tradegateway-web-api -n tradegateway --timeout=5m
+          # Run smoke tests against production
+          curl -sf https://tradegateway.gov/health || exit 1
+      - name: Tag release
+        run: |
+          git tag "release-$(date -u +%Y%m%d)-${{ github.sha::8 }}"
+          git push origin --tags
+      - name: Notify Slack
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: "Production deploy ${{ job.status }}: ${{ github.sha }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

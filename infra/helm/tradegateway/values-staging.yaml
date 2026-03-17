@@ -1,0 +1,69 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Staging Environment Overrides
+# =============================================================================
+# Usage: helm upgrade tradegateway-staging ./tradegateway \
+#          -f values.yaml -f values-staging.yaml \
+#          --namespace tradegateway-staging
+# =============================================================================
+
+global:
+  environment: staging
+
+# Staging uses internal subcharts for convenience
+postgresql:
+  enabled: true
+redis:
+  enabled: true
+kafka:
+  enabled: true
+
+# Staging replica counts (reduced for cost)
+replicaCount:
+  webApi: 2
+  declarationService: 2
+  ogaService: 2
+  profileService: 1
+  paymentService: 2
+  temporalWorker: 2
+  mojaloopGateway: 1
+  cargoTrackingService: 1
+  analyticsService: 1
+  riskEngine: 2
+  sanctionsService: 1
+  anomalyDetection: 1
+
+# Staging autoscaling (disabled to save cost)
+autoscaling:
+  enabled: false
+
+# Staging resources (smaller)
+resources:
+  webApi:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "500m", memory: "256Mi" }
+  declarationService:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "500m", memory: "256Mi" }
+  paymentService:
+    requests: { cpu: "200m", memory: "256Mi" }
+    limits:   { cpu: "1000m", memory: "512Mi" }
+  riskEngine:
+    requests: { cpu: "200m", memory: "512Mi" }
+    limits:   { cpu: "1000m", memory: "2Gi" }
+
+ingress:
+  hosts:
+    - host: staging.tradegateway.gov
+      paths:
+        - path: /
+          pathType: Prefix
+          service: web-api
+          port: 3000
+  tls:
+    - secretName: tradegateway-staging-tls
+      hosts:
+        - staging.tradegateway.gov
+
+monitoring:
+  prometheus:
+    scrapeInterval: "30s"

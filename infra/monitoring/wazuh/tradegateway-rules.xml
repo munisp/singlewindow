@@ -1,0 +1,161 @@
+<!-- ==========================================================================
+     TradeGateway™ NGSWTP — Wazuh SIEM Custom Alert Rules
+     ==========================================================================
+     Place this file in: /var/ossec/etc/rules/tradegateway-rules.xml
+     Reload: systemctl reload wazuh-manager
+     ========================================================================== -->
+<group name="tradegateway,customs,trade">
+
+  <!-- ─── Authentication & Access ─────────────────────────────────────── -->
+  <rule id="100001" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="msg">authentication failed</field>
+    <field name="app">tradegateway-web-api</field>
+    <description>TradeGateway: Authentication failure</description>
+    <group>authentication_failed,tradegateway</group>
+  </rule>
+
+  <rule id="100002" level="14" frequency="5" timeframe="60">
+    <if_matched_sid>100001</if_matched_sid>
+    <same_source_ip/>
+    <description>TradeGateway: Brute-force authentication attempt (5 failures in 60s)</description>
+    <group>authentication_failures,brute_force,tradegateway</group>
+    <options>no_full_log</options>
+  </rule>
+
+  <rule id="100003" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="msg">unauthorized access attempt</field>
+    <field name="app">tradegateway-web-api</field>
+    <description>TradeGateway: Unauthorized access attempt to protected resource</description>
+    <group>access_control,tradegateway</group>
+  </rule>
+
+  <rule id="100004" level="15">
+    <decoded_as>json</decoded_as>
+    <field name="procedure">admin\.</field>
+    <field name="level">error</field>
+    <description>TradeGateway: Admin procedure error — possible privilege escalation attempt</description>
+    <group>privilege_escalation,tradegateway</group>
+  </rule>
+
+  <!-- ─── Declaration Fraud Indicators ────────────────────────────────── -->
+  <rule id="100010" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="msg">hs_code_mismatch</field>
+    <description>TradeGateway: HS code mismatch detected — possible tariff evasion</description>
+    <group>fraud,customs,tradegateway</group>
+  </rule>
+
+  <rule id="100011" level="14">
+    <decoded_as>json</decoded_as>
+    <field name="msg">sanctions_hit</field>
+    <description>TradeGateway: Sanctions screening hit — entity on watchlist</description>
+    <group>sanctions,compliance,tradegateway</group>
+    <options>alert_by_email</options>
+  </rule>
+
+  <rule id="100012" level="13">
+    <decoded_as>json</decoded_as>
+    <field name="msg">risk_score_override</field>
+    <field name="actor_role">customs_officer</field>
+    <description>TradeGateway: Manual risk score override by customs officer</description>
+    <group>audit,customs,tradegateway</group>
+  </rule>
+
+  <rule id="100013" level="15">
+    <decoded_as>json</decoded_as>
+    <field name="msg">declaration_status_rollback</field>
+    <description>TradeGateway: Declaration status rolled back — possible manipulation</description>
+    <group>fraud,audit,tradegateway</group>
+    <options>alert_by_email</options>
+  </rule>
+
+  <!-- ─── Payment Anomalies ────────────────────────────────────────────── -->
+  <rule id="100020" level="14">
+    <decoded_as>json</decoded_as>
+    <field name="msg">payment_amount_mismatch</field>
+    <description>TradeGateway: Payment amount mismatch between declaration and ledger</description>
+    <group>payment,fraud,tradegateway</group>
+    <options>alert_by_email</options>
+  </rule>
+
+  <rule id="100021" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="msg">tigerbeetle_dual_write_failure</field>
+    <description>TradeGateway: TigerBeetle dual-write failure — ledger may be inconsistent</description>
+    <group>payment,data_integrity,tradegateway</group>
+  </rule>
+
+  <rule id="100022" level="15">
+    <decoded_as>json</decoded_as>
+    <field name="msg">tigerbeetle_simulation_mode</field>
+    <description>TradeGateway: TigerBeetle running in simulation mode in production</description>
+    <group>payment,configuration,tradegateway</group>
+    <options>alert_by_email</options>
+  </rule>
+
+  <rule id="100023" level="13" frequency="3" timeframe="300">
+    <decoded_as>json</decoded_as>
+    <field name="msg">payment_temporal_fallback</field>
+    <description>TradeGateway: Temporal payment fallback triggered 3+ times in 5 minutes</description>
+    <group>payment,availability,tradegateway</group>
+  </rule>
+
+  <!-- ─── API Abuse ─────────────────────────────────────────────────────── -->
+  <rule id="100030" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="msg">rate_limit_exceeded</field>
+    <description>TradeGateway: API rate limit exceeded</description>
+    <group>api_abuse,tradegateway</group>
+  </rule>
+
+  <rule id="100031" level="13" frequency="10" timeframe="60">
+    <if_matched_sid>100030</if_matched_sid>
+    <same_source_ip/>
+    <description>TradeGateway: Sustained API rate limit violations (10 in 60s) — possible DDoS</description>
+    <group>api_abuse,ddos,tradegateway</group>
+    <options>alert_by_email</options>
+  </rule>
+
+  <rule id="100032" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="msg">sql_injection_attempt</field>
+    <description>TradeGateway: Possible SQL injection attempt detected by WAF</description>
+    <group>web_attack,injection,tradegateway</group>
+  </rule>
+
+  <!-- ─── Data Exfiltration ─────────────────────────────────────────────── -->
+  <rule id="100040" level="13">
+    <decoded_as>json</decoded_as>
+    <field name="msg">bulk_export_initiated</field>
+    <field name="record_count">\d{4,}</field>
+    <description>TradeGateway: Large bulk data export (1000+ records) initiated</description>
+    <group>data_exfiltration,audit,tradegateway</group>
+  </rule>
+
+  <rule id="100041" level="14">
+    <decoded_as>json</decoded_as>
+    <field name="msg">audit_log_access</field>
+    <field name="actor_role">^(?!admin).*$</field>
+    <description>TradeGateway: Non-admin user accessed audit log</description>
+    <group>data_exfiltration,access_control,tradegateway</group>
+  </rule>
+
+  <!-- ─── Infrastructure ───────────────────────────────────────────────── -->
+  <rule id="100050" level="15">
+    <decoded_as>json</decoded_as>
+    <field name="msg">database_connection_pool_exhausted</field>
+    <description>TradeGateway: Database connection pool exhausted — service degraded</description>
+    <group>availability,database,tradegateway</group>
+    <options>alert_by_email</options>
+  </rule>
+
+  <rule id="100051" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="msg">kafka_consumer_lag_critical</field>
+    <description>TradeGateway: Kafka consumer lag is critical — event processing delayed</description>
+    <group>availability,messaging,tradegateway</group>
+  </rule>
+
+</group>

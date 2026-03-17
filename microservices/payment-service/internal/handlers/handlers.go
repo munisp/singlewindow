@@ -426,13 +426,21 @@ func (h *Handler) MojaloopCallback(w http.ResponseWriter, r *http.Request) {
 		// Dispatch ConfirmPaymentWorkflow via Temporal so the retry policy
 		// (5 attempts, exponential backoff) handles transient TB/Postgres failures.
 		// Falls back to a direct synchronous call if Temporal is unavailable.
-		wfErr := h.temporal.StartConfirmPaymentWorkflow(ctx, inv.ID, callback.TransferID)
+		// The payment_temporal_fallback_total Prometheus counter is incremented on fallback
+		// so ops teams can detect Temporal connectivity issues.
+		tbTxID := fmt.Sprintf("tb-%d-mojaloop", inv.ID)
+		wfErr := h.temporal.StartConfirmPaymentWorkflow(ctx, inv.ID, callback.TransferID, tbTxID, "mojaloop")
 		if wfErr == nil {
 			log.Printf("[payment-service] Mojaloop COMMITTED: ConfirmPaymentWorkflow dispatched for invoice %d", inv.ID)
 		} else {
 			// Temporal unavailable — fall back to direct synchronous confirmation.
+			// Increment Prometheus counter to surface this in monitoring.
+			if wfErr.Error() == "temporal server unavailable" {
+				h.temporal.RecordFallback("unavailable")
+			} else {
+				h.temporal.RecordFallback("dispatch_error")
+			}
 			log.Printf("[payment-service] Temporal unavailable (%v) — falling back to direct ConfirmPayment for invoice %d", wfErr, inv.ID)
-			tbTxID := fmt.Sprintf("tb-%d-mojaloop", inv.ID)
 			h.store.UpdateInvoicePayment(ctx, inv.ID, callback.TransferID, tbTxID, "mojaloop")
 			go h.pubsub.Publish(context.Background(), "payment.confirmed", pubsub.PaymentConfirmedEvent{
 				InvoiceId:     inv.ID,

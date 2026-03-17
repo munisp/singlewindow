@@ -1,0 +1,80 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Production Environment Overrides
+# =============================================================================
+# Usage: helm upgrade tradegateway ./tradegateway \
+#          -f values.yaml -f values-production.yaml \
+#          --namespace tradegateway
+# =============================================================================
+
+global:
+  environment: production
+
+# Production uses external managed databases — disable subcharts
+postgresql:
+  enabled: false
+redis:
+  enabled: false
+kafka:
+  enabled: false
+
+# Production replica counts (higher availability)
+replicaCount:
+  webApi: 5
+  declarationService: 5
+  ogaService: 5
+  profileService: 3
+  paymentService: 5
+  temporalWorker: 5
+  mojaloopGateway: 3
+  cargoTrackingService: 3
+  analyticsService: 3
+  riskEngine: 5
+  sanctionsService: 3
+  anomalyDetection: 3
+
+# Production infrastructure addresses (Kubernetes DNS)
+infrastructure:
+  temporal:
+    address: "temporal-frontend.temporal.svc.cluster.local:7233"
+  kafka:
+    brokers: "kafka-0.kafka-headless.kafka.svc.cluster.local:9092,kafka-1.kafka-headless.kafka.svc.cluster.local:9092,kafka-2.kafka-headless.kafka.svc.cluster.local:9092"
+  redis:
+    host: "redis-master.redis.svc.cluster.local"
+  keycloak:
+    url: "https://auth.tradegateway.gov"
+  tigerbeetle:
+    address: "tigerbeetle-0.tigerbeetle.svc.cluster.local:3000"
+
+# Production autoscaling — more aggressive
+autoscaling:
+  enabled: true
+  declarationService:
+    minReplicas: 5
+    maxReplicas: 20
+  ogaService:
+    minReplicas: 5
+    maxReplicas: 30
+  paymentService:
+    minReplicas: 5
+    maxReplicas: 20
+  riskEngine:
+    minReplicas: 5
+    maxReplicas: 20
+
+# Production resource limits (larger)
+resources:
+  paymentService:
+    requests: { cpu: "1000m", memory: "1Gi" }
+    limits:   { cpu: "4000m", memory: "2Gi" }
+  riskEngine:
+    requests: { cpu: "1000m", memory: "2Gi" }
+    limits:   { cpu: "4000m", memory: "8Gi" }
+  analyticsService:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "4000m", memory: "4Gi" }
+
+monitoring:
+  prometheus:
+    scrapeInterval: "10s"
+  grafana:
+    enabled: true

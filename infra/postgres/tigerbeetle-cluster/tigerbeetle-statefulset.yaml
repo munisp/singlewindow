@@ -1,0 +1,171 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — TigerBeetle Production StatefulSet
+# =============================================================================
+# Deploys a 3-node TigerBeetle cluster with:
+#   - Persistent storage (fast NVMe SSD)
+#   - Anti-affinity rules (one replica per node)
+#   - Liveness and readiness probes
+#   - PodDisruptionBudget (min 2 available)
+#
+# TigerBeetle requires cluster_id and replica_id to be stable across restarts.
+# The StatefulSet ordinal (0, 1, 2) maps directly to replica_id.
+#
+# Initialize the cluster (first time only):
+#   kubectl exec tigerbeetle-0 -- tigerbeetle format \
+#     --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
+#   kubectl exec tigerbeetle-1 -- tigerbeetle format \
+#     --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
+#   kubectl exec tigerbeetle-2 -- tigerbeetle format \
+#     --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
+# =============================================================================
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tigerbeetle
+  namespace: tradegateway
+  labels:
+    app: tigerbeetle
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: financial-ledger
+spec:
+  serviceName: tigerbeetle-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tigerbeetle
+  template:
+    metadata:
+      labels:
+        app: tigerbeetle
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+    spec:
+      # Anti-affinity: one TB replica per Kubernetes node
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: [tigerbeetle]
+              topologyKey: kubernetes.io/hostname
+
+      # Tolerate dedicated storage nodes
+      tolerations:
+        - key: "storage"
+          operator: "Equal"
+          value: "nvme"
+          effect: "NoSchedule"
+
+      terminationGracePeriodSeconds: 60
+
+      initContainers:
+        - name: format-data
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+          command:
+            - sh
+            - -c
+            - |
+              REPLICA_ID=${HOSTNAME##*-}
+              DATA_FILE="/data/0_${REPLICA_ID}.tigerbeetle"
+              if [ ! -f "$DATA_FILE" ]; then
+                echo "Formatting TigerBeetle data file: $DATA_FILE"
+                tigerbeetle format \
+                  --cluster=0 \
+                  --replica=${REPLICA_ID} \
+                  --replica-count=3 \
+                  "$DATA_FILE"
+              else
+                echo "Data file already exists: $DATA_FILE"
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+      containers:
+        - name: tigerbeetle
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+          command:
+            - sh
+            - -c
+            - |
+              REPLICA_ID=${HOSTNAME##*-}
+              DATA_FILE="/data/0_${REPLICA_ID}.tigerbeetle"
+              # Build addresses: pod-0:3000,pod-1:3000,pod-2:3000
+              ADDRESSES="tigerbeetle-0.tigerbeetle-headless.tradegateway.svc.cluster.local:3000,tigerbeetle-1.tigerbeetle-headless.tradegateway.svc.cluster.local:3000,tigerbeetle-2.tigerbeetle-headless.tradegateway.svc.cluster.local:3000"
+              exec tigerbeetle start \
+                --addresses="${ADDRESSES}" \
+                "$DATA_FILE"
+          ports:
+            - name: tb
+              containerPort: 3000
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "2000m"
+              memory: "4Gi"
+            limits:
+              cpu: "4000m"
+              memory: "8Gi"
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: "fast-nvme-ssd"
+        resources:
+          requests:
+            storage: 500Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle-headless
+  namespace: tradegateway
+  labels:
+    app: tigerbeetle
+spec:
+  clusterIP: None
+  selector:
+    app: tigerbeetle
+  ports:
+    - name: tb
+      port: 3000
+      targetPort: 3000
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tigerbeetle-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: tigerbeetle

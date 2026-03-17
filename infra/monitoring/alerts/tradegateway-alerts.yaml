@@ -1,0 +1,319 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — Prometheus Alerting Rules
+# =============================================================================
+# Apply: kubectl apply -f tradegateway-alerts.yaml -n monitoring
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tradegateway-alerts
+  namespace: monitoring
+  labels:
+    app: tradegateway
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+
+    # ─── Service Availability ──────────────────────────────────────────────
+    - name: tradegateway.availability
+      interval: 30s
+      rules:
+        - alert: ServiceDown
+          expr: |
+            up{job=~"tradegateway-.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "TradeGateway service {{ $labels.job }} is down"
+            description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 2 minutes."
+            runbook: "https://runbooks.tradegateway.gov/service-down"
+
+        - alert: HighPodRestartRate
+          expr: |
+            rate(kube_pod_container_status_restarts_total{namespace="tradegateway"}[15m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} is restarting frequently"
+            description: "Pod {{ $labels.pod }} has restarted more than once in the last 15 minutes."
+
+        - alert: PodCrashLooping
+          expr: |
+            kube_pod_container_status_waiting_reason{namespace="tradegateway", reason="CrashLoopBackOff"} == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pod {{ $labels.pod }} is in CrashLoopBackOff"
+            description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is crash-looping."
+
+    # ─── API Performance ───────────────────────────────────────────────────
+    - name: tradegateway.api
+      interval: 30s
+      rules:
+        - alert: HighAPIErrorRate
+          expr: |
+            sum(rate(http_requests_total{job="tradegateway-web-api", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="tradegateway-web-api"}[5m])) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            team: backend
+          annotations:
+            summary: "API error rate exceeds 5%"
+            description: "The TradeGateway API error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+            runbook: "https://runbooks.tradegateway.gov/high-error-rate"
+
+        - alert: HighAPILatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{job="tradegateway-web-api"}[5m])) by (le)
+            ) > 2
+          for: 5m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: "API P95 latency exceeds 2 seconds"
+            description: "P95 API latency is {{ $value | humanizeDuration }}."
+
+        - alert: DeclarationProcessingBacklog
+          expr: |
+            tradegateway_declaration_queue_depth > 500
+          for: 10m
+          labels:
+            severity: warning
+            team: customs
+          annotations:
+            summary: "Declaration processing backlog is high"
+            description: "{{ $value }} declarations are queued for processing."
+
+    # ─── Payment & Financial ───────────────────────────────────────────────
+    - name: tradegateway.payments
+      interval: 30s
+      rules:
+        - alert: PaymentFailureRateHigh
+          expr: |
+            sum(rate(tradegateway_payment_failures_total[5m]))
+            /
+            sum(rate(tradegateway_payment_attempts_total[5m])) > 0.02
+          for: 5m
+          labels:
+            severity: critical
+            team: payments
+          annotations:
+            summary: "Payment failure rate exceeds 2%"
+            description: "Payment failure rate is {{ $value | humanizePercentage }}."
+            runbook: "https://runbooks.tradegateway.gov/payment-failures"
+
+        - alert: TemporalFallbackActive
+          expr: |
+            rate(payment_temporal_fallback_total[5m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            team: payments
+          annotations:
+            summary: "Payment service is using Temporal fallback path"
+            description: "The payment service cannot reach Temporal and is falling back to direct HTTP calls. Temporal connectivity should be investigated."
+
+        - alert: TigerBeetleUnreachable
+          expr: |
+            tradegateway_tigerbeetle_bridge_healthy == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: payments
+          annotations:
+            summary: "TigerBeetle financial ledger is unreachable"
+            description: "The TigerBeetle bridge reports the ledger is unhealthy. No payments can be processed."
+            runbook: "https://runbooks.tradegateway.gov/tigerbeetle-down"
+
+        - alert: TigerBeetleSimulationMode
+          expr: |
+            tradegateway_tigerbeetle_bridge_mode{mode="simulation"} == 1
+          for: 1m
+          labels:
+            severity: warning
+            team: payments
+          annotations:
+            summary: "TigerBeetle is running in simulation mode"
+            description: "The TigerBeetle bridge is in simulation mode. Financial ledger entries are NOT being persisted to a real TigerBeetle cluster."
+
+    # ─── Database ──────────────────────────────────────────────────────────
+    - name: tradegateway.database
+      interval: 30s
+      rules:
+        - alert: PostgreSQLDown
+          expr: |
+            pg_up == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "PostgreSQL is down"
+            description: "PostgreSQL instance {{ $labels.instance }} is unreachable."
+            runbook: "https://runbooks.tradegateway.gov/postgres-down"
+
+        - alert: PostgreSQLHighConnections
+          expr: |
+            sum(pg_stat_activity_count) / pg_settings_max_connections > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "PostgreSQL connection pool is near capacity"
+            description: "{{ $value | humanizePercentage }} of max connections are in use."
+
+        - alert: PostgreSQLReplicationLag
+          expr: |
+            pg_replication_lag > 30
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "PostgreSQL replica is lagging"
+            description: "Replication lag is {{ $value | humanizeDuration }}."
+
+        - alert: PostgreSQLLongRunningQuery
+          expr: |
+            max(pg_stat_activity_max_tx_duration{datname="tradegateway"}) > 300
+          for: 5m
+          labels:
+            severity: warning
+            team: backend
+          annotations:
+            summary: "Long-running PostgreSQL query detected"
+            description: "A query has been running for {{ $value | humanizeDuration }}."
+
+    # ─── Kafka ─────────────────────────────────────────────────────────────
+    - name: tradegateway.kafka
+      interval: 30s
+      rules:
+        - alert: KafkaConsumerLagHigh
+          expr: |
+            kafka_consumergroup_lag{topic=~"tradegateway.*"} > 10000
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Kafka consumer lag is high for topic {{ $labels.topic }}"
+            description: "Consumer group {{ $labels.consumergroup }} has a lag of {{ $value }} messages on topic {{ $labels.topic }}."
+
+        - alert: KafkaBrokerDown
+          expr: |
+            kafka_brokers < 3
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Kafka cluster has fewer than 3 brokers"
+            description: "Only {{ $value }} Kafka brokers are available. Cluster health is degraded."
+
+    # ─── Risk Engine ───────────────────────────────────────────────────────
+    - name: tradegateway.risk
+      interval: 30s
+      rules:
+        - alert: RiskEngineHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(risk_engine_scoring_duration_seconds_bucket[5m])) by (le)
+            ) > 5
+          for: 5m
+          labels:
+            severity: warning
+            team: risk
+          annotations:
+            summary: "Risk engine P95 scoring latency exceeds 5 seconds"
+            description: "Risk scoring P95 latency is {{ $value | humanizeDuration }}. SLA requires < 5 seconds."
+
+        - alert: SanctionsListStale
+          expr: |
+            (time() - tradegateway_sanctions_list_last_updated_timestamp) > 86400
+          for: 1h
+          labels:
+            severity: warning
+            team: compliance
+          annotations:
+            summary: "Sanctions screening list has not been updated in 24 hours"
+            description: "The sanctions list was last updated {{ $value | humanizeDuration }} ago."
+
+    # ─── SLA Compliance ────────────────────────────────────────────────────
+    - name: tradegateway.sla
+      interval: 60s
+      rules:
+        - alert: GreenLaneClearanceExceedsSLA
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(tradegateway_clearance_duration_seconds_bucket{lane="green"}[1h])) by (le)
+            ) > 14400  # 4 hours in seconds
+          for: 30m
+          labels:
+            severity: warning
+            team: customs
+          annotations:
+            summary: "Green-lane clearance P95 exceeds 4-hour SLA"
+            description: "Green-lane P95 clearance time is {{ $value | humanizeDuration }}. SLA is 4 hours."
+
+        - alert: RedLaneClearanceExceedsSLA
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(tradegateway_clearance_duration_seconds_bucket{lane="red"}[1h])) by (le)
+            ) > 259200  # 72 hours in seconds
+          for: 1h
+          labels:
+            severity: warning
+            team: customs
+          annotations:
+            summary: "Red-lane clearance P95 exceeds 72-hour SLA"
+            description: "Red-lane P95 clearance time is {{ $value | humanizeDuration }}."
+
+    # ─── Infrastructure ────────────────────────────────────────────────────
+    - name: tradegateway.infrastructure
+      interval: 30s
+      rules:
+        - alert: NodeDiskPressure
+          expr: |
+            (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.instance }} disk usage exceeds 85%"
+            description: "Available disk space is {{ $value | humanizePercentage }}."
+
+        - alert: NodeMemoryPressure
+          expr: |
+            (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.instance }} memory usage exceeds 90%"
+            description: "Available memory is {{ $value | humanizePercentage }}."
+
+        - alert: PersistentVolumeNearFull
+          expr: |
+            kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes < 0.10
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "PersistentVolume {{ $labels.persistentvolumeclaim }} is 90% full"
+            description: "PVC {{ $labels.persistentvolumeclaim }} has {{ $value | humanizePercentage }} available."

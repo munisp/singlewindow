@@ -1,0 +1,170 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Loki Log Aggregation Configuration
+# =============================================================================
+# Loki is the log aggregation backend for all TradeGateway services.
+# Promtail agents on each node ship logs to Loki; Grafana queries Loki.
+#
+# Deploy: helm upgrade --install loki grafana/loki-stack \
+#           -f loki-config.yaml -n monitoring
+# =============================================================================
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+common:
+  instance_addr: 0.0.0.0
+  path_prefix: /var/loki
+  storage:
+    s3:
+      endpoint: ${S3_ENDPOINT:-}
+      bucketnames: tradegateway-logs
+      region: ${AWS_REGION:-ap-southeast-1}
+      access_key_id: ${AWS_ACCESS_KEY_ID}
+      secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+      insecure: false
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+
+memberlist:
+  join_members:
+    - loki-memberlist.monitoring.svc.cluster.local:7946
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: tradegateway_index_
+        period: 24h
+
+ingester:
+  chunk_idle_period: 30m
+  chunk_block_size: 262144
+  chunk_retain_period: 1m
+  max_transfer_retries: 0
+  wal:
+    enabled: true
+    dir: /var/loki/wal
+
+querier:
+  max_concurrent: 20
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+limits_config:
+  # Retention: 90 days for all logs
+  retention_period: 2160h
+  # Per-stream rate limits
+  ingestion_rate_mb: 64
+  ingestion_burst_size_mb: 128
+  per_stream_rate_limit: 32MB
+  per_stream_rate_limit_burst: 64MB
+  # Query limits
+  max_query_parallelism: 32
+  max_query_length: 0
+  max_entries_limit_per_query: 50000
+
+ruler:
+  alertmanager_url: http://alertmanager.monitoring.svc.cluster.local:9093
+  storage:
+    type: local
+    local:
+      directory: /var/loki/rules
+  rule_path: /var/loki/rules-temp
+  enable_api: true
+
+---
+# =============================================================================
+# Promtail Configuration — ships logs from all pods to Loki
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: monitoring
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+
+    positions:
+      filename: /tmp/positions.yaml
+
+    clients:
+      - url: http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+
+    scrape_configs:
+      # ─── TradeGateway namespace pods ──────────────────────────────────────
+      - job_name: tradegateway-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [tradegateway]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          # Add environment label from pod annotation
+          - source_labels: [__meta_kubernetes_pod_annotation_tradegateway_environment]
+            target_label: environment
+        pipeline_stages:
+          # Parse JSON logs from Go services
+          - match:
+              selector: '{app=~"declaration-service|payment-service|risk-engine|oga-hub|cargo-tracking|aeo-service|post-clearance|bond-service|free-zone|warehouse|sanctions-service"}'
+              stages:
+                - json:
+                    expressions:
+                      level: level
+                      msg: msg
+                      trace_id: trace_id
+                      span_id: span_id
+                      declaration_id: declaration_id
+                      trader_id: trader_id
+                      duration_ms: duration_ms
+                - labels:
+                    level:
+                    trace_id:
+                - metrics:
+                    log_lines_total:
+                      type: Counter
+                      description: "Total number of log lines"
+                      prefix: tradegateway_
+                      source: level
+                      config:
+                        action: inc
+          # Parse structured logs from Node.js tRPC server
+          - match:
+              selector: '{app="tradegateway-web-api"}'
+              stages:
+                - json:
+                    expressions:
+                      level: level
+                      msg: message
+                      user_id: userId
+                      procedure: procedure
+                - labels:
+                    level:
+                    procedure:
+          # Drop health check noise
+          - drop:
+              expression: ".*GET /health.*"

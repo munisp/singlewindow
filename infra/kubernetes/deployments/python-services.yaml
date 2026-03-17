@@ -1,0 +1,694 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Kubernetes Deployments: Python AI/ML Microservices
+# =============================================================================
+# Covers: risk-engine, sanctions-service, anomaly-detection, kyc-service,
+#         deltalake-svc, flink-cep-svc, sedona-svc, gnn-risk
+# =============================================================================
+
+# ─── risk-engine ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-engine
+  namespace: tradegateway
+  labels:
+    app: risk-engine
+    tier: ai
+    language: python
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: risk-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: risk-engine
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9087"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "risk-engine"
+        dapr.io/app-port: "8087"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      initContainers:
+        - name: model-loader
+          image: tradegateway/risk-engine:latest
+          command: ["python3", "-c", "import os; print('Models ready' if os.path.exists('/app/models') else 'No models')"]
+          volumeMounts:
+            - name: model-cache
+              mountPath: /app/models
+      containers:
+        - name: risk-engine
+          image: tradegateway/risk-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8087
+            - name: metrics
+              containerPort: 9087
+          env:
+            - name: PORT
+              value: "8087"
+            - name: METRICS_PORT
+              value: "9087"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: MODEL_PATH
+              value: "/app/models"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+          volumeMounts:
+            - name: model-cache
+              mountPath: /app/models
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8087
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8087
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-engine
+  namespace: tradegateway
+  labels:
+    app: risk-engine
+spec:
+  selector:
+    app: risk-engine
+  ports:
+    - name: http
+      port: 8087
+      targetPort: 8087
+    - name: metrics
+      port: 9087
+      targetPort: 9087
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-engine-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-engine
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: risk-engine-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: risk-engine
+---
+
+# ─── sanctions-service ───────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sanctions-service
+  namespace: tradegateway
+  labels:
+    app: sanctions-service
+    tier: ai
+    language: python
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sanctions-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sanctions-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9088"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "sanctions-service"
+        dapr.io/app-port: "8088"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: sanctions-service
+          image: tradegateway/sanctions-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8088
+            - name: metrics
+              containerPort: 9088
+          env:
+            - name: PORT
+              value: "8088"
+            - name: METRICS_PORT
+              value: "9088"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: OFAC_LIST_URL
+              value: "https://www.treasury.gov/ofac/downloads/sdn.xml"
+            - name: UN_SANCTIONS_URL
+              value: "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8088
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8088
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sanctions-service
+  namespace: tradegateway
+  labels:
+    app: sanctions-service
+spec:
+  selector:
+    app: sanctions-service
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
+    - name: metrics
+      port: 9088
+      targetPort: 9088
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sanctions-service-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: sanctions-service
+---
+
+# ─── anomaly-detection ───────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anomaly-detection
+  namespace: tradegateway
+  labels:
+    app: anomaly-detection
+    tier: ai
+    language: python
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: anomaly-detection
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: anomaly-detection
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9091"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "anomaly-detection"
+        dapr.io/app-port: "8091"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: anomaly-detection
+          image: tradegateway/anomaly-detection:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8091
+            - name: metrics
+              containerPort: 9091
+          env:
+            - name: PORT
+              value: "8091"
+            - name: METRICS_PORT
+              value: "9091"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: MODEL_PATH
+              value: "/app/models"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+          volumeMounts:
+            - name: model-cache
+              mountPath: /app/models
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8091
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8091
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: model-cache-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anomaly-detection
+  namespace: tradegateway
+  labels:
+    app: anomaly-detection
+spec:
+  selector:
+    app: anomaly-detection
+  ports:
+    - name: http
+      port: 8091
+      targetPort: 8091
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+---
+
+# ─── kyc-service ─────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyc-service
+  namespace: tradegateway
+  labels:
+    app: kyc-service
+    tier: ai
+    language: python
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kyc-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: kyc-service
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9095"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "kyc-service"
+        dapr.io/app-port: "8095"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: kyc-service
+          image: tradegateway/kyc-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8095
+            - name: metrics
+              containerPort: 9095
+          env:
+            - name: PORT
+              value: "8095"
+            - name: METRICS_PORT
+              value: "9095"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-url
+            - name: KEYCLOAK_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: keycloak-url
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8095
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8095
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kyc-service
+  namespace: tradegateway
+  labels:
+    app: kyc-service
+spec:
+  selector:
+    app: kyc-service
+  ports:
+    - name: http
+      port: 8095
+      targetPort: 8095
+    - name: metrics
+      port: 9095
+      targetPort: 9095
+---
+
+# ─── deltalake-svc ───────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deltalake-svc
+  namespace: tradegateway
+  labels:
+    app: deltalake-svc
+    tier: data
+    language: python
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: deltalake-svc
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: deltalake-svc
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9096"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: deltalake-svc
+          image: tradegateway/deltalake-svc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8096
+            - name: metrics
+              containerPort: 9096
+          env:
+            - name: PORT
+              value: "8096"
+            - name: METRICS_PORT
+              value: "9096"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: DELTA_LAKE_PATH
+              value: "/data/delta"
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: kafka-brokers
+            - name: S3_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: s3-endpoint
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: s3-access-key
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: s3-secret-key
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+            limits:
+              cpu: "4000m"
+              memory: "8Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deltalake-svc
+  namespace: tradegateway
+  labels:
+    app: deltalake-svc
+spec:
+  selector:
+    app: deltalake-svc
+  ports:
+    - name: http
+      port: 8096
+      targetPort: 8096
+    - name: metrics
+      port: 9096
+      targetPort: 9096
+---
+
+# ─── sedona-svc (Geospatial) ─────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sedona-svc
+  namespace: tradegateway
+  labels:
+    app: sedona-svc
+    tier: data
+    language: python
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sedona-svc
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sedona-svc
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9097"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: sedona-svc
+          image: tradegateway/sedona-svc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8097
+            - name: metrics
+              containerPort: 9097
+          env:
+            - name: PORT
+              value: "8097"
+            - name: METRICS_PORT
+              value: "9097"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: SPARK_MASTER
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: spark-master
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "4Gi"
+            limits:
+              cpu: "4000m"
+              memory: "16Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sedona-svc
+  namespace: tradegateway
+  labels:
+    app: sedona-svc
+spec:
+  selector:
+    app: sedona-svc
+  ports:
+    - name: http
+      port: 8097
+      targetPort: 8097
+    - name: metrics
+      port: 9097
+      targetPort: 9097
