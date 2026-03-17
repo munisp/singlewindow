@@ -18,6 +18,7 @@ import (
 	"github.com/tradegateway/payment-service/internal/handlers"
 	"github.com/tradegateway/payment-service/internal/pubsub"
 	"github.com/tradegateway/payment-service/internal/store"
+	"github.com/tradegateway/payment-service/internal/temporal"
 	"github.com/tradegateway/payment-service/internal/tigerbeetle"
 )
 
@@ -27,6 +28,7 @@ func main() {
 	dbURL := getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
 	tbAddr := getEnv("TIGERBEETLE_ADDRESS", "localhost:3000")
 	mojaloopURL := getEnv("MOJALOOP_URL", "http://localhost:3001")
+	temporalAddr := getEnv("TEMPORAL_ADDRESS", "localhost:7233")
 
 	log.Printf("[payment-service] Starting on port %s", port)
 
@@ -47,11 +49,15 @@ func main() {
 	// Runs in a goroutine so it does not block the HTTP server from starting.
 	go tigerbeetle.SeedAccounts(tb)
 
+	// Initialize Temporal client (graceful degradation if unavailable)
+	tc := temporal.New(temporalAddr)
+	defer tc.Close()
+
 	// Initialize Dapr pub/sub client
 	ps := pubsub.New(daprPort)
 
 	// Initialize handlers
-	h := handlers.New(st, ps, tb, mojaloopURL)
+	h := handlers.New(st, ps, tb, tc, mojaloopURL)
 
 	mux := http.NewServeMux()
 

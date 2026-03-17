@@ -15,6 +15,7 @@ import (
 
 	"github.com/tradegateway/payment-service/internal/pubsub"
 	"github.com/tradegateway/payment-service/internal/store"
+	"github.com/tradegateway/payment-service/internal/temporal"
 	"github.com/tradegateway/payment-service/internal/tigerbeetle"
 )
 
@@ -23,15 +24,17 @@ type Handler struct {
 	store       *store.Store
 	pubsub      *pubsub.Client
 	tb          tigerbeetle.Client
+	temporal    *temporal.Client
 	mojaloopURL string
 	httpClient  *http.Client
 }
 
-func New(st *store.Store, ps *pubsub.Client, tb tigerbeetle.Client, mojaloopURL string) *Handler {
+func New(st *store.Store, ps *pubsub.Client, tb tigerbeetle.Client, tc *temporal.Client, mojaloopURL string) *Handler {
 	return &Handler{
 		store:       st,
 		pubsub:      ps,
 		tb:          tb,
+		temporal:    tc,
 		mojaloopURL: mojaloopURL,
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 	}
@@ -420,19 +423,29 @@ func (h *Handler) MojaloopCallback(w http.ResponseWriter, r *http.Request) {
 
 	switch callback.State {
 	case "COMMITTED":
-		tbTxID := fmt.Sprintf("tb-%d-mojaloop", inv.ID)
-		h.store.UpdateInvoicePayment(ctx, inv.ID, callback.TransferID, tbTxID, "mojaloop")
-		go h.pubsub.Publish(context.Background(), "payment.confirmed", pubsub.PaymentConfirmedEvent{
-			InvoiceId:     inv.ID,
-			DeclarationId: inv.DeclarationId,
-			TraderId:      inv.TraderId,
-			Amount:        inv.TotalAmount,
-			Currency:      inv.Currency,
-			MojaloopTxID:  callback.TransferID,
-			TBTransferId:  tbTxID,
-			PaidAt:        time.Now().UTC(),
-		})
-		log.Printf("[payment-service] Mojaloop COMMITTED: invoice %d paid", inv.ID)
+		// Dispatch ConfirmPaymentWorkflow via Temporal so the retry policy
+		// (5 attempts, exponential backoff) handles transient TB/Postgres failures.
+		// Falls back to a direct synchronous call if Temporal is unavailable.
+		wfErr := h.temporal.StartConfirmPaymentWorkflow(ctx, inv.ID, callback.TransferID)
+		if wfErr == nil {
+			log.Printf("[payment-service] Mojaloop COMMITTED: ConfirmPaymentWorkflow dispatched for invoice %d", inv.ID)
+		} else {
+			// Temporal unavailable — fall back to direct synchronous confirmation.
+			log.Printf("[payment-service] Temporal unavailable (%v) — falling back to direct ConfirmPayment for invoice %d", wfErr, inv.ID)
+			tbTxID := fmt.Sprintf("tb-%d-mojaloop", inv.ID)
+			h.store.UpdateInvoicePayment(ctx, inv.ID, callback.TransferID, tbTxID, "mojaloop")
+			go h.pubsub.Publish(context.Background(), "payment.confirmed", pubsub.PaymentConfirmedEvent{
+				InvoiceId:     inv.ID,
+				DeclarationId: inv.DeclarationId,
+				TraderId:      inv.TraderId,
+				Amount:        inv.TotalAmount,
+				Currency:      inv.Currency,
+				MojaloopTxID:  callback.TransferID,
+				TBTransferId:  tbTxID,
+				PaidAt:        time.Now().UTC(),
+			})
+		}
+		log.Printf("[payment-service] Mojaloop COMMITTED: invoice %d processing", inv.ID)
 
 	case "ABORTED":
 		h.store.UpdateInvoiceStatus(ctx, inv.ID, "failed")
