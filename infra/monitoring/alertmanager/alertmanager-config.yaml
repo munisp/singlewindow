@@ -1,0 +1,162 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: "smtp.tradegateway.gov:587"
+  smtp_from: "alerts@tradegateway.gov"
+  smtp_auth_username: "alerts@tradegateway.gov"
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
+
+# ─── Routing Tree ─────────────────────────────────────────────────────────────
+route:
+  receiver: "slack-ops-general"
+  group_by: ["alertname", "service", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical: PagerDuty + Slack #ops-critical
+    - matchers:
+        - severity = "critical"
+      receiver: "pagerduty-critical"
+      continue: true
+
+    - matchers:
+        - severity = "critical"
+      receiver: "slack-ops-critical"
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Payment/Financial: PagerDuty + Finance Slack
+    - matchers:
+        - service =~ "payment|mojaloop|tigerbeetle|ledger"
+      receiver: "pagerduty-financial"
+      continue: true
+
+    - matchers:
+        - service =~ "payment|mojaloop|tigerbeetle|ledger"
+      receiver: "slack-finance"
+
+    # Security: SOC Slack + PagerDuty
+    - matchers:
+        - service =~ "wazuh|soc|threat-intel|cen|sanctions"
+      receiver: "pagerduty-security"
+      continue: true
+
+    - matchers:
+        - service =~ "wazuh|soc|threat-intel|cen|sanctions"
+      receiver: "slack-security"
+
+    # Customs Operations: Customs Slack
+    - matchers:
+        - service =~ "declaration|oga|clearance|risk"
+      receiver: "slack-customs-ops"
+
+    # Infrastructure: DevOps Slack
+    - matchers:
+        - service =~ "kafka|temporal|redis|kubernetes|node"
+      receiver: "slack-devops"
+
+    # Warning: General Slack only
+    - matchers:
+        - severity = "warning"
+      receiver: "slack-ops-general"
+      repeat_interval: 6h
+
+# ─── Receivers ────────────────────────────────────────────────────────────────
+receivers:
+  - name: "slack-ops-general"
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook_ops
+        channel: "#ops-alerts"
+        send_resolved: true
+        title: '{{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+        color: '{{ if eq .Status "firing" }}{{ if eq (index .Alerts 0).Labels.severity "critical" }}danger{{ else }}warning{{ end }}{{ else }}good{{ end }}'
+
+  - name: "slack-ops-critical"
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook_ops
+        channel: "#ops-critical"
+        send_resolved: true
+        title: '🚨 CRITICAL: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+        color: "danger"
+
+  - name: "slack-finance"
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook_finance
+        channel: "#finance-alerts"
+        send_resolved: true
+        title: '💰 Finance Alert: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+
+  - name: "slack-security"
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook_security
+        channel: "#security-alerts"
+        send_resolved: true
+        title: '🔐 Security Alert: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+
+  - name: "slack-customs-ops"
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook_ops
+        channel: "#customs-ops"
+        send_resolved: true
+        title: '📋 Customs Alert: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+
+  - name: "slack-devops"
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook_ops
+        channel: "#devops-alerts"
+        send_resolved: true
+        title: '⚙️ Infrastructure Alert: {{ template "slack.title" . }}'
+        text: '{{ template "slack.text" . }}'
+
+  - name: "pagerduty-critical"
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty_critical_key
+        severity: '{{ .CommonLabels.severity }}'
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          environment: production
+          runbook: '{{ .CommonAnnotations.runbook_url }}'
+
+  - name: "pagerduty-financial"
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty_financial_key
+        severity: '{{ .CommonLabels.severity }}'
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          environment: production
+
+  - name: "pagerduty-security"
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty_security_key
+        severity: '{{ .CommonLabels.severity }}'
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          environment: production
+
+# ─── Inhibition Rules ─────────────────────────────────────────────────────────
+inhibit_rules:
+  # Suppress warnings when critical is firing for the same service
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ["alertname", "service"]
+
+  # Suppress all alerts when the entire cluster is down
+  - source_matchers:
+      - alertname = "KubernetesClusterDown"
+    target_matchers:
+      - severity =~ "critical|warning"
+
+# ─── Templates ────────────────────────────────────────────────────────────────
+templates:
+  - /etc/alertmanager/templates/*.tmpl

@@ -7,9 +7,8 @@ import {
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
   withRlsContext
 } from "../db";
-import { declarations } from "../../drizzle/schema";
-import { eq, desc, and } from "drizzle-orm";
-import { clearanceCertificates } from "../../drizzle/schema";
+import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
+import { eq, desc, and, inArray } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { assertCan, setOwner } from "../_core/permify";
 import { nanoid } from "nanoid";
@@ -732,5 +731,80 @@ export const declarationsRouter = router({
         metadata: { rows: rows.length, dateFrom: input.dateFrom, dateTo: input.dateTo, status: input.status },
       });
       return { csv, rowCount: rows.length };
+    }),
+
+  // ─── Declaration Documents CRUD ──────────────────────────────────────────
+  /** Upload a document reference for a declaration */
+  addDocument: protectedProcedure
+    .input(z.object({
+      declarationId: z.number(),
+      documentType: z.enum(["invoice", "bill_of_lading", "packing_list", "certificate_of_origin", "permit", "other"]),
+      fileName: z.string().min(1),
+      fileUrl: z.string().url(),
+      fileSizeBytes: z.number().int().positive().optional(),
+      mimeType: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+      const officerRoles = ["admin", "customs_officer", "inspector"];
+      if (decl.traderId !== ctx.user.id && !officerRoles.includes(ctx.user.role))
+        throw new TRPCError({ code: "FORBIDDEN" });
+      const { addDocument: addDoc } = await import("../db");
+      const doc = await addDoc({
+        declarationId: input.declarationId,
+        documentType: input.documentType as any,
+        fileName: input.fileName,
+        fileUrl: input.fileUrl,
+        fileSizeBytes: input.fileSizeBytes ?? null,
+        mimeType: input.mimeType ?? null,
+      });
+      await logAuditEvent({
+        actorId: ctx.user.id,
+        action: "declaration.document.added",
+        entityType: "declaration",
+        entityId: input.declarationId,
+        metadata: { documentType: input.documentType, fileName: input.fileName },
+      });
+      return doc;
+    }),
+
+  /** List all documents for a declaration */
+  listDocuments: protectedProcedure
+    .input(z.object({ declarationId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+      const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer"];
+      if (decl.traderId !== ctx.user.id && !officerRoles.includes(ctx.user.role))
+        throw new TRPCError({ code: "FORBIDDEN" });
+      const { getDocumentsByDeclaration } = await import("../db");
+      return getDocumentsByDeclaration(input.declarationId);
+    }),
+
+  /** Delete a document (uploader or admin only) */
+  deleteDocument: protectedProcedure
+    .input(z.object({ documentId: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const dbClient = await getDb();
+      if (!dbClient) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const [doc] = await dbClient.select().from(declarationDocuments)
+        .where(eq(declarationDocuments.id, input.documentId))
+        .limit(1);
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND" });
+      // Only admin can delete; traders cannot delete submitted documents
+      if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer")
+        throw new TRPCError({ code: "FORBIDDEN" });
+      await dbClient!.delete(declarationDocuments)
+        .where(eq(declarationDocuments.id, input.documentId));
+      await logAuditEvent({
+        actorId: ctx.user.id,
+        action: "declaration.document.deleted",
+        entityType: "declaration",
+        entityId: doc.declarationId,
+        metadata: { documentId: input.documentId, fileName: doc.fileName },
+      });
+      return { success: true };
     }),
 });

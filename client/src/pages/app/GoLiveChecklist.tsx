@@ -286,6 +286,10 @@ const SECTIONS: CheckSection[] = [
 ];
 
 export default function GoLiveChecklist() {
+  // Real-time infrastructure health check via system.systemStatus
+  const { data: sysStatus, isLoading: statusLoading, refetch: refetchStatus } =
+    trpc.system.systemStatus.useQuery(undefined, { refetchInterval: 30_000 });
+
   const [checked, setChecked] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem("golive-checklist") || "{}");
@@ -332,6 +336,41 @@ export default function GoLiveChecklist() {
             <div className="text-xs text-muted-foreground">{checkedAll}/{totalAll} total</div>
           </div>
         </div>
+
+        {/* Live infrastructure health panel */}
+        <Card className="border-border">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Activity className="h-4 w-4 text-cyan-600" />
+                Live Infrastructure Status
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => refetchStatus()} disabled={statusLoading}>
+                <Activity className={`h-3 w-3 mr-1 ${statusLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {statusLoading ? (
+              <p className="text-xs text-muted-foreground">Checking infrastructure…</p>
+            ) : sysStatus ? (
+              <div className="flex flex-wrap gap-2">
+                {(sysStatus.components ?? []).map((comp: any) => (
+                  <Badge
+                    key={comp.name}
+                    variant={comp.status === 'healthy' ? 'default' : comp.status === 'degraded' ? 'secondary' : 'destructive'}
+                    className="text-xs"
+                  >
+                    {comp.name}: {comp.status}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Status unavailable</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Status banner */}
         {readyForLaunch ? (
