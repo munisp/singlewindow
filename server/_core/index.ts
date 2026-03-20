@@ -7,6 +7,8 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerOpenApiRoute } from "../openapi";
+import { metricsRegistry } from "./metrics";
+import { registerHealthRoutes } from "../routes/health";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -728,6 +730,17 @@ async function startServer() {
   registerOAuthRoutes(app);
   // Sprint 68: OpenAPI spec endpoint
   registerOpenApiRoute(app);
+  // Deep health check endpoints (/api/health, /api/health/live, /api/health/ready)
+  registerHealthRoutes(app);
+  // Prometheus metrics endpoint — scraped by Prometheus every 15 s
+  app.get("/metrics", async (_req, res) => {
+    try {
+      res.set("Content-Type", metricsRegistry.contentType);
+      res.end(await metricsRegistry.metrics());
+    } catch (err) {
+      res.status(500).end(String(err));
+    }
+  });
   // Sprint 74: OGA approval callback webhook (POST /api/webhooks/oga)
   const { registerOgaWebhookRoute } = await import("../webhooks/oga");
   registerOgaWebhookRoute(app);

@@ -78,3 +78,96 @@ monitoring:
     scrapeInterval: "10s"
   grafana:
     enabled: true
+
+# ─── Services block (aligned with deployment.yaml template) ──────────────────
+# Overrides the services block in values.yaml for production replica counts
+services:
+  web-api:
+    replicas: 5
+    hpa: { minReplicas: 5, maxReplicas: 20 }
+    resources:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+  declaration-service:
+    replicas: 5
+    hpa: { minReplicas: 5, maxReplicas: 30 }
+    resources:
+      requests: { cpu: "1000m", memory: "1Gi" }
+      limits:   { cpu: "4000m", memory: "4Gi" }
+  risk-engine:
+    replicas: 5
+    hpa: { minReplicas: 5, maxReplicas: 30 }
+    resources:
+      requests: { cpu: "2000m", memory: "4Gi" }
+      limits:   { cpu: "8000m", memory: "16Gi" }
+  payment-service:
+    replicas: 5
+    hpa: { minReplicas: 5, maxReplicas: 20 }
+    resources:
+      requests: { cpu: "1000m", memory: "1Gi" }
+      limits:   { cpu: "4000m", memory: "4Gi" }
+  mojaloop-gateway:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 12 }
+  temporal-worker:
+    replicas: 5
+    hpa: { minReplicas: 5, maxReplicas: 20 }
+  oga-service:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 15 }
+  cargo-tracking-service:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 12 }
+  analytics-service:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 10 }
+    resources:
+      requests: { cpu: "1000m", memory: "2Gi" }
+      limits:   { cpu: "4000m", memory: "8Gi" }
+  kyc-service:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 10 }
+  sanctions-service:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 12 }
+  anomaly-detection:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 10 }
+    resources:
+      requests: { cpu: "2000m", memory: "4Gi" }
+      limits:   { cpu: "8000m", memory: "16Gi" }
+  tigerbeetle-bridge-go:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 8 }
+  tigerbeetle-bridge-rs:
+    enabled: true
+    replicas: 2
+    hpa: { enabled: true, minReplicas: 2, maxReplicas: 6 }
+  fluvio-consumer:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 8 }
+  deltalake-svc:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 8 }
+  sedona-svc:
+    replicas: 3
+    hpa: { minReplicas: 3, maxReplicas: 8 }
+
+# ─── Pod security (production hardening) ─────────────────────────────────────
+global:
+  environment: production
+  registry: "registry.tradegateway.gov"
+  imageTag: "1.0.0"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

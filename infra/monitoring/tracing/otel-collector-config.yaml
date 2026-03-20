@@ -1,0 +1,277 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — OpenTelemetry Collector Configuration
+# =============================================================================
+# Receives traces from all microservices via OTLP gRPC/HTTP,
+# processes them, and exports to Jaeger (UI) and Prometheus (metrics).
+#
+# Deploy:
+#   kubectl apply -f otel-collector-config.yaml -n monitoring
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/part-of: tradegateway
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+            cors:
+              allowed_origins: ["https://tradegateway.gov", "https://api.tradegateway.gov"]
+
+      # Prometheus scrape receiver for Node.js metrics
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: "tradegateway-web-api"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["web-api.tradegateway.svc.cluster.local:3000"]
+              metrics_path: "/metrics"
+            - job_name: "tradegateway-declaration-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["declaration-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-payment-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["payment-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-risk-engine"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["risk-engine.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-oga-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["oga-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-cargo-tracking-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["cargo-tracking-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-temporal-worker"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["temporal-worker.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-mojaloop-gateway"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["mojaloop-gateway.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-kyc-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["kyc-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-sanctions-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["sanctions-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-analytics-service"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["analytics-service.tradegateway.svc.cluster.local:9090"]
+            - job_name: "tradegateway-tigerbeetle-bridge-go"
+              scrape_interval: 15s
+              static_configs:
+                - targets: ["tigerbeetle-bridge-go.tradegateway.svc.cluster.local:9090"]
+
+    processors:
+      # Batch traces before export to reduce network overhead
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+
+      # Add resource attributes to all telemetry
+      resource:
+        attributes:
+          - key: service.namespace
+            value: "tradegateway"
+            action: upsert
+          - key: deployment.environment
+            from_attribute: ENVIRONMENT
+            action: insert
+
+      # Memory limiter to prevent OOM
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 512
+        spike_limit_mib: 128
+
+      # Filter out health check spans to reduce noise
+      filter:
+        traces:
+          span:
+            - 'attributes["http.route"] == "/health"'
+            - 'attributes["http.route"] == "/metrics"'
+            - 'attributes["http.route"] == "/api/trpc/system.ping"'
+
+      # Tail-based sampling: keep 100% of error traces, 10% of success traces
+      tail_sampling:
+        decision_wait: 10s
+        num_traces: 50000
+        expected_new_traces_per_sec: 1000
+        policies:
+          - name: errors-policy
+            type: status_code
+            status_code: { status_codes: [ERROR] }
+          - name: slow-traces-policy
+            type: latency
+            latency: { threshold_ms: 1000 }
+          - name: declaration-traces-policy
+            type: string_attribute
+            string_attribute:
+              key: "service.name"
+              values: ["declaration-service", "risk-engine", "temporal-worker"]
+          - name: payment-traces-policy
+            type: string_attribute
+            string_attribute:
+              key: "service.name"
+              values: ["payment-service", "mojaloop-gateway", "tigerbeetle-bridge-go"]
+          - name: probabilistic-policy
+            type: probabilistic
+            probabilistic: { sampling_percentage: 10 }
+
+    exporters:
+      # Jaeger for trace visualization
+      jaeger:
+        endpoint: "jaeger-collector.monitoring.svc.cluster.local:14250"
+        tls:
+          insecure: true
+
+      # Prometheus remote write for trace-derived metrics
+      prometheusremotewrite:
+        endpoint: "http://prometheus-server.monitoring.svc.cluster.local:9090/api/v1/write"
+        tls:
+          insecure: true
+
+      # Logging exporter for debugging (disable in production)
+      logging:
+        loglevel: warn
+
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:13133"
+      pprof:
+        endpoint: "0.0.0.0:1777"
+      zpages:
+        endpoint: "0.0.0.0:55679"
+
+    service:
+      extensions: [health_check, pprof, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, filter, tail_sampling, batch]
+          exporters: [jaeger, logging]
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, resource, batch]
+          exporters: [prometheusremotewrite]
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app: otel-collector
+    app.kubernetes.io/part-of: tradegateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector-sa
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.96.0
+          args: ["--config=/conf/otel-collector-config.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: health-check
+              containerPort: 13133
+              protocol: TCP
+            - name: zpages
+              containerPort: 55679
+              protocol: TCP
+          volumeMounts:
+            - name: otel-collector-config-vol
+              mountPath: /conf
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits:   { cpu: "1000m", memory: "512Mi" }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: otel-collector-config-vol
+          configMap:
+            name: otel-collector-config
+            items:
+              - key: otel-collector-config.yaml
+                path: otel-collector-config.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app: otel-collector
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: health-check
+      port: 13133
+      targetPort: 13133
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector-sa
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: tradegateway

@@ -325,3 +325,330 @@ serviceAccount:
 # ─── ConfigMap ───────────────────────────────────────────────────────────────
 configMap:
   name: tradegateway-config
+
+# ─── Global Registry & Tag (used by deployment.yaml range template) ───────────
+# The deployment.yaml template references .Values.global.registry and
+# .Values.global.imageTag. These are separate from .Values.global.imageRegistry
+# (used by Bitnami subcharts) to avoid conflicts.
+# Override in values-production.yaml:
+#   global:
+#     registry: "registry.tradegateway.gov"
+#     imageTag: "2.1.0"
+#
+# Note: global block is already defined above; these keys are additive.
+# To avoid YAML duplication, set these in your environment override file.
+# Default values shown here for documentation purposes only.
+#
+# global:
+#   registry: "registry.tradegateway.gov"   # same as imageRegistry above
+#   imageTag: "1.0.0"                        # overrides per-service tags
+
+# ─── Services (iterated by deployment.yaml template) ─────────────────────────
+# Each key is the Kubernetes Deployment/Service name and container name.
+# Required: enabled, port, replicas
+# Optional: metricsPort (default 9090), daprEnabled (default "true"),
+#           resources, hpa.enabled, hpa.minReplicas, hpa.maxReplicas,
+#           hpa.targetCPUUtilizationPercentage, pdb.minAvailable
+services:
+  web-api:
+    enabled: true
+    port: 3000
+    metricsPort: 3000
+    replicas: 3
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "250m", memory: "512Mi" }
+      limits:   { cpu: "1000m", memory: "1Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 2
+
+  declaration-service:
+    enabled: true
+    port: 8083
+    metricsPort: 9090
+    replicas: 3
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+      targetCPUUtilizationPercentage: 65
+    pdb:
+      minAvailable: 2
+
+  oga-service:
+    enabled: true
+    port: 8084
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "250m", memory: "256Mi" }
+      limits:   { cpu: "1000m", memory: "1Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  payment-service:
+    enabled: true
+    port: 8082
+    metricsPort: 9090
+    replicas: 3
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 15
+      targetCPUUtilizationPercentage: 60
+    pdb:
+      minAvailable: 2
+
+  mojaloop-gateway:
+    enabled: true
+    port: 8085
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "250m", memory: "512Mi" }
+      limits:   { cpu: "1000m", memory: "2Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  risk-engine:
+    enabled: true
+    port: 8087
+    metricsPort: 9090
+    replicas: 3
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "1000m", memory: "2Gi" }
+      limits:   { cpu: "4000m", memory: "8Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+      targetCPUUtilizationPercentage: 60
+    pdb:
+      minAvailable: 2
+
+  cargo-tracking-service:
+    enabled: true
+    port: 8092
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "250m", memory: "256Mi" }
+      limits:   { cpu: "1000m", memory: "1Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  temporal-worker:
+    enabled: true
+    port: 8090
+    metricsPort: 9090
+    replicas: 3
+    daprEnabled: "false"
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 12
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 2
+
+  analytics-service:
+    enabled: true
+    port: 8093
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits:   { cpu: "2000m", memory: "4Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  kyc-service:
+    enabled: true
+    port: 8095
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "250m", memory: "256Mi" }
+      limits:   { cpu: "1000m", memory: "1Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  sanctions-service:
+    enabled: true
+    port: 8088
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 65
+    pdb:
+      minAvailable: 1
+
+  anomaly-detection:
+    enabled: true
+    port: 8091
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "1000m", memory: "2Gi" }
+      limits:   { cpu: "4000m", memory: "8Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 60
+    pdb:
+      minAvailable: 1
+
+  profile-service:
+    enabled: true
+    port: 8086
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "true"
+    resources:
+      requests: { cpu: "250m", memory: "256Mi" }
+      limits:   { cpu: "1000m", memory: "1Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  tigerbeetle-bridge-go:
+    enabled: true
+    port: 8200
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "false"
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  tigerbeetle-bridge-rs:
+    enabled: false  # Rust bridge disabled by default; enable for high-throughput ledger
+    port: 8201
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "false"
+    resources:
+      requests: { cpu: "500m", memory: "256Mi" }
+      limits:   { cpu: "2000m", memory: "1Gi" }
+    hpa:
+      enabled: false
+    pdb:
+      minAvailable: 1
+
+  fluvio-consumer:
+    enabled: true
+    port: 8094
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "false"
+    resources:
+      requests: { cpu: "250m", memory: "256Mi" }
+      limits:   { cpu: "1000m", memory: "1Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+
+  deltalake-svc:
+    enabled: true
+    port: 8096
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "false"
+    resources:
+      requests: { cpu: "1000m", memory: "4Gi" }
+      limits:   { cpu: "4000m", memory: "16Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 65
+    pdb:
+      minAvailable: 1
+
+  sedona-svc:
+    enabled: true
+    port: 8097
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "false"
+    resources:
+      requests: { cpu: "500m", memory: "2Gi" }
+      limits:   { cpu: "2000m", memory: "8Gi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 65
+    pdb:
+      minAvailable: 1

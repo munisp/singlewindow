@@ -5,7 +5,7 @@ const connectionString = process.env.DATABASE_URL?.startsWith("postgresql")
   : "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
 export default defineConfig({
   schema: "./drizzle/schema.ts",
-  out: "./drizzle",
+  out: "./drizzle/migrations",
   dialect: "postgresql",
   dbCredentials: {
     url: connectionString,

@@ -1,0 +1,372 @@
+---
+# =============================================================================
+# TradeGateway™ NGSWTP — Prometheus Alerting Rules
+# =============================================================================
+# Deploy via:
+#   kubectl apply -f alerting_rules.yaml -n monitoring
+# Or mount as a ConfigMap and reference in your Prometheus Helm values:
+#   prometheus.additionalRulesFiles: ["/etc/prometheus/alerting_rules.yaml"]
+# =============================================================================
+
+groups:
+
+  # ─── SLO: Declarations ─────────────────────────────────────────────────────
+  - name: slo.declarations
+    interval: 30s
+    rules:
+      - alert: DeclarationGreenLaneRateLow
+        expr: tradegateway_green_lane_rate_ratio < 0.60
+        for: 5m
+        labels:
+          severity: warning
+          team: customs
+          slo: green_lane_rate
+        annotations:
+          summary: "Green-lane clearance rate below 60%"
+          description: >
+            The green-lane rate is {{ $value | humanizePercentage }}, below the 60% SLO target.
+            Investigate risk engine scoring and OGA response times.
+          runbook: "https://wiki.tradegateway.gov/runbooks/green-lane-rate"
+
+      - alert: DeclarationClearanceP95High
+        expr: >
+          histogram_quantile(0.95,
+            rate(tradegateway_declaration_clearance_duration_seconds_bucket[10m])
+          ) > 14400
+        for: 10m
+        labels:
+          severity: critical
+          team: customs
+          slo: clearance_time
+        annotations:
+          summary: "P95 clearance time exceeds 4-hour SLO"
+          description: >
+            P95 clearance time is {{ $value | humanizeDuration }}, exceeding the 4-hour SLO.
+            Check Temporal workflow backlogs and OGA integration health.
+          runbook: "https://wiki.tradegateway.gov/runbooks/clearance-time"
+
+      - alert: DeclarationsInFlightHigh
+        expr: sum(tradegateway_declarations_in_flight) > 5000
+        for: 15m
+        labels:
+          severity: warning
+          team: customs
+        annotations:
+          summary: "High number of declarations awaiting clearance"
+          description: >
+            {{ $value }} declarations are currently in flight. Normal peak is < 2000.
+            Consider scaling the declaration-service and temporal-worker deployments.
+
+  # ─── SLO: Payments ──────────────────────────────────────────────────────────
+  - name: slo.payments
+    interval: 30s
+    rules:
+      - alert: PaymentP95LatencyHigh
+        expr: >
+          histogram_quantile(0.95,
+            rate(tradegateway_payment_duration_seconds_bucket[10m])
+          ) > 30
+        for: 5m
+        labels:
+          severity: critical
+          team: payments
+          slo: payment_latency
+        annotations:
+          summary: "P95 payment processing latency exceeds 30-second SLO"
+          description: >
+            P95 payment latency is {{ $value | humanizeDuration }}.
+            Check Mojaloop hub connectivity and TigerBeetle ledger health.
+          runbook: "https://wiki.tradegateway.gov/runbooks/payment-latency"
+
+      - alert: PaymentErrorRateHigh
+        expr: >
+          rate(tradegateway_payments_total{status="failed"}[5m])
+          / rate(tradegateway_payments_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: payments
+          slo: payment_error_rate
+        annotations:
+          summary: "Payment error rate exceeds 5%"
+          description: >
+            Payment error rate is {{ $value | humanizePercentage }}.
+            Investigate Mojaloop gateway and bank adapter connectivity.
+          runbook: "https://wiki.tradegateway.gov/runbooks/payment-errors"
+
+  # ─── SLO: Risk Engine ───────────────────────────────────────────────────────
+  - name: slo.risk_engine
+    interval: 30s
+    rules:
+      - alert: RiskScoringP99LatencyHigh
+        expr: >
+          histogram_quantile(0.99,
+            rate(tradegateway_risk_scoring_duration_seconds_bucket[5m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: risk
+          slo: risk_scoring_latency
+        annotations:
+          summary: "Risk scoring P99 latency exceeds 5-second SLO"
+          description: >
+            P99 risk scoring latency is {{ $value | humanizeDuration }}.
+            The risk engine must complete scoring within 5 seconds per declaration.
+          runbook: "https://wiki.tradegateway.gov/runbooks/risk-engine"
+
+  # ─── SLO: OGA Integrations ──────────────────────────────────────────────────
+  - name: slo.oga
+    interval: 60s
+    rules:
+      - alert: OGAResponseTimeHigh
+        expr: >
+          histogram_quantile(0.90,
+            rate(tradegateway_oga_response_duration_seconds_bucket[10m])
+          ) > 60
+        for: 10m
+        labels:
+          severity: warning
+          team: integrations
+          slo: oga_response_time
+        annotations:
+          summary: "OGA P90 response time exceeds 60-second SLO"
+          description: >
+            OGA {{ $labels.oga_code }} P90 response time is {{ $value | humanizeDuration }}.
+            Investigate OGA service health and network connectivity.
+          runbook: "https://wiki.tradegateway.gov/runbooks/oga-integration"
+
+      - alert: OGAHighErrorRate
+        expr: >
+          rate(tradegateway_oga_requests_total{status="error"}[10m])
+          / rate(tradegateway_oga_requests_total[10m]) > 0.10
+        for: 10m
+        labels:
+          severity: critical
+          team: integrations
+        annotations:
+          summary: "OGA {{ $labels.oga_code }} error rate exceeds 10%"
+          description: >
+            OGA {{ $labels.oga_code }} is returning errors at {{ $value | humanizePercentage }}.
+            Check OGA service status and authentication credentials.
+
+  # ─── SLO: ASEAN Single Window ───────────────────────────────────────────────
+  - name: slo.asean_sw
+    interval: 60s
+    rules:
+      - alert: ASEANSWMessageFailureRateHigh
+        expr: >
+          rate(tradegateway_asean_sw_messages_total{status="failed"}[10m])
+          / rate(tradegateway_asean_sw_messages_total[10m]) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          team: integrations
+          slo: asean_sw_reliability
+        annotations:
+          summary: "ASEAN SW message failure rate exceeds 5%"
+          description: >
+            ASEAN SW messages to {{ $labels.partner_country }} are failing at
+            {{ $value | humanizePercentage }}. Check ASEAN SW gateway connectivity.
+          runbook: "https://wiki.tradegateway.gov/runbooks/asean-sw"
+
+      - alert: ASEANSWLatencyHigh
+        expr: >
+          histogram_quantile(0.95,
+            rate(tradegateway_asean_sw_latency_seconds_bucket[10m])
+          ) > 10
+        for: 10m
+        labels:
+          severity: warning
+          team: integrations
+        annotations:
+          summary: "ASEAN SW P95 latency exceeds 10 seconds"
+          description: >
+            ASEAN SW P95 round-trip latency to {{ $labels.partner_country }} is
+            {{ $value | humanizeDuration }}.
+
+  # ─── SLO: WCO CEN ───────────────────────────────────────────────────────────
+  - name: slo.cen
+    interval: 60s
+    rules:
+      - alert: CENMessageFailureRateHigh
+        expr: >
+          rate(tradegateway_cen_messages_total{status="failed"}[10m])
+          / rate(tradegateway_cen_messages_total[10m]) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          team: integrations
+          slo: cen_reliability
+        annotations:
+          summary: "WCO CEN message failure rate exceeds 5%"
+          description: >
+            WCO CEN messages are failing at {{ $value | humanizePercentage }}.
+            Check CEN service connectivity and partner gateway status.
+          runbook: "https://wiki.tradegateway.gov/runbooks/cen"
+
+  # ─── SLO: API Gateway (tRPC) ────────────────────────────────────────────────
+  - name: slo.api
+    interval: 15s
+    rules:
+      - alert: APIErrorRateHigh
+        expr: >
+          rate(tradegateway_trpc_requests_total{status="error"}[5m])
+          / rate(tradegateway_trpc_requests_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          slo: api_error_rate
+        annotations:
+          summary: "API error rate exceeds 1% SLO"
+          description: >
+            tRPC procedure {{ $labels.procedure }} error rate is
+            {{ $value | humanizePercentage }}.
+          runbook: "https://wiki.tradegateway.gov/runbooks/api-errors"
+
+      - alert: APIP99LatencyHigh
+        expr: >
+          histogram_quantile(0.99,
+            rate(tradegateway_trpc_request_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          slo: api_latency
+        annotations:
+          summary: "API P99 latency exceeds 2-second SLO"
+          description: >
+            tRPC P99 latency is {{ $value | humanizeDuration }}.
+            Check database query performance and connection pool health.
+
+  # ─── Security ───────────────────────────────────────────────────────────────
+  - name: security.alerts
+    interval: 30s
+    rules:
+      - alert: HighSeveritySecurityAlert
+        expr: increase(tradegateway_security_alerts_total{severity="critical"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+          page: "true"
+        annotations:
+          summary: "Critical security alert detected"
+          description: >
+            A critical security alert has been generated.
+            Source: {{ $labels.source }}, Type: {{ $labels.alert_type }}.
+            Investigate immediately in the SOC dashboard.
+          runbook: "https://wiki.tradegateway.gov/runbooks/security-incident"
+
+      - alert: OpenSecurityIncidentsHigh
+        expr: sum(tradegateway_open_security_incidents{severity="critical"}) > 3
+        for: 15m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "More than 3 critical security incidents open simultaneously"
+          description: >
+            {{ $value }} critical security incidents are currently open.
+            Escalate to CISO and activate incident response protocol.
+
+      - alert: WazuhAlertSpike
+        expr: rate(tradegateway_wazuh_alerts_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Wazuh alert rate spike detected"
+          description: >
+            Wazuh is generating {{ $value | humanize }} alerts/second.
+            This may indicate an active attack or misconfiguration.
+
+  # ─── Infrastructure ──────────────────────────────────────────────────────────
+  - name: infrastructure.health
+    interval: 30s
+    rules:
+      - alert: SLABreachRateHigh
+        expr: rate(tradegateway_sla_breaches_total[10m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          team: operations
+        annotations:
+          summary: "SLA breach rate is elevated"
+          description: >
+            {{ $value | humanize }} SLA breaches per second over the last 10 minutes.
+            Type: {{ $labels.sla_type }}, Severity: {{ $labels.severity }}.
+
+      - alert: KafkaConsumerLag
+        expr: >
+          rate(tradegateway_kafka_messages_produced_total[5m])
+          - rate(tradegateway_kafka_messages_consumed_total[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Kafka consumer lag is growing"
+          description: >
+            Consumer lag on topic {{ $labels.topic }} is growing at
+            {{ $value | humanize }} messages/second.
+            Check consumer group health and scaling.
+
+      - alert: WebhookDeliveryFailureRateHigh
+        expr: >
+          rate(tradegateway_webhook_deliveries_total{status="failed"}[10m])
+          / rate(tradegateway_webhook_deliveries_total[10m]) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          team: integrations
+        annotations:
+          summary: "Webhook delivery failure rate exceeds 10%"
+          description: >
+            Webhook deliveries for event {{ $labels.event_type }} are failing at
+            {{ $value | humanizePercentage }}.
+
+      - alert: PortCongestionSevere
+        expr: tradegateway_port_congestion_level == 2
+        for: 30m
+        labels:
+          severity: warning
+          team: operations
+        annotations:
+          summary: "Severe port congestion detected at {{ $labels.port_code }}"
+          description: >
+            Port {{ $labels.port_code }} has been in severe congestion state for 30+ minutes.
+            Coordinate with port authority and notify affected traders.
+
+  # ─── Node.js Runtime ────────────────────────────────────────────────────────
+  - name: runtime.nodejs
+    interval: 30s
+    rules:
+      - alert: NodeHeapUsageHigh
+        expr: >
+          tradegateway_node_nodejs_heap_size_used_bytes
+          / tradegateway_node_nodejs_heap_size_total_bytes > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Node.js heap usage above 90%"
+          description: >
+            Node.js heap is {{ $value | humanizePercentage }} full.
+            A memory leak or large in-memory dataset may be present.
+
+      - alert: NodeEventLoopLagHigh
+        expr: tradegateway_node_nodejs_eventloop_lag_seconds > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Node.js event loop lag exceeds 500ms"
+          description: >
+            Event loop lag is {{ $value | humanizeDuration }}.
+            CPU-intensive synchronous operations may be blocking the event loop.
