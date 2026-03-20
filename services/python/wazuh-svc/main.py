@@ -197,6 +197,10 @@ class IngestAlertRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup():
+    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
+    if _MIDDLEWARE_AVAILABLE:
+        setup_middleware()
+        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
     _seed_demo_data()
 
 
@@ -360,6 +364,25 @@ async def get_mitre_stats():
     }
 
 
+@app.on_event("shutdown")
+async def shutdown():
+    # Middleware shutdown
+    if _MIDDLEWARE_AVAILABLE:
+        shutdown_middleware()
+
 if __name__ == "__main__":
     import uvicorn
+
+# ─── Middleware Integration ───────────────────────────────────────────────────
+import threading as _threading
+try:
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    _MIDDLEWARE_AVAILABLE = True
+except ImportError:
+    _MIDDLEWARE_AVAILABLE = False
+    def setup_middleware(): pass
+    def start_consumer_thread(): return None
+    def shutdown_middleware(): pass
+
+
     uvicorn.run(app, host="0.0.0.0", port=8108)

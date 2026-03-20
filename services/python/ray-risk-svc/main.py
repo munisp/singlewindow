@@ -322,7 +322,34 @@ def create_ab_test(body: dict):
     return test
 
 
+
+# ─── Lifecycle ───────────────────────────────────────────────────────────────
+@app.on_event("startup")
+async def startup():
+    import threading as _t
+    if _MIDDLEWARE_AVAILABLE:
+        setup_middleware()
+        _t.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
+
+@app.on_event("shutdown")
+async def shutdown():
+    if _MIDDLEWARE_AVAILABLE:
+        shutdown_middleware()
+
 if __name__ == "__main__":
     import uvicorn
+
+# ─── Middleware Integration ───────────────────────────────────────────────────
+import threading as _threading
+try:
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    _MIDDLEWARE_AVAILABLE = True
+except ImportError:
+    _MIDDLEWARE_AVAILABLE = False
+    def setup_middleware(): pass
+    def start_consumer_thread(): return None
+    def shutdown_middleware(): pass
+
+
     port = int(os.getenv("PORT", "8106"))
     uvicorn.run(app, host="0.0.0.0", port=port)

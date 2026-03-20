@@ -820,6 +820,10 @@ async def verify_seal(
 
 @app.on_event("startup")
 async def startup():
+    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
+    if _MIDDLEWARE_AVAILABLE:
+        setup_middleware()
+        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
     logger.info(f"Vision Analysis Service starting on port {PORT}")
     logger.info(f"Device: {DEVICE}")
     logger.info(f"Ollama endpoint: {OLLAMA_BASE_URL}")
@@ -827,9 +831,25 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    # Middleware shutdown
+    if _MIDDLEWARE_AVAILABLE:
+        shutdown_middleware()
     await vlm.close()
 
 
 if __name__ == "__main__":
     import uvicorn
+
+# ─── Middleware Integration ───────────────────────────────────────────────────
+import threading as _threading
+try:
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    _MIDDLEWARE_AVAILABLE = True
+except ImportError:
+    _MIDDLEWARE_AVAILABLE = False
+    def setup_middleware(): pass
+    def start_consumer_thread(): return None
+    def shutdown_middleware(): pass
+
+
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, log_level="info")

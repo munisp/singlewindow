@@ -158,7 +158,7 @@ spec:
       imagePullSecrets:
         - name: registry-credentials
 ---
-{{- if $svc.autoscaling.enabled }}
+{{- if and $svc.hpa $svc.hpa.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -172,15 +172,15 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: {{ $name }}
-  minReplicas: {{ $svc.autoscaling.minReplicas | default 2 }}
-  maxReplicas: {{ $svc.autoscaling.maxReplicas | default 10 }}
+  minReplicas: {{ $svc.hpa.minReplicas | default 2 }}
+  maxReplicas: {{ $svc.hpa.maxReplicas | default 10 }}
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ $svc.autoscaling.targetCPUUtilizationPercentage | default 70 }}
+          averageUtilization: {{ $svc.hpa.targetCPUUtilizationPercentage | default 70 }}
     - type: Resource
       resource:
         name: memory

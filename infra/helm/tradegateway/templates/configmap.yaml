@@ -14,16 +14,16 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 data:
   environment: {{ .Values.global.environment | quote }}
-  kafka-brokers: {{ .Values.kafka.brokers | quote }}
-  temporal-address: {{ .Values.temporal.address | quote }}
-  tigerbeetle-address: {{ .Values.tigerbeetle.address | quote }}
-  keycloak-url: {{ .Values.keycloak.url | quote }}
-  keycloak-realm: {{ .Values.keycloak.realm | quote }}
-  permify-url: {{ .Values.permify.url | quote }}
-  apisix-admin-url: {{ .Values.apisix.adminUrl | quote }}
-  opencti-url: {{ .Values.opencti.url | quote }}
-  wazuh-url: {{ .Values.wazuh.url | quote }}
-  mojaloop-hub-url: {{ .Values.mojaloop.hubUrl | quote }}
+  kafka-brokers: {{ .Values.infrastructure.kafka.brokers | default "kafka:9092" | quote }}
+  temporal-address: {{ .Values.infrastructure.temporal.address | default "temporal-frontend:7233" | quote }}
+  tigerbeetle-address: {{ .Values.infrastructure.tigerbeetle.address | default "tigerbeetle:3000" | quote }}
+  keycloak-url: {{ .Values.infrastructure.keycloak.url | default "http://keycloak:8080" | quote }}
+  keycloak-realm: {{ .Values.infrastructure.keycloak.realm | default "tradegateway" | quote }}
+  permify-url: {{ .Values.infrastructure.permify.url | default "http://permify:3476" | quote }}
+  apisix-admin-url: {{ .Values.infrastructure.apisix.adminUrl | default "http://apisix-admin:9180" | quote }}
+  opencti-url: {{ .Values.infrastructure.opencti.url | default "http://opencti:4000" | quote }}
+  wazuh-url: {{ .Values.infrastructure.wazuh.url | default "http://wazuh-manager:55000" | quote }}
+  mojaloop-hub-url: {{ .Values.infrastructure.mojaloop.hubUrl | default "https://hub.mojaloop.io" | quote }}
   log-level: {{ .Values.global.logLevel | default "info" | quote }}
   otel-exporter-endpoint: {{ .Values.observability.otlpEndpoint | default "http://jaeger-collector:4317" | quote }}
   # gRPC service addresses (used by Node.js tRPC server for health checks)

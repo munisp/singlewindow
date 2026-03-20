@@ -877,6 +877,10 @@ def _extract_currency(amount_str: str) -> str:
 
 @app.on_event("startup")
 async def startup():
+    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
+    if _MIDDLEWARE_AVAILABLE:
+        setup_middleware()
+        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
     logger.info(f"KYC/KYB Service starting on port {PORT}")
     logger.info("Initializing PaddleOCR (lazy)...")
     logger.info("Initializing DocLing (lazy)...")
@@ -885,11 +889,27 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    # Middleware shutdown
+    if _MIDDLEWARE_AVAILABLE:
+        shutdown_middleware()
     await vlm_verifier.close()
 
 
 if __name__ == "__main__":
     import uvicorn
+
+# ─── Middleware Integration ───────────────────────────────────────────────────
+import threading as _threading
+try:
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    _MIDDLEWARE_AVAILABLE = True
+except ImportError:
+    _MIDDLEWARE_AVAILABLE = False
+    def setup_middleware(): pass
+    def start_consumer_thread(): return None
+    def shutdown_middleware(): pass
+
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

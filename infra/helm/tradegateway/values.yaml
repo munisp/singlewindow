@@ -202,16 +202,34 @@ infrastructure:
     endpoint: "https://s3.tradegateway.gov"
   deltaLake:
     url: "http://deltalake-svc.tradegateway.svc.cluster.local:8096"
+  permify:
+    url: "http://permify.permify.svc.cluster.local:3476"
+  apisix:
+    adminUrl: "http://apisix-admin.apisix.svc.cluster.local:9180"
+    gatewayUrl: "http://apisix-gateway.apisix.svc.cluster.local:9080"
+  opencti:
+    url: "http://opencti.opencti.svc.cluster.local:4000"
+  wazuh:
+    url: "https://wazuh-manager.wazuh.svc.cluster.local:55000"
 
-# ─── Ingress ─────────────────────────────────────────────────────────────────
+# ─── Observability ───────────────────────────────────────────────────────────
+observability:
+  otlpEndpoint: "http://otel-collector.monitoring.svc.cluster.local:4317"
+  jaegerUrl: "http://jaeger-query.monitoring.svc.cluster.local:16686"
+  prometheusUrl: "http://prometheus.monitoring.svc.cluster.local:9090"
+  grafanaUrl: "http://grafana.monitoring.svc.cluster.local:3000"
+
+# ─── Ingresss ─────────────────────────────────────────────────────────────────
 ingress:
   enabled: true
   className: "nginx"
+  certManager:
+    enabled: true
+    clusterIssuer: "letsencrypt-production"
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    cert-manager.io/cluster-issuer: "letsencrypt-production"
   hosts:
     - host: tradegateway.gov
       paths:
