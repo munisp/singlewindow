@@ -32,6 +32,7 @@ Port: 8091 (HTTP)
 """
 
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import asyncio
 import base64
@@ -623,10 +624,19 @@ def extract_entity_profile(ocr: OCRResult, doc_type: str) -> EntityProfile:
 
 # ─── Application ─────────────────────────────────────────────────────────────
 
+
+# ─── Application Lifespan ───────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: activates full middleware bundle on startup."""
+    async with middleware_lifespan():
+        yield
+
 app = FastAPI(
     title="TradeGateway KYC/KYB Service",
     description="Next-generation document analysis: PaddleOCR + DocLing + Qwen2-VL",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -875,24 +885,8 @@ def _extract_currency(amount_str: str) -> str:
 
 # ─── Startup ─────────────────────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup():
-    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
-    if _MIDDLEWARE_AVAILABLE:
-        setup_middleware()
-        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
-    logger.info(f"KYC/KYB Service starting on port {PORT}")
-    logger.info("Initializing PaddleOCR (lazy)...")
-    logger.info("Initializing DocLing (lazy)...")
-    logger.info(f"VLM endpoint: {OLLAMA_BASE_URL}")
 
 
-@app.on_event("shutdown")
-async def shutdown():
-    # Middleware shutdown
-    if _MIDDLEWARE_AVAILABLE:
-        shutdown_middleware()
-    await vlm_verifier.close()
 
 
 if __name__ == "__main__":
@@ -901,13 +895,16 @@ if __name__ == "__main__":
 # ─── Middleware Integration ───────────────────────────────────────────────────
 import threading as _threading
 try:
-    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
 except ImportError:
     _MIDDLEWARE_AVAILABLE = False
     def setup_middleware(): pass
     def start_consumer_thread(): return None
     def shutdown_middleware(): pass
+    @asynccontextmanager
+    async def middleware_lifespan():
+        yield
 
 
     uvicorn.run(

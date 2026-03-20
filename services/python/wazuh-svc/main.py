@@ -6,6 +6,7 @@ TradeGateway declarations and trader accounts, and manage incident lifecycle.
 """
 
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import hashlib
 import json
@@ -22,7 +23,15 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="wazuh-svc", version="1.0.0")
+
+# ─── Application Lifespan ───────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: activates full middleware bundle on startup."""
+    async with middleware_lifespan():
+        yield
+
+app = FastAPI(title="wazuh-svc", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -195,13 +204,6 @@ class IngestAlertRequest(BaseModel):
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup():
-    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
-    if _MIDDLEWARE_AVAILABLE:
-        setup_middleware()
-        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
-    _seed_demo_data()
 
 
 @app.get("/health")
@@ -364,11 +366,6 @@ async def get_mitre_stats():
     }
 
 
-@app.on_event("shutdown")
-async def shutdown():
-    # Middleware shutdown
-    if _MIDDLEWARE_AVAILABLE:
-        shutdown_middleware()
 
 if __name__ == "__main__":
     import uvicorn
@@ -376,13 +373,16 @@ if __name__ == "__main__":
 # ─── Middleware Integration ───────────────────────────────────────────────────
 import threading as _threading
 try:
-    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
 except ImportError:
     _MIDDLEWARE_AVAILABLE = False
     def setup_middleware(): pass
     def start_consumer_thread(): return None
     def shutdown_middleware(): pass
+    @asynccontextmanager
+    async def middleware_lifespan():
+        yield
 
 
     uvicorn.run(app, host="0.0.0.0", port=8108)

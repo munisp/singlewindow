@@ -26,6 +26,7 @@ Port: 8090 (HTTP)
 """
 
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import asyncio
 import json
@@ -206,10 +207,19 @@ class ForgeClient:
 
 # ─── Application ─────────────────────────────────────────────────────────────
 
+
+# ─── Application Lifespan ───────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: activates full middleware bundle on startup."""
+    async with middleware_lifespan():
+        yield
+
 app = FastAPI(
     title="TradeGateway Ollama Proxy",
     description="Local LLM gateway for TradeGateway NGSWTP — routes to Ollama models (Qwen2.5, DeepSeek-R1, Qwen2-VL)",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -624,37 +634,8 @@ async def sanctions_check(request: Request):
 
 # ─── Startup / shutdown ───────────────────────────────────────────────────────
 
-@app.on_event("startup")
-async def startup():
-    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
-    if _MIDDLEWARE_AVAILABLE:
-        setup_middleware()
-        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
-    reachable = await ollama.is_reachable()
-    if reachable:
-        models = await ollama.list_models()
-        model_names = [m["name"] for m in models]
-        logger.info(f"Ollama is reachable. Available models: {model_names}")
-        for task, model in MODEL_ROUTING.items():
-            if not any(m.startswith(model.split(":")[0]) for m in model_names):
-                logger.warning(f"Model '{model}' for task '{task}' is not pulled. Run: ollama pull {model}")
-    else:
-        logger.warning(
-            f"Ollama is NOT reachable at {OLLAMA_BASE_URL}. "
-            f"Start with: ollama serve\n"
-            f"Pull required models:\n"
-            + "\n".join(f"  ollama pull {m}" for m in set(MODEL_ROUTING.values()))
-        )
 
 
-@app.on_event("shutdown")
-async def shutdown():
-    # Middleware shutdown
-    if _MIDDLEWARE_AVAILABLE:
-        shutdown_middleware()
-    await ollama.close()
-    if forge:
-        await forge.close()
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────
@@ -665,13 +646,16 @@ if __name__ == "__main__":
 # ─── Middleware Integration ───────────────────────────────────────────────────
 import threading as _threading
 try:
-    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
 except ImportError:
     _MIDDLEWARE_AVAILABLE = False
     def setup_middleware(): pass
     def start_consumer_thread(): return None
     def shutdown_middleware(): pass
+    @asynccontextmanager
+    async def middleware_lifespan():
+        yield
 
 
     uvicorn.run(

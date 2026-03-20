@@ -11,6 +11,7 @@ Detects complex trade fraud patterns using PyFlink CEP:
 """
 
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import hashlib
 import logging
@@ -27,7 +28,15 @@ from pydantic import BaseModel, Field
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("flink-cep-svc")
 
-app = FastAPI(title="TradeGateway Flink CEP Service", version="1.0.0")
+
+# ─── Application Lifespan ───────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: activates full middleware bundle on startup."""
+    async with middleware_lifespan():
+        yield
+
+app = FastAPI(title="TradeGateway Flink CEP Service", version="1.0.0", lifespan=lifespan)
 
 # ─── In-memory state (production: Flink state backend / Redis) ────────────────
 
@@ -399,17 +408,7 @@ def get_stats():
 
 
 # ─── Lifecycle ───────────────────────────────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    import threading as _t
-    if _MIDDLEWARE_AVAILABLE:
-        setup_middleware()
-        _t.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
 
-@app.on_event("shutdown")
-async def shutdown():
-    if _MIDDLEWARE_AVAILABLE:
-        shutdown_middleware()
 
 if __name__ == "__main__":
     import uvicorn
@@ -417,13 +416,16 @@ if __name__ == "__main__":
 # ─── Middleware Integration ───────────────────────────────────────────────────
 import threading as _threading
 try:
-    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
 except ImportError:
     _MIDDLEWARE_AVAILABLE = False
     def setup_middleware(): pass
     def start_consumer_thread(): return None
     def shutdown_middleware(): pass
+    @asynccontextmanager
+    async def middleware_lifespan():
+        yield
 
 
     port = int(os.getenv("PORT", "8104"))

@@ -15,6 +15,7 @@ WCO SAFE Framework risk management principles:
 - Value/weight anomaly detection
 """
 
+from contextlib import asynccontextmanager
 import hashlib
 import json
 import logging
@@ -362,10 +363,19 @@ def score_declaration(request: ScoreRequest) -> ScoreResponse:
 
 # ─── FASTAPI APPLICATION ──────────────────────────────────────────────────────
 
+
+# ─── Application Lifespan ───────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: activates full middleware bundle on startup."""
+    async with middleware_lifespan():
+        yield
+
 app = FastAPI(
     title="TradeGateway Risk Engine",
     description="ML-powered risk scoring for customs declarations (WCO SAFE Framework)",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -508,17 +518,7 @@ async def get_country_risk(country_code: str):
 
 
 # ─── Lifecycle ───────────────────────────────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    import threading as _t
-    if _MIDDLEWARE_AVAILABLE:
-        setup_middleware()
-        _t.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
 
-@app.on_event("shutdown")
-async def shutdown():
-    if _MIDDLEWARE_AVAILABLE:
-        shutdown_middleware()
 
 if __name__ == "__main__":
     import uvicorn
@@ -526,13 +526,16 @@ if __name__ == "__main__":
 # ─── Middleware Integration ───────────────────────────────────────────────────
 import threading as _threading
 try:
-    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
 except ImportError:
     _MIDDLEWARE_AVAILABLE = False
     def setup_middleware(): pass
     def start_consumer_thread(): return None
     def shutdown_middleware(): pass
+    @asynccontextmanager
+    async def middleware_lifespan():
+        yield
 
 
     logger.info(f"Starting Risk Engine on port {HTTP_PORT}")

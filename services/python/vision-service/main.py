@@ -42,6 +42,7 @@ Port: 8092 (HTTP)
 """
 
 from __future__ import annotations
+from contextlib import asynccontextmanager
 
 import asyncio
 import base64
@@ -604,10 +605,19 @@ def analyse_container(
 
 # ─── Application ─────────────────────────────────────────────────────────────
 
+
+# ─── Application Lifespan ───────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan: activates full middleware bundle on startup."""
+    async with middleware_lifespan():
+        yield
+
 app = FastAPI(
     title="TradeGateway Vision Analysis Service",
     description="YOLOv8 + SAM2 + OpenCV + Qwen2-VL cargo inspection",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -818,23 +828,8 @@ async def verify_seal(
     }
 
 
-@app.on_event("startup")
-async def startup():
-    # Middleware: Kafka + Dapr + Fluvio + OpenTelemetry
-    if _MIDDLEWARE_AVAILABLE:
-        setup_middleware()
-        _threading.Thread(target=start_consumer_thread, daemon=True, name="mw-consumer").start()
-    logger.info(f"Vision Analysis Service starting on port {PORT}")
-    logger.info(f"Device: {DEVICE}")
-    logger.info(f"Ollama endpoint: {OLLAMA_BASE_URL}")
 
 
-@app.on_event("shutdown")
-async def shutdown():
-    # Middleware shutdown
-    if _MIDDLEWARE_AVAILABLE:
-        shutdown_middleware()
-    await vlm.close()
 
 
 if __name__ == "__main__":
@@ -843,13 +838,16 @@ if __name__ == "__main__":
 # ─── Middleware Integration ───────────────────────────────────────────────────
 import threading as _threading
 try:
-    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware
+    from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
 except ImportError:
     _MIDDLEWARE_AVAILABLE = False
     def setup_middleware(): pass
     def start_consumer_thread(): return None
     def shutdown_middleware(): pass
+    @asynccontextmanager
+    async def middleware_lifespan():
+        yield
 
 
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, log_level="info")
