@@ -750,6 +750,12 @@ async function startServer() {
   // Sprint 79: Public certificate verification endpoint (GET /api/verify/:certNumber)
   const { registerCertVerifyRoute } = await import("../routes/certVerify");
   registerCertVerifyRoute(app);
+  // E2E test auth endpoint — only mounted when E2E_TEST_MODE=1 (never in production)
+  if (process.env.E2E_TEST_MODE === "1") {
+    const { registerE2eTestAuthRoute } = await import("../routes/e2eTestAuth");
+    registerE2eTestAuthRoute(app);
+  }
+
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

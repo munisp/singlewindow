@@ -106,8 +106,11 @@ jobs:
         run: ruff check services/python/ services/python-ai/ --ignore E501 || true
       - name: Test Python services
         run: |
-          for svc in $(find services/python -name "test_*.py" -o -name "*_test.py"); do
-            pytest $svc -v || true
+          # Run each service's test suite from its own directory to avoid
+          # module name collisions between services with identically-named test files.
+          for svc_dir in $(find services/python -name "tests" -type d); do
+            echo "=== Testing $svc_dir ==="
+            (cd "$svc_dir/.." && python3 -m pytest tests/ -v) || true
           done
 
   # ─── Rust Services Build ───────────────────────────────────────────────────
@@ -144,6 +147,24 @@ jobs:
           name: dist
           path: dist/
           retention-days: 7
+
+  # ─── Alertmanager Config & Routing Smoke Tests ───────────────────────────────
+  alertmanager-tests:
+    name: Alertmanager Config & Routing Tests (52 assertions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install amtool
+        run: |
+          wget -q https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz \
+            -O /tmp/alertmanager.tar.gz
+          tar -xzf /tmp/alertmanager.tar.gz -C /tmp/
+          sudo mv /tmp/alertmanager-0.27.0.linux-amd64/amtool /usr/local/bin/
+          amtool --version
+      - name: Run Alertmanager config syntax check
+        run: bash infra/monitoring/alertmanager/test-alertmanager-config.sh --check-only
+      - name: Run full Alertmanager routing smoke tests
+        run: bash infra/monitoring/alertmanager/test-alertmanager-config.sh
 
   # ─── Helm Dry-Run ──────────────────────────────────────────────────────────
   helm-validate:

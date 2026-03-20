@@ -127,3 +127,8 @@ services/rust-graph-risk/target/
 # Go build artifacts
 services/go-graph-bridge/bin/
 services/go-graph-bridge/*.exe
+
+# Playwright authenticated session state (contains signed JWTs)
+e2e/.auth/
+playwright-report/
+test-results/
