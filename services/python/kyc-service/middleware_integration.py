@@ -1,132 +1,67 @@
 """
-Kyc Service — Middleware Integration
-====================================
-Wires Kafka, Dapr, Fluvio, and OpenTelemetry into the kyc-service service.
-
-KYC verification service
-
-Kafka topics consumed:
-  trader.registered  → Trigger KYC verification when a new trader registers
-
-Kafka topics published:
-  kyc.completed
-  kyc.failed
-
-Fluvio streams:
-  kyc.status.stream  → real-time feed
-
-Usage:
-    from middleware_integration import setup_middleware, mw, start_consumer_thread
+TradeGateway™ NGSWTP — kyc-service Middleware Integration
+Full bundle: Kafka, Dapr, Fluvio, Temporal, Keycloak, Permify, Redis, APISIX, TigerBeetle, Lakehouse.
 """
-
 from __future__ import annotations
-
 import logging
 import os
-import threading
-from datetime import datetime, timezone
-from typing import Any
-
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
-from shared.middleware import MiddlewareBundle, init_tracer
+from contextlib import asynccontextmanager
+from middleware_bundle import MiddlewareBundle, create_bundle
 
 logger = logging.getLogger("kyc-service.middleware")
 
-SERVICE_NAME = "kyc-service"
-SERVICE_VERSION = "1.0.0"
-
-TOPIC_TRADER_REGISTERED = "trader.registered"
-TOPIC_KYC_COMPLETED = "kyc.completed"
-TOPIC_KYC_FAILED = "kyc.failed"
-FLUVIO_KYC_STATUS_STREAM = "kyc.status.stream"
-
-mw: MiddlewareBundle | None = None
-tracer_provider = None
-_consumer_thread: threading.Thread | None = None
+# ─── Global bundle instance ───────────────────────────────────────────────────
+_bundle: MiddlewareBundle | None = None
 
 
-def _handle_trader_registered(payload: dict[str, Any]) -> None:
-    """
-    Trigger KYC verification when a new trader registers
-    """
-    global mw
-    if mw is None:
-        return
-
-    logger.info(f"[Middleware] Kyc Service handling {payload.get('declaration_id', payload.get('trader_id', 'unknown'))}")
-
-    # Publish result event
-    result_event = {
-        "source": SERVICE_NAME,
-        "input": payload,
-        "processed_at": datetime.now(timezone.utc).isoformat(),
-        "status": "processed",
-    }
-
-    if mw:
-        mw.publish_event(TOPIC_KYC_COMPLETED, result_event)
-
-    if mw and mw.fluvio:
-        mw.fluvio.produce(FLUVIO_KYC_STATUS_STREAM, {
-            "source": SERVICE_NAME,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "status": "processed",
-        })
+def get_bundle() -> MiddlewareBundle:
+    """Lazy-initialize and return the global middleware bundle."""
+    global _bundle
+    if _bundle is None:
+        _bundle = create_bundle("kyc-service")
+    return _bundle
 
 
-def setup_middleware() -> None:
-    """Initialise all middleware clients for kyc-service."""
-    global mw, tracer_provider
-
-    try:
-        tracer_provider = init_tracer(SERVICE_NAME, SERVICE_VERSION)
-        logger.info("[Middleware] OpenTelemetry tracer initialised")
-    except Exception as exc:
-        logger.warning(f"[Middleware] OTel init failed (non-fatal): {exc}")
-
-    try:
-        mw = MiddlewareBundle(
-            service_name=SERVICE_NAME,
-            consume_topics=["trader.registered"],
-            handlers={
-                "trader.registered": _handle_trader_registered,
-            },
-            enable_fluvio=True,
-        )
-        logger.info("[Middleware] MiddlewareBundle initialised")
-    except Exception as exc:
-        logger.warning(f"[Middleware] MiddlewareBundle init failed (non-fatal): {exc}")
-        mw = None
-
-
-def start_consumer_thread() -> threading.Thread | None:
-    """Start Kafka consumer in a daemon background thread."""
-    global _consumer_thread
-    if mw is None:
-        return None
-
-    def _run():
-        try:
-            mw.start_consumers()
-        except Exception as exc:
-            logger.error(f"[Middleware] Consumer thread error: {exc}")
-
-    _consumer_thread = threading.Thread(target=_run, daemon=True, name=f"{SERVICE_NAME}-consumer")
-    _consumer_thread.start()
-    logger.info("[Middleware] Consumer thread started")
-    return _consumer_thread
+def setup_middleware() -> MiddlewareBundle:
+    """Initialize the middleware bundle. Call from FastAPI lifespan startup."""
+    bundle = get_bundle()
+    bundle.start()
+    logger.info("[kyc-service] Full middleware bundle initialized — Kafka, Dapr, Keycloak, Permify, Redis, TigerBeetle, Lakehouse, APISIX")
+    return bundle
 
 
 def shutdown_middleware() -> None:
-    """Gracefully shut down all middleware clients."""
-    global mw
-    if mw:
-        mw.stop()
-        mw = None
-    if tracer_provider:
-        try:
-            tracer_provider.shutdown()
-        except Exception:
-            pass
+    """Shutdown the middleware bundle. Call from FastAPI lifespan shutdown."""
+    global _bundle
+    if _bundle is not None:
+        _bundle.stop()
+        _bundle = None
+        logger.info("[kyc-service] Middleware bundle shutdown complete")
+
+
+def start_consumer_thread(topics: list[str], handler) -> None:
+    """Start a background Kafka consumer thread for the given topics."""
+    bundle = get_bundle()
+    bundle.kafka.subscribe(topics, handler)
+    logger.info(f"[kyc-service] Kafka consumer started for topics: {topics}")
+
+
+@asynccontextmanager
+async def middleware_lifespan():
+    """Async context manager for FastAPI lifespan integration.
+    
+    Usage in main.py:
+        from middleware_integration import middleware_lifespan
+        
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            async with middleware_lifespan():
+                yield
+        
+        app = FastAPI(lifespan=lifespan)
+    """
+    bundle = setup_middleware()
+    try:
+        yield bundle
+    finally:
+        shutdown_middleware()

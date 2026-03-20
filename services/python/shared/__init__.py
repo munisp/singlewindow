@@ -1,24 +1,31 @@
-"""TradeGateway™ NGSWTP — Shared Python middleware package."""
-from .middleware import (
-    KafkaPublisher,
-    KafkaConsumer,
-    DaprPublisher,
-    FluvioPublisher,
-    AsyncDaprPublisher,
-    AsyncFluvioPublisher,
+"""
+TradeGateway™ NGSWTP — Python Shared Middleware
+Exports the comprehensive MiddlewareBundle covering all 10 middleware technologies.
+"""
+from .middleware_full import (
     MiddlewareBundle,
-    init_tracer,
-    get_tracer,
+    MiddlewareConfig,
+    KafkaClient,
+    DaprClient,
+    KeycloakClient,
+    PermifyClient,
+    RedisClient,
+    TigerBeetleClient,
+    LakehouseClient,
+    APISIXClient,
+    create_bundle,
 )
 
 __all__ = [
-    "KafkaPublisher",
-    "KafkaConsumer",
-    "DaprPublisher",
-    "FluvioPublisher",
-    "AsyncDaprPublisher",
-    "AsyncFluvioPublisher",
     "MiddlewareBundle",
-    "init_tracer",
-    "get_tracer",
+    "MiddlewareConfig",
+    "KafkaClient",
+    "DaprClient",
+    "KeycloakClient",
+    "PermifyClient",
+    "RedisClient",
+    "TigerBeetleClient",
+    "LakehouseClient",
+    "APISIXClient",
+    "create_bundle",
 ]

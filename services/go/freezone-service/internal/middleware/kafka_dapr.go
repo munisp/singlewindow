@@ -15,6 +15,13 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func kafkaBrokers() []string {
@@ -205,4 +212,46 @@ func NewMiddlewareClients(handler DeclarationClearedHandler) (*MiddlewareClients
 func (m *MiddlewareClients) Close() {
 	m.KafkaPublisher.Close()
 	m.KafkaConsumer.Close()
+}
+
+// ─── OpenTelemetry Tracing ────────────────────────────────────────────────────
+
+// InitTracer initialises the OTLP trace exporter and sets the global TracerProvider.
+// Call this once at service startup; the returned shutdown function must be deferred.
+func InitTracer(serviceName string) (func(context.Context) error, error) {
+endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+if endpoint == "" {
+endpoint = "otel-collector.monitoring.svc.cluster.local:4317"
+}
+ctx := context.Background()
+exp, err := otlptracehttp.New(ctx,
+otlptracehttp.WithEndpoint(endpoint),
+otlptracehttp.WithInsecure(),
+)
+if err != nil {
+return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+}
+res, err := resource.New(ctx,
+resource.WithAttributes(
+semconv.ServiceName(serviceName),
+semconv.ServiceVersion("1.0.0"),
+attribute.String("platform", "tradegateway-ngswtp"),
+),
+)
+if err != nil {
+return nil, fmt.Errorf("failed to create OTel resource: %w", err)
+}
+tp := sdktrace.NewTracerProvider(
+sdktrace.WithBatcher(exp),
+sdktrace.WithResource(res),
+sdktrace.WithSampler(sdktrace.AlwaysSample()),
+)
+otel.SetTracerProvider(tp)
+slog.Info("OpenTelemetry tracer initialised", "service", serviceName, "endpoint", endpoint)
+return tp.Shutdown, nil
+}
+
+// Tracer returns a named tracer for the given service.
+func Tracer(serviceName string) trace.Tracer {
+return otel.Tracer(serviceName)
 }
