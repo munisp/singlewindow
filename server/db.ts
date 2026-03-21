@@ -201,7 +201,7 @@ export async function getAllDeclarations(
   const conditions: any[] = [];
   if (opts?.dateFrom) conditions.push(gte(declarations.submittedAt, opts.dateFrom));
   if (opts?.dateTo) conditions.push(lte(declarations.submittedAt, opts.dateTo));
-  if (opts?.status) conditions.push(eq(declarations.status, opts.status as any));
+  if (opts?.status) conditions.push(sql`${declarations.status} = ${opts.status}::declaration_status`);
   const base = db.select().from(declarations);
   const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
   return filtered.orderBy(desc(declarations.submittedAt)).limit(limit).offset(offset);

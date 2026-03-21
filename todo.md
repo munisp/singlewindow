@@ -1954,12 +1954,12 @@
 
 ## Sprint 104 — PostgreSQL Migration & Demo Seeding
 
-- [ ] [S104] Confirm DATABASE_URL points to PostgreSQL (not MySQL/TiDB)
-- [ ] [S104] Verify drizzle.config.ts uses pg-core dialect
-- [ ] [S104] Run pnpm db:push to sync full schema to PostgreSQL
-- [ ] [S104] Seed 6 demo users (trader/customs/oga/admin/security/developer) with correct roles
-- [ ] [S104] Mark demo users as onboarding-complete
-- [ ] [S104] Verify /demo login flow for all 6 portals end-to-end
+- [x] [S104] Confirm DATABASE_URL points to PostgreSQL (not MySQL/TiDB)
+- [x] [S104] Verify drizzle.config.ts uses pg-core dialect
+- [x] [S104] Run pnpm db:push to sync full schema to PostgreSQL
+- [x] [S104] Seed 6 demo users (trader/customs/oga/admin/security/developer) with correct roles
+- [x] [S104] Mark demo users as onboarding-complete
+- [x] [S104] Verify /demo login flow for all 6 portals end-to-end
 - [ ] [S104] Save checkpoint and publish
 
 ## Sprint 105 — Sidebar Navigation Legibility Fix
@@ -1969,13 +1969,23 @@
 - [x] [S105] Fix section header labels legibility
 - [x] [S105] Fix active/hover state visibility
 - [x] [S105] Verify fix across all 6 portal dashboards
-- [ ] [S105] Save checkpoint
+- [x] [S105] Save checkpoint
 
 ## Sprint 106 — Sidebar Full Legibility Redesign
 
-- [ ] [S106] Replace shadcn Sidebar with custom fully-controlled nav — no truncation, full contrast
-- [ ] [S106] Use 14px font, font-weight 500 for nav items, 11px semibold for section labels
-- [ ] [S106] Section labels: bright white/gold, clear separator line above each group
-- [ ] [S106] Active item: gold background accent, white text, left border indicator
-- [ ] [S106] Verify all items fully readable at 1280px viewport
-- [ ] [S106] Save checkpoint
+- [x] [S106] Replace shadcn Sidebar with custom fully-controlled nav — no truncation, full contrast
+- [x] [S106] Use 14px font, font-weight 500 for nav items, 11px semibold for section labels
+- [x] [S106] Section labels: bright white/gold, clear separator line above each group
+- [x] [S106] Active item: gold background accent, white text, left border indicator
+- [x] [S106] Verify all items fully readable at 1280px viewport
+- [x] [S106] Save checkpoint
+
+## Sprint 107 — Demo Seed Data + Role Switcher + Publish
+
+- [x] [S107] Inspect declarations table schema in PostgreSQL
+- [x] [S107] Seed 30 demo declarations across green/yellow/red risk lanes
+- [x] [S107] Add role-switcher dropdown to DemoModeBanner
+- [x] [S107] Fix DemoModeBanner to show current user's role from useAuth()
+- [x] [S107] Fix declarations.all to use withRlsContext (RLS was blocking all rows)
+- [x] [S107] Fix declarations.stats to use withRlsContext
+- [ ] [S107] Save checkpoint and publish

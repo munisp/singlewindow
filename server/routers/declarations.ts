@@ -276,10 +276,15 @@ export const declarationsRouter = router({
     .query(async ({ ctx, input }) => {
       const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
-      return getAllDeclarations(input.limit, input.offset, {
-        dateFrom: input.dateFrom,
-        dateTo: input.dateTo,
-        status: input.status,
+      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+        const { desc, and, gte, lte } = await import("drizzle-orm");
+        const { declarations: decl } = await import("../../drizzle/schema");
+        const conditions: any[] = [];
+        if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
+        if (input.dateTo) conditions.push(lte(decl.submittedAt, input.dateTo));
+        const base = db.select().from(decl);
+        const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+        return filtered.orderBy(desc(decl.submittedAt)).limit(input.limit).offset(input.offset);
       });
     }),
 
@@ -356,10 +361,42 @@ export const declarationsRouter = router({
   stats: protectedProcedure.query(async ({ ctx }) => {
     const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
     if (officerRoles.includes(ctx.user.role)) {
-      return getDeclarationStats();
+      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+        const { count, eq } = await import("drizzle-orm");
+        const { declarations: decl } = await import("../../drizzle/schema");
+        const [total, cleared, pending, rejected] = await Promise.all([
+          db.select({ count: count() }).from(decl),
+          db.select({ count: count() }).from(decl).where(eq(decl.status, "cleared" as any)),
+          db.select({ count: count() }).from(decl).where(eq(decl.status, "submitted" as any)),
+          db.select({ count: count() }).from(decl).where(eq(decl.status, "rejected" as any)),
+        ]);
+        return {
+          total: total[0]?.count ?? 0,
+          cleared: cleared[0]?.count ?? 0,
+          pending: pending[0]?.count ?? 0,
+          rejected: rejected[0]?.count ?? 0,
+        };
+      });
     }
     // Trader: return their own stats
-    return getDeclarationStatsByTrader(ctx.user.id);
+    return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+      const { count, eq, and } = await import("drizzle-orm");
+      const { declarations: decl } = await import("../../drizzle/schema");
+      const [total, cleared, pending, rejected, submitted] = await Promise.all([
+        db.select({ count: count() }).from(decl).where(eq(decl.traderId, ctx.user.id)),
+        db.select({ count: count() }).from(decl).where(and(eq(decl.traderId, ctx.user.id), eq(decl.status, "cleared" as any))),
+        db.select({ count: count() }).from(decl).where(and(eq(decl.traderId, ctx.user.id), eq(decl.status, "payment_pending" as any))),
+        db.select({ count: count() }).from(decl).where(and(eq(decl.traderId, ctx.user.id), eq(decl.status, "rejected" as any))),
+        db.select({ count: count() }).from(decl).where(and(eq(decl.traderId, ctx.user.id), eq(decl.status, "submitted" as any))),
+      ]);
+      return {
+        total: total[0]?.count ?? 0,
+        cleared: cleared[0]?.count ?? 0,
+        pending: pending[0]?.count ?? 0,
+        rejected: rejected[0]?.count ?? 0,
+        submitted: submitted[0]?.count ?? 0,
+      };
+    });
   }),
 
   /**
