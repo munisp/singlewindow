@@ -157,6 +157,9 @@ function Router() {
       <Route path="/app/customs/payments">
         <Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense>
       </Route>
+      <Route path="/app/trader/payments">
+        <Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense>
+      </Route>
       <Route path="/app/customs/workflows">
         <Suspense fallback={<LazyFallback />}><TemporalWorkflows /></Suspense>
       </Route>

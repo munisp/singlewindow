@@ -265,6 +265,9 @@ async function seed() {
     const declIds = [];
     for (let i = 0; i < 15; i++) {
       const traderId = pick(traderIds);
+      // Set RLS context so the INSERT policy (trader_id = current_user_id) passes
+      await client.query(`SET LOCAL app.current_user_id = '${traderId}'`);
+      await client.query(`SET LOCAL app.current_user_role = 'user'`);
       const corridor = pick(CORRIDORS);
       const hsCode = pick(HS_CODES);
       const lanes = ["green", "green", "green", "yellow", "red"];
@@ -320,6 +323,9 @@ async function seed() {
     const clearedDecls = declIds.filter(d => d.status === "cleared" || d.status === "payment_confirmed");
     for (let i = 0; i < Math.min(10, clearedDecls.length); i++) {
       const decl = clearedDecls[i];
+      // Set RLS context for payment insert
+      await client.query(`SET LOCAL app.current_user_id = '${decl.traderId}'`);
+      await client.query(`SET LOCAL app.current_user_role = 'user'`);
       const methods = ["bank_transfer", "mobile_money", "card"];
       const method = pick(methods);
       const ref = `PAY-APT-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;

@@ -320,8 +320,8 @@ export default function AdminConsole() {
 
   const filteredProfiles = profiles?.filter((p: any) =>
     !profileSearch ||
-    p.companyName?.toLowerCase().includes(profileSearch.toLowerCase()) ||
-    p.tin?.includes(profileSearch)
+    p.organizationName?.toLowerCase().includes(profileSearch.toLowerCase()) ||
+    p.taxId?.includes(profileSearch)
   ) ?? [];
 
   const pendingProfiles = filteredProfiles.filter((p: any) => p.status === "pending");
@@ -421,11 +421,11 @@ export default function AdminConsole() {
                       <div key={p.id} className="flex items-start justify-between px-5 py-4 hover:bg-muted/30">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-sm">{p.companyName}</span>
+                            <span className="font-semibold text-sm">{p.organizationName}</span>
                             <Badge variant="outline" className="text-xs">{p.stakeholderType?.replace(/_/g, " ")}</Badge>
                           </div>
                           <div className="grid grid-cols-2 gap-x-6 mt-2 text-xs text-muted-foreground">
-                            <span>TIN: <span className="font-mono">{p.tin}</span></span>
+                            <span>TIN: <span className="font-mono">{p.taxId}</span></span>
                             <span>Country: {p.country}</span>
                             <span>Contact: {p.contactEmail}</span>
                             <span>Phone: {p.contactPhone}</span>
@@ -491,9 +491,9 @@ export default function AdminConsole() {
                       <tbody className="divide-y">
                         {filteredProfiles.map((p: any) => (
                           <tr key={p.id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 font-medium">{p.companyName}</td>
+                            <td className="px-4 py-3 font-medium">{p.organizationName}</td>
                             <td className="px-4 py-3 text-xs text-muted-foreground">{p.stakeholderType?.replace(/_/g, " ")}</td>
-                            <td className="px-4 py-3 font-mono text-xs">{p.tin}</td>
+                            <td className="px-4 py-3 font-mono text-xs">{p.taxId}</td>
                             <td className="px-4 py-3 text-xs">{p.country}</td>
                             <td className="px-4 py-3">
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[p.status] ?? "bg-gray-100 text-gray-700"}`}>

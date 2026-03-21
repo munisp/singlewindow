@@ -108,9 +108,9 @@ export const ogaRouter = router({
       );
     }),
 
-  // OGA officer: get assigned permits
+  // OGA officer: get assigned permits (admin/customs_officer see all)
   myPermits: protectedProcedure.query(async ({ ctx }) => {
-    return getPermitsByOfficer(ctx.user.id);
+    return getPermitsByOfficer(ctx.user.id, ctx.user.role);
   }),
 
   // OGA officer: approve a permit

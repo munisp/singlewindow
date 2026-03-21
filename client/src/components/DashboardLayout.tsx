@@ -300,6 +300,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
         { icon: Award, label: "AEO Self-Assessment", path: "/app/trader/aeo-self-assessment" },
         { icon: BarChart3, label: "Performance Scorecard", path: "/app/trader/scorecard" },
+        { icon: CreditCard, label: "Duty Payments", path: "/app/trader/payments" },
         { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },
         { icon: Fingerprint, label: "Identity Verification", path: "/app/trader/kyc" },
         { icon: Anchor, label: "Cargo Tracking Map", path: "/app/geo/cargo-tracking" },

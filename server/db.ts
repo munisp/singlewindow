@@ -329,9 +329,13 @@ export async function updateOgaPermit(id: number, data: Partial<typeof ogaPermit
   return result[0];
 }
 
-export async function getPermitsByOfficer(officerId: number) {
+export async function getPermitsByOfficer(officerId: number, role?: string) {
   const db = await getDb();
   if (!db) return [];
+  // Admin and customs_officer see all permits; oga_officer sees only their assigned permits
+  if (role === 'admin' || role === 'customs_officer') {
+    return db.select().from(ogaPermits).orderBy(desc(ogaPermits.createdAt));
+  }
   return db.select().from(ogaPermits)
     .where(eq(ogaPermits.assignedOfficerId, officerId))
     .orderBy(desc(ogaPermits.createdAt));

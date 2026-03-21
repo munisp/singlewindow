@@ -72,10 +72,10 @@ export default function CustomsDashboard() {
   ) ?? [];
 
   const laneGroups = {
-    red: filtered.filter((d: any) => d.status === "red_lane").length,
-    yellow: filtered.filter((d: any) => d.status === "yellow_lane").length,
-    green: filtered.filter((d: any) => d.status === "green_lane").length,
-    pending: filtered.filter((d: any) => d.status === "submitted").length,
+    red: (stats as any)?.redLane ?? filtered.filter((d: any) => d.riskLane === "red_lane" || d.riskLane === "red").length,
+    yellow: (stats as any)?.yellowLane ?? filtered.filter((d: any) => d.riskLane === "yellow_lane" || d.riskLane === "yellow").length,
+    green: (stats as any)?.greenLane ?? filtered.filter((d: any) => d.riskLane === "green_lane" || d.riskLane === "green").length,
+    pending: filtered.filter((d: any) => d.status === "submitted" || d.status === "under_review").length,
   };
 
   return (

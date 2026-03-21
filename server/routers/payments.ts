@@ -100,7 +100,10 @@ export const paymentsRouter = router({
       if (ctx.user.role !== "admin" && ctx.user.role !== "finance") {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
-      const txs = await getAllPayments(input.limit, input.offset);
+      // withRlsContext sets app.current_user_id and app.current_user_role so RLS policies pass
+      const txs = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
+        db.select().from(payments).limit(input.limit).offset(input.offset).orderBy(payments.createdAt)
+      );
       return { transactions: txs, total: txs.length };
     }),
 

@@ -428,17 +428,23 @@ export const declarationsRouter = router({
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
         const { count, eq } = await import("drizzle-orm");
         const { declarations: decl } = await import("../../drizzle/schema");
-        const [total, cleared, pending, rejected] = await Promise.all([
+        const [total, cleared, pending, rejected, redLane, yellowLane, greenLane] = await Promise.all([
           db.select({ count: count() }).from(decl),
           db.select({ count: count() }).from(decl).where(eq(decl.status, "cleared" as any)),
           db.select({ count: count() }).from(decl).where(eq(decl.status, "submitted" as any)),
           db.select({ count: count() }).from(decl).where(eq(decl.status, "rejected" as any)),
+          db.select({ count: count() }).from(decl).where(eq(decl.riskLane, "red" as any)),
+          db.select({ count: count() }).from(decl).where(eq(decl.riskLane, "yellow" as any)),
+          db.select({ count: count() }).from(decl).where(eq(decl.riskLane, "green" as any)),
         ]);
         return {
           total: total[0]?.count ?? 0,
           cleared: cleared[0]?.count ?? 0,
           pending: pending[0]?.count ?? 0,
           rejected: rejected[0]?.count ?? 0,
+          redLane: redLane[0]?.count ?? 0,
+          yellowLane: yellowLane[0]?.count ?? 0,
+          greenLane: greenLane[0]?.count ?? 0,
         };
       });
     }
