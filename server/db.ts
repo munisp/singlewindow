@@ -202,7 +202,42 @@ export async function getAllDeclarations(
   if (opts?.dateFrom) conditions.push(gte(declarations.submittedAt, opts.dateFrom));
   if (opts?.dateTo) conditions.push(lte(declarations.submittedAt, opts.dateTo));
   if (opts?.status) conditions.push(sql`${declarations.status} = ${opts.status}::declaration_status`);
-  const base = db.select().from(declarations);
+  const base = db
+    .select({
+      id: declarations.id,
+      declarationNumber: declarations.declarationNumber,
+      ucr: declarations.ucr,
+      traderId: declarations.traderId,
+      traderName: users.name,
+      traderEmail: users.email,
+      declarationType: declarations.declarationType,
+      status: declarations.status,
+      riskLane: declarations.riskLane,
+      riskScore: declarations.riskScore,
+      hsCode: declarations.hsCode,
+      goodsDescription: declarations.goodsDescription,
+      countryOfOrigin: declarations.countryOfOrigin,
+      countryOfDestination: declarations.countryOfDestination,
+      portOfEntry: declarations.portOfEntry,
+      grossWeight: declarations.grossWeight,
+      netWeight: declarations.netWeight,
+      numberOfPackages: declarations.numberOfPackages,
+      invoiceValue: declarations.invoiceValue,
+      invoiceCurrency: declarations.invoiceCurrency,
+      dutyAmount: declarations.dutyAmount,
+      vatAmount: declarations.vatAmount,
+      levyAmount: declarations.levyAmount,
+      totalDue: declarations.totalDue,
+      assignedOfficerId: declarations.assignedOfficerId,
+      aiExplanation: declarations.aiExplanation,
+      sanctionsFlags: declarations.sanctionsFlags,
+      submittedAt: declarations.submittedAt,
+      clearedAt: declarations.clearedAt,
+      createdAt: declarations.createdAt,
+      updatedAt: declarations.updatedAt,
+    })
+    .from(declarations)
+    .leftJoin(users, eq(declarations.traderId, users.id));
   const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
   return filtered.orderBy(desc(declarations.submittedAt)).limit(limit).offset(offset);
 }

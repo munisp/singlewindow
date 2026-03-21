@@ -67,7 +67,7 @@ export default function CustomsDashboard() {
   const filtered = declarations?.filter((d: any) =>
     !search ||
     d.declarationNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    d.importerName?.toLowerCase().includes(search.toLowerCase()) ||
+    d.traderName?.toLowerCase().includes(search.toLowerCase()) ||
     d.hsCode?.includes(search)
   ) ?? [];
 
@@ -201,7 +201,7 @@ export default function CustomsDashboard() {
                           </td>
                           <td className="px-4 py-3">
                             <div>
-                              <p className="font-medium truncate max-w-32">{d.importerName || "—"}</p>
+                              <p className="font-medium truncate max-w-32">{d.traderName || "—"}</p>
                               <p className="text-xs text-muted-foreground">{d.declarationType?.toUpperCase()}</p>
                             </div>
                           </td>

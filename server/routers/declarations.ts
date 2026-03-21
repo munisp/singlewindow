@@ -248,17 +248,51 @@ export const declarationsRouter = router({
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
       const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
-      if (officerRoles.includes(ctx.user.role)) {
-        const decl = await getDeclarationById(input.id);
-        if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
-        return decl;
-      }
-      // Trader path: withRlsContext enforces row-level security — only own rows returned
-      const results = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
-        db.select().from(declarations)
-          .where(and(eq(declarations.id, input.id), eq(declarations.traderId, ctx.user.id)))
-          .limit(1)
-      );
+      // Both officers and traders use withRlsContext so PostgreSQL RLS policies are satisfied
+      const results = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+        const { users: usersTable } = await import("../../drizzle/schema");
+        const { eq: eqOp, and: andOp } = await import("drizzle-orm");
+        const baseQuery = db
+          .select({
+            id: declarations.id,
+            declarationNumber: declarations.declarationNumber,
+            ucr: declarations.ucr,
+            traderId: declarations.traderId,
+            traderName: usersTable.name,
+            traderEmail: usersTable.email,
+            declarationType: declarations.declarationType,
+            status: declarations.status,
+            riskLane: declarations.riskLane,
+            riskScore: declarations.riskScore,
+            hsCode: declarations.hsCode,
+            goodsDescription: declarations.goodsDescription,
+            countryOfOrigin: declarations.countryOfOrigin,
+            countryOfDestination: declarations.countryOfDestination,
+            portOfEntry: declarations.portOfEntry,
+            grossWeight: declarations.grossWeight,
+            netWeight: declarations.netWeight,
+            numberOfPackages: declarations.numberOfPackages,
+            invoiceValue: declarations.invoiceValue,
+            invoiceCurrency: declarations.invoiceCurrency,
+            dutyAmount: declarations.dutyAmount,
+            vatAmount: declarations.vatAmount,
+            levyAmount: declarations.levyAmount,
+            totalDue: declarations.totalDue,
+            assignedOfficerId: declarations.assignedOfficerId,
+            aiExplanation: declarations.aiExplanation,
+            sanctionsFlags: declarations.sanctionsFlags,
+            submittedAt: declarations.submittedAt,
+            clearedAt: declarations.clearedAt,
+            createdAt: declarations.createdAt,
+            updatedAt: declarations.updatedAt,
+          })
+          .from(declarations)
+          .leftJoin(usersTable, eqOp(declarations.traderId, usersTable.id));
+        if (officerRoles.includes(ctx.user.role)) {
+          return baseQuery.where(eqOp(declarations.id, input.id)).limit(1);
+        }
+        return baseQuery.where(andOp(eqOp(declarations.id, input.id), eqOp(declarations.traderId, ctx.user.id))).limit(1);
+      });
       if (!results[0]) throw new TRPCError({ code: "NOT_FOUND" });
       return results[0];
     }),
@@ -277,12 +311,42 @@ export const declarationsRouter = router({
       const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
-        const { desc, and, gte, lte } = await import("drizzle-orm");
-        const { declarations: decl } = await import("../../drizzle/schema");
+        const { desc, and, gte, lte, eq: eqOp } = await import("drizzle-orm");
+        const { declarations: decl, users: usersTable } = await import("../../drizzle/schema");
         const conditions: any[] = [];
         if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
         if (input.dateTo) conditions.push(lte(decl.submittedAt, input.dateTo));
-        const base = db.select().from(decl);
+        const base = db
+          .select({
+            id: decl.id,
+            declarationNumber: decl.declarationNumber,
+            ucr: decl.ucr,
+            traderId: decl.traderId,
+            traderName: usersTable.name,
+            traderEmail: usersTable.email,
+            declarationType: decl.declarationType,
+            status: decl.status,
+            riskLane: decl.riskLane,
+            riskScore: decl.riskScore,
+            hsCode: decl.hsCode,
+            goodsDescription: decl.goodsDescription,
+            countryOfOrigin: decl.countryOfOrigin,
+            countryOfDestination: decl.countryOfDestination,
+            portOfEntry: decl.portOfEntry,
+            invoiceValue: decl.invoiceValue,
+            invoiceCurrency: decl.invoiceCurrency,
+            dutyAmount: decl.dutyAmount,
+            vatAmount: decl.vatAmount,
+            totalDue: decl.totalDue,
+            assignedOfficerId: decl.assignedOfficerId,
+            aiExplanation: decl.aiExplanation,
+            submittedAt: decl.submittedAt,
+            clearedAt: decl.clearedAt,
+            createdAt: decl.createdAt,
+            updatedAt: decl.updatedAt,
+          })
+          .from(decl)
+          .leftJoin(usersTable, eqOp(decl.traderId, usersTable.id));
         const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
         return filtered.orderBy(desc(decl.submittedAt)).limit(input.limit).offset(input.offset);
       });

@@ -1988,4 +1988,15 @@
 - [x] [S107] Fix DemoModeBanner to show current user's role from useAuth()
 - [x] [S107] Fix declarations.all to use withRlsContext (RLS was blocking all rows)
 - [x] [S107] Fix declarations.stats to use withRlsContext
-- [ ] [S107] Save checkpoint and publish
+- [x] [S107] Save checkpoint and publish
+
+## Sprint 108 — Declaration Drill-Down, Importer JOIN, Trader Seed Fix
+
+- [x] [S108] Reassign 10 NGSWTP declarations to Tunde Adeyemi (id=91); Amara Diallo keeps 20
+- [x] [S108] Fix declarations.all inline query to JOIN users table and return traderName
+- [x] [S108] Fix declarations.byId to use withRlsContext + users JOIN (returns traderName, traderEmail)
+- [x] [S108] Fix Importer column in CustomsDashboard to show d.traderName
+- [x] [S108] Wire Review button in CustomsDashboard to /app/customs/declarations/:id (already wired)
+- [x] [S108] Verify DeclarationReview page loads with correct data (NGSWTP-2026-00012, risk 5.30)
+- [x] [S108] Verify Importer column shows Amara Diallo / Tunde Adeyemi correctly
+- [ ] [S108] Save checkpoint
