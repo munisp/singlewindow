@@ -123,7 +123,7 @@ export default function CustomsDashboard() {
     try {
       await Promise.all(
         Array.from(selectedIds).map(id =>
-          assignOfficerMutation.mutateAsync({ id, officerId: parseInt(bulkOfficerId) })
+          assignOfficerMutation.mutateAsync({ declarationId: id, officerId: parseInt(bulkOfficerId) })
         )
       );
       toast.success(`Assigned ${selectedIds.size} declaration${selectedIds.size > 1 ? 's' : ''} to officer`);
