@@ -223,6 +223,7 @@ export default function DeclarationDetail() {
 
   const declarationId = parseInt(id ?? "0", 10);
   const isOfficer = ["admin", "customs_officer", "inspector"].includes(user?.role ?? "");
+  const [selectedOfficerId, setSelectedOfficerId] = useState<string>("");
 
   const { data: declaration, isLoading, error, refetch } = trpc.declarations.byId.useQuery(
     { id: declarationId },
@@ -234,7 +235,23 @@ export default function DeclarationDetail() {
     { enabled: !!declarationId && !isNaN(declarationId) }
   );
 
+  // Sprint 112: List officers for assignment dropdown
+  const { data: officerList } = trpc.declarations.listOfficers.useQuery(undefined, {
+    enabled: isOfficer,
+  });
+
   const utils = trpc.useUtils();
+
+  const assignOfficerMutation = trpc.declarations.assignOfficer.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.officerId ? `Assigned to ${data.officerName}` : "Officer assignment cleared");
+      setSelectedOfficerId("");
+      utils.declarations.byId.invalidate({ id: declarationId });
+      utils.declarations.workload.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const updateStatusMutation = trpc.declarations.updateStatus.useMutation({
     onSuccess: () => {
       toast.success("Declaration status updated");
@@ -646,6 +663,53 @@ export default function DeclarationDetail() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
+                      {/* Sprint 112: Assign Officer */}
+                      {officerList && officerList.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Assign Officer</p>
+                          <div className="flex gap-2">
+                            <Select
+                              value={selectedOfficerId}
+                              onValueChange={setSelectedOfficerId}
+                            >
+                              <SelectTrigger className="flex-1">
+                                <SelectValue placeholder={
+                                  decl.assignedOfficerId
+                                    ? (officerList.find(o => o.id === decl.assignedOfficerId)?.name ?? `Officer #${decl.assignedOfficerId}`)
+                                    : "Unassigned — select officer..."
+                                } />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassign">— Unassign —</SelectItem>
+                                {officerList.map(o => (
+                                  <SelectItem key={o.id} value={String(o.id)}>
+                                    {o.name} <span className="text-muted-foreground text-xs ml-1">({o.role})</span>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={!selectedOfficerId || assignOfficerMutation.isPending}
+                              onClick={() => {
+                                if (!selectedOfficerId) return;
+                                assignOfficerMutation.mutate({
+                                  declarationId,
+                                  officerId: selectedOfficerId === "unassign" ? null : parseInt(selectedOfficerId, 10),
+                                });
+                              }}
+                            >
+                              {assignOfficerMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Assign"}
+                            </Button>
+                          </div>
+                          {decl.assignedOfficerId && (
+                            <p className="text-xs text-muted-foreground">
+                              Currently assigned to: <span className="font-medium text-foreground">{officerList.find(o => o.id === decl.assignedOfficerId)?.name ?? `Officer #${decl.assignedOfficerId}`}</span>
+                            </p>
+                          )}
+                        </div>
+                      )}
                       <Select value={selectedStatus} onValueChange={setSelectedStatus}>
                         <SelectTrigger>
                           <SelectValue placeholder="Select new status..." />

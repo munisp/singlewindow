@@ -67,17 +67,47 @@ export default function CustomsDashboard() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data: declarations, isLoading, isError} = trpc.declarations.all.useQuery({
-    limit: 100,
+  // Sprint 112: cursor-based pagination state
+  const [cursor, setCursor] = useState<number | undefined>(undefined);
+  const [allItems, setAllItems] = useState<any[]>([]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCursor(undefined);
+    setAllItems([]);
+  }, [statusFilter, laneFilter, debouncedSearch]);
+
+  const { data: pageData, isLoading, isError, isFetching } = trpc.declarations.all.useQuery({
+    limit: 50,
+    lastId: cursor,
     status: statusFilter !== "all" ? statusFilter : undefined,
     riskLane: laneFilter !== "all" ? laneFilter : undefined,
     search: debouncedSearch.trim() || undefined,
   });
 
+  // Accumulate pages
+  useEffect(() => {
+    if (!pageData?.items) return;
+    if (!cursor) {
+      // First page (or after filter reset)
+      setAllItems(pageData.items);
+    } else {
+      // Append next page
+      setAllItems(prev => {
+        const existingIds = new Set(prev.map((d: any) => d.id));
+        const newItems = pageData.items.filter((d: any) => !existingIds.has(d.id));
+        return [...prev, ...newItems];
+      });
+    }
+  }, [pageData]);
+
+  const hasMore = pageData?.hasMore ?? false;
+  const nextCursor = pageData?.nextCursor;
+
   const { data: stats } = trpc.declarations.stats.useQuery();
 
   // Server-side search is now applied; client-side filter is a no-op passthrough
-  const filtered = declarations ?? [];
+  const filtered = allItems;
 
   const laneGroups = {
     red: (stats as any)?.redLane ?? filtered.filter((d: any) => d.riskLane === "red_lane" || d.riskLane === "red").length,
@@ -170,7 +200,7 @@ export default function CustomsDashboard() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold">
-              Declaration Queue ({filtered.length})
+              Declaration Queue ({filtered.length}{hasMore ? "+" : ""})
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -286,6 +316,24 @@ export default function CustomsDashboard() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {/* Load More button */}
+            {hasMore && !isLoading && (
+              <div className="p-4 border-t text-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => nextCursor && setCursor(nextCursor)}
+                  disabled={isFetching}
+                  className="gap-2"
+                >
+                  {isFetching ? (
+                    <><span className="h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />Loading...</>
+                  ) : (
+                    <>Load more declarations</>
+                  )}
+                </Button>
               </div>
             )}
           </CardContent>

@@ -1,5 +1,6 @@
 import { Toaster } from "@/components/ui/sonner";
 import DemoModeBanner from "@/components/DemoModeBanner";
+import MobileBottomNav from "@/components/MobileBottomNav";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch, Redirect } from "wouter";
@@ -423,6 +424,7 @@ function App() {
           <Toaster />
           <DemoModeBanner />
           <Router />
+          <MobileBottomNav />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

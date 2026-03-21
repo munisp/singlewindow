@@ -299,10 +299,11 @@ export const declarationsRouter = router({
     }),
 
   // Get all declarations (customs officers / admin / finance / inspector / oga_officer)
+  // Sprint 112: Upgraded to cursor-based pagination (lastId + limit) for efficiency
   all: protectedProcedure
     .input(z.object({
-      limit: z.number().default(50),
-      offset: z.number().default(0),
+      limit: z.number().min(1).max(200).default(50),
+      lastId: z.number().optional(),   // cursor: last seen declaration ID (for "load more")
       status: z.string().optional(),
       riskLane: z.string().optional(),
       search: z.string().optional(),
@@ -313,7 +314,7 @@ export const declarationsRouter = router({
       const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
-        const { desc, and, gte, lte, eq: eqOp, or, ilike } = await import("drizzle-orm");
+        const { desc, and, gte, lte, eq: eqOp, or, ilike, lt } = await import("drizzle-orm");
         const { declarations: decl, users: usersTable } = await import("../../drizzle/schema");
         const conditions: any[] = [];
         if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
@@ -330,6 +331,10 @@ export const declarationsRouter = router({
             ilike(decl.hsCode, term),
           ));
         }
+        // Cursor: only fetch records with id < lastId (keyset pagination on descending id)
+        if (input.lastId) conditions.push(lt(decl.id, input.lastId));
+
+        const fetchLimit = input.limit + 1; // fetch one extra to detect hasMore
         const base = db
           .select({
             id: decl.id,
@@ -362,7 +367,11 @@ export const declarationsRouter = router({
           .from(decl)
           .leftJoin(usersTable, eqOp(decl.traderId, usersTable.id));
         const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
-        return filtered.orderBy(desc(decl.submittedAt)).limit(input.limit).offset(input.offset);
+        const rows = await filtered.orderBy(desc(decl.id)).limit(fetchLimit);
+        const hasMore = rows.length > input.limit;
+        const items = hasMore ? rows.slice(0, input.limit) : rows;
+        const nextCursor = hasMore ? items[items.length - 1]?.id : undefined;
+        return { items, hasMore, nextCursor };
       });
     }),
 
@@ -973,6 +982,128 @@ export const declarationsRouter = router({
       });
       return { success: true };
     }),
+
+  /**
+   * Sprint 112 — Assign Officer to Declaration
+   * Allows admin/customs_officer to assign a declaration to a specific officer.
+   * Broadcasts workload update after assignment.
+   */
+  assignOfficer: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      officerId: z.number().int().positive().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const allowedRoles = ["admin", "customs_officer"];
+      if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+
+      const db = await (await import("../db")).getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const { eq } = await import("drizzle-orm");
+      const { declarations: decl, users } = await import("../../drizzle/schema");
+
+      // Verify declaration exists
+      const [existing] = await db.select().from(decl).where(eq(decl.id, input.declarationId)).limit(1);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+
+      // Verify officer exists and has correct role (if assigning)
+      let officerName = "Unassigned";
+      if (input.officerId !== null) {
+        const [officer] = await db.select({ id: users.id, name: users.name, role: users.role })
+          .from(users).where(eq(users.id, input.officerId)).limit(1);
+        if (!officer) throw new TRPCError({ code: "NOT_FOUND", message: "Officer not found" });
+        const officerRoles = ["admin", "customs_officer", "inspector"];
+        if (!officerRoles.includes(officer.role)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "User is not a customs officer" });
+        }
+        officerName = officer.name ?? `Officer #${input.officerId}`;
+      }
+
+      // Update the assignment
+      await db.update(decl)
+        .set({ assignedOfficerId: input.officerId })
+        .where(eq(decl.id, input.declarationId));
+
+      await logAuditEvent({
+        actorId: ctx.user.id,
+        action: "declaration.officer_assigned",
+        entityType: "declaration",
+        entityId: input.declarationId,
+        metadata: {
+          officerId: input.officerId,
+          officerName,
+          previousOfficerId: existing.assignedOfficerId,
+          declarationNumber: existing.declarationNumber,
+        },
+      });
+
+      // Notify the newly assigned officer
+      if (input.officerId !== null) {
+        const savedNotif = await createUserNotification({
+          userId: input.officerId,
+          type: "declaration_assigned",
+          title: "Declaration Assigned to You",
+          body: `Declaration ${existing.declarationNumber} has been assigned to you for review. Risk lane: ${existing.riskLane ?? "pending"}.`,
+          declarationId: input.declarationId,
+        });
+        if (savedNotif) {
+          broadcastNotification(input.officerId, {
+            id: savedNotif.id,
+            category: "assignment",
+            title: savedNotif.title,
+            body: savedNotif.body ?? "",
+            entityType: "declaration",
+            entityId: input.declarationId,
+            createdAt: savedNotif.createdAt?.toISOString() ?? new Date().toISOString(),
+          });
+        }
+      }
+
+      // Broadcast workload update to all connected officers
+      (async () => {
+        try {
+          const { count, eq: eqOp, and: andOp, isNotNull, lt, sql } = await import("drizzle-orm");
+          const db2 = await (await import("../db")).getDb();
+          if (!db2) return;
+          const [total, red, yellow, green] = await Promise.all([
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.status, "submitted" as any)),
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "red" as any)),
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "yellow" as any)),
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "green" as any)),
+          ]);
+          const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const [breached] = await db2.select({ count: count() }).from(decl)
+            .where(andOp(eqOp(decl.status, "submitted" as any), lt(decl.submittedAt, cutoff)));
+          broadcastWorkloadUpdate({
+            totalPending: total[0]?.count ?? 0,
+            redLane: red[0]?.count ?? 0,
+            yellowLane: yellow[0]?.count ?? 0,
+            greenLane: green[0]?.count ?? 0,
+            slaBreached: breached?.count ?? 0,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch { /* non-critical */ }
+      })();
+
+      return { success: true, declarationId: input.declarationId, officerId: input.officerId, officerName };
+    }),
+
+  /**
+   * Sprint 112 — List customs officers for assignment dropdown
+   */
+  listOfficers: protectedProcedure.query(async ({ ctx }) => {
+    const allowedRoles = ["admin", "customs_officer"];
+    if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+    const db = await (await import("../db")).getDb();
+    if (!db) return [];
+    const { users } = await import("../../drizzle/schema");
+    const { inArray: inArr } = await import("drizzle-orm");
+    return db.select({ id: users.id, name: users.name, email: users.email, role: users.role })
+      .from(users)
+      .where(inArr(users.role, ["admin", "customs_officer", "inspector"] as any[]))
+      .orderBy(users.name);
+  }),
 
   /**
    * Sprint 110 — Officer Workload Dashboard

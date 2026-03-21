@@ -2050,3 +2050,24 @@
 - [x] declarations.workload tRPC procedure (per-officer queue counts + lane breakdown)
 - [x] OfficerWorkload page updated to use declarations.workload + WebSocket live updates
 - [x] Duplicate nav key warning fixed (composite key gi-ii-path)
+
+## Sprint 112 — Assignment, Pagination, Mobile Trader
+- [ ] declarations.assignOfficer tRPC mutation (admin/customs_officer only)
+- [ ] broadcastWorkloadUpdate called after officer assignment
+- [ ] "Assign to Officer" dropdown in DeclarationDetail page
+- [ ] Cursor-based pagination in declarations.all (lastId + limit)
+- [ ] "Load more" button in CustomsDashboard declaration queue
+- [ ] Responsive mobile-first layout for Trader Portal (TraderDashboard, NewDeclaration, DeclarationStatus)
+
+## Sprint 112 — Assignment, Pagination & Mobile
+
+- [x] assignOfficer mutation in declarations.ts with broadcastWorkloadUpdate
+- [x] Assign to Officer dropdown in DeclarationDetail (admin/customs_officer roles)
+- [x] Cursor-based pagination (lastId + hasMore) in declarations.all
+- [x] Load More button in CustomsDashboard table footer
+- [x] Fix CustomsRisk and AdminDeclarations to use new paginated response shape
+- [x] Mobile sidebar overlay (position: fixed, slide in/out with backdrop)
+- [x] handleToggleSidebar — mobile opens/closes overlay, desktop collapses
+- [x] Mobile main content padding reduced to 12px, bottom padding 72px for bottom nav
+- [x] MobileBottomNav component for Trader Portal (Home, Declarations, New, Payments, Alerts)
+- [x] MobileBottomNav added to App.tsx (only shown for trader role on mobile)

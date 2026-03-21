@@ -84,18 +84,20 @@ export default function AdminDeclarations() {
     setLocation("/app/admin/declarations");
   };
 
-  const { data, isLoading, refetch, isError } = trpc.declarations.all.useQuery({
+  const { data: pageData, isLoading, refetch, isError } = trpc.declarations.all.useQuery({
     limit: PAGE_SIZE,
-    offset: page * PAGE_SIZE,
     status: statusFilter !== "ALL" ? statusFilter.toLowerCase() : undefined,
     dateFrom,
     dateTo,
   });
 
-  type DeclarationItem = NonNullable<typeof data>[number];
+  const data = pageData?.items ?? [];
+  const hasMore = pageData?.hasMore ?? false;
+
+  type DeclarationItem = (typeof data)[number];
 
   // Client-side text search only (date/status filter is server-side)
-  const filtered = (data ?? []).filter((d: DeclarationItem) =>
+  const filtered = data.filter((d: DeclarationItem) =>
     !search ||
     d.declarationNumber.toLowerCase().includes(search.toLowerCase()) ||
     (d.goodsDescription ?? "").toLowerCase().includes(search.toLowerCase())
@@ -116,7 +118,7 @@ export default function AdminDeclarations() {
               All Declarations
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              System-wide declaration management — {data?.length ?? 0} loaded
+              System-wide declaration management — {data.length} loaded
             </p>
           </div>
           <div className="flex gap-2">
@@ -282,14 +284,14 @@ export default function AdminDeclarations() {
         </Card>
 
         {/* Pagination */}
-        {(data?.length ?? 0) >= PAGE_SIZE && (
+        {hasMore && (
           <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>Page {page + 1}</span>
+            <span>Showing {data.length} declarations</span>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
                 Previous
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={(data?.length ?? 0) < PAGE_SIZE}>
+              <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)}>
                 Next
               </Button>
             </div>

@@ -471,24 +471,54 @@ function DashboardLayoutContent({
     .flatMap(g => g.items)
     .find(i => location.startsWith(i.path))?.label ?? title ?? "TradeGateway";
 
+  // Mobile sidebar open state (separate from collapsed state used on desktop)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // On mobile, toggle sidebar open/close; on desktop, collapse/expand
+  const handleToggleSidebar = () => {
+    if (isMobile) {
+      setMobileSidebarOpen(v => !v);
+    } else {
+      toggleSidebar();
+    }
+  };
+
+  // Close mobile sidebar on navigation
+  useEffect(() => {
+    if (isMobile) setMobileSidebarOpen(false);
+  }, [location]);
+
   return (
     <>
+      {/* Mobile sidebar backdrop overlay */}
+      {isMobile && mobileSidebarOpen && (
+        <div
+          onClick={() => setMobileSidebarOpen(false)}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            zIndex: 49,
+          }}
+        />
+      )}
       {/* ── CUSTOM SIDEBAR ── fully controlled, no shadcn overrides ── */}
       <div
         ref={sidebarRef}
         style={{
-          position: "relative",
+          position: isMobile ? "fixed" : "relative",
+          left: isMobile ? (mobileSidebarOpen ? 0 : -280) : undefined,
+          top: isMobile ? 0 : undefined,
           display: "flex",
           flexDirection: "column",
-          width: isCollapsed ? 56 : sidebarWidth,
-          minWidth: isCollapsed ? 56 : sidebarWidth,
+          width: isMobile ? 280 : (isCollapsed ? 56 : sidebarWidth),
+          minWidth: isMobile ? 280 : (isCollapsed ? 56 : sidebarWidth),
           height: "100vh",
           background: "oklch(0.145 0.005 240)",
           borderRight: "1px solid rgba(255,255,255,0.08)",
-          transition: isResizing ? "none" : "width 0.2s ease",
+          transition: isResizing ? "none" : "width 0.2s ease, left 0.25s ease",
           overflow: "hidden",
           flexShrink: 0,
-          zIndex: 40,
+          zIndex: 50,
         }}
       >
         {/* Header */}
@@ -667,7 +697,7 @@ function DashboardLayoutContent({
         {isMobile && (
           <div className="flex border-b h-14 items-center justify-between bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:backdrop-blur sticky top-0 z-40">
             <div className="flex items-center gap-3">
-              <button onClick={toggleSidebar} className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-muted transition-colors">
+              <button onClick={handleToggleSidebar} className="h-9 w-9 rounded-lg flex items-center justify-center hover:bg-muted transition-colors">
                 <PanelLeft className="h-5 w-5" />
               </button>
               <span className="font-medium text-sm">{activeLabel}</span>
@@ -707,7 +737,7 @@ function DashboardLayoutContent({
             </Button>
           </div>
         )}
-        <main style={{ flex: 1, padding: "24px" }}>{children}</main>
+        <main style={{ flex: 1, padding: isMobile ? "12px" : "24px", paddingBottom: isMobile ? "72px" : "24px" }}>{children}</main>
       </div>
     </>
   );

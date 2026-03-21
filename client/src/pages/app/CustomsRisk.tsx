@@ -51,18 +51,19 @@ function DeclarationRow({ d }: { d: any }) {
 export default function CustomsRisk() {
   const [search, setSearch] = useState("");
   const [laneFilter, setLaneFilter] = useState<"all" | "red" | "yellow" | "green">("all");
-  const { data: all, isLoading, refetch, isFetching, isError} = trpc.declarations.all.useQuery({ limit: 100, offset: 0 });
+  const { data: allData, isLoading, refetch, isFetching, isError} = trpc.declarations.all.useQuery({ limit: 200 });
+  const all = allData?.items ?? [];
   const { data: modelStats } = trpc.riskModel.getModelStats.useQuery();
   const { data: featureImportance } = trpc.riskModel.getFeatureImportance.useQuery();
   const { data: modelMetrics } = trpc.riskModel.getModelMetrics.useQuery();
-  const declarations = (all ?? []).filter((d: any) => {
+  const declarations = all.filter((d: any) => {
     const s = !search || d.declarationNumber?.toLowerCase().includes(search.toLowerCase()) || d.hsCode?.toLowerCase().includes(search.toLowerCase());
     return s && (laneFilter === "all" || d.riskLane === laneFilter);
   });
-  const red = (all ?? []).filter((d: any) => d.riskLane === "red");
-  const yellow = (all ?? []).filter((d: any) => d.riskLane === "yellow");
-  const green = (all ?? []).filter((d: any) => d.riskLane === "green");
-  const total = (all ?? []).length;
+  const red = all.filter((d: any) => d.riskLane === "red");
+  const yellow = all.filter((d: any) => d.riskLane === "yellow");
+  const green = all.filter((d: any) => d.riskLane === "green");
+  const total = all.length;
   const laneDist = [
     { name: "Red", value: red.length, fill: "#EF4444" },
     { name: "Yellow", value: yellow.length, fill: "#F59E0B" },
