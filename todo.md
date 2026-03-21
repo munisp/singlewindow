@@ -1951,3 +1951,31 @@
 - [x] Created DEMO-MODE.md runbook with full documentation of demo mode architecture, 6 pre-seeded demo users, RLS bypass mechanism, security considerations, and troubleshooting guide
 - [x] All 6 portals confirmed navigable in demo mode (Trader, Customs, OGA, Admin, Security, Developer)
 - [x] Final production checkpoint saved
+
+## Sprint 104 — PostgreSQL Migration & Demo Seeding
+
+- [ ] [S104] Confirm DATABASE_URL points to PostgreSQL (not MySQL/TiDB)
+- [ ] [S104] Verify drizzle.config.ts uses pg-core dialect
+- [ ] [S104] Run pnpm db:push to sync full schema to PostgreSQL
+- [ ] [S104] Seed 6 demo users (trader/customs/oga/admin/security/developer) with correct roles
+- [ ] [S104] Mark demo users as onboarding-complete
+- [ ] [S104] Verify /demo login flow for all 6 portals end-to-end
+- [ ] [S104] Save checkpoint and publish
+
+## Sprint 105 — Sidebar Navigation Legibility Fix
+
+- [x] [S105] Audit DashboardLayout sidebar text contrast, font-weight, font-size
+- [x] [S105] Fix nav item text to be clearly legible (high contrast, readable weight)
+- [x] [S105] Fix section header labels legibility
+- [x] [S105] Fix active/hover state visibility
+- [x] [S105] Verify fix across all 6 portal dashboards
+- [ ] [S105] Save checkpoint
+
+## Sprint 106 — Sidebar Full Legibility Redesign
+
+- [ ] [S106] Replace shadcn Sidebar with custom fully-controlled nav — no truncation, full contrast
+- [ ] [S106] Use 14px font, font-weight 500 for nav items, 11px semibold for section labels
+- [ ] [S106] Section labels: bright white/gold, clear separator line above each group
+- [ ] [S106] Active item: gold background accent, white text, left border indicator
+- [ ] [S106] Verify all items fully readable at 1280px viewport
+- [ ] [S106] Save checkpoint

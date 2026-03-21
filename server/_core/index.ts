@@ -699,6 +699,8 @@ async function runPermifySeedOnStartup() {
 
 async function startServer() {
   const app = express();
+  // Trust the reverse proxy (Manus/nginx) so express-rate-limit reads the correct client IP
+  app.set('trust proxy', 1);
   const server = createServer(app);
   // Permify schema seed on startup (non-blocking, only when PERMIFY_HOST is set)
   runPermifySeedOnStartup().catch(() => {});

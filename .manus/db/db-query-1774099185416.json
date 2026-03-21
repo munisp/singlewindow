@@ -1,0 +1,9 @@
+{
+  "query": "SELECT openId, name, role FROM users WHERE openId LIKE 'demo-%';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2t5rixfHAYLQmtB.root --database jXBmDbCKSCugxa7Gwg2VnA --execute SELECT openId, name, role FROM users WHERE openId LIKE 'demo-%';",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 67
+}

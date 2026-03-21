@@ -92,6 +92,7 @@ const ServiceHealth = lazy(() => import('./pages/app/ServiceHealth'));
 const AuditLog = lazy(() => import('./pages/app/AuditLog'));
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 const SystemStatus = lazy(() => import('./pages/SystemStatus'));
+const DemoLogin = lazy(() => import('./pages/DemoLogin'));
 
 const LazyFallback = () => (
   <div className="min-h-screen flex items-center justify-center text-muted-foreground">
@@ -102,6 +103,11 @@ const LazyFallback = () => (
 function Router() {
   return (
     <Switch>
+      {/* Demo mode role-picker login screen */}
+      <Route path="/demo">
+        <Suspense fallback={<LazyFallback />}><DemoLogin /></Suspense>
+      </Route>
+
       {/* Public landing page */}
       <Route path="/" component={Home} />
 
