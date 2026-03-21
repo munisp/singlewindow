@@ -60,7 +60,11 @@ export default function CustomsDashboard() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [laneFilter, setLaneFilter] = useState("all");
 
-  const { data: declarations, isLoading, isError} = trpc.declarations.all.useQuery({ limit: 50 });
+  const { data: declarations, isLoading, isError} = trpc.declarations.all.useQuery({
+    limit: 100,
+    status: statusFilter !== "all" ? statusFilter : undefined,
+    riskLane: laneFilter !== "all" ? laneFilter : undefined,
+  });
 
   const { data: stats } = trpc.declarations.stats.useQuery();
 

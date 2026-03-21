@@ -94,10 +94,14 @@ export default function NotificationCentre() {
   const unreadCount = liveCount ?? countData?.count ?? 0;
 
   // Sprint 63: WebSocket real-time push
-  const handleNotification = useCallback(() => {
+  const handleNotification = useCallback((notif: { title: string; body: string }) => {
     utils.userNotifications.getMyNotifications.invalidate();
     utils.userNotifications.getUnreadCount.invalidate();
-    toast.info("New notification received", { duration: 3000 });
+    toast.info(notif.title, {
+      description: notif.body,
+      duration: 5000,
+    });
+    setWsConnected(true);
   }, [utils]);
 
   const handleUnreadCount = useCallback((count: number) => {

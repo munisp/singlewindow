@@ -2027,3 +2027,16 @@
 - [x] [S109] Verify PWA manifest.json and sw.js are correctly configured
 - [x] [S109] Verify Officer Actions (updateStatus) in DeclarationDetail is fully wired
 - [x] [S109] Verify all 6 portals load with real data
+
+## Sprint 110 — Three Next Steps
+
+- [x] Ray risk scorer LLM fallback — llmFallbackScore() with SHAP-style explanations, deterministic rules as secondary fallback
+- [x] Batch score fallback — parallel LLM scoring when Ray unavailable
+- [x] getModelStats / getFeatureImportance fallback — embedded static data when Ray unavailable
+- [x] declarations.all server filter — status and riskLane conditions wired into DB query
+- [x] CustomsDashboard filter wiring — dropdowns now pass status/riskLane to server query (limit raised to 100)
+- [x] WebSocket broadcastNotification wired in updateStatus mutation — real-time push to trader on status change
+- [x] DashboardLayout useNotificationSocket — live bell badge + rich toast with "View" action on all pages
+- [x] NotificationCentre handleNotification — richer toast with title + body from WS payload
+- [x] Duplicate /app/customs nav key fixed — "Pending Declarations" renamed to "Declaration Queue" at /app/customs/queue
+- [x] /app/customs/queue route added to App.tsx

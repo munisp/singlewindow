@@ -77,10 +77,12 @@ import {
   Rocket,
   Server,
 } from "lucide-react";
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
+import { useNotificationSocket } from "@/hooks/useNotificationSocket";
+import { toast } from "sonner";
 
 // ─── ROLE-BASED NAVIGATION ────────────────────────────────────────────────────
 
@@ -214,7 +216,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Clearance Operations",
         items: [
           { icon: LayoutDashboard, label: "My Workstation", path: "/app/customs" },
-          { icon: FileText, label: "Pending Declarations", path: "/app/customs" },
+          { icon: FileText, label: "Declaration Queue", path: "/app/customs/queue" },
           { icon: AlertTriangle, label: "Risk Screening", path: "/app/customs/risk" },
           { icon: Camera, label: "Cargo Inspection", path: "/app/customs/vision" },
           { icon: Package, label: "Agency Permits", path: "/app/oga" },
@@ -409,11 +411,34 @@ function DashboardLayoutContent({
   const navGroups = getNavGroups(user?.role ?? "user");
 
   // Unread notifications count (Sprint 15 - uses userNotifications.getUnreadCount for efficiency)
+  const utils = trpc.useUtils();
   const { data: unreadData } = trpc.userNotifications.getUnreadCount.useQuery(
     undefined,
     { refetchInterval: 30000 }
   );
-  const unreadCount = unreadData?.count ?? 0;
+  const [liveUnreadCount, setLiveUnreadCount] = useState<number | null>(null);
+  const unreadCount = liveUnreadCount ?? unreadData?.count ?? 0;
+
+  // Sprint 63: Real-time WebSocket for live bell badge + toast notifications
+  const handleWsNotification = useCallback((notif: { title: string; body: string }) => {
+    utils.userNotifications.getUnreadCount.invalidate();
+    utils.userNotifications.getMyNotifications.invalidate();
+    toast.info(notif.title, {
+      description: notif.body,
+      duration: 5000,
+      action: { label: "View", onClick: () => setLocation("/app/notification-centre") },
+    });
+  }, [utils, setLocation]);
+
+  const handleWsUnreadCount = useCallback((count: number) => {
+    setLiveUnreadCount(count);
+  }, []);
+
+  useNotificationSocket({
+    onNotification: handleWsNotification,
+    onUnreadCount: handleWsUnreadCount,
+    enabled: !!user,
+  });
 
   useEffect(() => {
     if (isCollapsed) setIsResizing(false);

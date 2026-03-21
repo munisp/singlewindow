@@ -149,6 +149,7 @@ function Router() {
 
       {/* Customs Officer Portal */}
       <Route path="/app/customs" component={CustomsDashboard} />
+      <Route path="/app/customs/queue" component={CustomsDashboard} />
       <Route path="/app/customs/declarations/:id" component={DeclarationDetail} />
       <Route path="/app/customs/vision" component={VisionAnalysis} />
       <Route path="/app/customs/risk">

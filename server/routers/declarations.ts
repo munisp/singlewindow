@@ -11,6 +11,7 @@ import { declarations, declarationDocuments, clearanceCertificates } from "../..
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { assertCan, setOwner } from "../_core/permify";
+import { broadcastNotification, broadcastUnreadCount } from "../_core/wsServer";
 import { nanoid } from "nanoid";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
@@ -316,6 +317,8 @@ export const declarationsRouter = router({
         const conditions: any[] = [];
         if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
         if (input.dateTo) conditions.push(lte(decl.submittedAt, input.dateTo));
+        if (input.status && input.status !== "all") conditions.push(eqOp(decl.status, input.status as any));
+        if (input.riskLane && input.riskLane !== "all") conditions.push(eqOp(decl.riskLane, input.riskLane as any));
         const base = db
           .select({
             id: decl.id,
@@ -410,13 +413,26 @@ export const declarationsRouter = router({
       const userNotifType = input.status === "cleared" ? "declaration_cleared" :
         input.status === "rejected" ? "declaration_rejected" :
         input.status === "docs_required" ? "docs_required" : "status_update";
-      await createUserNotification({
+      const savedNotif = await createUserNotification({
         userId: decl.traderId,
         type: userNotifType,
         title: `Declaration ${input.status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}`,
         body: statusMessages[input.status] ?? `Declaration ${decl.declarationNumber} status: ${input.status}.`,
         declarationId: input.id,
       });
+
+      // Sprint 63: Real-time WebSocket push to trader
+      if (savedNotif) {
+        broadcastNotification(decl.traderId, {
+          id: savedNotif.id,
+          category: "declaration",
+          title: savedNotif.title,
+          body: savedNotif.body ?? "",
+          entityType: "declaration",
+          entityId: input.id,
+          createdAt: savedNotif.createdAt?.toISOString() ?? new Date().toISOString(),
+        });
+      }
 
       return updated;
     }),
