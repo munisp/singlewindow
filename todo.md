@@ -2040,3 +2040,13 @@
 - [x] NotificationCentre handleNotification — richer toast with title + body from WS payload
 - [x] Duplicate /app/customs nav key fixed — "Pending Declarations" renamed to "Declaration Queue" at /app/customs/queue
 - [x] /app/customs/queue route added to App.tsx
+
+## Sprint 111 — Search, OGA WebSocket, Workload Dashboard
+- [x] Declaration search with server-side ILIKE across declarationNumber, ucr, traderName
+- [x] Debounced search input (350ms) in CustomsDashboard
+- [x] OGA permit approve/reject WebSocket broadcast to trader
+- [x] WsWorkloadEvent type added to wsServer.ts
+- [x] broadcastWorkloadUpdate called from declarations.updateStatus mutation
+- [x] declarations.workload tRPC procedure (per-officer queue counts + lane breakdown)
+- [x] OfficerWorkload page updated to use declarations.workload + WebSocket live updates
+- [x] Duplicate nav key warning fixed (composite key gi-ii-path)

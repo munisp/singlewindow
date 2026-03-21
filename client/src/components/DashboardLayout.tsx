@@ -543,11 +543,11 @@ function DashboardLayoutContent({
               )}
               {/* Nav items */}
               <div style={{ padding: "2px 8px" }}>
-                {group.items.map(item => {
+                {group.items.map((item, ii) => {
                   const isActive = location === item.path || (item.path !== "/" && location.startsWith(item.path));
                   return (
                     <button
-                      key={item.path}
+                      key={`${gi}-${ii}-${item.path}`}
                       onClick={() => setLocation(item.path)}
                       title={isCollapsed ? item.label : undefined}
                       style={{

@@ -7,6 +7,8 @@ import {
   getDb, withRlsContext
 } from "../db";
 import { assertCan, setOwner } from "../_core/permify";
+import { broadcastNotification } from "../_core/wsServer";
+import { createUserNotification } from "../db";
 import { ogaPermits, declarations } from "../../drizzle/schema";
 import { and, gte, lte, isNotNull, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -141,7 +143,7 @@ export const ogaRouter = router({
         newState: { status: "approved", permitNumber: updated.permitNumber },
       });
 
-      // Notify trader
+      // Notify trader via legacy notifications + user_notifications + WebSocket push
       const decl = await getDeclarationById(updated.declarationId);
       if (decl) {
         await createNotification({
@@ -152,6 +154,25 @@ export const ogaRouter = router({
           entityType: "permit",
           entityId: input.permitId,
         });
+        // Sprint 110: real-time push to trader
+        const savedNotif = await createUserNotification({
+          userId: decl.traderId,
+          type: "permit_approved",
+          title: `${updated.agencyName} Permit Approved`,
+          body: `Permit ${updated.permitNumber} from ${updated.agencyName} has been approved for declaration ${decl.declarationNumber}. Your goods may now proceed.`,
+          declarationId: updated.declarationId,
+        });
+        if (savedNotif) {
+          broadcastNotification(decl.traderId, {
+            id: savedNotif.id,
+            category: "compliance",
+            title: savedNotif.title,
+            body: savedNotif.body ?? "",
+            entityType: "permit",
+            entityId: input.permitId,
+            createdAt: savedNotif.createdAt?.toISOString() ?? new Date().toISOString(),
+          });
+        }
       }
 
       return updated;
@@ -184,6 +205,25 @@ export const ogaRouter = router({
           entityType: "permit",
           entityId: input.permitId,
         });
+        // Sprint 110: real-time push to trader
+        const savedNotif = await createUserNotification({
+          userId: decl.traderId,
+          type: "permit_rejected",
+          title: `${updated.agencyName} Permit Rejected`,
+          body: `Your permit from ${updated.agencyName} for declaration ${decl.declarationNumber} was rejected. Reason: ${input.reason}`,
+          declarationId: updated.declarationId,
+        });
+        if (savedNotif) {
+          broadcastNotification(decl.traderId, {
+            id: savedNotif.id,
+            category: "compliance",
+            title: savedNotif.title,
+            body: savedNotif.body ?? "",
+            entityType: "permit",
+            entityId: input.permitId,
+            createdAt: savedNotif.createdAt?.toISOString() ?? new Date().toISOString(),
+          });
+        }
       }
       await logAuditEvent({
         entityType: "permit",

@@ -11,7 +11,7 @@ import { declarations, declarationDocuments, clearanceCertificates } from "../..
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { assertCan, setOwner } from "../_core/permify";
-import { broadcastNotification, broadcastUnreadCount } from "../_core/wsServer";
+import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } from "../_core/wsServer";
 import { nanoid } from "nanoid";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
@@ -305,6 +305,7 @@ export const declarationsRouter = router({
       offset: z.number().default(0),
       status: z.string().optional(),
       riskLane: z.string().optional(),
+      search: z.string().optional(),
       dateFrom: z.date().optional(),
       dateTo: z.date().optional(),
     }))
@@ -312,13 +313,23 @@ export const declarationsRouter = router({
       const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
-        const { desc, and, gte, lte, eq: eqOp } = await import("drizzle-orm");
+        const { desc, and, gte, lte, eq: eqOp, or, ilike } = await import("drizzle-orm");
         const { declarations: decl, users: usersTable } = await import("../../drizzle/schema");
         const conditions: any[] = [];
         if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
         if (input.dateTo) conditions.push(lte(decl.submittedAt, input.dateTo));
         if (input.status && input.status !== "all") conditions.push(eqOp(decl.status, input.status as any));
         if (input.riskLane && input.riskLane !== "all") conditions.push(eqOp(decl.riskLane, input.riskLane as any));
+        if (input.search && input.search.trim()) {
+          const term = `%${input.search.trim()}%`;
+          conditions.push(or(
+            ilike(decl.declarationNumber, term),
+            ilike(decl.ucr, term),
+            ilike(usersTable.name, term),
+            ilike(decl.goodsDescription, term),
+            ilike(decl.hsCode, term),
+          ));
+        }
         const base = db
           .select({
             id: decl.id,
@@ -433,6 +444,38 @@ export const declarationsRouter = router({
           createdAt: savedNotif.createdAt?.toISOString() ?? new Date().toISOString(),
         });
       }
+
+      // Sprint 110: broadcast workload update to all connected officers after status change
+      (async () => {
+        try {
+          const { count, eq: eqOp } = await import("drizzle-orm");
+          const { declarations: decl } = await import("../../drizzle/schema");
+          const db2 = await (await import("../db")).getDb();
+          if (!db2) return;
+          const [total, red, yellow, green] = await Promise.all([
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.status, "submitted" as any)),
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "red" as any)),
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "yellow" as any)),
+            db2.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "green" as any)),
+          ]);
+          // Count SLA breaches: submitted declarations older than 24h
+          const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const { lt } = await import("drizzle-orm");
+          const [breached] = await db2.select({ count: count() }).from(decl)
+            .where((await import("drizzle-orm")).and(
+              eqOp(decl.status, "submitted" as any),
+              lt(decl.submittedAt, cutoff)
+            ));
+          broadcastWorkloadUpdate({
+            totalPending: total[0]?.count ?? 0,
+            redLane: red[0]?.count ?? 0,
+            yellowLane: yellow[0]?.count ?? 0,
+            greenLane: green[0]?.count ?? 0,
+            slaBreached: breached?.count ?? 0,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch { /* non-critical */ }
+      })();
 
       return updated;
     }),
@@ -930,4 +973,74 @@ export const declarationsRouter = router({
       });
       return { success: true };
     }),
+
+  /**
+   * Sprint 110 — Officer Workload Dashboard
+   * Returns per-officer queue counts and platform-wide lane breakdown.
+   * Only accessible to admin, customs_officer, inspector, and finance roles.
+   */
+  workload: protectedProcedure.query(async ({ ctx }) => {
+    const allowedRoles = ["admin", "customs_officer", "inspector", "finance"];
+    if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+
+    const db = await (await import("../db")).getDb();
+    if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+    const { count, eq: eqOp, and: andOp, isNotNull, lt, sql } = await import("drizzle-orm");
+    const { declarations: decl, users } = await import("../../drizzle/schema");
+
+    // Platform-wide lane and status counts
+    const [totalPending, redLane, yellowLane, greenLane] = await Promise.all([
+      db.select({ count: count() }).from(decl).where(eqOp(decl.status, "submitted" as any)),
+      db.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "red" as any)),
+      db.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "yellow" as any)),
+      db.select({ count: count() }).from(decl).where(eqOp(decl.riskLane, "green" as any)),
+    ]);
+
+    // SLA breaches: submitted declarations older than 24h
+    const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [slaBreached] = await db.select({ count: count() }).from(decl)
+      .where(andOp(eqOp(decl.status, "submitted" as any), lt(decl.submittedAt, cutoff24h)));
+
+    // Per-officer queue: count of declarations assigned to each officer
+    const officerQueues = await db
+      .select({
+        officerId: decl.assignedOfficerId,
+        officerName: users.name,
+        officerEmail: users.email,
+        queueCount: count(),
+        redCount: sql<number>`SUM(CASE WHEN ${decl.riskLane} = 'red' THEN 1 ELSE 0 END)`,
+        yellowCount: sql<number>`SUM(CASE WHEN ${decl.riskLane} = 'yellow' THEN 1 ELSE 0 END)`,
+        greenCount: sql<number>`SUM(CASE WHEN ${decl.riskLane} = 'green' THEN 1 ELSE 0 END)`,
+        clearedCount: sql<number>`SUM(CASE WHEN ${decl.status} = 'cleared' THEN 1 ELSE 0 END)`,
+      })
+      .from(decl)
+      .leftJoin(users, eqOp(decl.assignedOfficerId, users.id))
+      .where(isNotNull(decl.assignedOfficerId))
+      .groupBy(decl.assignedOfficerId, users.name, users.email);
+
+    // Unassigned declarations
+    const [unassigned] = await db.select({ count: count() }).from(decl)
+      .where(andOp(eqOp(decl.status, "submitted" as any), sql`${decl.assignedOfficerId} IS NULL`));
+
+    return {
+      totalPending: totalPending[0]?.count ?? 0,
+      redLane: redLane[0]?.count ?? 0,
+      yellowLane: yellowLane[0]?.count ?? 0,
+      greenLane: greenLane[0]?.count ?? 0,
+      slaBreached: slaBreached?.count ?? 0,
+      unassigned: unassigned?.count ?? 0,
+      officerQueues: officerQueues.map((o) => ({
+        officerId: o.officerId,
+        officerName: o.officerName ?? "Unknown Officer",
+        officerEmail: o.officerEmail ?? "",
+        queueCount: Number(o.queueCount),
+        redCount: Number(o.redCount ?? 0),
+        yellowCount: Number(o.yellowCount ?? 0),
+        greenCount: Number(o.greenCount ?? 0),
+        clearedCount: Number(o.clearedCount ?? 0),
+      })),
+      updatedAt: new Date().toISOString(),
+    };
+  }),
 });

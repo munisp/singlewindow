@@ -20,7 +20,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation } from "wouter";
 
 // SLA thresholds in hours by risk lane
@@ -57,23 +57,27 @@ const LANE_CONFIG: Record<string, { label: string; color: string; bg: string; ic
 export default function CustomsDashboard() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [laneFilter, setLaneFilter] = useState("all");
+
+  // Debounce search input by 350ms to avoid excessive queries
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const { data: declarations, isLoading, isError} = trpc.declarations.all.useQuery({
     limit: 100,
     status: statusFilter !== "all" ? statusFilter : undefined,
     riskLane: laneFilter !== "all" ? laneFilter : undefined,
+    search: debouncedSearch.trim() || undefined,
   });
 
   const { data: stats } = trpc.declarations.stats.useQuery();
 
-  const filtered = declarations?.filter((d: any) =>
-    !search ||
-    d.declarationNumber?.toLowerCase().includes(search.toLowerCase()) ||
-    d.traderName?.toLowerCase().includes(search.toLowerCase()) ||
-    d.hsCode?.includes(search)
-  ) ?? [];
+  // Server-side search is now applied; client-side filter is a no-op passthrough
+  const filtered = declarations ?? [];
 
   const laneGroups = {
     red: (stats as any)?.redLane ?? filtered.filter((d: any) => d.riskLane === "red_lane" || d.riskLane === "red").length,

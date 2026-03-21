@@ -54,7 +54,20 @@ export interface WsCargoConnectionEvent {
 
 export type WsCargoEvent = WsVesselUpdateEvent | WsCargoConnectionEvent;
 
-export type WsEvent = WsNotificationEvent | WsUnreadCountEvent | WsVesselUpdateEvent | WsCargoConnectionEvent;
+// Sprint 110 — Officer Workload Dashboard
+export interface WsWorkloadEvent {
+  type: "workload_update";
+  payload: {
+    totalPending: number;
+    redLane: number;
+    yellowLane: number;
+    greenLane: number;
+    slaBreached: number;
+    updatedAt: string;
+  };
+}
+
+export type WsEvent = WsNotificationEvent | WsUnreadCountEvent | WsVesselUpdateEvent | WsCargoConnectionEvent | WsWorkloadEvent;
 
 // ─── Connection Registry ──────────────────────────────────────────────────────
 
@@ -132,6 +145,18 @@ export function broadcastNotification(
 
 export function broadcastUnreadCount(userId: number, count: number): void {
   broadcastToUser(userId, { type: "unread_count", payload: { count } });
+}
+
+// Sprint 110: Broadcast workload update to all connected customs officers / admins
+export function broadcastWorkloadUpdate(payload: WsWorkloadEvent["payload"]): void {
+  const message = JSON.stringify({ type: "workload_update", payload });
+  connections.forEach((conns) => {
+    conns.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(message);
+      }
+    });
+  });
 }
 
 // ─── WebSocket Server Setup ───────────────────────────────────────────────────

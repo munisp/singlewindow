@@ -8,7 +8,7 @@
  *   - Team-level summary statistics
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -17,6 +17,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { Button } from "@/components/ui/button";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -26,6 +28,10 @@ import {
   Users,
   FileText,
   Shield,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Activity,
 } from "lucide-react";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -84,17 +90,66 @@ function StatCard({
 export default function OfficerWorkload() {
   const [periodDays, setPeriodDays] = useState(30);
   const [slaTargetHours, setSlaTargetHours] = useState(24);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const { data, isLoading, error, isError} = trpc.officerWorkload.getTeamSummary.useQuery({
-    periodDays,
-    slaTargetHours,
+  const utils = trpc.useUtils();
+
+  // Use the new declarations.workload procedure
+  const { data, isLoading, error, isError, refetch } = trpc.declarations.workload.useQuery(undefined, {
+    refetchInterval: 60_000,
   });
 
-  const team = data?.teamStats;
-  const officers = data?.officers ?? [];
+  // Sprint 110: WebSocket live updates
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+    ws.onopen = () => setWsConnected(true);
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "workload_update") {
+          setLastUpdated(new Date());
+          utils.declarations.workload.invalidate();
+        }
+      } catch { /* ignore */ }
+    };
+    ws.onclose = () => setWsConnected(false);
+    ws.onerror = () => setWsConnected(false);
+    return () => ws.close();
+  }, [utils]);
+
+  // Map new data shape to the UI
+  const officerQueues = data?.officerQueues ?? [];
+  const maxQueue = Math.max(...officerQueues.map((o) => o.queueCount), 1);
+
+  // Build team summary from new data
+  const team = data ? {
+    totalOfficers: officerQueues.length,
+    totalQueueDepth: data.totalPending,
+    avgReviewTimeHours: null as number | null, // not available in new procedure
+    slaComplianceRate: data.slaBreached > 0
+      ? Math.max(0, Math.round((1 - data.slaBreached / Math.max(data.totalPending, 1)) * 100))
+      : 100,
+  } : null;
+
+  // Map officerQueues to the old officers shape for the table
+  const officers = officerQueues.map((o) => ({
+    id: o.officerId ?? 0,
+    name: o.officerName,
+    email: o.officerEmail,
+    queueDepth: o.queueCount,
+    openFraudCases: o.redCount, // red lane = high risk / potential fraud
+    declarationsReviewedInPeriod: o.clearedCount,
+    avgReviewTimeHours: null as number | null,
+    slaComplianceRate: o.queueCount > 0
+      ? Math.round((o.clearedCount / Math.max(o.queueCount + o.clearedCount, 1)) * 100)
+      : null,
+  }));
 
   return (
-    <DashboardLayout>
+    <DashboardLayout title="Officer Workload Dashboard">
       {isError && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
           Failed to load data. Please refresh the page.
@@ -105,11 +160,15 @@ export default function OfficerWorkload() {
         <div className="px-6 py-5 border-b border-white/10 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-white font-display flex items-center gap-2">
-              <Users size={20} className="text-gold" />
+              <Activity size={20} className="text-gold" />
               Officer Workload Dashboard
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
               Queue depth, review times, and SLA compliance for each customs officer
+              {wsConnected
+                ? <><Wifi className="h-3 w-3 text-green-400 ml-2" /> <span className="text-green-400">Live</span></>
+                : <><WifiOff className="h-3 w-3 text-slate-500 ml-2" /> Polling</>}
+              {lastUpdated && <span className="text-slate-500 ml-1">· Updated {lastUpdated.toLocaleTimeString()}</span>}
             </p>
           </div>
           {/* Controls */}
