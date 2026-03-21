@@ -233,15 +233,36 @@ export const declarationsRouter = router({
 
   // Get trader's own declarations — RLS-enforced at the database level
   myDeclarations: protectedProcedure
-    .input(z.object({ limit: z.number().default(20), offset: z.number().default(0) }))
+    .input(z.object({
+      limit: z.number().default(20),
+      offset: z.number().default(0),
+      search: z.string().optional(),
+      status: z.string().optional(),
+    }))
     .query(async ({ ctx, input }) => {
-      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
-        db.select().from(declarations)
-          .where(eq(declarations.traderId, ctx.user.id))
+      const { ilike, and: andOp, or: orOp } = await import("drizzle-orm");
+      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+        const conditions = [eq(declarations.traderId, ctx.user.id)];
+        if (input.search && input.search.trim()) {
+          const q = `%${input.search.trim()}%`;
+          conditions.push(
+            orOp(
+              ilike(declarations.declarationNumber, q),
+              ilike(declarations.ucr, q),
+              ilike(declarations.goodsDescription, q),
+              ilike(declarations.hsCode, q),
+            ) as any
+          );
+        }
+        if (input.status) {
+          conditions.push(eq(declarations.status, input.status as any));
+        }
+        return db.select().from(declarations)
+          .where(andOp(...conditions))
           .orderBy(desc(declarations.createdAt))
           .limit(input.limit)
-          .offset(input.offset)
-      );
+          .offset(input.offset);
+      });
     }),
 
   // Get a single declaration — officers bypass RLS; traders go through RLS context

@@ -2071,3 +2071,20 @@
 - [x] Mobile main content padding reduced to 12px, bottom padding 72px for bottom nav
 - [x] MobileBottomNav component for Trader Portal (Home, Declarations, New, Payments, Alerts)
 - [x] MobileBottomNav added to App.tsx (only shown for trader role on mobile)
+
+## Sprint 113 — Search, Bulk Assignment & Status Tracker
+
+- [ ] Add search param to myDeclarations procedure (ILIKE on declarationNumber, ucr, goodsDescription)
+- [ ] Wire search input in TraderDeclarations page with 350ms debounce
+- [ ] Add checkbox column to Customs Dashboard table for bulk selection
+- [ ] Bulk assign selected declarations to officer (dropdown + confirm button)
+- [ ] DeclarationStatusTracker component (vertical timeline mobile, horizontal progress bar desktop)
+- [ ] Add status tracker to top of DeclarationDetail page
+
+## Sprint 113 — Search, Bulk Assign, Status Tracker
+- [x] Add search parameter to myDeclarations procedure with ILIKE query
+- [x] Rewrite TraderDeclarations with search input, status filter, debouncing, and mobile layout
+- [x] Add checkbox column to Customs Dashboard table for bulk selection
+- [x] Add bulk officer assignment action bar with officer dropdown
+- [x] Add DeclarationProgressBar component (horizontal stepper on desktop, compact on mobile)
+- [x] Wire DeclarationProgressBar into DeclarationDetail page

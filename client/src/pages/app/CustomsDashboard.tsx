@@ -19,8 +19,11 @@ import {
   XCircle,
   Wifi,
   WifiOff,
+  Users,
+  CheckSquare,
+  Square,
 } from "lucide-react";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
 
 // SLA thresholds in hours by risk lane
@@ -60,6 +63,11 @@ export default function CustomsDashboard() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [laneFilter, setLaneFilter] = useState("all");
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkOfficerId, setBulkOfficerId] = useState<string>("");
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const utils = trpc.useUtils();
 
   // Debounce search input by 350ms to avoid excessive queries
   useEffect(() => {
@@ -105,6 +113,29 @@ export default function CustomsDashboard() {
   const nextCursor = pageData?.nextCursor;
 
   const { data: stats } = trpc.declarations.stats.useQuery();
+  const { data: officerList } = trpc.declarations.listOfficers.useQuery();
+  const assignOfficerMutation = trpc.declarations.assignOfficer.useMutation();
+
+  // Bulk assign handler
+  const handleBulkAssign = useCallback(async () => {
+    if (!bulkOfficerId || selectedIds.size === 0) return;
+    setIsBulkAssigning(true);
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map(id =>
+          assignOfficerMutation.mutateAsync({ id, officerId: parseInt(bulkOfficerId) })
+        )
+      );
+      toast.success(`Assigned ${selectedIds.size} declaration${selectedIds.size > 1 ? 's' : ''} to officer`);
+      setSelectedIds(new Set());
+      setBulkOfficerId("");
+      utils.declarations.all.invalidate();
+    } catch {
+      toast.error("Bulk assignment failed — please try again");
+    } finally {
+      setIsBulkAssigning(false);
+    }
+  }, [bulkOfficerId, selectedIds, assignOfficerMutation, utils]);
 
   // Server-side search is now applied; client-side filter is a no-op passthrough
   const filtered = allItems;
@@ -196,6 +227,43 @@ export default function CustomsDashboard() {
           </Select>
         </div>
 
+        {/* Bulk Action Bar — appears when rows are selected */}
+        {selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+            <span className="text-sm font-medium text-primary">
+              <CheckSquare className="h-4 w-4 inline mr-1" />
+              {selectedIds.size} selected
+            </span>
+            <Select value={bulkOfficerId} onValueChange={setBulkOfficerId}>
+              <SelectTrigger className="w-52 h-8 text-xs">
+                <SelectValue placeholder="Assign to officer..." />
+              </SelectTrigger>
+              <SelectContent>
+                {(officerList ?? []).map((o: any) => (
+                  <SelectItem key={o.id} value={String(o.id)}>{o.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              disabled={!bulkOfficerId || isBulkAssigning}
+              onClick={handleBulkAssign}
+            >
+              {isBulkAssigning ? <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Users className="h-3.5 w-3.5" />}
+              Assign Selected
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs ml-auto"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear selection
+            </Button>
+          </div>
+        )}
+
         {/* Declaration table */}
         <Card>
           <CardHeader className="pb-3">
@@ -218,6 +286,22 @@ export default function CustomsDashboard() {
                 <table className="w-full text-sm">
                   <thead className="border-b bg-muted/30">
                     <tr>
+                      <th className="px-4 py-3 w-8">
+                        <button
+                          onClick={() => {
+                            if (selectedIds.size === filtered.length) {
+                              setSelectedIds(new Set());
+                            } else {
+                              setSelectedIds(new Set(filtered.map((d: any) => d.id)));
+                            }
+                          }}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          {selectedIds.size === filtered.length && filtered.length > 0
+                            ? <CheckSquare className="h-4 w-4" />
+                            : <Square className="h-4 w-4" />}
+                        </button>
+                      </th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">Reference</th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">Importer</th>
                       <th className="text-left px-4 py-3 font-medium text-muted-foreground">HS Code</th>
@@ -232,8 +316,24 @@ export default function CustomsDashboard() {
                     {filtered.map((d: any) => {
                       const lane = LANE_CONFIG[d.status] ?? LANE_CONFIG.submitted;
                       const riskScore = d.riskScore ? Number(d.riskScore) : null;
+                      const isSelected = selectedIds.has(d.id);
                       return (
-                        <tr key={d.id} className="hover:bg-muted/30 transition-colors">
+                        <tr key={d.id} className={`hover:bg-muted/30 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => {
+                                setSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(d.id)) next.delete(d.id);
+                                  else next.add(d.id);
+                                  return next;
+                                });
+                              }}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              {isSelected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
+                            </button>
+                          </td>
                           <td className="px-4 py-3">
                             <span className="font-mono text-xs font-medium">{d.declarationNumber}</span>
                           </td>

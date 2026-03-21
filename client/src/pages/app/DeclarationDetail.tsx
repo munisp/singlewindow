@@ -211,6 +211,120 @@ function DetailRow({ label, value, mono = false }: { label: string; value: React
   );
 }
 
+// ─── DECLARATION PROGRESS BAR ───────────────────────────────────────────────
+
+const PROGRESS_STEPS = [
+  { key: "draft",              label: "Draft",          shortLabel: "Draft" },
+  { key: "submitted",          label: "Submitted",       shortLabel: "Submit" },
+  { key: "under_review",       label: "Risk Assessment", shortLabel: "Risk" },
+  { key: "lane_assigned",      label: "Lane Assigned",   shortLabel: "Lane" },
+  { key: "cleared",            label: "Cleared",         shortLabel: "Clear" },
+];
+
+const STATUS_TO_STEP: Record<string, number> = {
+  draft: 0,
+  submitted: 1,
+  under_review: 2,
+  docs_required: 2,
+  payment_pending: 2,
+  under_examination: 3,
+  examination_complete: 3,
+  green_lane: 3,
+  yellow_lane: 3,
+  red_lane: 3,
+  cleared: 4,
+  rejected: 4,
+};
+
+function DeclarationProgressBar({ status, riskLane }: { status: string; riskLane?: string | null }) {
+  const currentStep = STATUS_TO_STEP[status] ?? 0;
+  const isRejected = status === "rejected";
+  const laneLabel = riskLane ? riskLane.replace(/_lane$/, "").toUpperCase() : null;
+  const laneColor = riskLane === "green_lane" ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+    : riskLane === "yellow_lane" ? "text-amber-600 bg-amber-50 border-amber-200"
+    : riskLane === "red_lane" ? "text-red-600 bg-red-50 border-red-200"
+    : "text-blue-600 bg-blue-50 border-blue-200";
+
+  return (
+    <div className="w-full">
+      {/* Desktop: horizontal stepper */}
+      <div className="hidden sm:flex items-center w-full">
+        {PROGRESS_STEPS.map((step, i) => {
+          const isComplete = currentStep > i;
+          const isCurrent = currentStep === i;
+          const isLast = i === PROGRESS_STEPS.length - 1;
+          const showLane = i === 3 && laneLabel;
+          return (
+            <div key={step.key} className="flex items-center flex-1 last:flex-none">
+              <div className="flex flex-col items-center gap-1">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${
+                  isRejected && isCurrent ? "bg-red-500 border-red-500 text-white" :
+                  isComplete ? "bg-emerald-500 border-emerald-500 text-white" :
+                  isCurrent ? "bg-primary border-primary text-white shadow-md shadow-primary/30" :
+                  "bg-muted/50 border-muted text-muted-foreground"
+                }`}>
+                  {isRejected && isCurrent ? <XCircle className="h-4 w-4" /> :
+                   isComplete ? <CheckCircle2 className="h-4 w-4" /> :
+                   <span>{i + 1}</span>}
+                </div>
+                <span className={`text-xs font-medium ${
+                  isRejected && isCurrent ? "text-red-600" :
+                  isComplete ? "text-emerald-600" :
+                  isCurrent ? "text-primary" :
+                  "text-muted-foreground"
+                }`}>
+                  {showLane ? (
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-xs font-semibold ${laneColor}`}>
+                      {laneLabel}
+                    </span>
+                  ) : step.label}
+                </span>
+              </div>
+              {!isLast && (
+                <div className={`flex-1 h-0.5 mx-2 mb-5 rounded-full transition-all ${
+                  currentStep > i ? "bg-emerald-400" : "bg-muted"
+                }`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Mobile: compact progress indicator */}
+      <div className="flex sm:hidden items-center gap-3 p-3 bg-muted/30 rounded-lg border">
+        <div className="flex gap-1">
+          {PROGRESS_STEPS.map((_, i) => (
+            <div
+              key={i}
+              className={`h-1.5 rounded-full transition-all ${
+                isRejected && currentStep === i ? "w-8 bg-red-500" :
+                currentStep > i ? "w-8 bg-emerald-500" :
+                currentStep === i ? "w-8 bg-primary" :
+                "w-4 bg-muted"
+              }`}
+            />
+          ))}
+        </div>
+        <span className="text-xs font-medium">
+          Step {currentStep + 1} of {PROGRESS_STEPS.length}:
+          <span className={`ml-1 ${
+            isRejected ? "text-red-600" :
+            currentStep === PROGRESS_STEPS.length - 1 ? "text-emerald-600" :
+            "text-primary"
+          }`}>
+            {isRejected ? "Rejected" : PROGRESS_STEPS[currentStep]?.label}
+          </span>
+        </span>
+        {laneLabel && (
+          <span className={`ml-auto text-xs font-semibold px-2 py-0.5 rounded border ${laneColor}`}>
+            {laneLabel} LANE
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 export default function DeclarationDetail() {
@@ -320,6 +434,11 @@ export default function DeclarationDetail() {
             </Badge>
           )}
         </div>
+
+        {/* Declaration Status Progress Bar — horizontal on desktop, compact on mobile */}
+        {decl && !isLoading && (
+          <DeclarationProgressBar status={decl.status} riskLane={decl.riskLane} />
+        )}
 
         {isLoading ? (
           <div className="space-y-4">
