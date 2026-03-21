@@ -166,6 +166,100 @@ jobs:
       - name: Run full Alertmanager routing smoke tests
         run: bash infra/monitoring/alertmanager/test-alertmanager-config.sh
 
+  # ─── Prometheus Alert Rule Unit Tests ────────────────────────────────────────
+  prometheus-rule-tests:
+    name: Prometheus Alert Rule Tests (26 tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install promtool
+        run: |
+          PROM_VER="2.51.2"
+          wget -q "https://github.com/prometheus/prometheus/releases/download/v${PROM_VER}/prometheus-${PROM_VER}.linux-amd64.tar.gz" \
+            -O /tmp/prometheus.tar.gz
+          tar -xzf /tmp/prometheus.tar.gz -C /tmp/
+          sudo mv /tmp/prometheus-${PROM_VER}.linux-amd64/promtool /usr/local/bin/
+          promtool --version
+      - name: Validate alert rule syntax
+        run: |
+          python3 -c "
+import yaml, sys
+with open('infra/monitoring/prometheus/alerting_rules.yaml') as f:
+    doc = yaml.safe_load(f)
+groups = doc.get('spec', {}).get('groups', doc.get('groups', []))
+with open('/tmp/plain_rules.yaml', 'w') as f:
+    yaml.dump({'groups': groups}, f)
+print(f'Extracted {len(groups)} rule groups')
+"
+          promtool check rules /tmp/plain_rules.yaml
+      - name: Run SLO alert rule unit tests
+        run: promtool test rules infra/monitoring/prometheus/alerting_rules.test.yaml
+      - name: Run infrastructure alert rule unit tests
+        run: promtool test rules infra/monitoring/alerts/tradegateway-alerts.test.yaml
+
+  # ─── Authenticated E2E Playwright Tests ────────────────────────────────────
+  playwright-e2e:
+    name: Authenticated E2E Tests (Journey 8)
+    runs-on: ubuntu-latest
+    needs: [test]
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: tradegateway_test
+        ports: ["3306:3306"]
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
+    env:
+      DATABASE_URL: mysql://root:test@localhost:3306/tradegateway_test
+      JWT_SECRET: test-jwt-secret-for-ci
+      VITE_APP_ID: test-app-id
+      OAUTH_SERVER_URL: https://api.manus.im
+      VITE_OAUTH_PORTAL_URL: https://manus.im
+      OWNER_OPEN_ID: test-owner
+      OWNER_NAME: Test Owner
+      BUILT_IN_FORGE_API_URL: https://api.manus.im
+      BUILT_IN_FORGE_API_KEY: test-key
+      VITE_FRONTEND_FORGE_API_KEY: test-key
+      VITE_FRONTEND_FORGE_API_URL: https://api.manus.im
+      E2E_TEST_MODE: "true"
+      E2E_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      - name: Push database schema
+        run: pnpm db:push
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Start dev server in background
+        run: |
+          pnpm dev &
+          echo $! > /tmp/devserver.pid
+          # Wait for server to be ready (up to 60s)
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/trpc/auth.me > /dev/null 2>&1; then
+              echo "Server ready after ${i}x2s"
+              break
+            fi
+            sleep 2
+          done
+      - name: Run authenticated E2E tests (Journey 8)
+        run: npx playwright test e2e/journey8-authenticated-declaration-flow.spec.ts --reporter=html
+      - name: Upload Playwright HTML report on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-journey8
+          path: playwright-report/
+          retention-days: 14
+      - name: Stop dev server
+        if: always()
+        run: kill $(cat /tmp/devserver.pid) 2>/dev/null || true
+
   # ─── Helm Dry-Run ──────────────────────────────────────────────────────────
   helm-validate:
     name: Helm Chart Validation

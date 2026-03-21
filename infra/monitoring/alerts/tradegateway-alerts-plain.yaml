@@ -1,0 +1,303 @@
+groups:
+- interval: 30s
+  name: tradegateway.availability
+  rules:
+  - alert: ServiceDown
+    annotations:
+      description: Service {{ $labels.job }} on {{ $labels.instance }} has been down
+        for more than 2 minutes.
+      runbook: https://runbooks.tradegateway.gov/service-down
+      summary: TradeGateway service {{ $labels.job }} is down
+    expr: 'up{job=~"tradegateway-.*"} == 0
+
+      '
+    for: 2m
+    labels:
+      severity: critical
+      team: platform
+  - alert: HighPodRestartRate
+    annotations:
+      description: Pod {{ $labels.pod }} has restarted more than once in the last
+        15 minutes.
+      summary: Pod {{ $labels.pod }} is restarting frequently
+    expr: 'rate(kube_pod_container_status_restarts_total{namespace="tradegateway"}[15m])
+      > 0.1
+
+      '
+    for: 5m
+    labels:
+      severity: warning
+      team: platform
+  - alert: PodCrashLooping
+    annotations:
+      description: Container {{ $labels.container }} in pod {{ $labels.pod }} is crash-looping.
+      summary: Pod {{ $labels.pod }} is in CrashLoopBackOff
+    expr: 'kube_pod_container_status_waiting_reason{namespace="tradegateway", reason="CrashLoopBackOff"}
+      == 1
+
+      '
+    for: 5m
+    labels:
+      severity: critical
+      team: platform
+- interval: 30s
+  name: tradegateway.api
+  rules:
+  - alert: HighAPIErrorRate
+    annotations:
+      description: The TradeGateway API error rate is {{ $value | humanizePercentage
+        }} over the last 5 minutes.
+      runbook: https://runbooks.tradegateway.gov/high-error-rate
+      summary: API error rate exceeds 5%
+    expr: 'sum(rate(http_requests_total{job="tradegateway-web-api", status=~"5.."}[5m]))
+
+      /
+
+      sum(rate(http_requests_total{job="tradegateway-web-api"}[5m])) > 0.05
+
+      '
+    for: 5m
+    labels:
+      severity: critical
+      team: backend
+  - alert: HighAPILatency
+    annotations:
+      description: P95 API latency is {{ $value | humanizeDuration }}.
+      summary: API P95 latency exceeds 2 seconds
+    expr: "histogram_quantile(0.95,\n  sum(rate(http_request_duration_seconds_bucket{job=\"\
+      tradegateway-web-api\"}[5m])) by (le)\n) > 2\n"
+    for: 5m
+    labels:
+      severity: warning
+      team: backend
+  - alert: DeclarationProcessingBacklog
+    annotations:
+      description: '{{ $value }} declarations are queued for processing.'
+      summary: Declaration processing backlog is high
+    expr: 'tradegateway_declaration_queue_depth > 500
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      team: customs
+- interval: 30s
+  name: tradegateway.payments
+  rules:
+  - alert: PaymentFailureRateHigh
+    annotations:
+      description: Payment failure rate is {{ $value | humanizePercentage }}.
+      runbook: https://runbooks.tradegateway.gov/payment-failures
+      summary: Payment failure rate exceeds 2%
+    expr: 'sum(rate(tradegateway_payment_failures_total[5m]))
+
+      /
+
+      sum(rate(tradegateway_payment_attempts_total[5m])) > 0.02
+
+      '
+    for: 5m
+    labels:
+      severity: critical
+      team: payments
+  - alert: TemporalFallbackActive
+    annotations:
+      description: The payment service cannot reach Temporal and is falling back to
+        direct HTTP calls. Temporal connectivity should be investigated.
+      summary: Payment service is using Temporal fallback path
+    expr: 'rate(payment_temporal_fallback_total[5m]) > 0
+
+      '
+    for: 5m
+    labels:
+      severity: warning
+      team: payments
+  - alert: TigerBeetleUnreachable
+    annotations:
+      description: The TigerBeetle bridge reports the ledger is unhealthy. No payments
+        can be processed.
+      runbook: https://runbooks.tradegateway.gov/tigerbeetle-down
+      summary: TigerBeetle financial ledger is unreachable
+    expr: 'tradegateway_tigerbeetle_bridge_healthy == 0
+
+      '
+    for: 2m
+    labels:
+      severity: critical
+      team: payments
+  - alert: TigerBeetleSimulationMode
+    annotations:
+      description: The TigerBeetle bridge is in simulation mode. Financial ledger
+        entries are NOT being persisted to a real TigerBeetle cluster.
+      summary: TigerBeetle is running in simulation mode
+    expr: 'tradegateway_tigerbeetle_bridge_mode{mode="simulation"} == 1
+
+      '
+    for: 1m
+    labels:
+      severity: warning
+      team: payments
+- interval: 30s
+  name: tradegateway.database
+  rules:
+  - alert: PostgreSQLDown
+    annotations:
+      description: PostgreSQL instance {{ $labels.instance }} is unreachable.
+      runbook: https://runbooks.tradegateway.gov/postgres-down
+      summary: PostgreSQL is down
+    expr: 'pg_up == 0
+
+      '
+    for: 1m
+    labels:
+      severity: critical
+      team: platform
+  - alert: PostgreSQLHighConnections
+    annotations:
+      description: '{{ $value | humanizePercentage }} of max connections are in use.'
+      summary: PostgreSQL connection pool is near capacity
+    expr: 'sum(pg_stat_activity_count) / pg_settings_max_connections > 0.85
+
+      '
+    for: 5m
+    labels:
+      severity: warning
+      team: platform
+  - alert: PostgreSQLReplicationLag
+    annotations:
+      description: Replication lag is {{ $value | humanizeDuration }}.
+      summary: PostgreSQL replica is lagging
+    expr: 'pg_replication_lag > 30
+
+      '
+    for: 5m
+    labels:
+      severity: warning
+      team: platform
+  - alert: PostgreSQLLongRunningQuery
+    annotations:
+      description: A query has been running for {{ $value | humanizeDuration }}.
+      summary: Long-running PostgreSQL query detected
+    expr: 'max(pg_stat_activity_max_tx_duration{datname="tradegateway"}) > 300
+
+      '
+    for: 5m
+    labels:
+      severity: warning
+      team: backend
+- interval: 30s
+  name: tradegateway.kafka
+  rules:
+  - alert: KafkaConsumerLagHigh
+    annotations:
+      description: Consumer group {{ $labels.consumergroup }} has a lag of {{ $value
+        }} messages on topic {{ $labels.topic }}.
+      summary: Kafka consumer lag is high for topic {{ $labels.topic }}
+    expr: 'kafka_consumergroup_lag{topic=~"tradegateway.*"} > 10000
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      team: platform
+  - alert: KafkaBrokerDown
+    annotations:
+      description: Only {{ $value }} Kafka brokers are available. Cluster health is
+        degraded.
+      summary: Kafka cluster has fewer than 3 brokers
+    expr: 'kafka_brokers < 3
+
+      '
+    for: 2m
+    labels:
+      severity: critical
+      team: platform
+- interval: 30s
+  name: tradegateway.risk
+  rules:
+  - alert: RiskEngineHighLatency
+    annotations:
+      description: Risk scoring P95 latency is {{ $value | humanizeDuration }}. SLA
+        requires < 5 seconds.
+      summary: Risk engine P95 scoring latency exceeds 5 seconds
+    expr: "histogram_quantile(0.95,\n  sum(rate(risk_engine_scoring_duration_seconds_bucket[5m]))\
+      \ by (le)\n) > 5\n"
+    for: 5m
+    labels:
+      severity: warning
+      team: risk
+  - alert: SanctionsListStale
+    annotations:
+      description: The sanctions list was last updated {{ $value | humanizeDuration
+        }} ago.
+      summary: Sanctions screening list has not been updated in 24 hours
+    expr: '(time() - tradegateway_sanctions_list_last_updated_timestamp) > 86400
+
+      '
+    for: 1h
+    labels:
+      severity: warning
+      team: compliance
+- interval: 60s
+  name: tradegateway.sla
+  rules:
+  - alert: GreenLaneClearanceExceedsSLA
+    annotations:
+      description: Green-lane P95 clearance time is {{ $value | humanizeDuration }}.
+        SLA is 4 hours.
+      summary: Green-lane clearance P95 exceeds 4-hour SLA
+    expr: "histogram_quantile(0.95,\n  sum(rate(tradegateway_clearance_duration_seconds_bucket{lane=\"\
+      green\"}[1h])) by (le)\n) > 14400  # 4 hours in seconds\n"
+    for: 30m
+    labels:
+      severity: warning
+      team: customs
+  - alert: RedLaneClearanceExceedsSLA
+    annotations:
+      description: Red-lane P95 clearance time is {{ $value | humanizeDuration }}.
+      summary: Red-lane clearance P95 exceeds 72-hour SLA
+    expr: "histogram_quantile(0.95,\n  sum(rate(tradegateway_clearance_duration_seconds_bucket{lane=\"\
+      red\"}[1h])) by (le)\n) > 259200  # 72 hours in seconds\n"
+    for: 1h
+    labels:
+      severity: warning
+      team: customs
+- interval: 30s
+  name: tradegateway.infrastructure
+  rules:
+  - alert: NodeDiskPressure
+    annotations:
+      description: Available disk space is {{ $value | humanizePercentage }}.
+      summary: Node {{ $labels.instance }} disk usage exceeds 85%
+    expr: '(node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})
+      < 0.15
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      team: platform
+  - alert: NodeMemoryPressure
+    annotations:
+      description: Available memory is {{ $value | humanizePercentage }}.
+      summary: Node {{ $labels.instance }} memory usage exceeds 90%
+    expr: '(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+
+      '
+    for: 5m
+    labels:
+      severity: critical
+      team: platform
+  - alert: PersistentVolumeNearFull
+    annotations:
+      description: PVC {{ $labels.persistentvolumeclaim }} has {{ $value | humanizePercentage
+        }} available.
+      summary: PersistentVolume {{ $labels.persistentvolumeclaim }} is 90% full
+    expr: 'kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes
+      < 0.10
+
+      '
+    for: 10m
+    labels:
+      severity: warning
+      team: platform

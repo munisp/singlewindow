@@ -1,0 +1,260 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Prometheus Alert Rule Unit Tests
+# =============================================================================
+# Run: promtool test rules tradegateway-alerts.test.yaml
+# Requires: tradegateway-alerts-plain.yaml (extracted from CRD spec)
+# =============================================================================
+
+rule_files:
+  - tradegateway-alerts-plain.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ─── tradegateway.availability: ServiceDown ───────────────────────────────
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="tradegateway-declaration-engine", instance="10.0.0.1:8080"}'
+        values: '1 1 1 0 0 0'  # goes down at t=3m
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ServiceDown
+        exp_alerts: []  # not yet firing (< 2m down)
+      - eval_time: 5m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels:
+              alertname: ServiceDown
+              severity: critical
+              team: platform
+              job: tradegateway-declaration-engine
+              instance: "10.0.0.1:8080"
+            exp_annotations:
+              summary: "TradeGateway service tradegateway-declaration-engine is down"
+              description: "Service tradegateway-declaration-engine on 10.0.0.1:8080 has been down for more than 2 minutes."
+              runbook: "https://runbooks.tradegateway.gov/service-down"
+
+  # ─── tradegateway.availability: ServiceDown — healthy (should NOT fire) ───
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="tradegateway-web-api", instance="10.0.0.2:8080"}'
+        values: '1 1 1 1 1 1 1 1'  # always up
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ServiceDown
+        exp_alerts: []
+
+  # ─── tradegateway.availability: PodCrashLooping ───────────────────────────
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_waiting_reason{namespace="tradegateway", reason="CrashLoopBackOff", pod="risk-engine-abc", container="risk-engine"}'
+        values: '0 0 1 1 1 1 1 1'  # starts crash-looping at t=2m
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PodCrashLooping
+        exp_alerts: []  # not yet 5m
+      - eval_time: 7m
+        alertname: PodCrashLooping
+        exp_alerts:
+          - exp_labels:
+              alertname: PodCrashLooping
+              severity: critical
+              team: platform
+              namespace: tradegateway
+              reason: CrashLoopBackOff
+              pod: risk-engine-abc
+              container: risk-engine
+            exp_annotations:
+              summary: "Pod risk-engine-abc is in CrashLoopBackOff"
+              description: "Container risk-engine in pod risk-engine-abc is crash-looping."
+
+  # ─── tradegateway.api: HighAPIErrorRate — fires at 10% ────────────────────
+
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="tradegateway-web-api", status="500"}'
+        values: '0+10x10'   # 10 errors/min
+      - series: 'http_requests_total{job="tradegateway-web-api", status="200"}'
+        values: '0+90x10'   # 90 success/min (10% error rate)
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HighAPIErrorRate
+        exp_alerts:
+          - exp_labels:
+              alertname: HighAPIErrorRate
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "API error rate exceeds 5%"
+              description: "The TradeGateway API error rate is 10% over the last 5 minutes."
+              runbook: "https://runbooks.tradegateway.gov/high-error-rate"
+
+  # ─── tradegateway.api: HighAPIErrorRate — healthy (should NOT fire) ───────
+
+  - interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="tradegateway-web-api", status="500"}'
+        values: '0+2x10'    # 2 errors/min
+      - series: 'http_requests_total{job="tradegateway-web-api", status="200"}'
+        values: '0+98x10'   # 98 success/min (2% error rate, below 5%)
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: HighAPIErrorRate
+        exp_alerts: []
+
+  # ─── tradegateway.api: DeclarationProcessingBacklog ───────────────────────
+
+  - interval: 1m
+    input_series:
+      - series: 'tradegateway_declaration_queue_depth'
+        values: '0 100 300 600 600 600 600 600 600 600 600 600 600'  # exceeds 500 at t=3m
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: DeclarationProcessingBacklog
+        exp_alerts: []  # not yet 10m
+      - eval_time: 13m
+        alertname: DeclarationProcessingBacklog
+        exp_alerts:
+          - exp_labels:
+              alertname: DeclarationProcessingBacklog
+              severity: warning
+              team: customs
+            exp_annotations:
+              summary: "Declaration processing backlog is high"
+              description: "600 declarations are queued for processing."
+
+  # ─── tradegateway.kafka: KafkaConsumerLagHigh — fires at 12000 ────────────
+
+  - interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag{topic="tradegateway-declarations", consumergroup="declaration-processor"}'
+        values: '0 5000 12000 12000 12000 12000 12000 12000 12000 12000 12000 12000 12000'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: KafkaConsumerLagHigh
+        exp_alerts: []  # not yet 10m
+      - eval_time: 12m
+        alertname: KafkaConsumerLagHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: KafkaConsumerLagHigh
+              severity: warning
+              team: platform
+              topic: tradegateway-declarations
+              consumergroup: declaration-processor
+            exp_annotations:
+              summary: "Kafka consumer lag is high for topic tradegateway-declarations"
+              description: "Consumer group declaration-processor has a lag of 12000 messages on topic tradegateway-declarations."
+
+  # ─── tradegateway.kafka: KafkaConsumerLagHigh — healthy (should NOT fire) ─
+
+  - interval: 1m
+    input_series:
+      - series: 'kafka_consumergroup_lag{topic="tradegateway-declarations", consumergroup="declaration-processor"}'
+        values: '2000 2000 2000 2000 2000 2000 2000 2000 2000 2000 2000 2000 2000'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: KafkaConsumerLagHigh
+        exp_alerts: []
+
+  # ─── tradegateway.kafka: KafkaBrokerDown ─────────────────────────────────
+
+  - interval: 1m
+    input_series:
+      - series: 'kafka_brokers'
+        values: '3 3 2 2 2 2'  # drops below 3 at t=2m
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: KafkaBrokerDown
+        exp_alerts: []  # not yet 2m sustained
+      - eval_time: 4m
+        alertname: KafkaBrokerDown
+        exp_alerts:
+          - exp_labels:
+              alertname: KafkaBrokerDown
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: "Kafka cluster has fewer than 3 brokers"
+              description: "Only 2 Kafka brokers are available. Cluster health is degraded."
+
+  # ─── tradegateway.infrastructure: NodeDiskPressure — fires at 10% avail ──
+
+  - interval: 1m
+    input_series:
+      # 10% available (below 15% threshold)
+      - series: 'node_filesystem_avail_bytes{mountpoint="/", instance="node-1"}'
+        values: '10737418240x12'   # 10GB constant
+      - series: 'node_filesystem_size_bytes{mountpoint="/", instance="node-1"}'
+        values: '107374182400x12'  # 100GB constant → 10% available
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NodeDiskPressure
+        exp_alerts: []  # not yet 10m
+      - eval_time: 11m
+        alertname: NodeDiskPressure
+        exp_alerts:
+          - exp_labels:
+              alertname: NodeDiskPressure
+              severity: warning
+              team: platform
+              mountpoint: /
+              instance: node-1
+            exp_annotations:
+              summary: "Node node-1 disk usage exceeds 85%"
+              description: "Available disk space is 10%."
+
+  # ─── tradegateway.infrastructure: NodeDiskPressure — healthy ─────────────
+
+  - interval: 1m
+    input_series:
+      # 50% available (well above 15% threshold)
+      - series: 'node_filesystem_avail_bytes{mountpoint="/", instance="node-2"}'
+        values: '53687091200x12'   # 50GB
+      - series: 'node_filesystem_size_bytes{mountpoint="/", instance="node-2"}'
+        values: '107374182400x12'  # 100GB → 50% available
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: NodeDiskPressure
+        exp_alerts: []
+
+  # ─── tradegateway.infrastructure: NodeMemoryPressure — fires at 5% avail ─
+
+  - interval: 1m
+    input_series:
+      # 5% available (below 10% threshold)
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '536870912x7'    # 512MB constant
+      - series: 'node_memory_MemTotal_bytes'
+        values: '10737418240x7'  # 10GB constant → 5% available
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NodeMemoryPressure
+        exp_alerts: []  # not yet 5m
+      - eval_time: 6m
+        alertname: NodeMemoryPressure
+        exp_alerts:
+          - exp_labels:
+              alertname: NodeMemoryPressure
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: "Node  memory usage exceeds 90%"
+              description: "Available memory is 5%."
+
+  # ─── tradegateway.infrastructure: NodeMemoryPressure — healthy ───────────
+
+  - interval: 1m
+    input_series:
+      # 50% available (well above 10% threshold)
+      - series: 'node_memory_MemAvailable_bytes'
+        values: '5368709120x7'   # 5GB
+      - series: 'node_memory_MemTotal_bytes'
+        values: '10737418240x7'  # 10GB → 50% available
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: NodeMemoryPressure
+        exp_alerts: []
