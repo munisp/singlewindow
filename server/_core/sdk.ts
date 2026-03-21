@@ -6,6 +6,7 @@ import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
 import * as db from "../db";
+import { getPool } from "../db";
 import { ENV } from "./env";
 import type {
   ExchangeTokenRequest,
@@ -268,6 +269,44 @@ class SDKServer {
 
     const sessionUserId = session.openId;
     const signedInAt = new Date();
+
+    // ── Demo mode: bypass RLS by setting app.current_user_id in a raw pool query ──
+    // Demo users (open_id starts with "demo-") are pre-seeded in the DB by the
+    // postgres superuser. The regular Drizzle connection doesn't set the RLS
+    // context, so we use a raw pool client with set_config() to satisfy the policy.
+    if (sessionUserId.startsWith("demo-")) {
+      const pool = getPool();
+      if (pool) {
+        const client = await pool.connect();
+        try {
+          await client.query("SELECT set_config('app.current_user_id', $1, false)", [sessionUserId]);
+          await client.query("SELECT set_config('app.current_user_role', $1, false)", ['admin']);
+          const result = await client.query<{
+            id: number; open_id: string; name: string | null; email: string | null;
+            login_method: string | null; role: string; created_at: Date; updated_at: Date; last_signed_in: Date;
+          }>("SELECT * FROM users WHERE open_id = $1 LIMIT 1", [sessionUserId]);
+          if (result.rows[0]) {
+            await client.query("UPDATE users SET last_signed_in = $1 WHERE open_id = $2", [signedInAt, sessionUserId]);
+            const row = result.rows[0];
+            return {
+              id: row.id,
+              openId: row.open_id,
+              name: row.name,
+              email: row.email,
+              loginMethod: row.login_method,
+              role: row.role as User["role"],
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+              lastSignedIn: row.last_signed_in,
+            };
+          }
+        } finally {
+          client.release();
+        }
+      }
+      throw ForbiddenError("Demo user not found — run the demo seed script");
+    }
+
     let user = await db.getUserByOpenId(sessionUserId);
 
     // If user not in DB, sync from OAuth server automatically

@@ -97,7 +97,7 @@ export default function DeveloperPortal() {
     navigator.clipboard.writeText(text).then(() => toast.success("Copied to clipboard")).catch(() => toast.error("Copy failed"));
   };
 
-  const keys = (keysData as any)?.keys ?? [];
+  const keys = Array.isArray(keysData) ? keysData : [];
   const usage = (usageData as any) ?? {};
 
   const API_ENDPOINTS = [

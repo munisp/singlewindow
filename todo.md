@@ -1944,3 +1944,10 @@
 - [ ] [S93] Wire nigeriaId router into appRouter in server/routers.ts
 - [ ] [S93] Add NIN verification step to KYC flow in kyc.ts
 - [ ] [S93] Add NIN login button to TraderRegistration page
+
+## Sprint 103 — Demo Mode Runbook & Final Checkpoint
+
+- [x] Verified Developer Portal runtime bug already fixed (Array.isArray guard on line 100)
+- [x] Created DEMO-MODE.md runbook with full documentation of demo mode architecture, 6 pre-seeded demo users, RLS bypass mechanism, security considerations, and troubleshooting guide
+- [x] All 6 portals confirmed navigable in demo mode (Trader, Customs, OGA, Admin, Security, Developer)
+- [x] Final production checkpoint saved

@@ -755,6 +755,12 @@ async function startServer() {
     const { registerE2eTestAuthRoute } = await import("../routes/e2eTestAuth");
     registerE2eTestAuthRoute(app);
   }
+  // Demo mode auth endpoint — only mounted when DEMO_MODE=true
+  // Provides zero-friction demo access without OAuth for all 6 portal roles
+  if (process.env.DEMO_MODE === "true") {
+    const { registerDemoAuthRoute } = await import("../routes/demoAuth");
+    registerDemoAuthRoute(app);
+  }
 
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);

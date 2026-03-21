@@ -1,0 +1,13 @@
+{
+  "query": "\nINSERT INTO users (open_id, name, email, login_method, role) VALUES\n  ('demo-trader',    'Amara Diallo',     'amara.diallo@demo.tradegateway',    'demo', 'user'),\n  ('demo-customs',   'Kwame Asante',     'kwame.asante@demo.tradegateway',    'demo', 'user'),\n  ('demo-oga',       'Fatima Al-Hassan', 'fatima.alhassan@demo.tradegateway', 'demo', 'user'),\n  ('demo-admin',     'Chidi Okonkwo',    'chidi.okonkwo@demo.tradegateway',   'demo', 'admin'),\n  ('demo-security',  'Ngozi Eze',        'ngozi.eze@demo.tradegateway',       'demo', 'user'),\n  ('demo-developer', 'Tunde Adeyemi',    'tunde.adeyemi@demo.tradegateway',   'demo', 'user')\nON CONFLICT (open_id) DO UPDATE SET\n  name         = EXCLUDED.name,\n  email        = EXCLUDED.email,\n  login_method = EXCLUDED.login_method,\n  role         = EXCLUDED.role,\n  last_signed_in = NOW();\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2t5rixfHAYLQmtB.root --database jXBmDbCKSCugxa7Gwg2VnA --execute \nINSERT INTO users (open_id, name, email, login_method, role) VALUES\n  ('demo-trader',    'Amara Diallo',     'amara.diallo@demo.tradegateway',    'demo', 'user'),\n  ('demo-customs',   'Kwame Asante',     'kwame.asante@demo.tradegateway',    'demo', 'user'),\n  ('demo-oga',       'Fatima Al-Hassan', 'fatima.alhassan@demo.tradegateway', 'demo', 'user'),\n  ('demo-admin',     'Chidi Okonkwo',    'chidi.okonkwo@demo.tradegateway',   'demo', 'admin'),\n  ('demo-security',  'Ngozi Eze',        'ngozi.eze@demo.tradegateway',       'demo', 'user'),\n  ('demo-developer', 'Tunde Adeyemi',    'tunde.adeyemi@demo.tradegateway',   'demo', 'user')\nON CONFLICT (open_id) DO UPDATE SET\n  name         = EXCLUDED.name,\n  email        = EXCLUDED.email,\n  login_method = EXCLUDED.login_method,\n  role         = EXCLUDED.role,\n  last_signed_in = NOW();\n",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1064 (42000) at line 2: You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 8 column 12 near \"CONFLICT (open_id) DO UPDATE SET",
+    "  name         = EXCLUDED.name,",
+    "  email        = EXCLUDED.email,",
+    "  login_method = EXCLUDED.login_method,",
+    "  role         = EXCLUDED.role,",
+    "  last_signed_in = NOW()\""
+  ]
+}
