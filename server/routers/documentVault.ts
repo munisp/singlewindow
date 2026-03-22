@@ -468,4 +468,43 @@ export const documentVaultRouter = router({
         .where(and(...conditions))
         .orderBy(desc(documentVault.createdAt));
     }),
+
+  /**
+   * Sprint 117: Soft-delete a document — sets status to 'deleted' and removes the blob.
+   * Only the document owner or privileged officers (admin, customs_officer, oga_officer) can delete.
+   */
+  delete: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [doc] = await db
+        .select()
+        .from(documentVault)
+        .where(and(eq(documentVault.id, input.id), eq(documentVault.status, "active")))
+        .limit(1);
+
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found or already deleted" });
+
+      const isPrivileged = ["admin", "customs_officer", "oga_officer"].includes(ctx.user.role);
+      if (!isPrivileged && doc.ownerId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You do not have permission to delete this document" });
+      }
+
+      // Soft-delete in DB
+      await db
+        .update(documentVault)
+        .set({ status: "deleted" as any, updatedAt: new Date() })
+        .where(eq(documentVault.id, input.id));
+
+      // Best-effort blob removal from RustFS/S3
+      try {
+        if (doc.fileKey) await rustfsDelete(doc.fileKey);
+      } catch {
+        // Non-fatal: blob removal failure doesn't block the soft-delete
+      }
+
+      return { success: true, id: input.id };
+    }),
 });

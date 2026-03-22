@@ -1199,7 +1199,7 @@ export const declarationsRouter = router({
   /** Export a single declaration as a PDF summary — available to the declaration owner and officers */
   /** Bulk export multiple declarations as a ZIP archive of HTML summaries — officers only */
   bulkExportZip: protectedProcedure
-    .input(z.object({ ids: z.array(z.number()).min(1).max(50) }))
+    .input(z.object({ ids: z.array(z.number()).min(1).max(50), label: z.string().max(256).optional() }))
     .mutation(async ({ ctx, input }) => {
       const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer"];
       if (!officerRoles.includes(ctx.user.role)) {
@@ -1304,6 +1304,7 @@ ${riskScore !== null ? `<div class="section"><div class="section-title">Risk Ass
           s3Url: url,
           s3Key: fileKey,
           fileSizeBytes: zipBuffer.byteLength,
+          label: input.label ?? null,
           // Expire after 7 days
           expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
         }).returning({ id: bulkExports.id });

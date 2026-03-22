@@ -73,6 +73,7 @@ export default function CustomsDashboard() {
   const [bulkOfficerId, setBulkOfficerId] = useState<string>("");
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [isBulkExporting, setIsBulkExporting] = useState(false);
+  const [bulkExportLabel, setBulkExportLabel] = useState("");  // Sprint 117: optional label for ZIP archive
   // Sprint 114: SLA breach real-time alert banner state
   const [slaBreachCount, setSlaBreachCount] = useState<number | null>(null);
   const [slaBannerDismissed, setSlaBannerDismissed] = useState(false);
@@ -168,7 +169,7 @@ export default function CustomsDashboard() {
   const handleBulkExportZip = useCallback(() => {
     if (selectedIds.size === 0) return;
     setIsBulkExporting(true);
-    bulkExportZipMutation.mutate({ ids: Array.from(selectedIds) });
+    bulkExportZipMutation.mutate({ ids: Array.from(selectedIds), label: bulkExportLabel.trim() || undefined });
   }, [selectedIds, bulkExportZipMutation]);
 
   // Sprint 114: WebSocket listener for SLA breach workload_update events
@@ -369,6 +370,15 @@ export default function CustomsDashboard() {
               {isBulkAssigning ? <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Users className="h-3.5 w-3.5" />}
               Assign Selected
             </Button>
+<input
+              type="text"
+              placeholder="Archive label (optional)"
+              value={bulkExportLabel}
+              onChange={e => setBulkExportLabel(e.target.value)}
+              maxLength={256}
+              className="h-8 w-44 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              title="Optional label for this ZIP archive — shown in Export History"
+            />
             <Button
               size="sm"
               variant="outline"
@@ -714,6 +724,7 @@ function ExportHistoryPanel() {
               <thead className="border-b bg-muted/30">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Label</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Declarations</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Failed</th>
                   <th className="text-left px-4 py-3 font-medium text-muted-foreground">Size</th>
@@ -733,6 +744,13 @@ function ExportHistoryPanel() {
                     <tr key={row.id} className={`hover:bg-muted/30 transition-colors ${isExpired ? "opacity-50" : ""}`}>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {new Date(row.createdAt).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-xs max-w-[160px]">
+                        {row.label ? (
+                          <span className="font-medium text-foreground truncate block" title={row.label}>{row.label}</span>
+                        ) : (
+                          <span className="text-muted-foreground italic">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-medium">{row.declarationCount}</td>
                       <td className="px-4 py-3">

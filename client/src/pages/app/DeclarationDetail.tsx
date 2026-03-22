@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
   DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield,
-  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon, ChevronDown
+  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon, ChevronDown, Trash2
 } from "lucide-react";
 import { useState, useRef, useCallback, useMemo } from "react";
 import { Textarea } from "@/components/ui/textarea";
@@ -1036,6 +1036,18 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
     onError: (err) => toast.error("Download failed", { description: err.message }),
   });
 
+  // Sprint 117: soft-delete a document
+  const deleteDoc = trpc.documentVault.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Document removed", { description: "The document has been deleted." });
+      refetch();
+    },
+    onError: (err) => toast.error("Delete failed", { description: err.message }),
+  });
+
+  // Officers can delete any doc; traders can only delete their own (handled server-side, show button for all)
+  const canDelete = isOfficer || !terminalStatuses.includes(declarationStatus);
+
   if (!isLoading && (!docs || docs.length === 0) && !canUpload) return null;
 
   return (
@@ -1125,7 +1137,7 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
             ))}
           </div>
         ) : (
-          <GroupedDocumentList docs={docs ?? []} download={download} />
+          <GroupedDocumentList docs={docs ?? []} download={download} deleteDoc={deleteDoc} canDelete={canDelete} userId={user?.id} />
         )}
       </CardContent>
     </Card>
@@ -1139,7 +1151,14 @@ const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
 );
 const GROUP_ORDER = ["Trade Documents", "Regulatory", "Compliance", "General"];
 
-function GroupedDocumentList({ docs, download }: { docs: any[]; download: any }) {
+function GroupedDocumentList({ docs, download, deleteDoc, canDelete, userId }: {
+  docs: any[];
+  download: any;
+  deleteDoc: any;
+  canDelete: boolean;
+  userId?: number;
+}) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   // Build a map: group → docs
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {};
@@ -1235,6 +1254,40 @@ function GroupedDocumentList({ docs, download }: { docs: any[]; download: any })
                         ? <RefreshCwIcon className="h-3 w-3 animate-spin" />
                         : <Download className="h-3 w-3" />}
                     </Button>
+                    {canDelete && (
+                      confirmDeleteId === doc.id ? (
+                        // Inline confirmation
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => { deleteDoc.mutate({ id: doc.id }); setConfirmDeleteId(null); }}
+                            disabled={deleteDoc.isPending}
+                          >
+                            {deleteDoc.isPending ? <RefreshCwIcon className="h-3 w-3 animate-spin" /> : "Confirm"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setConfirmDeleteId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-destructive"
+                          title="Delete document"
+                          onClick={() => setConfirmDeleteId(doc.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      )
+                    )}
                   </div>
                 ))}
               </div>

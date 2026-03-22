@@ -693,6 +693,43 @@ async function runSLABreachAlertBroadcast() {
     if (slaBreachedCount > 0) {
       console.log(`[Cron] SLA breach alert broadcast — ${slaBreachedCount} breach(es) detected, workload_update sent to all officers`);
     }
+    // Sprint 117: send escalation email digest when breach count exceeds threshold
+    const SLA_BREACH_EMAIL_THRESHOLD = 5;
+    if (slaBreachedCount >= SLA_BREACH_EMAIL_THRESHOLD) {
+      try {
+        const { notifyOwner } = await import("./notification");
+        const redBreaches = processingRows.filter((r) => {
+          if (!r.submittedAt || (r.riskLane ?? "green") !== "red") return false;
+          const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+          return elapsed > SLA_MS.red;
+        }).length;
+        const yellowBreaches = processingRows.filter((r) => {
+          if (!r.submittedAt || (r.riskLane ?? "green") !== "yellow") return false;
+          const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+          return elapsed > SLA_MS.yellow;
+        }).length;
+        const greenBreaches = slaBreachedCount - redBreaches - yellowBreaches;
+        await notifyOwner({
+          title: `🚨 SLA Breach Alert — ${slaBreachedCount} Declaration${slaBreachedCount !== 1 ? "s" : ""} Overdue`,
+          content: [
+            `**SLA Breach Digest** — ${now.toUTCString()}`,
+            ``,
+            `A total of **${slaBreachedCount}** declaration${slaBreachedCount !== 1 ? "s are" : " is"} currently breaching their SLA threshold.`,
+            ``,
+            `| Lane   | Breached |`,
+            `|--------|----------|`,
+            `| 🔴 Red    | ${redBreaches} |`,
+            `| 🟡 Yellow | ${yellowBreaches} |`,
+            `| 🟢 Green  | ${greenBreaches} |`,
+            ``,
+            `Please log in to the Customs Dashboard and use the **SLA Breached** filter to triage these declarations immediately.`,
+          ].join("\n"),
+        });
+        console.log(`[Cron] SLA breach escalation email sent — ${slaBreachedCount} breaches (threshold: ${SLA_BREACH_EMAIL_THRESHOLD})`);
+      } catch (emailErr) {
+        console.warn("[Cron] SLA breach escalation email failed:", emailErr);
+      }
+    }
   } catch (err) {
     console.error("[Cron] SLA breach alert broadcast failed:", err);
   }
