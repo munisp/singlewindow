@@ -637,6 +637,69 @@ cron.schedule("0 0 4 * * *", async () => {
 }, { timezone: "UTC" });
 console.log("[Cron] Nightly revocation CSV email scheduled at 04:00 UTC daily");
 
+// ── SLA breach real-time alert broadcast ─────────────────────────────────────
+// Runs every 15 minutes. Queries declarations that have breached their SLA and
+// broadcasts a workload_update WebSocket event to all connected officers so the
+// CustomsDashboard alert banner refreshes without a page reload.
+async function runSLABreachAlertBroadcast() {
+  try {
+    const { getDb } = await import("../db");
+    const { declarations } = await import("../../drizzle/schema");
+    const { and, inArray, isNotNull, sql, count } = await import("drizzle-orm");
+    const { broadcastWorkloadUpdate } = await import("./wsServer");
+    const db = await getDb();
+    if (!db) return;
+    const SLA_MS: Record<string, number> = {
+      green: 4 * 3600 * 1000,
+      yellow: 24 * 3600 * 1000,
+      red: 72 * 3600 * 1000,
+      blue: 48 * 3600 * 1000,
+    };
+    const processingStatuses = ["submitted", "under_review", "inspection_required", "payment_pending"];
+    const now = new Date();
+    // Count total pending
+    const [totalPendingRow] = await db
+      .select({ count: count() })
+      .from(declarations)
+      .where(inArray(declarations.status, processingStatuses as any[]));
+    // Count by lane
+    const [redRow] = await db.select({ count: count() }).from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), sql`${declarations.riskLane} = 'red'`));
+    const [yellowRow] = await db.select({ count: count() }).from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), sql`${declarations.riskLane} = 'yellow'`));
+    const [greenRow] = await db.select({ count: count() }).from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), sql`${declarations.riskLane} = 'green'`));
+    // Count SLA breaches
+    const processingRows = await db
+      .select({ submittedAt: declarations.submittedAt, riskLane: declarations.riskLane })
+      .from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), isNotNull(declarations.submittedAt)))
+      .limit(1000);
+    const slaBreachedCount = processingRows.filter((r) => {
+      if (!r.submittedAt) return false;
+      const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+      const threshold = SLA_MS[r.riskLane ?? "green"] ?? SLA_MS.green;
+      return elapsed > threshold;
+    }).length;
+    broadcastWorkloadUpdate({
+      totalPending: totalPendingRow?.count ?? 0,
+      redLane: redRow?.count ?? 0,
+      yellowLane: yellowRow?.count ?? 0,
+      greenLane: greenRow?.count ?? 0,
+      slaBreached: slaBreachedCount,
+      updatedAt: now.toISOString(),
+    });
+    if (slaBreachedCount > 0) {
+      console.log(`[Cron] SLA breach alert broadcast — ${slaBreachedCount} breach(es) detected, workload_update sent to all officers`);
+    }
+  } catch (err) {
+    console.error("[Cron] SLA breach alert broadcast failed:", err);
+  }
+}
+// SLA breach alert broadcast — every 15 minutes (offset by 7 minutes from port congestion scan)
+cron.schedule("0 7/15 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
+console.log("[Cron] SLA breach alert broadcast scheduled every 15 minutes");
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();
@@ -752,6 +815,9 @@ async function startServer() {
   // Sprint 79: Public certificate verification endpoint (GET /api/verify/:certNumber)
   const { registerCertVerifyRoute } = await import("../routes/certVerify");
   registerCertVerifyRoute(app);
+  // File upload endpoint — authenticated multipart upload to S3
+  const { uploadRouter } = await import("../routes/uploadRoute");
+  app.use("/api/upload", uploadRouter);
   // E2E test auth endpoint — only mounted when E2E_TEST_MODE=1 (never in production)
   if (process.env.E2E_TEST_MODE === "1") {
     const { registerE2eTestAuthRoute } = await import("../routes/e2eTestAuth");

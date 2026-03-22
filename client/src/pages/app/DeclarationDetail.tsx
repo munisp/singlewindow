@@ -12,7 +12,7 @@ import {
   DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield,
   FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -332,6 +332,7 @@ export default function DeclarationDetail() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const [certLoading, setCertLoading] = useState(false);
+  const [pdfExportLoading, setPdfExportLoading] = useState(false);
   const [statusNotes, setStatusNotes] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("");
 
@@ -396,6 +397,25 @@ export default function DeclarationDetail() {
   const handleDownloadCert = () => {
     setCertLoading(true);
     certMutation.mutate({ id: declarationId });
+  };
+
+  const exportPdfMutation = trpc.declarations.exportSummaryPDF.useMutation({
+    onSuccess: (result) => {
+      setPdfExportLoading(false);
+      window.open(result.url, "_blank");
+      toast.success("Declaration summary ready", {
+        description: `PDF for ${result.declarationNumber} opened in a new tab.`,
+      });
+    },
+    onError: (err) => {
+      setPdfExportLoading(false);
+      toast.error("Export failed", { description: err.message });
+    },
+  });
+
+  const handleExportPdf = () => {
+    setPdfExportLoading(true);
+    exportPdfMutation.mutate({ id: declarationId });
   };
 
   // Cast to any for fields that may not be in the inferred type but exist at runtime
@@ -465,22 +485,42 @@ export default function DeclarationDetail() {
                     <TrendingUp className="h-4 w-4 text-primary" />
                     Clearance Progress
                   </CardTitle>
-                  {decl.status === "cleared" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleDownloadCert}
-                      disabled={certLoading}
-                      className="gap-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                    >
-                      {certLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4" />
-                      )}
-                      {certLoading ? "Generating..." : "Download Clearance Certificate"}
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {/* PDF Summary Export — available for all statuses */}
+                    {decl && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleExportPdf}
+                        disabled={pdfExportLoading}
+                        className="gap-2 text-muted-foreground hover:text-foreground"
+                        title="Export declaration summary as PDF"
+                      >
+                        {pdfExportLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileText className="h-4 w-4" />
+                        )}
+                        {pdfExportLoading ? "Exporting..." : "Export PDF"}
+                      </Button>
+                    )}
+                    {decl.status === "cleared" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDownloadCert}
+                        disabled={certLoading}
+                        className="gap-2 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                      >
+                        {certLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                        {certLoading ? "Generating..." : "Download Clearance Certificate"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -873,7 +913,7 @@ export default function DeclarationDetail() {
         ) : null}
 
         {/* Attached Documents from Document Vault */}
-        {declarationId > 0 && <AttachedDocuments declarationId={declarationId} />}
+        {declarationId > 0 && <AttachedDocuments declarationId={declarationId} declarationStatus={decl?.status ?? ""} />}
       </div>
     </DashboardLayout>
   );
@@ -897,11 +937,87 @@ function formatDocBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-function AttachedDocuments({ declarationId }: { declarationId: number }) {
+const UPLOAD_CATEGORIES = [
+  { value: "commercial_invoice", label: "Commercial Invoice" },
+  { value: "bill_of_lading", label: "Bill of Lading" },
+  { value: "packing_list", label: "Packing List" },
+  { value: "certificate_of_origin", label: "Certificate of Origin" },
+  { value: "phytosanitary_cert", label: "Phytosanitary Certificate" },
+  { value: "import_permit", label: "Import Permit" },
+  { value: "export_permit", label: "Export Permit" },
+  { value: "insurance_cert", label: "Insurance Certificate" },
+  { value: "customs_bond", label: "Customs Bond" },
+  { value: "correspondence", label: "Correspondence" },
+  { value: "other", label: "Other" },
+] as const;
+
+function AttachedDocuments({ declarationId, declarationStatus }: { declarationId: number; declarationStatus: string }) {
+  const { user } = useAuth();
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadCategory, setUploadCategory] = useState<string>("other");
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Upload is allowed for officers always; for traders on non-terminal statuses
+  const isOfficer = ["admin", "customs_officer", "inspector", "oga_officer"].includes(user?.role ?? "");
+  const terminalStatuses = ["cleared", "rejected", "cancelled"];
+  const canUpload = isOfficer || !terminalStatuses.includes(declarationStatus);
+
   const { data: docs, isLoading, refetch } = trpc.documentVault.listByDeclaration.useQuery(
     { declarationId },
     { enabled: declarationId > 0 }
   );
+
+  const uploadMutation = trpc.documentVault.upload.useMutation({
+    onSuccess: () => {
+      toast.success("Document uploaded", { description: "File attached to this declaration." });
+      refetch();
+      setUploadDescription("");
+      setUploadCategory("other");
+    },
+    onError: (err) => toast.error("Upload failed", { description: err.message }),
+  });
+
+  const processFile = useCallback(async (file: File) => {
+    const MAX_SIZE = 20 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      toast.error("File too large", { description: "Maximum file size is 20 MB." });
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const base64 = btoa(binary);
+      await uploadMutation.mutateAsync({
+        filename: file.name,
+        contentType: file.type || "application/octet-stream",
+        fileData: base64,
+        sizeBytes: file.size,
+        category: uploadCategory as any,
+        accessLevel: "shared_with_customs",
+        description: uploadDescription || undefined,
+        declarationId,
+      });
+    } catch { /* handled by onError */ } finally {
+      setIsUploading(false);
+    }
+  }, [uploadMutation, uploadCategory, uploadDescription, declarationId]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }, [processFile]);
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [processFile]);
 
   const download = trpc.documentVault.download.useMutation({
     onSuccess: (data) => {
@@ -911,7 +1027,7 @@ function AttachedDocuments({ declarationId }: { declarationId: number }) {
     onError: (err) => toast.error("Download failed", { description: err.message }),
   });
 
-  if (!isLoading && (!docs || docs.length === 0)) return null;
+  if (!isLoading && (!docs || docs.length === 0) && !canUpload) return null;
 
   return (
     <Card className="mt-6">
@@ -933,6 +1049,66 @@ function AttachedDocuments({ declarationId }: { declarationId: number }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        {/* Upload Dropzone */}
+        {canUpload && (
+          <div className="mb-4">
+            <div className="flex flex-wrap gap-2 mb-2">
+              <select
+                value={uploadCategory}
+                onChange={e => setUploadCategory(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {UPLOAD_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Description (optional)"
+                value={uploadDescription}
+                onChange={e => setUploadDescription(e.target.value)}
+                className="h-8 flex-1 min-w-32 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Upload document — click or drag a file here"
+              className={`relative flex flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed transition-colors cursor-pointer p-4 ${
+                isDragging
+                  ? "border-primary bg-primary/5"
+                  : "border-border/60 hover:border-primary/60 hover:bg-muted/30"
+              } ${isUploading ? "pointer-events-none opacity-60" : ""}`}
+              onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              onKeyDown={e => e.key === "Enter" && fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.zip,.tar,.gz"
+                onChange={handleFileChange}
+              />
+              {isUploading ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <p className="text-xs text-muted-foreground">Uploading…</p>
+                </>
+              ) : (
+                <>
+                  <Download className="h-5 w-5 text-muted-foreground rotate-180" />
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-primary">Click to upload</span> or drag &amp; drop
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/70">PDF, Word, Excel, Images, ZIP — max 20 MB</p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(3)].map((_, i) => (

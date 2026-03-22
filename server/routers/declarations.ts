@@ -1195,4 +1195,143 @@ export const declarationsRouter = router({
       updatedAt: new Date().toISOString(),
     };
   }),
+
+  /** Export a single declaration as a PDF summary — available to the declaration owner and officers */
+  exportSummaryPDF: protectedProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer"];
+      const decl = await getDeclarationById(input.id);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+      if (ctx.user.role === "user" && decl.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const isOfficer = officerRoles.includes(ctx.user.role);
+      const generatedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+      const statusLabel = (decl.status ?? "").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+      const riskLane = (decl as any).riskLane ?? null;
+      const laneLabel = riskLane ? riskLane.replace(/_lane$/, "").toUpperCase() + " LANE" : "N/A";
+      const laneColor = riskLane === "green_lane" ? "#16a34a" : riskLane === "yellow_lane" ? "#d97706" : riskLane === "red_lane" ? "#dc2626" : "#6b7280";
+      const riskScore = (decl as any).riskScore !== null && (decl as any).riskScore !== undefined ? Number((decl as any).riskScore) : null;
+      const scoreColor = riskScore !== null ? (riskScore < 30 ? "#16a34a" : riskScore < 60 ? "#d97706" : "#dc2626") : "#6b7280";
+      const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 40px; color: #1a1a2e; font-size: 13px; }
+    .header { text-align: center; border-bottom: 3px solid #D4A017; padding-bottom: 20px; margin-bottom: 24px; }
+    .header h1 { font-size: 26px; color: #0A1628; margin: 0 0 4px; letter-spacing: 1px; }
+    .header h2 { font-size: 14px; color: #D4A017; margin: 0; font-weight: 500; }
+    .meta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-bottom: 24px; font-size: 11px; color: #6b7280; }
+    .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; background: #f3f4f6; color: #374151; }
+    .lane-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; color: white; background: ${laneColor}; }
+    .section { margin-bottom: 20px; page-break-inside: avoid; }
+    .section-title { font-size: 10px; font-weight: 700; color: #D4A017; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 5px 8px; vertical-align: top; }
+    td:first-child { color: #6b7280; width: 45%; font-size: 11px; }
+    td:last-child { font-weight: 600; font-size: 12px; }
+    tr:nth-child(even) { background: #f9fafb; }
+    .risk-score { font-size: 28px; font-weight: 900; color: ${scoreColor}; }
+    .footer { text-align: center; font-size: 10px; color: #9ca3af; margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+    .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-45deg); font-size: 80px; color: rgba(212,160,23,0.05); font-weight: 900; letter-spacing: 8px; pointer-events: none; }
+    .confidential { color: #dc2626; font-size: 10px; font-weight: 700; text-align: center; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="watermark">NGSWTP</div>
+  <div class="confidential">${isOfficer ? "OFFICIAL USE — CUSTOMS AUTHORITY" : "TRADER COPY — CONFIDENTIAL"}</div>
+  <div class="header">
+    <h1>NATIONAL TRADE GATEWAY</h1>
+    <h2>DECLARATION SUMMARY REPORT</h2>
+  </div>
+  <div class="meta">
+    <span>Declaration: <strong>${decl.declarationNumber}</strong></span>
+    <span>UCR: <strong>${decl.ucr ?? "N/A"}</strong></span>
+    <span>Generated: <strong>${generatedDate}</strong></span>
+    <span>Status: <span class="status-badge">${statusLabel}</span></span>
+    <span>Risk Lane: <span class="lane-badge">${laneLabel}</span></span>
+  </div>
+  <div class="section">
+    <div class="section-title">Goods &amp; Shipment</div>
+    <table>
+      <tr><td>Declaration Type</td><td>${(decl.declarationType ?? "").replace(/_/g, " ").toUpperCase()}</td></tr>
+      <tr><td>HS Code</td><td>${decl.hsCode ?? "N/A"}</td></tr>
+      <tr><td>Goods Description</td><td>${decl.goodsDescription ?? "N/A"}</td></tr>
+      <tr><td>Gross Weight</td><td>${decl.grossWeight ? `${decl.grossWeight} kg` : "N/A"}</td></tr>
+      <tr><td>Net Weight</td><td>${decl.netWeight ? `${decl.netWeight} kg` : "N/A"}</td></tr>
+      <tr><td>Number of Packages</td><td>${decl.numberOfPackages ?? "N/A"}</td></tr>
+      <tr><td>Port of Entry</td><td>${decl.portOfEntry ?? "N/A"}</td></tr>
+      <tr><td>Country of Origin</td><td>${decl.countryOfOrigin ?? "N/A"}</td></tr>
+    </table>
+  </div>
+  <div class="section">
+    <div class="section-title">Parties</div>
+    <table>
+      <tr><td>Importer Name</td><td>${(decl as any).importerName ?? "N/A"}</td></tr>
+      <tr><td>Importer TIN</td><td>${(decl as any).importerTin ?? "N/A"}</td></tr>
+      <tr><td>Exporter Name</td><td>${(decl as any).exporterName ?? "N/A"}</td></tr>
+      <tr><td>Country of Export</td><td>${(decl as any).countryOfExport ?? "N/A"}</td></tr>
+    </table>
+  </div>
+  <div class="section">
+    <div class="section-title">Financial</div>
+    <table>
+      <tr><td>Invoice Value</td><td>${decl.invoiceCurrency ?? "USD"} ${decl.invoiceValue ?? "N/A"}</td></tr>
+      <tr><td>Duty Amount</td><td>${decl.invoiceCurrency ?? "USD"} ${decl.dutyAmount ?? "0.00"}</td></tr>
+      <tr><td>VAT Amount</td><td>${decl.invoiceCurrency ?? "USD"} ${decl.vatAmount ?? "0.00"}</td></tr>
+      <tr><td>Total Due</td><td><strong>${decl.invoiceCurrency ?? "USD"} ${decl.totalDue ?? "0.00"}</strong></td></tr>
+      ${(decl as any).paymentReference ? `<tr><td>Payment Reference</td><td>${(decl as any).paymentReference}</td></tr>` : ""}
+    </table>
+  </div>
+  ${riskScore !== null ? `
+  <div class="section">
+    <div class="section-title">Risk Assessment</div>
+    <table>
+      <tr><td>Risk Score</td><td><span class="risk-score">${riskScore}</span> / 100</td></tr>
+      <tr><td>Risk Lane</td><td>${laneLabel}</td></tr>
+    </table>
+  </div>` : ""}
+  ${(decl as any).notes ? `
+  <div class="section">
+    <div class="section-title">Customs Notes</div>
+    <p style="font-style:italic;color:#92400e;background:#fffbeb;padding:10px;border-radius:4px;">${(decl as any).notes}</p>
+  </div>` : ""}
+  <div class="footer">
+    Generated by National Trade Gateway Single Window Platform &nbsp;|&nbsp; ${generatedDate}<br>
+    Declaration: ${decl.declarationNumber} &nbsp;|&nbsp; This document is for reference only.
+  </div>
+</body>
+</html>`;
+      const { storagePut } = await import("../storage");
+      const { nanoid: nanoId } = await import("nanoid");
+      const { execSync } = await import("child_process");
+      const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
+      const { tmpdir } = await import("os");
+      const { join } = await import("path");
+      const tmpHtml = join(tmpdir(), `decl-summary-${nanoId(8)}.html`);
+      const tmpPdf = join(tmpdir(), `decl-summary-${nanoId(8)}.pdf`);
+      try {
+        writeFileSync(tmpHtml, htmlContent, "utf-8");
+        execSync(`manus-md-to-pdf "${tmpHtml}" "${tmpPdf}" 2>/dev/null || wkhtmltopdf "${tmpHtml}" "${tmpPdf}" 2>/dev/null || chromium-browser --headless --no-sandbox --print-to-pdf="${tmpPdf}" "${tmpHtml}" 2>/dev/null || true`, { timeout: 30_000 });
+        let pdfBuffer: Buffer;
+        try {
+          pdfBuffer = readFileSync(tmpPdf);
+        } catch {
+          const htmlBuffer = readFileSync(tmpHtml);
+          const fileKey = `declaration-summaries/${decl.declarationNumber}-${nanoId(6)}.html`;
+          const { url } = await storagePut(fileKey, htmlBuffer, "text/html");
+          await logAuditEvent({ actorId: ctx.user.id, action: "declarations.exportSummaryPDF", entityType: "declaration", entityId: decl.id, metadata: { format: "html" } });
+          return { url, format: "html" as const, declarationNumber: decl.declarationNumber };
+        }
+        const fileKey = `declaration-summaries/${decl.declarationNumber}-${nanoId(6)}.pdf`;
+        const { url } = await storagePut(fileKey, pdfBuffer, "application/pdf");
+        await logAuditEvent({ actorId: ctx.user.id, action: "declarations.exportSummaryPDF", entityType: "declaration", entityId: decl.id, metadata: { format: "pdf" } });
+        return { url, format: "pdf" as const, declarationNumber: decl.declarationNumber };
+      } finally {
+        try { unlinkSync(tmpHtml); } catch { /* ignore */ }
+        try { unlinkSync(tmpPdf); } catch { /* ignore */ }
+      }
+    }),
 });

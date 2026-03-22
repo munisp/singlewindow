@@ -2088,3 +2088,8 @@
 - [x] Add bulk officer assignment action bar with officer dropdown
 - [x] Add DeclarationProgressBar component (horizontal stepper on desktop, compact on mobile)
 - [x] Wire DeclarationProgressBar into DeclarationDetail page
+
+## Sprint 114 — Document Upload, PDF Export, SLA Alerts
+- [ ] Add file upload dropzone to Declaration Detail page (wired to addDocument mutation)
+- [ ] Implement server-side declaration PDF export endpoint
+- [ ] Build SLA breach alert background job with node-cron and WebSocket broadcast

@@ -67,6 +67,10 @@ export default function CustomsDashboard() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkOfficerId, setBulkOfficerId] = useState<string>("");
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  // Sprint 114: SLA breach real-time alert banner state
+  const [slaBreachCount, setSlaBreachCount] = useState<number | null>(null);
+  const [slaBannerDismissed, setSlaBannerDismissed] = useState(false);
+  const [slaLastUpdated, setSlaLastUpdated] = useState<Date | null>(null);
   const utils = trpc.useUtils();
 
   // Debounce search input by 350ms to avoid excessive queries
@@ -137,6 +141,29 @@ export default function CustomsDashboard() {
     }
   }, [bulkOfficerId, selectedIds, assignOfficerMutation, utils]);
 
+  // Sprint 114: WebSocket listener for SLA breach workload_update events
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "workload_update") {
+          const breached = msg.payload?.slaBreached ?? 0;
+          setSlaBreachCount(breached);
+          setSlaLastUpdated(new Date());
+          if (breached > 0) {
+            // Reset dismiss so the banner re-appears when new breaches arrive
+            setSlaBannerDismissed(false);
+          }
+          utils.declarations.stats.invalidate();
+        }
+      } catch { /* ignore */ }
+    };
+    return () => ws.close();
+  }, [utils]);
+
   // Server-side search is now applied; client-side filter is a no-op passthrough
   const filtered = allItems;
 
@@ -159,6 +186,30 @@ export default function CustomsDashboard() {
           <h1 className="text-2xl font-bold tracking-tight">Customs Officer Dashboard</h1>
           <p className="text-muted-foreground text-sm mt-1">Declaration queue with AI risk assessment</p>
         </div>
+
+        {/* Sprint 114: SLA Breach Alert Banner */}
+        {slaBreachCount !== null && slaBreachCount > 0 && !slaBannerDismissed && (
+          <div className="flex items-start gap-3 p-4 rounded-lg border border-red-300 bg-red-50 text-red-800">
+            <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-sm">
+                {slaBreachCount} Declaration{slaBreachCount !== 1 ? "s" : ""} Breached SLA
+              </p>
+              <p className="text-xs text-red-700 mt-0.5">
+                {slaBreachCount} active declaration{slaBreachCount !== 1 ? "s have" : " has"} exceeded their clearance time target.
+                {slaLastUpdated && ` Last checked: ${slaLastUpdated.toLocaleTimeString()}.`}
+                {" "}Review and prioritise these declarations immediately.
+              </p>
+            </div>
+            <button
+              onClick={() => setSlaBannerDismissed(true)}
+              className="text-red-500 hover:text-red-700 text-lg leading-none font-bold shrink-0"
+              aria-label="Dismiss SLA alert"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
