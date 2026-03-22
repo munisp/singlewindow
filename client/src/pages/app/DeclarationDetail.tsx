@@ -10,9 +10,9 @@ import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
   DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield,
-  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon
+  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon, ChevronDown
 } from "lucide-react";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -1125,48 +1125,123 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
             ))}
           </div>
         ) : (
-          <div className="space-y-2">
-            {(docs ?? []).map(doc => (
-              <div
-                key={doc.id}
-                className="flex items-center gap-3 p-3 rounded-lg border border-border/40 bg-card/30 hover:bg-card/60 transition-colors"
-              >
-                <div className="flex-shrink-0 w-8 h-8 rounded-md flex items-center justify-center bg-primary/10 text-primary">
-                  {getDocFileIcon(doc.mimeType)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{doc.filename}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-muted-foreground">{formatDocBytes(doc.sizeBytes)}</span>
-                    <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(doc.createdAt).toLocaleDateString()}
-                    </span>
-                    {doc.description && (
-                      <>
-                        <span className="text-xs text-muted-foreground">·</span>
-                        <span className="text-xs text-muted-foreground truncate max-w-[200px]">{doc.description}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8 w-8 p-0 flex-shrink-0"
-                  title="Download"
-                  onClick={() => download.mutate({ id: doc.id })}
-                  disabled={download.isPending}
-                >
-                  {download.isPending
-                    ? <RefreshCwIcon className="h-3.5 w-3.5 animate-spin" />
-                    : <Download className="h-3.5 w-3.5" />}
-                </Button>
-              </div>
-            ))}
-          </div>
+          <GroupedDocumentList docs={docs ?? []} download={download} />
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Grouped Document List ────────────────────────────────────────────────────
+// Groups documents by their category and renders each group as a collapsible section.
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
+  UPLOAD_CATEGORIES.map(c => [c.value, c.label])
+);
+const GROUP_ORDER = ["Trade Documents", "Regulatory", "Compliance", "General"];
+
+function GroupedDocumentList({ docs, download }: { docs: any[]; download: any }) {
+  // Build a map: group → docs
+  const grouped = useMemo(() => {
+    const map: Record<string, any[]> = {};
+    for (const doc of docs) {
+      const catMeta = UPLOAD_CATEGORIES.find(c => c.value === doc.category);
+      const group = catMeta?.group ?? "General";
+      if (!map[group]) map[group] = [];
+      map[group].push(doc);
+    }
+    return map;
+  }, [docs]);
+
+  const orderedGroups = [
+    ...GROUP_ORDER.filter(g => grouped[g]),
+    ...Object.keys(grouped).filter(g => !GROUP_ORDER.includes(g)),
+  ];
+
+  // Track which groups are collapsed
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggle = (group: string) => setCollapsed(prev => ({ ...prev, [group]: !prev[group] }));
+
+  if (docs.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground text-center py-4">
+        No documents attached yet.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {orderedGroups.map(group => {
+        const groupDocs = grouped[group] ?? [];
+        const isCollapsed = collapsed[group] ?? false;
+        return (
+          <div key={group} className="rounded-lg border border-border/40 overflow-hidden">
+            {/* Group header */}
+            <button
+              type="button"
+              onClick={() => toggle(group)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-foreground uppercase tracking-wide">{group}</span>
+                <span className="text-xs text-muted-foreground font-normal">({groupDocs.length})</span>
+              </div>
+              <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+            </button>
+            {/* Group items */}
+            {!isCollapsed && (
+              <div className="divide-y divide-border/30">
+                {groupDocs.map((doc: any) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center gap-3 px-3 py-2.5 bg-card/20 hover:bg-card/50 transition-colors"
+                  >
+                    <div className="flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center bg-primary/10 text-primary">
+                      {getDocFileIcon(doc.mimeType)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.filename}</p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="text-xs text-muted-foreground">{formatDocBytes(doc.sizeBytes)}</span>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(doc.createdAt).toLocaleDateString()}
+                        </span>
+                        {doc.category && doc.category !== "other" && (
+                          <>
+                            <span className="text-xs text-muted-foreground">·</span>
+                            <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded font-medium">
+                              {CATEGORY_LABEL[doc.category] ?? doc.category}
+                            </span>
+                          </>
+                        )}
+                        {doc.description && (
+                          <>
+                            <span className="text-xs text-muted-foreground">·</span>
+                            <span className="text-xs text-muted-foreground truncate max-w-[200px]">{doc.description}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 flex-shrink-0"
+                      title="Download"
+                      onClick={() => download.mutate({ id: doc.id })}
+                      disabled={download.isPending}
+                    >
+                      {download.isPending
+                        ? <RefreshCwIcon className="h-3 w-3 animate-spin" />
+                        : <Download className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }

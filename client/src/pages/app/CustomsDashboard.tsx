@@ -24,6 +24,9 @@ import {
   Square,
   Archive,
   Loader2,
+  Download,
+  History,
+  ExternalLink,
 } from "lucide-react";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
@@ -192,12 +195,20 @@ export default function CustomsDashboard() {
   }, [utils]);
 
   // Sprint 115: when SLA breach filter is active, filter client-side by elapsed time vs threshold
-  const filtered = isSlaBreachedFilter
-    ? allItems.filter((d: any) => {
-        const sla = getSLAStatus(d);
-        return sla.isBreached;
-      })
-    : allItems;
+  // Sprint 116: when SLA breach filter is active, sort by hoursElapsed descending
+  const filtered = useMemo(() => {
+    const base = isSlaBreachedFilter
+      ? allItems.filter((d: any) => getSLAStatus(d).isBreached)
+      : allItems;
+    if (isSlaBreachedFilter) {
+      return [...base].sort((a: any, b: any) => {
+        const aElapsed = getSLAStatus(a).hoursElapsed;
+        const bElapsed = getSLAStatus(b).hoursElapsed;
+        return bElapsed - aElapsed; // Most overdue first
+      });
+    }
+    return base;
+  }, [allItems, isSlaBreachedFilter]);
 
   const laneGroups = {
     red: (stats as any)?.redLane ?? filtered.filter((d: any) => d.riskLane === "red_lane" || d.riskLane === "red").length,
@@ -556,6 +567,9 @@ export default function CustomsDashboard() {
         </Card>
       </div>
 
+      {/* ── Bulk Export History ──────────────────────────────────────── */}
+      <ExportHistoryPanel />
+
       {/* ── Fluvio Live Cargo Event Stream ─────────────────────────────── */}
       <LiveCargoStream />
     </DashboardLayout>
@@ -658,6 +672,104 @@ function LiveCargoStream() {
             ))
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Bulk Export History Panel ────────────────────────────────────────────────
+function ExportHistoryPanel() {
+  const { data: exports, isLoading, refetch } = trpc.declarations.listBulkExports.useQuery({ limit: 20 });
+
+  if (!isLoading && (!exports || exports.length === 0)) return null;
+
+  return (
+    <Card className="mt-6">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <History className="h-4 w-4 text-primary" />
+          Bulk Export History
+          {exports && exports.length > 0 && (
+            <span className="ml-1 text-sm font-normal text-muted-foreground">({exports.length})</span>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 w-7 p-0"
+            onClick={() => refetch()}
+            title="Refresh export history"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="p-4 space-y-2">
+            {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/30">
+                <tr>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Declarations</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Failed</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Size</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Expires</th>
+                  <th className="text-left px-4 py-3 font-medium text-muted-foreground">Download</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {(exports ?? []).map((row: any) => {
+                  const isExpired = row.expiresAt && new Date(row.expiresAt) < new Date();
+                  const sizeLabel = row.fileSizeBytes
+                    ? row.fileSizeBytes > 1024 * 1024
+                      ? `${(row.fileSizeBytes / 1024 / 1024).toFixed(1)} MB`
+                      : `${Math.round(row.fileSizeBytes / 1024)} KB`
+                    : "—";
+                  return (
+                    <tr key={row.id} className={`hover:bg-muted/30 transition-colors ${isExpired ? "opacity-50" : ""}`}>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {new Date(row.createdAt).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 font-medium">{row.declarationCount}</td>
+                      <td className="px-4 py-3">
+                        {row.failedCount > 0 ? (
+                          <span className="text-xs text-red-600 font-medium">{row.failedCount} failed</span>
+                        ) : (
+                          <span className="text-xs text-emerald-600">✓ All ok</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{sizeLabel}</td>
+                      <td className="px-4 py-3 text-xs">
+                        {row.expiresAt ? (
+                          <span className={isExpired ? "text-red-500" : "text-muted-foreground"}>
+                            {isExpired ? "Expired" : new Date(row.expiresAt).toLocaleDateString()}
+                          </span>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1"
+                          disabled={isExpired}
+                          onClick={() => window.open(row.s3Url, "_blank")}
+                          title={isExpired ? "This archive has expired" : "Re-download ZIP archive"}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          {isExpired ? "Expired" : "Download"}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -176,6 +176,13 @@
       "when": 1773157380851,
       "tag": "0024_colossal_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1774174059564,
+      "tag": "0025_nice_gorilla_man",
+      "breakpoints": true
     }
   ]
 }

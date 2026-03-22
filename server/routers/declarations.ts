@@ -5,7 +5,7 @@ import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
-  withRlsContext
+  withRlsContext, getDb
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
@@ -1289,14 +1289,34 @@ ${riskScore !== null ? `<div class="section"><div class="section-title">Risk Ass
       const zipBuffer = Buffer.from(zipSync(zipEntries));
       const fileKey = `bulk-exports/declarations-${nanoId(8)}.zip`;
       const { url } = await storagePut(fileKey, zipBuffer, "application/zip");
+      // Sprint 116: persist export record so officers can re-download from history
+      const { bulkExports } = await import("../../drizzle/schema");
+      const db = await getDb();
+      const successCount = results.filter(r => r.ok).length;
+      const failedCount = results.filter(r => !r.ok).length;
+      let exportId: number | undefined;
+      if (db) {
+        const [inserted] = await db.insert(bulkExports).values({
+          userId: ctx.user.id,
+          declarationIds: JSON.stringify(input.ids),
+          declarationCount: successCount,
+          failedCount,
+          s3Url: url,
+          s3Key: fileKey,
+          fileSizeBytes: zipBuffer.byteLength,
+          // Expire after 7 days
+          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
+        }).returning({ id: bulkExports.id });
+        exportId = inserted?.id;
+      }
       await logAuditEvent({
         actorId: ctx.user.id,
         action: "declarations.bulkExportZip",
         entityType: "declaration",
         entityId: 0,
-        metadata: { count: results.filter(r => r.ok).length, ids: input.ids },
+        metadata: { count: successCount, ids: input.ids, exportId },
       });
-      return { url, count: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length };
+      return { url, count: successCount, failed: failedCount, exportId };
     }),
 
   exportSummaryPDF: protectedProcedure
@@ -1435,5 +1455,25 @@ ${riskScore !== null ? `<div class="section"><div class="section-title">Risk Ass
         try { unlinkSync(tmpHtml); } catch { /* ignore */ }
         try { unlinkSync(tmpPdf); } catch { /* ignore */ }
       }
+    }),
+
+  // Sprint 116: list bulk export history for the current officer
+  listBulkExports: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))
+    .query(async ({ ctx, input }) => {
+      const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer"];
+      if (!officerRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only customs officers can view export history." });
+      }
+      const { bulkExports } = await import("../../drizzle/schema");
+      const db = await getDb();
+      if (!db) return [];
+      const rows = await db
+        .select()
+        .from(bulkExports)
+        .where(eq(bulkExports.userId, ctx.user.id))
+        .orderBy(desc(bulkExports.createdAt))
+        .limit(input.limit);
+      return rows;
     }),
 });

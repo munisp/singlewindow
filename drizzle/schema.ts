@@ -1338,3 +1338,24 @@ export const complianceEmailDeliveryLog = pgTable("compliance_email_delivery_log
 ]);
 export type ComplianceEmailDeliveryLog = typeof complianceEmailDeliveryLog.$inferSelect;
 export type InsertComplianceEmailDeliveryLog = typeof complianceEmailDeliveryLog.$inferInsert;
+
+// ─── BULK EXPORT HISTORY ─────────────────────────────────────────────────────
+// Records every bulk PDF ZIP export so officers can re-download recent archives.
+export const bulkExports = pgTable("bulk_exports", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id).notNull(),
+  declarationIds: text("declaration_ids").notNull(),  // JSON array of declaration IDs
+  declarationCount: integer("declaration_count").notNull(),
+  failedCount: integer("failed_count").default(0).notNull(),
+  s3Url: text("s3_url").notNull(),
+  s3Key: text("s3_key").notNull(),
+  fileSizeBytes: integer("file_size_bytes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+  label: varchar("label", { length: 256 }),
+}, (t) => [
+  index("idx_bulk_exports_user_id").on(t.userId),
+  index("idx_bulk_exports_created_at").on(t.createdAt),
+]);
+export type BulkExport = typeof bulkExports.$inferSelect;
+export type InsertBulkExport = typeof bulkExports.$inferInsert;
