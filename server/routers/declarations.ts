@@ -534,6 +534,10 @@ export const declarationsRouter = router({
           redLane: redLane[0]?.count ?? 0,
           yellowLane: yellowLane[0]?.count ?? 0,
           greenLane: greenLane[0]?.count ?? 0,
+          // Aliases for client/test compatibility
+          red: redLane[0]?.count ?? 0,
+          yellow: yellowLane[0]?.count ?? 0,
+          green: greenLane[0]?.count ?? 0,
         };
       });
     }

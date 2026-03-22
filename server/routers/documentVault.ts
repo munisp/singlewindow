@@ -10,7 +10,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb, withRlsContext } from "../db";
-import { documentVault, documentShares } from "../../drizzle/schema";
+import { documentVault, documentShares, documentVersions } from "../../drizzle/schema";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck, rustfsScan } from "../rustfsSvcClient";
 import { nanoid } from "nanoid";
@@ -506,5 +506,72 @@ export const documentVaultRouter = router({
       }
 
       return { success: true, id: input.id };
+    }),
+
+  /**
+   * Sprint 118: Archive a document version before it is replaced.
+   * Called by the frontend replace flow: saves old doc metadata to document_versions,
+   * then the caller deletes the old doc and uploads the new one.
+   */
+  archiveVersion: protectedProcedure
+    .input(z.object({
+      documentId: z.number().int().positive(),
+      replacedByUserId: z.number().int().positive().optional(),
+      reason: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const [doc] = await db
+        .select()
+        .from(documentVault)
+        .where(and(eq(documentVault.id, input.documentId), eq(documentVault.status, "active")))
+        .limit(1);
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found or not active" });
+      const isPrivileged = ["admin", "customs_officer", "oga_officer"].includes(ctx.user.role);
+      if (!isPrivileged && doc.ownerId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+      const [version] = await db.insert(documentVersions).values({
+        originalDocumentId: doc.id,
+        fileName: doc.filename,
+        s3Key: doc.fileKey,
+        s3Url: doc.url,
+        mimeType: doc.mimeType,
+        fileSize: doc.sizeBytes,
+        category: doc.category,
+        description: doc.description,
+        uploadedBy: doc.ownerId,
+        replacedBy: input.replacedByUserId ?? ctx.user.id,
+        replacedAt: new Date(),
+        versionNote: input.reason ?? "User-initiated replace",
+      }).returning();
+      return version;
+    }),
+
+  /**
+   * Sprint 118: List version history for a document (all previous versions archived on replace).
+   * Accessible by the document owner, admins, and officers.
+   */
+  listVersions: protectedProcedure
+    .input(z.object({ documentId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const isPrivileged = ["admin", "customs_officer", "oga_officer"].includes(ctx.user.role);
+      const [doc] = await db
+        .select({ ownerId: documentVault.ownerId })
+        .from(documentVault)
+        .where(eq(documentVault.id, input.documentId))
+        .limit(1);
+      if (!doc) throw new TRPCError({ code: "NOT_FOUND", message: "Document not found" });
+      if (!isPrivileged && doc.ownerId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+      return db
+        .select()
+        .from(documentVersions)
+        .where(eq(documentVersions.originalDocumentId, input.documentId))
+        .orderBy(desc(documentVersions.replacedAt));
     }),
 });

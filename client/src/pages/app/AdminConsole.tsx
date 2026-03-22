@@ -621,6 +621,25 @@ export default function AdminConsole() {
                 </Link>
               </CardContent>
             </Card>
+            {/* Sprint 83/84 — Certificate Revocation Log shortcut */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Shield className="h-4 w-4" />
+                  Certificate Revocation Log
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Audit trail of all revoked AfCFTA and GSP certificates with search and CSV export.
+                </p>
+                <Link href="/app/admin/cert-revocations">
+                  <Button variant="outline" size="sm">
+                    View Revocation Log →
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

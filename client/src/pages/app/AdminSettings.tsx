@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Settings, Save, RefreshCw, ShieldAlert, Clock } from "lucide-react";
+import { Settings, Save, RefreshCw, ShieldAlert, Clock, History } from "lucide-react";
 
 // Human-readable labels for known setting keys
 const SETTING_META: Record<string, { label: string; unit?: string; icon?: React.ReactNode; min?: number; max?: number }> = {
@@ -159,6 +159,64 @@ export default function AdminSettings() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Settings Audit Log */}
+      <SettingsAuditLogSection />
     </DashboardLayout>
+  );
+}
+
+function SettingsAuditLogSection() {
+  const { data, isLoading, refetch } = trpc.siteSettings.listAuditLog.useQuery({ limit: 50 });
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto pb-10">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <History className="h-4 w-4" />
+              Change History
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isLoading} className="h-7 w-7 p-0">
+              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
+          <CardDescription>Every setting change is recorded here for accountability.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+          ) : !data?.length ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No changes recorded yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground">Setting</th>
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground">Old</th>
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground">New</th>
+                    <th className="text-left py-2 pr-4 font-medium text-muted-foreground">Changed By</th>
+                    <th className="text-left py-2 font-medium text-muted-foreground">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((entry) => (
+                    <tr key={entry.id} className="border-b border-border/50 hover:bg-muted/30">
+                      <td className="py-2 pr-4 font-mono text-xs">{entry.settingKey}</td>
+                      <td className="py-2 pr-4 text-muted-foreground">{entry.oldValue ?? <span className="italic">—</span>}</td>
+                      <td className="py-2 pr-4 font-semibold">{entry.newValue}</td>
+                      <td className="py-2 pr-4">{entry.changedByName ?? entry.changedBy ?? "—"}</td>
+                      <td className="py-2 text-xs text-muted-foreground">{new Date(entry.changedAt).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

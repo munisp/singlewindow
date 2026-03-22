@@ -1371,3 +1371,40 @@ export const siteSettings = pgTable("site_settings", {
 });
 export type SiteSetting = typeof siteSettings.$inferSelect;
 export type InsertSiteSetting = typeof siteSettings.$inferInsert;
+
+// ─── SETTINGS AUDIT LOG ─────────────────────────────────────────────────────
+// Records every change to site_settings for admin accountability.
+export const settingsAuditLog = pgTable("settings_audit_log", {
+  id: serial("id").primaryKey(),
+  settingKey: varchar("setting_key", { length: 128 }).notNull(),
+  oldValue: text("old_value"),
+  newValue: text("new_value").notNull(),
+  changedBy: integer("changed_by").references(() => users.id),
+  changedByName: text("changed_by_name"),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+  note: text("note"),
+});
+export type SettingsAuditLog = typeof settingsAuditLog.$inferSelect;
+
+// ─── DOCUMENT VERSIONS ──────────────────────────────────────────────────────
+// Soft-archives replaced document uploads so officers can audit version history.
+export const documentVersions = pgTable("document_versions", {
+  id: serial("id").primaryKey(),
+  originalDocumentId: integer("original_document_id").notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  uploadedBy: integer("uploaded_by").references(() => users.id),
+  category: varchar("category", { length: 64 }).notNull(),
+  description: text("description"),
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  mimeType: varchar("mime_type", { length: 128 }),
+  s3Key: text("s3_key").notNull(),
+  s3Url: text("s3_url").notNull(),
+  replacedAt: timestamp("replaced_at").defaultNow().notNull(),
+  replacedBy: integer("replaced_by").references(() => users.id),
+  versionNote: text("version_note"),
+}, (t) => [
+  index("idx_docver_original_doc_id").on(t.originalDocumentId),
+  index("idx_docver_declaration_id").on(t.declarationId),
+]);
+export type DocumentVersion = typeof documentVersions.$inferSelect;

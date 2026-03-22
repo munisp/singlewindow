@@ -27,6 +27,7 @@ import {
   Download,
   History,
   ExternalLink,
+  RefreshCw as RefreshCwIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
@@ -690,6 +691,28 @@ function LiveCargoStream() {
 // ─── Bulk Export History Panel ────────────────────────────────────────────────
 function ExportHistoryPanel() {
   const { data: exports, isLoading, refetch } = trpc.declarations.listBulkExports.useQuery({ limit: 20 });
+  const [regeneratingId, setRegeneratingId] = useState<number | null>(null);
+  const bulkExportMutation = trpc.declarations.bulkExportZip.useMutation({
+    onSuccess: (data) => {
+      toast.success("Archive regenerated", { description: "New ZIP ready for download." });
+      window.open(data.url, "_blank");
+      refetch();
+      setRegeneratingId(null);
+    },
+    onError: (err) => {
+      toast.error("Regeneration failed", { description: err.message });
+      setRegeneratingId(null);
+    },
+  });
+
+  const handleRegenerate = (row: any) => {
+    if (!row.declarationIds?.length) {
+      toast.error("Cannot regenerate", { description: "Declaration IDs not stored for this export." });
+      return;
+    }
+    setRegeneratingId(row.id);
+    bulkExportMutation.mutate({ ids: row.declarationIds, label: row.label ? `${row.label} (regenerated)` : undefined });
+  };
 
   if (!isLoading && (!exports || exports.length === 0)) return null;
 
@@ -769,17 +792,36 @@ function ExportHistoryPanel() {
                         ) : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs gap-1"
-                          disabled={isExpired}
-                          onClick={() => window.open(row.s3Url, "_blank")}
-                          title={isExpired ? "This archive has expired" : "Re-download ZIP archive"}
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          {isExpired ? "Expired" : "Download"}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs gap-1"
+                            disabled={isExpired}
+                            onClick={() => window.open(row.s3Url, "_blank")}
+                            title={isExpired ? "This archive has expired" : "Re-download ZIP archive"}
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            {isExpired ? "Expired" : "Download"}
+                          </Button>
+                          {isExpired && row.declarationIds?.length > 0 && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs gap-1 text-primary"
+                              disabled={regeneratingId === row.id}
+                              onClick={() => handleRegenerate(row)}
+                              title="Re-generate this archive with the same declarations"
+                            >
+                              {regeneratingId === row.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <RefreshCwIcon className="h-3 w-3" />
+                              )}
+                              Regen
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

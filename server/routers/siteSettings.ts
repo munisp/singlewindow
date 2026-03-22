@@ -4,10 +4,10 @@
  * Includes seed defaults for known settings (e.g. sla_breach_email_threshold).
  */
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { siteSettings } from "../../drizzle/schema";
+import { settingsAuditLog, siteSettings } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
 
 // Known settings with defaults and descriptions
@@ -119,6 +119,14 @@ export const siteSettingsRouter = router({
 
       const description = KNOWN_SETTINGS[input.key]?.description ?? null;
 
+      // Read old value for audit log
+      const [existing] = await db
+        .select({ value: siteSettings.value })
+        .from(siteSettings)
+        .where(eq(siteSettings.key, input.key))
+        .limit(1);
+      const oldValue = existing?.value ?? null;
+
       await db
         .insert(siteSettings)
         .values({
@@ -137,6 +145,40 @@ export const siteSettingsRouter = router({
           },
         });
 
+      // Record audit log entry
+      await db.insert(settingsAuditLog).values({
+        settingKey: input.key,
+        oldValue,
+        newValue: input.value,
+        changedBy: ctx.user.id,
+        changedByName: ctx.user.name ?? ctx.user.email ?? String(ctx.user.id),
+        changedAt: new Date(),
+      });
+
       return { success: true, key: input.key, value: input.value };
+    }),
+
+  /**
+   * List audit log entries for a given setting key (or all). Admins only.
+   */
+  listAuditLog: protectedProcedure
+    .input(z.object({ key: z.string().min(1).max(128).optional(), limit: z.number().int().min(1).max(200).default(50) }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
+      }
+      const db = await getDb();
+      if (!db) return [];
+
+      const query = db
+        .select()
+        .from(settingsAuditLog)
+        .orderBy(desc(settingsAuditLog.changedAt))
+        .limit(input.limit);
+
+      if (input.key) {
+        return query.where(eq(settingsAuditLog.settingKey, input.key));
+      }
+      return query;
     }),
 });

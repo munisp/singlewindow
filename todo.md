@@ -2090,6 +2090,6 @@
 - [x] Wire DeclarationProgressBar into DeclarationDetail page
 
 ## Sprint 114 — Document Upload, PDF Export, SLA Alerts
-- [ ] Add file upload dropzone to Declaration Detail page (wired to addDocument mutation)
-- [ ] Implement server-side declaration PDF export endpoint
-- [ ] Build SLA breach alert background job with node-cron and WebSocket broadcast
+- [x] Add file upload dropzone to Declaration Detail page (wired to addDocument mutation)
+- [x] Implement server-side declaration PDF export endpoint (declarations.exportSummaryPDF + clearance cert PDF)
+- [x] Build SLA breach alert background job with node-cron and WebSocket broadcast (every 15 min in _core/index.ts)

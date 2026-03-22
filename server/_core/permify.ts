@@ -68,16 +68,16 @@ export async function can(
 
     if (!res.ok) {
       console.warn(`[permify] Check failed (${res.status}): ${entityType}:${entityId}#${permission}`);
-      // In non-demo mode, fall back to allow if Permify returns an error (graceful degradation)
-      return true;
+      // Deny on non-OK responses to maintain security (fail-closed)
+      return false;
     }
 
     const data: PermifyCheckResponse = await res.json();
     return data.can === "CHECK_RESULT_ALLOWED";
   } catch (err) {
-    // Permify unavailable — log and allow (graceful degradation for production)
-    console.warn(`[permify] Unavailable, allowing ${entityType}:${entityId}#${permission} for user ${userId} (graceful degradation):`, err);
-    return true;
+    // Permify unavailable — log and deny (fail-closed for security)
+    console.warn(`[permify] Unavailable, denying ${entityType}:${entityId}#${permission} for user ${userId} (fail-closed):`, err);
+    return false;
   }
 }
 

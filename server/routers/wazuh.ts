@@ -89,8 +89,8 @@ export const wazuhRouter = router({
   // Trigger a response playbook — no-op in demo mode
   triggerPlaybook: adminProcedure
     .input(z.object({
-      playbookId: z.string(),
-      alertId: z.string(),
+      playbookId: z.string().min(1, "playbookId is required"),
+      alertId: z.string().min(1, "alertId is required"),
     }))
     .mutation(async ({ input }) => {
       const live = await callWazuh<{

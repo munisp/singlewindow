@@ -190,6 +190,13 @@
       "when": 1774175530348,
       "tag": "0026_magical_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1774176666168,
+      "tag": "0027_normal_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

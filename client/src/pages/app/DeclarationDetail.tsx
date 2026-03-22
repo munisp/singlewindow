@@ -980,14 +980,20 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
   // Use a ref so processFile closure always reads the latest replaceDocId
   const replaceDocIdRef = useRef<number | null>(null);
 
+  const archiveVersionMutation = trpc.documentVault.archiveVersion.useMutation();
+
   const uploadMutation = trpc.documentVault.upload.useMutation({
     onSuccess: () => {
-      // If this was a replace operation, soft-delete the old doc
+      // If this was a replace operation, archive then soft-delete the old doc
       if (replaceDocIdRef.current !== null) {
         const oldId = replaceDocIdRef.current;
         replaceDocIdRef.current = null;
-        deleteDoc.mutate({ id: oldId });
-        toast.success("Document replaced", { description: "Old document removed, new file attached." });
+        // Archive version first (best-effort), then delete
+        archiveVersionMutation.mutate(
+          { documentId: oldId, reason: "Replaced via upload dropzone" },
+          { onSettled: () => deleteDoc.mutate({ id: oldId }) }
+        );
+        toast.success("Document replaced", { description: "Previous version archived, new file attached." });
       } else {
         toast.success("Document uploaded", { description: "File attached to this declaration." });
       }
