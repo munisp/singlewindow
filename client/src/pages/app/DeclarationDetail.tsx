@@ -937,19 +937,28 @@ function formatDocBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-const UPLOAD_CATEGORIES = [
-  { value: "commercial_invoice", label: "Commercial Invoice" },
-  { value: "bill_of_lading", label: "Bill of Lading" },
-  { value: "packing_list", label: "Packing List" },
-  { value: "certificate_of_origin", label: "Certificate of Origin" },
-  { value: "phytosanitary_cert", label: "Phytosanitary Certificate" },
-  { value: "import_permit", label: "Import Permit" },
-  { value: "export_permit", label: "Export Permit" },
-  { value: "insurance_cert", label: "Insurance Certificate" },
-  { value: "customs_bond", label: "Customs Bond" },
-  { value: "correspondence", label: "Correspondence" },
-  { value: "other", label: "Other" },
-] as const;
+/** All categories must match the server-side DOCUMENT_CATEGORIES enum in documentVault.ts */
+const UPLOAD_CATEGORIES: { value: string; label: string; group: string }[] = [
+  // Trade documents
+  { value: "commercial_invoice",   label: "Commercial Invoice",        group: "Trade Documents" },
+  { value: "bill_of_lading",       label: "Bill of Lading",            group: "Trade Documents" },
+  { value: "packing_list",         label: "Packing List",              group: "Trade Documents" },
+  { value: "certificate_of_origin",label: "Certificate of Origin",     group: "Trade Documents" },
+  { value: "insurance_cert",       label: "Insurance Certificate",     group: "Trade Documents" },
+  // Regulatory & permits
+  { value: "phytosanitary_cert",   label: "Phytosanitary Certificate", group: "Regulatory" },
+  { value: "import_permit",        label: "Import Permit",             group: "Regulatory" },
+  { value: "export_permit",        label: "Export Permit",             group: "Regulatory" },
+  { value: "customs_bond",         label: "Customs Bond",              group: "Regulatory" },
+  // Compliance & KYC
+  { value: "kyc_identity",         label: "KYC — Identity",            group: "Compliance" },
+  { value: "kyc_business",         label: "KYC — Business",            group: "Compliance" },
+  { value: "aeo_supporting",       label: "AEO Supporting Document",   group: "Compliance" },
+  { value: "post_clearance",       label: "Post-Clearance Audit",      group: "Compliance" },
+  // General
+  { value: "correspondence",       label: "Correspondence",            group: "General" },
+  { value: "other",                label: "Other",                     group: "General" },
+];
 
 function AttachedDocuments({ declarationId, declarationStatus }: { declarationId: number; declarationStatus: string }) {
   const { user } = useAuth();

@@ -1197,6 +1197,108 @@ export const declarationsRouter = router({
   }),
 
   /** Export a single declaration as a PDF summary — available to the declaration owner and officers */
+  /** Bulk export multiple declarations as a ZIP archive of HTML summaries — officers only */
+  bulkExportZip: protectedProcedure
+    .input(z.object({ ids: z.array(z.number()).min(1).max(50) }))
+    .mutation(async ({ ctx, input }) => {
+      const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer"];
+      if (!officerRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only customs officers can bulk-export declarations." });
+      }
+      const { getDeclarationById } = await import("../db");
+      const { storagePut } = await import("../storage");
+      const { nanoid: nanoId } = await import("nanoid");
+      const { zipSync, strToU8 } = await import("fflate");
+      const generatedDate = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+
+      function buildHtml(decl: any): string {
+        const statusLabel = (decl.status ?? "").replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+        const riskLane = decl.riskLane ?? null;
+        const laneLabel = riskLane ? riskLane.replace(/_lane$/, "").toUpperCase() + " LANE" : "N/A";
+        const laneColor = riskLane === "green_lane" ? "#16a34a" : riskLane === "yellow_lane" ? "#d97706" : riskLane === "red_lane" ? "#dc2626" : "#6b7280";
+        const riskScore = decl.riskScore !== null && decl.riskScore !== undefined ? Number(decl.riskScore) : null;
+        const scoreColor = riskScore !== null ? (riskScore < 30 ? "#16a34a" : riskScore < 60 ? "#d97706" : "#dc2626") : "#6b7280";
+        return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+body{font-family:'Helvetica Neue',Arial,sans-serif;margin:0;padding:40px;color:#1a1a2e;font-size:13px}
+.header{text-align:center;border-bottom:3px solid #D4A017;padding-bottom:20px;margin-bottom:24px}
+.header h1{font-size:26px;color:#0A1628;margin:0 0 4px;letter-spacing:1px}
+.header h2{font-size:14px;color:#D4A017;margin:0;font-weight:500}
+.meta{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;margin-bottom:24px;font-size:11px;color:#6b7280}
+.status-badge{display:inline-block;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;background:#f3f4f6;color:#374151}
+.lane-badge{display:inline-block;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;color:white;background:${laneColor}}
+.section{margin-bottom:20px;page-break-inside:avoid}
+.section-title{font-size:10px;font-weight:700;color:#D4A017;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #e5e7eb;padding-bottom:5px;margin-bottom:10px}
+table{width:100%;border-collapse:collapse}
+td{padding:5px 8px;vertical-align:top}
+td:first-child{color:#6b7280;width:45%;font-size:11px}
+td:last-child{font-weight:600;font-size:12px}
+tr:nth-child(even){background:#f9fafb}
+.risk-score{font-size:28px;font-weight:900;color:${scoreColor}}
+.footer{text-align:center;font-size:10px;color:#9ca3af;margin-top:40px;border-top:1px solid #e5e7eb;padding-top:12px}
+</style></head><body>
+<div class="header"><h1>NATIONAL TRADE GATEWAY</h1><h2>DECLARATION SUMMARY REPORT</h2></div>
+<div class="meta">
+  <span>Declaration: <strong>${decl.declarationNumber}</strong></span>
+  <span>UCR: <strong>${decl.ucr ?? "N/A"}</strong></span>
+  <span>Generated: <strong>${generatedDate}</strong></span>
+  <span>Status: <span class="status-badge">${statusLabel}</span></span>
+  <span>Risk Lane: <span class="lane-badge">${laneLabel}</span></span>
+</div>
+<div class="section"><div class="section-title">Goods &amp; Shipment</div><table>
+  <tr><td>Declaration Type</td><td>${(decl.declarationType ?? "").replace(/_/g, " ").toUpperCase()}</td></tr>
+  <tr><td>HS Code</td><td>${decl.hsCode ?? "N/A"}</td></tr>
+  <tr><td>Goods Description</td><td>${decl.goodsDescription ?? "N/A"}</td></tr>
+  <tr><td>Gross Weight</td><td>${decl.grossWeight ? `${decl.grossWeight} kg` : "N/A"}</td></tr>
+  <tr><td>Net Weight</td><td>${decl.netWeight ? `${decl.netWeight} kg` : "N/A"}</td></tr>
+  <tr><td>Number of Packages</td><td>${decl.numberOfPackages ?? "N/A"}</td></tr>
+  <tr><td>Port of Entry</td><td>${decl.portOfEntry ?? "N/A"}</td></tr>
+  <tr><td>Country of Origin</td><td>${decl.countryOfOrigin ?? "N/A"}</td></tr>
+</table></div>
+<div class="section"><div class="section-title">Financial</div><table>
+  <tr><td>Invoice Value</td><td>${decl.invoiceCurrency ?? "USD"} ${decl.invoiceValue ?? "N/A"}</td></tr>
+  <tr><td>Duty Amount</td><td>${decl.invoiceCurrency ?? "USD"} ${decl.dutyAmount ?? "0.00"}</td></tr>
+  <tr><td>VAT Amount</td><td>${decl.invoiceCurrency ?? "USD"} ${decl.vatAmount ?? "0.00"}</td></tr>
+  <tr><td>Total Due</td><td><strong>${decl.invoiceCurrency ?? "USD"} ${decl.totalDue ?? "0.00"}</strong></td></tr>
+</table></div>
+${riskScore !== null ? `<div class="section"><div class="section-title">Risk Assessment</div><table>
+  <tr><td>Risk Score</td><td><span class="risk-score">${riskScore}</span> / 100</td></tr>
+  <tr><td>Risk Lane</td><td>${laneLabel}</td></tr>
+</table></div>` : ""}
+<div class="footer">Generated by National Trade Gateway Single Window Platform &nbsp;|&nbsp; ${generatedDate}<br>Declaration: ${decl.declarationNumber} &nbsp;|&nbsp; OFFICIAL USE</div>
+</body></html>`;
+      }
+
+      const zipEntries: Record<string, Uint8Array> = {};
+      const results: Array<{ id: number; declarationNumber: string; ok: boolean }> = [];
+      for (const id of input.ids) {
+        try {
+          const decl = await getDeclarationById(id);
+          if (!decl) { results.push({ id, declarationNumber: `#${id}`, ok: false }); continue; }
+          const html = buildHtml(decl);
+          const filename = `${decl.declarationNumber ?? `decl-${id}`}.html`;
+          zipEntries[filename] = strToU8(html);
+          results.push({ id, declarationNumber: decl.declarationNumber, ok: true });
+        } catch {
+          results.push({ id, declarationNumber: `#${id}`, ok: false });
+        }
+      }
+      if (Object.keys(zipEntries).length === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "No declarations could be exported." });
+      }
+      const zipBuffer = Buffer.from(zipSync(zipEntries));
+      const fileKey = `bulk-exports/declarations-${nanoId(8)}.zip`;
+      const { url } = await storagePut(fileKey, zipBuffer, "application/zip");
+      await logAuditEvent({
+        actorId: ctx.user.id,
+        action: "declarations.bulkExportZip",
+        entityType: "declaration",
+        entityId: 0,
+        metadata: { count: results.filter(r => r.ok).length, ids: input.ids },
+      });
+      return { url, count: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length };
+    }),
+
   exportSummaryPDF: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {

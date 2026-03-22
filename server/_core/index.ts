@@ -192,7 +192,7 @@ async function runSLABreachScan() {
     };
 
     const now = new Date();
-    const processingStatuses = ["submitted", "under_review", "inspection_required", "payment_pending"];
+    const processingStatuses = ["submitted", "under_assessment", "docs_required", "payment_pending", "payment_confirmed", "under_examination"];
     const rows = await db
       .select()
       .from(declarations)
@@ -476,7 +476,7 @@ async function runWeeklyAnalyticsReport() {
       .from(declarations)
       .where(
         and(
-          sql`${declarations.status} IN ('submitted','under_review','inspection_required','payment_pending')`,
+          sql`${declarations.status} IN ('submitted','under_assessment','docs_required','payment_pending','payment_confirmed','under_examination')`,
           isNotNull(declarations.submittedAt)
         )
       )
@@ -655,7 +655,8 @@ async function runSLABreachAlertBroadcast() {
       red: 72 * 3600 * 1000,
       blue: 48 * 3600 * 1000,
     };
-    const processingStatuses = ["submitted", "under_review", "inspection_required", "payment_pending"];
+    // Valid enum values from declarationStatusEnum in schema.ts
+    const processingStatuses = ["submitted", "under_assessment", "docs_required", "payment_pending", "payment_confirmed", "under_examination"];
     const now = new Date();
     // Count total pending
     const [totalPendingRow] = await db

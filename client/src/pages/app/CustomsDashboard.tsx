@@ -22,6 +22,8 @@ import {
   Users,
   CheckSquare,
   Square,
+  Archive,
+  Loader2,
 } from "lucide-react";
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
@@ -67,6 +69,7 @@ export default function CustomsDashboard() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkOfficerId, setBulkOfficerId] = useState<string>("");
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const [isBulkExporting, setIsBulkExporting] = useState(false);
   // Sprint 114: SLA breach real-time alert banner state
   const [slaBreachCount, setSlaBreachCount] = useState<number | null>(null);
   const [slaBannerDismissed, setSlaBannerDismissed] = useState(false);
@@ -89,10 +92,13 @@ export default function CustomsDashboard() {
     setAllItems([]);
   }, [statusFilter, laneFilter, debouncedSearch]);
 
+  // Sprint 115: __sla_breached__ is a client-side virtual filter; don't pass it to the server
+  const isSlaBreachedFilter = statusFilter === "__sla_breached__";
   const { data: pageData, isLoading, isError, isFetching } = trpc.declarations.all.useQuery({
     limit: 50,
     lastId: cursor,
-    status: statusFilter !== "all" ? statusFilter : undefined,
+    // When SLA breach filter is active, fetch all active statuses so we can filter client-side
+    status: !isSlaBreachedFilter && statusFilter !== "all" ? statusFilter : undefined,
     riskLane: laneFilter !== "all" ? laneFilter : undefined,
     search: debouncedSearch.trim() || undefined,
   });
@@ -141,6 +147,27 @@ export default function CustomsDashboard() {
     }
   }, [bulkOfficerId, selectedIds, assignOfficerMutation, utils]);
 
+  const bulkExportZipMutation = trpc.declarations.bulkExportZip.useMutation({
+    onSuccess: (result) => {
+      setIsBulkExporting(false);
+      window.open(result.url, "_blank");
+      toast.success(
+        `ZIP ready — ${result.count} declaration${result.count !== 1 ? "s" : ""} exported` +
+        (result.failed > 0 ? ` (${result.failed} failed)` : "")
+      );
+    },
+    onError: (err) => {
+      setIsBulkExporting(false);
+      toast.error("Bulk export failed", { description: err.message });
+    },
+  });
+
+  const handleBulkExportZip = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    setIsBulkExporting(true);
+    bulkExportZipMutation.mutate({ ids: Array.from(selectedIds) });
+  }, [selectedIds, bulkExportZipMutation]);
+
   // Sprint 114: WebSocket listener for SLA breach workload_update events
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -164,8 +191,13 @@ export default function CustomsDashboard() {
     return () => ws.close();
   }, [utils]);
 
-  // Server-side search is now applied; client-side filter is a no-op passthrough
-  const filtered = allItems;
+  // Sprint 115: when SLA breach filter is active, filter client-side by elapsed time vs threshold
+  const filtered = isSlaBreachedFilter
+    ? allItems.filter((d: any) => {
+        const sla = getSLAStatus(d);
+        return sla.isBreached;
+      })
+    : allItems;
 
   const laneGroups = {
     red: (stats as any)?.redLane ?? filtered.filter((d: any) => d.riskLane === "red_lane" || d.riskLane === "red").length,
@@ -276,6 +308,28 @@ export default function CustomsDashboard() {
               <SelectItem value="red_lane">Red</SelectItem>
             </SelectContent>
           </Select>
+          {/* Sprint 115: SLA breach filter shortcut */}
+          <Button
+            size="sm"
+            variant={statusFilter === "__sla_breached__" ? "default" : "outline"}
+            className="h-10 gap-1.5 text-xs shrink-0"
+            onClick={() => {
+              if (statusFilter === "__sla_breached__") {
+                setStatusFilter("all");
+              } else {
+                setStatusFilter("__sla_breached__");
+              }
+            }}
+            title="Show only declarations that have exceeded their SLA clearance target"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            SLA Breached
+            {slaBreachCount !== null && slaBreachCount > 0 && (
+              <span className="ml-1 bg-red-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+                {slaBreachCount}
+              </span>
+            )}
+          </Button>
         </div>
 
         {/* Bulk Action Bar — appears when rows are selected */}
@@ -303,6 +357,17 @@ export default function CustomsDashboard() {
             >
               {isBulkAssigning ? <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Users className="h-3.5 w-3.5" />}
               Assign Selected
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 text-xs"
+              disabled={isBulkExporting}
+              onClick={handleBulkExportZip}
+              title="Download selected declarations as a ZIP of HTML summaries"
+            >
+              {isBulkExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+              Export ZIP
             </Button>
             <Button
               size="sm"
