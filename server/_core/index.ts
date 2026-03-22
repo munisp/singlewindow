@@ -693,8 +693,21 @@ async function runSLABreachAlertBroadcast() {
     if (slaBreachedCount > 0) {
       console.log(`[Cron] SLA breach alert broadcast — ${slaBreachedCount} breach(es) detected, workload_update sent to all officers`);
     }
-    // Sprint 117: send escalation email digest when breach count exceeds threshold
-    const SLA_BREACH_EMAIL_THRESHOLD = 5;
+    // Sprint 118: read threshold from site_settings (falls back to 5 if not set)
+    let SLA_BREACH_EMAIL_THRESHOLD = 5;
+    try {
+      const { siteSettings: siteSettingsTable } = await import("../../drizzle/schema");
+      const { eq: eqSS } = await import("drizzle-orm");
+      const [thresholdRow] = await db
+        .select({ value: siteSettingsTable.value })
+        .from(siteSettingsTable)
+        .where(eqSS(siteSettingsTable.key, "sla_breach_email_threshold"))
+        .limit(1);
+      if (thresholdRow) {
+        const parsed = parseInt(thresholdRow.value, 10);
+        if (!isNaN(parsed) && parsed > 0) SLA_BREACH_EMAIL_THRESHOLD = parsed;
+      }
+    } catch { /* non-fatal, use default */ }
     if (slaBreachedCount >= SLA_BREACH_EMAIL_THRESHOLD) {
       try {
         const { notifyOwner } = await import("./notification");
@@ -737,6 +750,51 @@ async function runSLABreachAlertBroadcast() {
 // SLA breach alert broadcast — every 15 minutes (offset by 7 minutes from port congestion scan)
 cron.schedule("0 7/15 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
 console.log("[Cron] SLA breach alert broadcast scheduled every 15 minutes");
+
+// ─── Nightly Bulk Export Expiry Cleanup ──────────────────────────────────────
+// Runs at 03:30 UTC every day.
+// Hard-deletes bulk_exports rows whose expiresAt has passed and removes their S3 objects.
+async function runBulkExportExpiryCron() {
+  try {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) { console.warn("[BulkExportExpiry] DB unavailable, skipping."); return; }
+    const now = new Date();
+    const { lt: ltOp, eq: eqOp } = await import("drizzle-orm");
+    const { bulkExports: bulkExportsTable } = await import("../../drizzle/schema");
+    const { storageDelete } = await import("../storage");
+    // Find all expired rows
+    const expired = await db
+      .select({ id: bulkExportsTable.id, s3Key: bulkExportsTable.s3Key })
+      .from(bulkExportsTable)
+      .where(ltOp(bulkExportsTable.expiresAt, now));
+
+    if (expired.length === 0) {
+      console.log("[BulkExportExpiry] No expired exports to clean up.");
+      return;
+    }
+
+    let deleted = 0;
+    let s3Errors = 0;
+    for (const row of expired) {
+      try {
+        if (row.s3Key) {
+          await storageDelete(row.s3Key);
+        }
+      } catch (e) {
+        console.warn(`[BulkExportExpiry] S3 delete failed for key ${row.s3Key}:`, e);
+        s3Errors++;
+      }
+      await db.delete(bulkExportsTable).where(eqOp(bulkExportsTable.id, row.id));
+      deleted++;
+    }
+    console.log(`[BulkExportExpiry] Cleaned up ${deleted} expired exports (${s3Errors} S3 errors).`);
+  } catch (err) {
+    console.error("[BulkExportExpiry] Cron error:", err);
+  }
+}
+cron.schedule("0 30 3 * * *", runBulkExportExpiryCron, { timezone: "UTC" });
+console.log("[Cron] Bulk export expiry cleanup scheduled nightly at 03:30 UTC");
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {

@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  Settings,
   Shield,
   ShieldCheck,
   TrendingUp,
@@ -601,6 +602,25 @@ export default function AdminConsole() {
             <LedgerStatsCard />
             <RateLimitStatsCard />
             <PortDataCard />
+            {/* Sprint 118 — Platform Settings shortcut */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Settings className="h-4 w-4" />
+                  Platform Settings
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Configure SLA thresholds, breach alert email threshold, and other system-wide parameters.
+                </p>
+                <Link href="/app/admin/settings">
+                  <Button variant="outline" size="sm">
+                    Open Platform Settings →
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

@@ -977,14 +977,30 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
     { enabled: declarationId > 0 }
   );
 
+  // Use a ref so processFile closure always reads the latest replaceDocId
+  const replaceDocIdRef = useRef<number | null>(null);
+
   const uploadMutation = trpc.documentVault.upload.useMutation({
     onSuccess: () => {
-      toast.success("Document uploaded", { description: "File attached to this declaration." });
+      // If this was a replace operation, soft-delete the old doc
+      if (replaceDocIdRef.current !== null) {
+        const oldId = replaceDocIdRef.current;
+        replaceDocIdRef.current = null;
+        deleteDoc.mutate({ id: oldId });
+        toast.success("Document replaced", { description: "Old document removed, new file attached." });
+      } else {
+        toast.success("Document uploaded", { description: "File attached to this declaration." });
+      }
       refetch();
       setUploadDescription("");
       setUploadCategory("other");
+      setReplaceDocId(null);
     },
-    onError: (err) => toast.error("Upload failed", { description: err.message }),
+    onError: (err) => {
+      replaceDocIdRef.current = null;
+      setReplaceDocId(null);
+      toast.error("Upload failed", { description: err.message });
+    },
   });
 
   const processFile = useCallback(async (file: File) => {
@@ -993,6 +1009,8 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
       toast.error("File too large", { description: "Maximum file size is 20 MB." });
       return;
     }
+    // Capture the replaceDocId into the ref so the onSuccess closure can read it
+    replaceDocIdRef.current = replaceDocId;
     setIsUploading(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -1048,6 +1066,22 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
   // Officers can delete any doc; traders can only delete their own (handled server-side, show button for all)
   const canDelete = isOfficer || !terminalStatuses.includes(declarationStatus);
 
+  // Sprint 118: Replace — tracks which doc is being replaced so we can delete it after upload
+  const [replaceDocId, setReplaceDocId] = useState<number | null>(null);
+  const dropzoneRef = useRef<HTMLDivElement>(null);
+
+  const handleReplace = useCallback((doc: any) => {
+    // Pre-fill category and description from the doc being replaced
+    setUploadCategory(doc.category ?? "other");
+    setUploadDescription(doc.description ?? "");
+    setReplaceDocId(doc.id);
+    // Scroll to and focus the dropzone
+    setTimeout(() => {
+      dropzoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      fileInputRef.current?.click();
+    }, 100);
+  }, []);
+
   if (!isLoading && (!docs || docs.length === 0) && !canUpload) return null;
 
   return (
@@ -1091,7 +1125,15 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
                 className="h-8 flex-1 min-w-32 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            {replaceDocId !== null && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs mb-1">
+                <RefreshCwIcon className="h-3 w-3 flex-shrink-0" />
+                <span>Replacing document — select a new file below. The old file will be deleted on upload.</span>
+                <button type="button" className="ml-auto underline" onClick={() => { setReplaceDocId(null); replaceDocIdRef.current = null; }}>Cancel</button>
+              </div>
+            )}
             <div
+              ref={dropzoneRef}
               role="button"
               tabIndex={0}
               aria-label="Upload document — click or drag a file here"
@@ -1137,7 +1179,7 @@ function AttachedDocuments({ declarationId, declarationStatus }: { declarationId
             ))}
           </div>
         ) : (
-          <GroupedDocumentList docs={docs ?? []} download={download} deleteDoc={deleteDoc} canDelete={canDelete} userId={user?.id} />
+          <GroupedDocumentList docs={docs ?? []} download={download} deleteDoc={deleteDoc} canDelete={canDelete} userId={user?.id} onReplace={canDelete ? handleReplace : undefined} />
         )}
       </CardContent>
     </Card>
@@ -1151,12 +1193,13 @@ const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
 );
 const GROUP_ORDER = ["Trade Documents", "Regulatory", "Compliance", "General"];
 
-function GroupedDocumentList({ docs, download, deleteDoc, canDelete, userId }: {
+function GroupedDocumentList({ docs, download, deleteDoc, canDelete, userId, onReplace }: {
   docs: any[];
   download: any;
   deleteDoc: any;
   canDelete: boolean;
   userId?: number;
+  onReplace?: (doc: any) => void;
 }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   // Build a map: group → docs
@@ -1254,6 +1297,17 @@ function GroupedDocumentList({ docs, download, deleteDoc, canDelete, userId }: {
                         ? <RefreshCwIcon className="h-3 w-3 animate-spin" />
                         : <Download className="h-3 w-3" />}
                     </Button>
+                    {onReplace && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 flex-shrink-0 text-muted-foreground hover:text-amber-600"
+                        title="Replace document"
+                        onClick={() => onReplace(doc)}
+                      >
+                        <RefreshCwIcon className="h-3 w-3" />
+                      </Button>
+                    )}
                     {canDelete && (
                       confirmDeleteId === doc.id ? (
                         // Inline confirmation

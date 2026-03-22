@@ -87,6 +87,7 @@ const RulesOfOrigin = lazy(() => import('./pages/app/RulesOfOrigin'));
 const PilotDashboard = lazy(() => import('./pages/app/PilotDashboard'));
 const ExecutiveDashboard = lazy(() => import('./pages/app/ExecutiveDashboard'));
 const ComplianceEmailSettings = lazy(() => import('./pages/app/ComplianceEmailSettings'));
+const AdminSettings = lazy(() => import('./pages/app/AdminSettings'));
 // Sprint 80 — Public certificate verification page (no auth required)
 const GoLiveChecklist = lazy(() => import('./pages/app/GoLiveChecklist'));
 const ServiceHealth = lazy(() => import('./pages/app/ServiceHealth'));
@@ -408,6 +409,9 @@ function Router() {
       </Route>
       <Route path="/app/admin/audit-log">
         <Suspense fallback={<LazyFallback />}><AuditLog /></Suspense>
+      </Route>
+      <Route path="/app/admin/settings">
+        <Suspense fallback={<LazyFallback />}><AdminSettings /></Suspense>
       </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />

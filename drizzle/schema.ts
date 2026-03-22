@@ -1359,3 +1359,15 @@ export const bulkExports = pgTable("bulk_exports", {
 ]);
 export type BulkExport = typeof bulkExports.$inferSelect;
 export type InsertBulkExport = typeof bulkExports.$inferInsert;
+
+// ─── SITE SETTINGS ───────────────────────────────────────────────────────────
+// Key-value store for configurable platform settings editable by admins.
+export const siteSettings = pgTable("site_settings", {
+  key: varchar("key", { length: 128 }).primaryKey(),
+  value: text("value").notNull(),
+  description: text("description"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: integer("updated_by").references(() => users.id),
+});
+export type SiteSetting = typeof siteSettings.$inferSelect;
+export type InsertSiteSetting = typeof siteSettings.$inferInsert;
