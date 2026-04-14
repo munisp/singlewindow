@@ -1,0 +1,17 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+  namespace: tradegateway
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    - name: brokers
+      secretKeyRef:
+        name: kafka-secret
+        key: brokers
+    - name: consumerGroup
+      value: tradegateway-profile-service
+    - name: authType
+      value: none

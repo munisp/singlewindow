@@ -1,0 +1,59 @@
+# Temporal Worker Deployment — runs the DeclarationClearanceWorkflow activities
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+  labels:
+    app: temporal-worker
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: temporal-worker
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "temporal-worker"
+        dapr.io/app-port: "8087"
+    spec:
+      containers:
+        - name: temporal-worker
+          image: tradegateway/workflow-service:latest
+          env:
+            - name: TEMPORAL_HOST
+              value: "temporal-frontend.tradegateway.svc.cluster.local:7233"
+            - name: TEMPORAL_NAMESPACE
+              value: "tradegateway"
+            - name: TEMPORAL_TASK_QUEUE
+              value: "declaration-clearance"
+            - name: WORKER_CONCURRENCY
+              value: "20"
+            - name: KAFKA_BROKERS
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-secret
+                  key: brokers
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+spec:
+  selector:
+    app: temporal-worker
+  ports:
+    - port: 8087
+      targetPort: 8087
+  type: ClusterIP

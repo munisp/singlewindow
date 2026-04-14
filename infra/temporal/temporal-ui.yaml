@@ -1,0 +1,41 @@
+# Temporal Web UI
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  namespace: tradegateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-ui
+  template:
+    metadata:
+      labels:
+        app: temporal-ui
+    spec:
+      containers:
+        - name: temporal-ui
+          image: temporalio/ui:2.26.2
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-frontend.tradegateway.svc.cluster.local:7233"
+            - name: TEMPORAL_CORS_ORIGINS
+              value: "https://tradegateway.manus.space"
+            - name: TEMPORAL_NOTIFY_ON_NEW_VERSION
+              value: "false"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  namespace: tradegateway
+spec:
+  selector:
+    app: temporal-ui
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP

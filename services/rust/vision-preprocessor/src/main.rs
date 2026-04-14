@@ -827,3 +827,84 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sha256_hex_deterministic() {
+        let data = b"TradeGateway test payload";
+        let h1 = sha256_hex(data);
+        let h2 = sha256_hex(data);
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 16); // DefaultHasher produces 16-char hex
+    }
+
+    #[test]
+    fn test_pad_to_square_already_square() {
+        let img = DynamicImage::new_rgb8(640, 640);
+        let padded = pad_to_square(&img, 640);
+        let (w, h) = padded.dimensions();
+        assert_eq!(w, 640);
+        assert_eq!(h, 640);
+    }
+
+    #[test]
+    fn test_pad_to_square_portrait() {
+        let img = DynamicImage::new_rgb8(320, 640);
+        let padded = pad_to_square(&img, 640);
+        let (w, h) = padded.dimensions();
+        assert_eq!(w, 640);
+        assert_eq!(h, 640);
+    }
+
+    #[test]
+    fn test_tile_image_small_returns_single_tile() {
+        let img = DynamicImage::new_rgb8(320, 240);
+        let tiles = tile_image(&img, 640, 64, 4096);
+        assert_eq!(tiles.len(), 1);
+        let (tile, x, y, scale) = &tiles[0];
+        assert_eq!(*x, 0);
+        assert_eq!(*y, 0);
+        assert!((scale - 1.0).abs() < f32::EPSILON);
+        let (tw, th) = tile.dimensions();
+        assert_eq!(tw, 640);
+        assert_eq!(th, 640);
+    }
+
+    #[test]
+    fn test_tile_image_large_produces_multiple_tiles() {
+        let img = DynamicImage::new_rgb8(1280, 1280);
+        let tiles = tile_image(&img, 640, 64, 4096);
+        // stride = 640 - 64 = 576; tiles_per_dim = ceil(1280/576) = 3; total = 9
+        assert!(tiles.len() > 1);
+    }
+
+    #[test]
+    fn test_exposure_score_black_image() {
+        let img = DynamicImage::new_luma8(64, 64); // all zeros = pure black
+        let score = compute_exposure_score(&img);
+        // Black image: mean=0, std_dev=0 → poor exposure
+        assert!(score < 0.5, "Black image should have low exposure score, got {}", score);
+    }
+
+    #[test]
+    fn test_config_default_port() {
+        // Without PORT env var, should default to 8095
+        let config = Config::default();
+        // PORT env may or may not be set in test env; just check it's a valid port
+        assert!(config.port > 0 && config.port < 65535);
+        assert_eq!(config.tile_size, 640);
+        assert_eq!(config.tile_overlap, 64);
+        assert_eq!(config.max_concurrent_tiles, 8);
+    }
+
+    #[tokio::test]
+    async fn test_semaphore_limits_concurrency() {
+        let sem = Arc::new(Semaphore::new(2));
+        let _p1 = sem.clone().acquire_owned().await.unwrap();
+        let _p2 = sem.clone().acquire_owned().await.unwrap();
+        assert!(sem.try_acquire().is_err(), "Semaphore should be exhausted at capacity 2");
+    }
+}

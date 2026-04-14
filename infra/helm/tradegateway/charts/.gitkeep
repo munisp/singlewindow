@@ -1,0 +1,9 @@
+# Helm subchart dependencies are downloaded at deploy time via:
+#   helm dependency update ./infra/helm/tradegateway
+# 
+# Subcharts defined in Chart.yaml:
+#   - bitnami/kafka 28.x
+#   - bitnami/redis 19.x
+#   - bitnami/postgresql 15.x
+#   - dapr/dapr 1.13.x
+#   - temporalio/temporal 0.33.x
