@@ -1462,6 +1462,45 @@ ${riskScore !== null ? `<div class="section"><div class="section-title">Risk Ass
       }
     }),
 
+  // Sprint 117: bulk assign declarations to an officer
+  bulkAssign: protectedProcedure
+    .input(z.object({
+      declarationIds: z.array(z.number().int().positive()).min(1).max(100),
+      officerId: z.number().int().positive(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const officerRoles = ["admin", "customs_officer", "inspector"];
+      if (!officerRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only customs officers can bulk assign declarations." });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      const { users } = await import("../../drizzle/schema");
+      const [officer] = await db.select({ id: users.id, name: users.name })
+        .from(users).where(eq(users.id, input.officerId)).limit(1);
+      if (!officer) throw new TRPCError({ code: "NOT_FOUND", message: "Officer not found" });
+      await db.update(declarations)
+        .set({ assignedOfficerId: input.officerId, updatedAt: new Date() })
+        .where(inArray(declarations.id, input.declarationIds));
+      // Broadcast a workload refresh signal
+      broadcastWorkloadUpdate({
+        totalPending: input.declarationIds.length,
+        redLane: 0,
+        yellowLane: 0,
+        greenLane: 0,
+        slaBreached: 0,
+        updatedAt: new Date().toISOString(),
+      });
+      await logAuditEvent({
+        actorId: ctx.user.id as unknown as number,
+        action: "declarations.bulkAssign",
+        entityType: "declaration" as any,
+        entityId: input.declarationIds[0],
+        metadata: { declarationIds: input.declarationIds, officerId: input.officerId, officerName: officer.name, count: input.declarationIds.length },
+      });
+      return { assigned: input.declarationIds.length, officerId: input.officerId, officerName: officer.name };
+    }),
+
   // Sprint 116: list bulk export history for the current officer
   listBulkExports: protectedProcedure
     .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))

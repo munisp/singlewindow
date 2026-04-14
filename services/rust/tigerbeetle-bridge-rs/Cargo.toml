@@ -1,0 +1,52 @@
+[package]
+name = "tigerbeetle-bridge-rs"
+version = "1.0.0"
+edition = "2021"
+description = "TigerBeetle Rust bridge — production-grade double-entry bookkeeping for customs duties"
+authors = ["TradeGateway NGSWTP Team"]
+license = "Apache-2.0"
+
+[[bin]]
+name = "tigerbeetle-bridge-rs"
+path = "src/main.rs"
+
+# ─── Feature flags ─────────────────────────────────────────────────────────────
+# Default: in-memory simulation (no TigerBeetle binary required, CI-safe)
+# Production: cargo build --release --features tigerbeetle-live
+[features]
+default = []
+tigerbeetle-live = ["dep:tigerbeetle"]
+
+[dependencies]
+# HTTP server
+axum = { version = "0.7", features = ["macros", "json"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "timeout"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Crypto (account ID hashing, idempotency keys)
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+
+# Config
+dotenvy = "0.15"
+
+# Optional: TigerBeetle client (production only)
+tigerbeetle = { version = "0.16", optional = true }
+
+[dev-dependencies]
+axum-test = "14"
+tokio-test = "0.4"

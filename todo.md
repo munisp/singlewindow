@@ -1438,74 +1438,74 @@
 - [x] Add POST /api/webhooks/oga endpoint for OGA approval callbacks
 
 ### Phase 2: Orchestration Architecture Design
-- [ ] Document top 30 stakeholder journeys
-- [ ] Define Kafka topic schema for all journeys
-- [ ] Define Temporal workflow definitions
-- [ ] Define Permify RBAC schema for all roles
+- [x] Document top 30 stakeholder journeys
+- [x] Define Kafka topic schema for all journeys
+- [x] Define Temporal workflow definitions
+- [x] Define Permify RBAC schema for all roles
 
 ### Phase 3: Go Microservices
-- [ ] declaration-service (Go + Dapr)
-- [ ] payment-service (Go + Dapr + TigerBeetle)
-- [ ] oga-service (Go + Dapr)
-- [ ] profile-service (Go + Dapr)
-- [ ] cargo-tracking-service (Go + Dapr)
-- [ ] risk-engine-service (Python + Dapr)
-- [ ] analytics-service (Python + Delta Lake)
+- [x] declaration-service (Go + Dapr)
+- [x] payment-service (Go + Dapr + TigerBeetle)
+- [x] oga-service (Go + Dapr)
+- [x] profile-service (Go + Dapr)
+- [x] cargo-tracking-service (Go + Dapr)
+- [x] risk-engine-service (Python + Dapr)
+- [x] analytics-service (Python + Delta Lake)
 
 ### Phase 4: Kafka + Fluvio Event Bus
-- [ ] Define all Kafka topics (declaration.*, payment.*, oga.*, cargo.*)
-- [ ] Implement producers in Go services
-- [ ] Implement consumers for notification/audit/analytics
-- [ ] Fluvio real-time stream for cargo tracking
+- [x] Define all Kafka topics (declaration.*, payment.*, oga.*, cargo.*)
+- [x] Implement producers in Go services
+- [x] Implement consumers for notification/audit/analytics
+- [x] Fluvio real-time stream for cargo tracking
 
 ### Phase 5: Temporal Workflows
-- [ ] DeclarationLifecycleWorkflow
-- [ ] OGAApprovalWorkflow
-- [ ] PaymentClearingWorkflow
-- [ ] AEOOnboardingWorkflow
-- [ ] PostClearanceAuditWorkflow
+- [x] DeclarationLifecycleWorkflow
+- [x] OGAApprovalWorkflow
+- [x] PaymentClearingWorkflow
+- [x] AEOOnboardingWorkflow
+- [x] PostClearanceAuditWorkflow
 
 ### Phase 6: Keycloak + Permify IAM
-- [ ] Keycloak realm config (TradeGateway)
-- [ ] Client configs for all services
-- [ ] Permify schema for all 30 stakeholder roles
-- [ ] RBAC policies for all procedures
+- [x] Keycloak realm config (TradeGateway)
+- [x] Client configs for all services
+- [x] Permify schema for all 30 stakeholder roles
+- [x] RBAC policies for all procedures
 
 ### Phase 7: Redis Caching
-- [ ] Session store migration to Redis
-- [ ] Rate limiting with Redis
-- [ ] Real-time pub/sub for notifications
-- [ ] Cache invalidation for declarations/payments
+- [x] Session store migration to Redis
+- [x] Rate limiting with Redis
+- [x] Real-time pub/sub for notifications
+- [x] Cache invalidation for declarations/payments
 
 ### Phase 8: APISIX Gateway
-- [ ] Route config for all microservices
-- [ ] Auth plugin (JWT/OIDC)
-- [ ] Rate limiting plugin
-- [ ] WAF plugin (OpenAppSec)
+- [x] Route config for all microservices
+- [x] Auth plugin (JWT/OIDC)
+- [x] Rate limiting plugin
+- [x] WAF plugin (OpenAppSec)
 
 ### Phase 9: TigerBeetle Ledger
-- [ ] Account creation for traders/customs
-- [ ] Transfer recording for duty payments
-- [ ] Double-entry bookkeeping
-- [ ] Balance queries
+- [x] Account creation for traders/customs
+- [x] Transfer recording for duty payments
+- [x] Double-entry bookkeeping
+- [x] Balance queries
 
 ### Phase 10: Lakehouse
-- [ ] Delta Lake setup (Python)
-- [ ] Ingestion pipelines from Kafka
-- [ ] Analytics queries (trade volume, revenue, risk)
-- [ ] Parquet export for reporting
+- [x] Delta Lake setup (Python)
+- [x] Ingestion pipelines from Kafka
+- [x] Analytics queries (trade volume, revenue, risk)
+- [x] Parquet export for reporting
 
 ### Phase 11: Node.js Integration
-- [ ] Wire Go services as gRPC clients
-- [ ] Wire Temporal client
-- [ ] Wire Redis client
-- [ ] Wire TigerBeetle client
+- [x] Wire Go services as gRPC clients
+- [x] Wire Temporal client
+- [x] Wire Redis client
+- [x] Wire TigerBeetle client
 
 ### Phase 12: UI Updates
-- [ ] Real-time Temporal workflow status panel
-- [ ] Kafka event feed component
-- [ ] TigerBeetle ledger balance display
-- [ ] Keycloak login flow integration
+- [x] Real-time Temporal workflow status panel
+- [x] Kafka event feed component
+- [x] TigerBeetle ledger balance display
+- [x] Keycloak login flow integration
 
 ### Phase 13: Checkpoint + Archive
 - [x] Save checkpoint
@@ -1911,39 +1911,39 @@
 ## Sprint 90 — Final Production Go-Live
 
 ### SENDGRID Email Wiring
-- [ ] [S90] Request SENDGRID_API_KEY secret via webdev_request_secrets
-- [ ] [S90] Update nightlyRevocationCsv.ts to use env SENDGRID_API_KEY with graceful fallback
-- [ ] [S90] Update execDigest.ts to use env SENDGRID_API_KEY with graceful fallback
-- [ ] [S90] Add sendTestEmail tRPC procedure for admin to verify email delivery
-- [ ] [S90] Add Send Test Email button to ComplianceEmailSettings page
+- [x] [S90] Request SENDGRID_API_KEY secret via webdev_request_secrets
+- [x] [S90] Update nightlyRevocationCsv.ts to use env SENDGRID_API_KEY with graceful fallback
+- [x] [S90] Update execDigest.ts to use env SENDGRID_API_KEY with graceful fallback
+- [x] [S90] Add sendTestEmail tRPC procedure for admin to verify email delivery
+- [x] [S90] Add Send Test Email button to ComplianceEmailSettings page
 
 ### Pilot Demo Seed Data
-- [ ] [S90] Verify and run seed-pilot-demo.mjs script end-to-end
-- [ ] [S90] Confirm PilotDashboard populates with seeded data
-- [ ] [S90] Add db:seed script to package.json
+- [x] [S90] Verify and run seed-pilot-demo.mjs script end-to-end
+- [x] [S90] Confirm PilotDashboard populates with seeded data
+- [x] [S90] Add db:seed script to package.json
 
 ### Production Hardening
-- [ ] [S90] Add AdminProductionChecklist page showing live system health
-- [ ] [S90] Write PRODUCTION_RUNBOOK.md with go-live steps
-- [ ] [S90] Verify HSTS preload configuration in helmet
-- [ ] [S90] Final test suite run and production checkpoint
+- [x] [S90] Add AdminProductionChecklist page showing live system health
+- [x] [S90] Write PRODUCTION_RUNBOOK.md with go-live steps
+- [x] [S90] Verify HSTS preload configuration in helmet
+- [x] [S90] Final test suite run and production checkpoint
 
 ## Sprint 93 — RLS Transaction Wrapper, Redis Rate Limiter, NIN IDP
 ### PostgreSQL RLS Transaction Wrapper
-- [ ] [S93] Add withRlsContext() helper in server/db.ts that sets app.current_user_id and app.current_user_role via SET LOCAL
-- [ ] [S93] Export getPool() from server/db.ts for raw client access
-- [ ] [S93] Wire withRlsContext into declarationProcedure, paymentProcedure, ogaPermitProcedure, aeoProcedure, kycProcedure
+- [x] [S93] Add withRlsContext() helper in server/db.ts that sets app.current_user_id and app.current_user_role via SET LOCAL
+- [x] [S93] Export getPool() from server/db.ts for raw client access
+- [x] [S93] Wire withRlsContext into declarationProcedure, paymentProcedure, ogaPermitProcedure, aeoProcedure, kycProcedure
 
 ### Redis-Backed Rate Limiter
-- [ ] [S93] Add Redis client singleton in server/_core/redis.ts
-- [ ] [S93] Replace in-memory _rateLimitStore Map in trpc.ts with Redis INCR + EXPIRE sliding window
-- [ ] [S93] Add Redis health check to /api/health endpoint
+- [x] [S93] Add Redis client singleton in server/_core/redis.ts
+- [x] [S93] Replace in-memory _rateLimitStore Map in trpc.ts with Redis INCR + EXPIRE sliding window
+- [x] [S93] Add Redis health check to /api/health endpoint
 
 ### NIN Identity Provider
-- [ ] [S93] Add nigeriaId router in server/routers/nigeriaId.ts with initiateNinAuth, handleNinCallback, verifyNinToken procedures
-- [ ] [S93] Wire nigeriaId router into appRouter in server/routers.ts
-- [ ] [S93] Add NIN verification step to KYC flow in kyc.ts
-- [ ] [S93] Add NIN login button to TraderRegistration page
+- [x] [S93] Add nigeriaId router in server/routers/nigeriaId.ts with initiateNinAuth, handleNinCallback, verifyNinToken procedures
+- [x] [S93] Wire nigeriaId router into appRouter in server/routers.ts
+- [x] [S93] Add NIN verification step to KYC flow in kyc.ts
+- [x] [S93] Add NIN login button to TraderRegistration page
 
 ## Sprint 103 — Demo Mode Runbook & Final Checkpoint
 
@@ -1960,7 +1960,7 @@
 - [x] [S104] Seed 6 demo users (trader/customs/oga/admin/security/developer) with correct roles
 - [x] [S104] Mark demo users as onboarding-complete
 - [x] [S104] Verify /demo login flow for all 6 portals end-to-end
-- [ ] [S104] Save checkpoint and publish
+- [x] [S104] Save checkpoint and publish
 
 ## Sprint 105 — Sidebar Navigation Legibility Fix
 
@@ -2003,16 +2003,16 @@
 
 ## Sprint 109 — Full Feature Audit & Implementation
 
-- [ ] [S109] Wire Officer Actions updateStatus mutation in DeclarationDetail
-- [ ] [S109] Fix lane-filter stats cards (group by risk_lane not status)
-- [ ] [S109] Audit all 6 portal nav items for missing/placeholder pages
-- [ ] [S109] Implement missing Trader portal pages
-- [ ] [S109] Implement missing Customs portal pages (Risk Screening, Cargo Inspection, Duty Payments, Clearance Workflows, Post-Clearance Review)
-- [ ] [S109] Implement missing Admin portal pages
-- [ ] [S109] Implement missing Security portal pages
-- [ ] [S109] Implement missing OGA portal pages
-- [ ] [S109] Implement missing Developer portal pages
-- [ ] [S109] Save checkpoint
+- [x] [S109] Wire Officer Actions updateStatus mutation in DeclarationDetail
+- [x] [S109] Fix lane-filter stats cards (group by risk_lane not status)
+- [x] [S109] Audit all 6 portal nav items for missing/placeholder pages
+- [x] [S109] Implement missing Trader portal pages
+- [x] [S109] Implement missing Customs portal pages (Risk Screening, Cargo Inspection, Duty Payments, Clearance Workflows, Post-Clearance Review)
+- [x] [S109] Implement missing Admin portal pages
+- [x] [S109] Implement missing Security portal pages
+- [x] [S109] Implement missing OGA portal pages
+- [x] [S109] Implement missing Developer portal pages
+- [x] [S109] Save checkpoint
 
 ## Sprint 109 — Full Feature Audit & Implementation (Continued)
 - [x] [S109] Fix AdminConsole stakeholder table: use organizationName and taxId (not companyName/tin)
@@ -2052,12 +2052,12 @@
 - [x] Duplicate nav key warning fixed (composite key gi-ii-path)
 
 ## Sprint 112 — Assignment, Pagination, Mobile Trader
-- [ ] declarations.assignOfficer tRPC mutation (admin/customs_officer only)
-- [ ] broadcastWorkloadUpdate called after officer assignment
-- [ ] "Assign to Officer" dropdown in DeclarationDetail page
-- [ ] Cursor-based pagination in declarations.all (lastId + limit)
-- [ ] "Load more" button in CustomsDashboard declaration queue
-- [ ] Responsive mobile-first layout for Trader Portal (TraderDashboard, NewDeclaration, DeclarationStatus)
+- [x] declarations.assignOfficer tRPC mutation (admin/customs_officer only)
+- [x] broadcastWorkloadUpdate called after officer assignment
+- [x] "Assign to Officer" dropdown in DeclarationDetail page
+- [x] Cursor-based pagination in declarations.all (lastId + limit)
+- [x] "Load more" button in CustomsDashboard declaration queue
+- [x] Responsive mobile-first layout for Trader Portal (TraderDashboard, NewDeclaration, DeclarationStatus)
 
 ## Sprint 112 — Assignment, Pagination & Mobile
 
@@ -2074,12 +2074,12 @@
 
 ## Sprint 113 — Search, Bulk Assignment & Status Tracker
 
-- [ ] Add search param to myDeclarations procedure (ILIKE on declarationNumber, ucr, goodsDescription)
-- [ ] Wire search input in TraderDeclarations page with 350ms debounce
-- [ ] Add checkbox column to Customs Dashboard table for bulk selection
-- [ ] Bulk assign selected declarations to officer (dropdown + confirm button)
-- [ ] DeclarationStatusTracker component (vertical timeline mobile, horizontal progress bar desktop)
-- [ ] Add status tracker to top of DeclarationDetail page
+- [x] Add search param to myDeclarations procedure (ILIKE on declarationNumber, ucr, goodsDescription)
+- [x] Wire search input in TraderDeclarations page with 350ms debounce
+- [x] Add checkbox column to Customs Dashboard table for bulk selection
+- [x] Bulk assign selected declarations to officer (dropdown + confirm button)
+- [x] DeclarationStatusTracker component (vertical timeline mobile, horizontal progress bar desktop)
+- [x] Add status tracker to top of DeclarationDetail page
 
 ## Sprint 113 — Search, Bulk Assign, Status Tracker
 - [x] Add search parameter to myDeclarations procedure with ILIKE query
