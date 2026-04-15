@@ -308,8 +308,20 @@ describe("Permify authorization model — Drawback Claim resource", () => {
 });
 
 describe("Permify client helper — graceful degradation", () => {
+  const originalDemoMode = process.env.DEMO_MODE;
   beforeEach(() => {
     mockFetch.mockReset();
+    // Ensure DEMO_MODE is off so the can() function actually calls fetch
+    delete process.env.DEMO_MODE;
+    // Reset module cache so permify re-reads DEMO_MODE
+    vi.resetModules();
+  });
+  afterEach(() => {
+    if (originalDemoMode !== undefined) {
+      process.env.DEMO_MODE = originalDemoMode;
+    } else {
+      delete process.env.DEMO_MODE;
+    }
   });
 
   it("returns false when Permify is unavailable (network error)", async () => {
