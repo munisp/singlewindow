@@ -9,8 +9,8 @@
  *   Lightweight liveness probe — returns 200 if the process is alive.
  *
  * GET /api/health/ready
- *   Readiness probe — returns 200 only if DB and Redis are reachable.
- *   Returns 503 if any critical dependency is down.
+ *   Readiness probe — returns 200 only if DB is reachable.
+ *   Returns 503 if database is down. Optional services (Redis, Kafka, etc.) do not block readiness.
  */
 
 import type { Express } from "express";
@@ -23,6 +23,7 @@ interface ComponentHealth {
   status: HealthStatus;
   latencyMs?: number;
   message?: string;
+  optional?: boolean;
 }
 
 interface HealthReport {
@@ -32,13 +33,15 @@ interface HealthReport {
   timestamp: string;
   components: {
     database: ComponentHealth;
-    redis?: ComponentHealth;
-    tigerbeetle?: ComponentHealth;
-    temporal?: ComponentHealth;
-    kafka?: ComponentHealth;
-    aseanSw?: ComponentHealth;
-    cenService?: ComponentHealth;
+    redis: ComponentHealth;
+    tigerbeetle: ComponentHealth;
+    temporal: ComponentHealth;
+    kafka: ComponentHealth;
+    aseanSw: ComponentHealth;
+    cenService: ComponentHealth;
+    permify: ComponentHealth;
   };
+  demoMode: boolean;
 }
 
 // ─── Probe helpers ────────────────────────────────────────────────────────────
@@ -59,9 +62,10 @@ async function checkDatabase(): Promise<ComponentHealth> {
   }
 }
 
-async function checkExternalService(
+async function checkOptionalService(
   url: string,
-  timeoutMs = 3000
+  name: string,
+  timeoutMs = 2000
 ): Promise<ComponentHealth> {
   const start = Date.now();
   try {
@@ -70,61 +74,72 @@ async function checkExternalService(
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
     const latencyMs = Date.now() - start;
-    if (res.ok) return { status: "ok", latencyMs };
-    return { status: "degraded", latencyMs, message: `HTTP ${res.status}` };
-  } catch (err) {
+    if (res.ok) return { status: "ok", latencyMs, optional: true };
+    return { status: "degraded", latencyMs, message: `HTTP ${res.status}`, optional: true };
+  } catch (_err) {
+    // Optional services that are unavailable are "degraded", not "down"
     return {
-      status: "down",
+      status: "degraded",
       latencyMs: Date.now() - start,
-      message: err instanceof Error ? err.message : "Connection refused",
+      message: `${name} not reachable (optional in demo mode)`,
+      optional: true,
     };
   }
 }
 
 // ─── Full health report ───────────────────────────────────────────────────────
 async function buildHealthReport(): Promise<HealthReport> {
-  const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService] =
+  const isDemoMode = process.env.DEMO_MODE === "true";
+
+  const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =
     await Promise.all([
       checkDatabase(),
-      checkExternalService(
-        `http://${process.env.REDIS_HOST ?? "localhost"}:${process.env.REDIS_PORT ?? "6379"}`
+      checkOptionalService(
+        `http://${process.env.REDIS_HOST ?? "localhost"}:${process.env.REDIS_PORT ?? "6379"}/ping`,
+        "Redis"
       ),
-      checkExternalService(
-        `http://${process.env.TIGERBEETLE_BRIDGE_HOST ?? "localhost"}:8200/health`
+      checkOptionalService(
+        `http://${process.env.TIGERBEETLE_BRIDGE_HOST ?? "localhost"}:${process.env.TIGERBEETLE_BRIDGE_PORT ?? "8200"}/health`,
+        "TigerBeetle"
       ),
-      checkExternalService(
-        `http://${process.env.TEMPORAL_HOST ?? "localhost"}:7233`
+      checkOptionalService(
+        `http://${process.env.TEMPORAL_HOST ?? "localhost"}:${process.env.TEMPORAL_PORT ?? "7233"}`,
+        "Temporal"
       ),
-      checkExternalService(
-        `http://${process.env.KAFKA_HOST ?? "localhost"}:9092`
+      checkOptionalService(
+        `http://${process.env.KAFKA_HOST ?? "localhost"}:${process.env.KAFKA_REST_PORT ?? "8082"}/topics`,
+        "Kafka"
       ),
-      checkExternalService(
-        process.env.ASEAN_SW_URL ?? "http://localhost:8098/health"
+      checkOptionalService(
+        process.env.ASEAN_SW_URL ?? "http://localhost:8098/health",
+        "ASEAN Single Window"
       ),
-      checkExternalService(
-        process.env.CEN_SERVICE_URL ?? "http://localhost:8097/health"
+      checkOptionalService(
+        process.env.CEN_SERVICE_URL ?? "http://localhost:8097/health",
+        "WCO CEN Service"
+      ),
+      checkOptionalService(
+        `http://${process.env.PERMIFY_HOST ?? "localhost"}:${process.env.PERMIFY_PORT ?? "3476"}/healthz`,
+        "Permify"
       ),
     ]);
 
-  // Determine overall status
-  const criticalComponents = [database];
-  const nonCriticalComponents = [redis, tigerbeetle, temporal, kafka, aseanSw, cenService];
-
+  // Only database is critical — everything else is optional
   let overallStatus: HealthStatus = "ok";
-  if (criticalComponents.some(c => c.status === "down")) {
+  if (database.status === "down") {
     overallStatus = "down";
-  } else if (
-    criticalComponents.some(c => c.status === "degraded") ||
-    nonCriticalComponents.some(c => c.status === "down")
-  ) {
+  } else if (database.status === "degraded") {
     overallStatus = "degraded";
   }
+  // Optional services being degraded does NOT make overall status worse
+  // This prevents false alarms in demo/dev environments
 
   return {
     status: overallStatus,
     version: process.env.APP_VERSION ?? "1.0.0",
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
+    demoMode: isDemoMode,
     components: {
       database,
       redis,
@@ -133,6 +148,7 @@ async function buildHealthReport(): Promise<HealthReport> {
       kafka,
       aseanSw,
       cenService,
+      permify,
     },
   };
 }

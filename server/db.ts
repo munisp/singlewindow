@@ -37,6 +37,18 @@ export async function getDb() {
   return _db;
 }
 
+/**
+ * Close the PostgreSQL connection pool. Called during graceful shutdown.
+ */
+export async function closePool(): Promise<void> {
+  if (_pool) {
+    await _pool.end();
+    _pool = null;
+    _db = null;
+    console.log('[Database] Connection pool closed.');
+  }
+}
+
 // ─── USER QUERIES ─────────────────────────────────────────────────────────────
 
 export async function upsertUser(user: InsertUser): Promise<void> {

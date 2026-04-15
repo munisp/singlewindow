@@ -865,6 +865,41 @@ async function startServer() {
   runPermifySeedOnStartup().catch(() => {});
   // Sprint 63: WebSocket server for real-time notifications
   setupWebSocketServer(server);
+
+  // ── Request correlation ID middleware ───────────────────────────────────────────────
+  // Injects X-Request-ID header for distributed tracing. Uses incoming header if
+  // already set by a reverse proxy (nginx/APISIX), otherwise generates a new UUID.
+  app.use((req: any, res: any, next: any) => {
+    const requestId = (req.headers['x-request-id'] as string) ||
+      `tg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    req.requestId = requestId;
+    res.setHeader('X-Request-ID', requestId);
+    next();
+  });
+
+  // ── Structured access logging ───────────────────────────────────────────────────────────
+  // Logs each API request as structured JSON in production, human-readable in dev.
+  if (process.env.NODE_ENV === 'production') {
+    app.use((req: any, res: any, next: any) => {
+      const start = Date.now();
+      res.on('finish', () => {
+        // Skip health check and metrics noise in production logs
+        if (req.path === '/api/health/live' || req.path === '/metrics') return;
+        const log = {
+          ts: new Date().toISOString(),
+          requestId: req.requestId,
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          ms: Date.now() - start,
+          ip: req.ip,
+          ua: req.headers['user-agent']?.slice(0, 120),
+        };
+        process.stdout.write(JSON.stringify(log) + '\n');
+      });
+      next();
+    });
+  }
   // ── Security headers (helmet) ─────────────────────────────────────────────
   app.use(helmet({
     contentSecurityPolicy: {
@@ -952,6 +987,30 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // ── Graceful shutdown ─────────────────────────────────────────────────────
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+    server.close(async () => {
+      console.log('[Server] HTTP server closed.');
+      try {
+        const { closePool } = await import('../db');
+        await closePool();
+        console.log('[Server] Database pool closed.');
+      } catch (err) {
+        console.error('[Server] Error closing database pool:', err);
+      }
+      console.log('[Server] Graceful shutdown complete.');
+      process.exit(0);
+    });
+    // Force exit after 30 seconds if graceful shutdown hangs
+    setTimeout(() => {
+      console.error('[Server] Graceful shutdown timed out. Forcing exit.');
+      process.exit(1);
+    }, 30_000);
+  };
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   // Sprint 70/73: Broadcast live vessel positions every 15 seconds; check geofence crossings
   // Deduplicate geofence alerts: track last-fired time per vessel+geofence pair
