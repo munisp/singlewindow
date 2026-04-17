@@ -13,6 +13,7 @@ import { invokeLLM } from "../_core/llm";
 import { assertCan, setOwner } from "../_core/permify";
 import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } from "../_core/wsServer";
 import { nanoid } from "nanoid";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -227,6 +228,25 @@ export const declarationsRouter = router({
         body: `Your declaration ${decl.declarationNumber} has been submitted for assessment. Risk lane assigned: ${risk.lane.toUpperCase()}. Estimated duties: ${total.toFixed(2)} ${decl.invoiceCurrency ?? "USD"}.`,
         declarationId: input.id,
       }).catch(() => { /* non-blocking */ });
+
+      // Publish Kafka event for downstream consumers (risk engine, OGA routing, analytics)
+      publishEvent(TOPICS.DECLARATION_SUBMITTED, {
+        eventType: "declaration.submitted",
+        aggregateId: String(input.id),
+        payload: {
+          declarationId: input.id,
+          declarationNumber: decl.declarationNumber,
+          traderId: ctx.user.id,
+          riskLane: risk.lane,
+          riskScore: risk.score,
+          hsCode: decl.hsCode,
+          countryOfOrigin: decl.countryOfOrigin,
+          totalDue: total.toFixed(2),
+          currency: decl.invoiceCurrency,
+          submittedAt: new Date().toISOString(),
+        },
+        metadata: { userId: String(ctx.user.id) },
+      }).catch(() => { /* non-blocking — Kafka unavailable in demo mode */ });
 
       return updated;
     }),
@@ -474,6 +494,25 @@ export const declarationsRouter = router({
           createdAt: savedNotif.createdAt?.toISOString() ?? new Date().toISOString(),
         });
       }
+
+      // Publish Kafka event for declaration status change (downstream: analytics, OGA, trader portal)
+      const statusTopic = input.status === "cleared" ? TOPICS.DECLARATION_CLEARED :
+        input.status === "rejected" ? TOPICS.DECLARATION_REJECTED : TOPICS.DECLARATION_UPDATED;
+      publishEvent(statusTopic, {
+        eventType: `declaration.${input.status}`,
+        aggregateId: String(input.id),
+        payload: {
+          declarationId: input.id,
+          declarationNumber: decl.declarationNumber,
+          traderId: decl.traderId,
+          previousStatus: decl.status,
+          newStatus: input.status,
+          changedBy: ctx.user.id,
+          changedByRole: ctx.user.role,
+          notes: input.notes,
+        },
+        metadata: { userId: String(ctx.user.id) },
+      }).catch(() => { /* non-blocking */ });
 
       // Sprint 110: broadcast workload update to all connected officers after status change
       (async () => {

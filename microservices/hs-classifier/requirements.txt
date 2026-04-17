@@ -1,0 +1,12 @@
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+psycopg2-binary==2.9.10
+kafka-python==2.0.2
+redis==5.2.0
+prometheus-client==0.21.0
+tenacity==9.0.0
+pydantic==2.10.0
+python-multipart==0.0.17
+httpx==0.28.0
+numpy==2.1.0
+scikit-learn==1.5.2

@@ -388,3 +388,356 @@ services:
       - prometheus
     networks:
       - tradegateway
+
+  # ── DECLARATION SERVICE (Go) ───────────────────────────────────────────────
+  declaration-service:
+    build:
+      context: ../microservices/declaration-service
+      dockerfile: Dockerfile
+    container_name: tg-declaration-service
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+      REDIS_URL: "redis://redis:6379"
+      PERMIFY_HOST: "permify:3478"
+      TEMPORAL_HOST: "temporal:7233"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── PAYMENT SERVICE (Go) ───────────────────────────────────────────────────
+  payment-service:
+    build:
+      context: ../microservices/payment-service
+      dockerfile: Dockerfile
+    container_name: tg-payment-service
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+      MOJALOOP_URL: "http://mojaloop-switch:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── OGA SERVICE (Go) ───────────────────────────────────────────────────────
+  oga-service:
+    build:
+      context: ../microservices/oga-service
+      dockerfile: Dockerfile
+    container_name: tg-oga-service
+    ports:
+      - "8083:8083"
+    environment:
+      PORT: "8083"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── PROFILE SERVICE (Go) ───────────────────────────────────────────────────
+  profile-service:
+    build:
+      context: ../microservices/profile-service
+      dockerfile: Dockerfile
+    container_name: tg-profile-service
+    ports:
+      - "8084:8084"
+    environment:
+      PORT: "8084"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── RISK ENGINE (Go) ──────────────────────────────────────────────────────
+  risk-engine:
+    build:
+      context: ../microservices/risk-engine
+      dockerfile: Dockerfile
+    container_name: tg-risk-engine
+    ports:
+      - "8085:8085"
+    environment:
+      PORT: "8085"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── SANCTIONS SERVICE (Go) ─────────────────────────────────────────────────
+  sanctions-service:
+    build:
+      context: ../microservices/sanctions-service
+      dockerfile: Dockerfile
+    container_name: tg-sanctions-service
+    ports:
+      - "8088:8088"
+    environment:
+      PORT: "8088"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8088/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── TEMPORAL WORKER (Go) ───────────────────────────────────────────────────
+  temporal-worker:
+    build:
+      context: ../microservices/temporal-worker
+      dockerfile: Dockerfile
+    container_name: tg-temporal-worker
+    environment:
+      TEMPORAL_HOST: "temporal:7233"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      temporal:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    restart: unless-stopped
+
+  # ── FLUVIO CONSUMER (Go) ───────────────────────────────────────────────────
+  fluvio-consumer:
+    build:
+      context: ../microservices/fluvio-consumer
+      dockerfile: Dockerfile
+    container_name: tg-fluvio-consumer
+    environment:
+      KAFKA_BROKERS: "kafka:9092"
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    restart: unless-stopped
+
+  # ── RISK AI SERVICE (Python/FastAPI) ───────────────────────────────────────
+  risk-ai-service:
+    build:
+      context: ../microservices/risk-ai
+      dockerfile: Dockerfile
+    container_name: tg-risk-ai
+    ports:
+      - "8090:8080"
+    environment:
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── GNN RISK SERVICE (Python/FastAPI) ─────────────────────────────────────
+  gnn-risk-service:
+    build:
+      context: ../microservices/gnn-risk
+      dockerfile: Dockerfile
+    container_name: tg-gnn-risk
+    ports:
+      - "8091:8080"
+    environment:
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── VISION SERVICE (Python/FastAPI) ───────────────────────────────────────
+  vision-service:
+    build:
+      context: ../microservices/vision-service
+      dockerfile: Dockerfile
+    container_name: tg-vision-service
+    ports:
+      - "8092:8080"
+    environment:
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── ANOMALY DETECTION SERVICE (Python/FastAPI) ────────────────────────────
+  anomaly-detection-service:
+    build:
+      context: ../microservices/anomaly-detection
+      dockerfile: Dockerfile
+    container_name: tg-anomaly-detection
+    ports:
+      - "8093:8080"
+    environment:
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── HS CLASSIFIER SERVICE (Python/FastAPI) ────────────────────────────────
+  hs-classifier-service:
+    build:
+      context: ../microservices/hs-classifier
+      dockerfile: Dockerfile
+    container_name: tg-hs-classifier
+    ports:
+      - "8094:8080"
+    environment:
+      DATABASE_URL: "postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway"
+      KAFKA_BROKERS: "kafka:9092"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── LOKI (Log Aggregation) ─────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: tg-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - tradegateway
+
+  # ── OTEL COLLECTOR ─────────────────────────────────────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.101.0
+    container_name: tg-otel-collector
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./monitoring/tracing/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
+    networks:
+      - tradegateway
+
+  # ── JAEGER (Distributed Tracing) ───────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: tg-jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - tradegateway
+
+  # ── ALERTMANAGER ───────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: tg-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager-config.yaml:/etc/alertmanager/alertmanager.yml
+    networks:
+      - tradegateway

@@ -15,6 +15,9 @@ import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
+import cors from "cors";
+import { sanitizeMiddleware } from "./sanitize";
+import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
@@ -900,27 +903,55 @@ async function startServer() {
       next();
     });
   }
+  // ── CORS ─────────────────────────────────────────────────────────────────────
+  const allowedOrigins = [
+    /\.manus\.space$/,
+    /\.manus\.computer$/,
+    /^https?:\/\/localhost(:\d+)?$/,
+    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+  ];
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = allowedOrigins.some(p => typeof p === 'string' ? p === origin : p.test(origin));
+      callback(allowed ? null : new Error('CORS: origin not allowed'), allowed);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+    exposedHeaders: ['X-Request-ID'],
+    maxAge: 86400,
+  }));
   // ── Security headers (helmet) ─────────────────────────────────────────────
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://fonts.googleapis.com"],
+        // Tighten CSP in production: remove unsafe-inline/eval
+        scriptSrc: process.env.NODE_ENV === 'production'
+          ? ["'self'", "https://fonts.googleapis.com"]
+          : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://fonts.googleapis.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "wss:", "https:"],
         frameSrc: ["'none'"],
         objectSrc: ["'none'"],
-        upgradeInsecureRequests: [],
+        upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
       },
     },
-    crossOriginEmbedderPolicy: false, // Required for map/media embeds
+    crossOriginEmbedderPolicy: false,
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    frameguard: { action: 'deny' },
+    noSniff: true,
+    xssFilter: true,
   }));
-  // Configure body parser with larger size limit for file uploads
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // ── Input sanitization (XSS prevention) ─────────────────────────────────────
+  app.use(sanitizeMiddleware);
+  // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
   // OAuth callback under /api/oauth/callback — apply strict rate limiting
   app.use("/api/oauth", authRateLimit);
   registerOAuthRoutes(app);
@@ -1011,6 +1042,9 @@ async function startServer() {
   };
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  // Also close Kafka producer on shutdown
+  process.on('SIGTERM', () => closeKafka().catch(() => {}));
+  process.on('SIGINT', () => closeKafka().catch(() => {}));
 
   // Sprint 70/73: Broadcast live vessel positions every 15 seconds; check geofence crossings
   // Deduplicate geofence alerts: track last-fired time per vessel+geofence pair

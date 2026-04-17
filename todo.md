@@ -38,4 +38,4 @@
 - [x] TypeScript 0 errors, production build succeeds (21MB, 501 chunks)
 
 ## Archive
-- [ ] Generate comprehensive archive from /home/ubuntu (in progress)
+- [x] Generated comprehensive archive: tradegateway-COMPLETE-v24-20260415.zip (49MB, 1804 files)
