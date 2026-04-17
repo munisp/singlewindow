@@ -31,8 +31,8 @@ export const ENV = {
   permifyApiKey: process.env.PERMIFY_API_KEY ?? "",
 
   // ─── Redis ────────────────────────────────────────────────────────────────
-  redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
-  redisPassword: process.env.REDIS_PASSWORD ?? "",
+  redisUrl: process.env.REDIS_URL ?? "redis://:tradegateway_redis_2026@localhost:6379",
+  redisPassword: process.env.REDIS_PASSWORD ?? "tradegateway_redis_2026",
 
   // ─── Kafka ────────────────────────────────────────────────────────────────
   kafkaBrokers: (process.env.KAFKA_BROKERS ?? "localhost:9092").split(","),

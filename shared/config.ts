@@ -21,7 +21,8 @@ export const POSTGRES_POOL_CONNECTION_TIMEOUT_MS = parseInt(process.env.POSTGRES
 // ─── Redis ────────────────────────────────────────────────────────────────────
 export const REDIS_HOST = process.env.REDIS_HOST ?? "localhost";
 export const REDIS_PORT = parseInt(process.env.REDIS_PORT ?? "6379");
-export const REDIS_URL = process.env.REDIS_URL ?? `redis://${REDIS_HOST}:${REDIS_PORT}`;
+export const REDIS_PASSWORD = process.env.REDIS_PASSWORD ?? "tradegateway_redis_2026";
+export const REDIS_URL = process.env.REDIS_URL ?? `redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}`;
 export const REDIS_KEY_PREFIX = "tg:";
 export const REDIS_SESSION_TTL_SECONDS = 86400; // 24 hours
 export const REDIS_RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute

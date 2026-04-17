@@ -39,3 +39,29 @@
 
 ## Archive
 - [x] Generated comprehensive archive: tradegateway-COMPLETE-v24-20260415.zip (49MB, 1804 files)
+
+## v25 Additions (Security & Integrations)
+- [x] Kafka client (kafkajs) installed and wired into declaration lifecycle
+- [x] CORS middleware with allowlist (cors package)
+- [x] XSS input sanitization on all tRPC inputs (xss + validator packages)
+- [x] Dockerfiles for all 5 Python AI microservices
+- [x] requirements.txt for all Python microservices
+- [x] 8 missing Go microservices added to docker-compose.yml (35 total containers)
+- [x] Loki + Promtail + OTel Collector + Jaeger + Alertmanager configs
+- [x] Makefile with all common operations
+- [x] Multi-stage production Dockerfile
+- [x] .dockerignore
+- [x] Security audit report (docs/SECURITY-AUDIT.md)
+- [x] 0 critical CVEs confirmed
+- [x] Smoke tests: 17/17 pass (28 total)
+- [x] Generated archive: tradegateway-COMPLETE-v25-20260417.zip (35MB, 1698 files)
+
+## v26 Additions (Redis Live + Admin Promotion)
+- [x] Redis natively installed and running (port 6379, password-authenticated)
+- [x] Redis health check fixed to use ioredis PING (not HTTP)
+- [x] ENV.redisUrl updated with password default
+- [x] Health endpoint: Database OK + Redis OK
+- [x] All 15 demo accounts promoted to admin role
+- [x] Final smoke tests: 17/17 pass
+- [x] Final tests: 1,679 passing
+- [ ] Generate comprehensive v26 archive (in progress)

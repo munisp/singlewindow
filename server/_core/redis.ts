@@ -10,22 +10,24 @@
  */
 
 import Redis from "ioredis";
+import { ENV } from "./env";
 
 let _redis: Redis | null = null;
 let _connectionFailed = false;
 
 /**
- * Returns the Redis singleton, or null if REDIS_URL is not configured.
+ * Returns the Redis singleton, or null if Redis is unavailable.
+ * Uses ENV.redisUrl (which includes password default) so it works out-of-the-box.
  * Errors are caught and logged — the app continues without Redis.
  */
 export function getRedis(): Redis | null {
   if (_connectionFailed) return null;
   if (_redis) return _redis;
 
-  const url = process.env.REDIS_URL;
-  if (!url) {
-    // Not configured — silently skip (in-memory fallback will be used)
-    return null;
+  // Use ENV.redisUrl which has the password-authenticated default
+  const url = ENV.redisUrl;
+  if (!url || url === "redis://localhost:6379") {
+    // Legacy no-password URL — try anyway but don't block startup
   }
 
   try {

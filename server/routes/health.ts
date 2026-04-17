@@ -15,6 +15,7 @@
 
 import type { Express } from "express";
 import { getDb } from "../db";
+import { redisHealthCheck } from "../_core/redis";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type HealthStatus = "ok" | "degraded" | "down";
@@ -94,10 +95,13 @@ async function buildHealthReport(): Promise<HealthReport> {
   const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =
     await Promise.all([
       checkDatabase(),
-      checkOptionalService(
-        `http://${process.env.REDIS_HOST ?? "localhost"}:${process.env.REDIS_PORT ?? "6379"}/ping`,
-        "Redis"
-      ),
+      // Use the ioredis client directly for Redis health check (not HTTP)
+      redisHealthCheck().then((r): ComponentHealth => ({
+        status: r.ok ? "ok" : "degraded",
+        latencyMs: r.latencyMs,
+        message: r.ok ? undefined : `Redis not reachable${isDemoMode ? " (optional in demo mode)" : ""}`,
+        optional: true,
+      })),
       checkOptionalService(
         `http://${process.env.TIGERBEETLE_BRIDGE_HOST ?? "localhost"}:${process.env.TIGERBEETLE_BRIDGE_PORT ?? "8200"}/health`,
         "TigerBeetle"
