@@ -1,8 +1,7 @@
 /**
  * notifications.test.ts — Tests for notifications tRPC router
  * Uses vi.mock to avoid real DB connections.
- * Updated for Sprint 96: router now uses withRlsContext instead of
- * getNotificationsByUser/markNotificationRead helpers.
+ * Updated for Sprint 96+: router now uses withRlsContext and returns {items, total} for list.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { appRouter } from "./routers";
@@ -35,27 +34,57 @@ const mockNotifications = [
   },
 ];
 
-// Build a chainable Drizzle mock that returns mockNotifications for select queries
-function makeChainableMock(resolveValue: unknown = mockNotifications) {
+const mockCountResult = [{ count: 2 }];
+
+/**
+ * Build a chainable Drizzle mock.
+ * - select().from().where().orderBy().limit().offset() → resolves mockNotifications
+ * - select({count}).from().where() → resolves mockCountResult (awaited directly)
+ * - update().set().where() → resolves { returning: [...] }
+ * - delete().where() → resolves { returning: [...] }
+ */
+function makeChainableMock() {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
-  const terminalMethods = ["limit", "offset"];
-  const chainMethods = ["select", "from", "where", "orderBy", "update", "set"];
-  for (const m of chainMethods) {
-    chain[m] = vi.fn().mockReturnThis();
-  }
-  for (const m of terminalMethods) {
-    chain[m] = vi.fn().mockResolvedValue(resolveValue);
-  }
-  // returning() is used by update/insert
+
+  // offset is the terminal for list queries
+  chain.offset = vi.fn().mockResolvedValue(mockNotifications);
+
+  // limit chains to offset
+  chain.limit = vi.fn().mockReturnThis();
+
+  // orderBy chains
+  chain.orderBy = vi.fn().mockReturnThis();
+
+  // returning for update/delete
   chain.returning = vi.fn().mockResolvedValue([{ id: 1, userId: 9801, read: true }]);
-  // where() when used as terminal (e.g. update...set...where) should also resolve
-  // Override where to resolve as a Promise when called after set()
-  chain.where = vi.fn().mockImplementation(() => {
-    // Return both a thenable (for await) and chainable methods
-    const result = Promise.resolve(resolveValue);
-    Object.assign(result, chain);
-    return result;
+
+  // set chains
+  chain.set = vi.fn().mockReturnThis();
+
+  // update chains
+  chain.update = vi.fn().mockReturnThis();
+
+  // delete chains
+  chain.delete = vi.fn().mockReturnThis();
+
+  // from chains
+  chain.from = vi.fn().mockReturnThis();
+
+  // select chains
+  chain.select = vi.fn().mockReturnThis();
+
+  // where: must handle two cases:
+  //   1. After orderBy → returns chainable (for .limit().offset())
+  //   2. After select({count}).from() → returns Promise resolving to countResult
+  //   3. After update().set() → returns thenable with .returning()
+  //   4. After delete() → returns thenable with .returning()
+  chain.where = vi.fn().mockImplementation(function (this: unknown) {
+    // Return an object that is both a Promise (for count queries) and chainable
+    const countPromise = Promise.resolve(mockCountResult);
+    const chainable = Object.assign(countPromise, chain);
+    return chainable;
   });
+
   return chain;
 }
 
@@ -91,19 +120,21 @@ describe("notifications router", () => {
   beforeEach(() => vi.clearAllMocks());
 
   describe("list", () => {
-    it("returns an array for authenticated user", async () => {
+    it("returns items and total for authenticated user", async () => {
       const result = await caller.notifications.list({ limit: 10 });
-      expect(Array.isArray(result)).toBe(true);
+      expect(result).toHaveProperty("items");
+      expect(result).toHaveProperty("total");
+      expect(Array.isArray(result.items)).toBe(true);
     });
 
     it("respects limit parameter (no more than limit items)", async () => {
       const result = await caller.notifications.list({ limit: 5 });
-      expect(result.length).toBeLessThanOrEqual(5);
+      expect(result.items.length).toBeLessThanOrEqual(5);
     });
 
     it("each notification has required fields", async () => {
       const result = await caller.notifications.list({ limit: 20 });
-      result.forEach((n: Record<string, unknown>) => {
+      result.items.forEach((n: Record<string, unknown>) => {
         expect(n).toHaveProperty("id");
         expect(n).toHaveProperty("title");
         expect(n).toHaveProperty("message");

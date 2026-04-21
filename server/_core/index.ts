@@ -1,6 +1,11 @@
 import "dotenv/config";
-// Override DATABASE_URL to use local PostgreSQL (ignoring platform-injected TiDB URL)
-process.env.DATABASE_URL = "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
+// Override DATABASE_URL: use LOCAL_DATABASE_URL if set, otherwise keep injected URL only
+// if it is a PostgreSQL URL; otherwise fall back to the default local postgres connection.
+const _injectedDbUrl = process.env.DATABASE_URL ?? "";
+const _localDbUrl = process.env.LOCAL_DATABASE_URL ?? "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
+if (!_injectedDbUrl.startsWith("postgresql://") && !_injectedDbUrl.startsWith("postgres://")) {
+  process.env.DATABASE_URL = _localDbUrl;
+}
 import express from "express";
 import { createServer } from "http";
 import net from "net";

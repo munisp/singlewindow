@@ -199,23 +199,25 @@ export const bulkExportRouter = router({
         createdAt: r.createdAt.toISOString(),
       }));
 
-      // ── XLSX export ──────────────────────────────────────────────────────────
+      // ── XLSX export (exceljs — no CVEs) ────────────────────────────────────
       if (input.format === "xlsx") {
-        const XLSX = await import("xlsx");
-        const wsData = [
-          CSV_HEADERS,
-          ...normalizedRows.map((r) => CSV_HEADERS.map((h) => (r as any)[h] ?? "")),
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-        // Auto-width columns
-        ws["!cols"] = CSV_HEADERS.map((h) => ({ wch: Math.max(h.length + 2, 12) }));
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Declarations");
-        const xlsxBuffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+        const ExcelJS = await import("exceljs");
+        const wb = new ExcelJS.Workbook();
+        wb.creator = "TradeGateway NGSWTP";
+        wb.created = new Date();
+        const ws = wb.addWorksheet("Declarations");
+        ws.columns = CSV_HEADERS.map((h) => ({ header: h, key: h, width: Math.max(h.length + 2, 14) }));
+        const headerRow = ws.getRow(1);
+        headerRow.font = { bold: true, color: { argb: "FFD4A017" } };
+        headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0A1628" } };
+        normalizedRows.forEach((r) => {
+          ws.addRow(CSV_HEADERS.map((h) => (r as any)[h] ?? ""));
+        });
+        const xlsxBuffer = await wb.xlsx.writeBuffer();
         return {
           format: "xlsx" as const,
           filename: `declarations-export-${new Date().toISOString().slice(0, 10)}.xlsx`,
-          content: xlsxBuffer.toString("base64"),
+          content: Buffer.from(xlsxBuffer).toString("base64"),
           rowCount: rows.length,
         };
       }

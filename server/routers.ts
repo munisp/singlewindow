@@ -99,10 +99,35 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
-    listUsers: protectedProcedure.query(async ({ ctx }) => {
-      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
-      return getAllUsers(200, 0);
-    }),
+    listUsers: protectedProcedure
+      .input(z.object({
+        limit: z.number().int().min(1).max(500).default(200),
+        offset: z.number().int().min(0).default(0),
+        search: z.string().optional(),
+        role: z.string().optional(),
+      }).optional())
+      .query(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+        const db = await (await import("./db")).getDb();
+        if (!db) return [];
+        const { users } = await import("../drizzle/schema");
+        const { desc, ilike, eq, and, or } = await import("drizzle-orm");
+        const conditions: any[] = [];
+        if (input?.search) {
+          conditions.push(or(
+            ilike(users.name, `%${input.search}%`),
+            ilike(users.email, `%${input.search}%`),
+          ));
+        }
+        if (input?.role && input.role !== "ALL") {
+          conditions.push(eq(users.role, input.role as any));
+        }
+        return db.select().from(users)
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .orderBy(desc(users.createdAt))
+          .limit(input?.limit ?? 200)
+          .offset(input?.offset ?? 0);
+      }),
     changeRole: protectedProcedure
       .input(z.object({
         userId: z.number().int().positive(),
@@ -125,6 +150,30 @@ export const appRouter = router({
           actorType: "admin",
           newState: { role: input.role },
         });
+        return result[0];
+      }),
+    userStats: protectedProcedure.query(async ({ ctx }) => {
+      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      const db = await (await import("./db")).getDb();
+      if (!db) return { total: 0, byRole: {} as Record<string, number> };
+      const { users } = await import("../drizzle/schema");
+      const { sql } = await import("drizzle-orm");
+      const rows = await db.select({ role: users.role, count: sql<number>`count(*)::int` }).from(users).groupBy(users.role);
+      const byRole: Record<string, number> = {};
+      let total = 0;
+      for (const r of rows) { byRole[r.role] = r.count; total += r.count; }
+      return { total, byRole };
+    }),
+    updateUserName: protectedProcedure
+      .input(z.object({ userId: z.number().int().positive(), name: z.string().min(1).max(255) }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const { users } = await import("../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+        const result = await db.update(users).set({ name: input.name, updatedAt: new Date() }).where(eq(users.id, input.userId)).returning();
+        if (!result[0]) throw new TRPCError({ code: "NOT_FOUND" });
         return result[0];
       }),
   }),
