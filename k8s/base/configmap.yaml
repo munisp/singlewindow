@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradegateway-config
+  namespace: tradegateway
+data:
+  VITE_APP_ID: "tradegateway-ngswtp"
+  OAUTH_SERVER_URL: "https://auth.manus.im"
+  VITE_OAUTH_PORTAL_URL: "https://auth.manus.im/login"
+  VITE_FRONTEND_FORGE_API_URL: "https://api.manus.im"
+  BUILT_IN_FORGE_API_URL: "https://api.manus.im"
+  TEMPORAL_HOST: "temporal-frontend.temporal.svc.cluster.local"
+  TEMPORAL_PORT: "7233"
+  TEMPORAL_NAMESPACE: "tradegateway"
+  DEMO_MODE: "false"
+  AWS_REGION: "us-east-1"
+  S3_BUCKET: "tradegateway"
+  OWNER_NAME: "TradeGateway Admin"

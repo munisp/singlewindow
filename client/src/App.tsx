@@ -1,3 +1,4 @@
+import { PageSkeleton as _PageSkeleton } from "@/components/LoadingIndicator";
 import { Toaster } from "@/components/ui/sonner";
 import DemoModeBanner from "@/components/DemoModeBanner";
 import MobileBottomNav from "@/components/MobileBottomNav";
@@ -97,12 +98,9 @@ const AuditLog = lazy(() => import('./pages/app/AuditLog'));
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 const SystemStatus = lazy(() => import('./pages/SystemStatus'));
 const DemoLogin = lazy(() => import('./pages/DemoLogin'));
+const NLFinancialQuery = lazy(() => import('./pages/app/NLFinancialQuery'));
 
-const LazyFallback = () => (
-  <div className="min-h-screen flex items-center justify-center text-muted-foreground">
-    Loading...
-  </div>
-);
+const LazyFallback = () => <_PageSkeleton />;
 
 function Router() {
   return (
@@ -171,6 +169,7 @@ function Router() {
 
       {/* OGA Portal */}
       <Route path="/app/oga" component={OGAPortal} />
+      <Route path="/app/nl-query">{() => <Suspense fallback={<LazyFallback />}><NLFinancialQuery /></Suspense>}</Route>
       <Route path="/app/oga/expiry-calendar" component={OGAExpiryCalendar} />
 
       {/* Admin Console */}

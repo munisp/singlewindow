@@ -155,6 +155,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Smart Tools",
         items: [
           { icon: Sparkles, label: "Trade Advisory Assistant", path: "/app/ai-assistant" },
+          { icon: Sparkles, label: "NL Financial Query", path: "/app/nl-query" },
           { icon: Network, label: "Entity Relationship Map", path: "/app/knowledge-graph" },
           { icon: GitFork, label: "Suspicious Activity Map", path: "/app/admin/fraud-network" },
         ],
@@ -233,6 +234,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Smart Tools",
         items: [
           { icon: Sparkles, label: "Trade Advisory Assistant", path: "/app/ai-assistant" },
+          { icon: Sparkles, label: "NL Financial Query", path: "/app/nl-query" },
           { icon: Network, label: "Entity Relationship Map", path: "/app/knowledge-graph" },
           { icon: GitFork, label: "Suspicious Activity Map", path: "/app/admin/fraud-network" },
         ],
@@ -265,6 +267,7 @@ function getNavGroups(role: string): NavGroup[] {
         label: "Smart Tools",
         items: [
           { icon: Sparkles, label: "Trade Advisory Assistant", path: "/app/ai-assistant" },
+          { icon: Sparkles, label: "NL Financial Query", path: "/app/nl-query" },
         ],
       },
       common,

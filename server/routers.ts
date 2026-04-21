@@ -29,6 +29,7 @@ import { officerWorkloadRouter } from "./routers/officerWorkload";
 import { userNotificationsRouter } from "./routers/userNotifications";
 import { slaEscalationRouter } from "./routers/slaEscalation";
 import { bulkExportRouter } from "./routers/bulkExport";
+import { nlQueryRouter } from "./routers/nlQuery";
 import { notificationPreferencesRouter } from "./routers/notificationPreferences";
 import { adminAnalyticsRouter } from "./routers/adminAnalytics";
 import { ledgerRouter } from "./routers/ledger";
@@ -201,6 +202,7 @@ export const appRouter = router({
   userNotifications: userNotificationsRouter,
   slaEscalation: slaEscalationRouter,
   bulkExport: bulkExportRouter,
+  nlQuery: nlQueryRouter,
   notificationPreferences: notificationPreferencesRouter,
   adminAnalytics: adminAnalyticsRouter,
   documentVault: documentVaultRouter,

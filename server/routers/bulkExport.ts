@@ -1,11 +1,12 @@
 /**
- * Bulk Declaration Export Router — Sprint 15
+ * Bulk Export Router — Sprint 15 + Sprint 97 (Transaction History CSV)
  *
- * Generates CSV exports of declarations with flexible filters.
- * Returns CSV as a base64-encoded string for the client to download.
+ * Generates CSV/JSON/XLSX exports of declarations, payments, audit logs,
+ * and Mojaloop transaction history.
+ * Returns content as a base64-encoded string for the client to download.
  *
- * Supported formats: CSV (default), JSON
- * Supported filters: status, riskLane, dateFrom, dateTo, traderId (admin only)
+ * Supported formats: CSV (default), JSON, XLSX
+ * Supported exports: declarations, payments, auditLog, transactionHistory
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
@@ -28,35 +29,37 @@ function rowsToCsv(headers: string[], rows: Record<string, unknown>[]): string {
   return [headerLine, ...dataLines].join("\r\n");
 }
 
+/** Trigger a browser download from a base64-encoded string (client-side helper) */
+export function downloadBase64(content: string, filename: string, mimeType: string) {
+  const bytes = atob(content);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const bulkExportRouter = router({
   // ── EXPORT DECLARATIONS ──────────────────────────────────────────────────────
-  // Returns a CSV/JSON/XLSX (base64) of declarations matching the given filters.
-  // Traders can only export their own declarations.
-  // Admins/officers can export all or filter by traderId.
   exportDeclarations: protectedProcedure
     .input(
       z.object({
         format: z.enum(["csv", "json", "xlsx"]).default("csv"),
         status: z
           .enum([
-            "all",
-            "draft",
-            "submitted",
-            "under_assessment",
-            "docs_required",
-            "payment_pending",
-            "payment_confirmed",
-            "under_examination",
-            "examination_complete",
-            "cleared",
-            "rejected",
-            "cancelled",
+            "all", "draft", "submitted", "under_assessment", "docs_required",
+            "payment_pending", "payment_confirmed", "under_examination",
+            "examination_complete", "cleared", "rejected", "cancelled",
           ])
           .default("all"),
         riskLane: z.enum(["all", "green", "yellow", "red", "blue"]).default("all"),
-        dateFrom: z.string().optional(), // ISO date string
-        dateTo: z.string().optional(),   // ISO date string
-        traderId: z.number().int().positive().optional(), // admin only
+        dateFrom: z.string().optional(),
+        dateTo: z.string().optional(),
+        traderId: z.number().int().positive().optional(),
         limit: z.number().int().min(1).max(5000).default(1000),
       })
     )
@@ -66,10 +69,7 @@ export const bulkExportRouter = router({
         ctx.user.role === "customs_officer" ||
         ctx.user.role === "finance";
 
-      // Traders can only export their own data
-      const effectiveTraderId = isOfficerOrAdmin
-        ? (input.traderId ?? null)
-        : ctx.user.id;
+      const effectiveTraderId = isOfficerOrAdmin ? (input.traderId ?? null) : ctx.user.id;
 
       if (input.traderId && !isOfficerOrAdmin) {
         throw new TRPCError({
@@ -80,29 +80,15 @@ export const bulkExportRouter = router({
 
       const { getDb } = await import("../db");
       const { declarations, users } = await import("../../drizzle/schema");
-      const { and, eq, inArray, gte, lte, isNotNull } = await import("drizzle-orm");
+      const { and, eq, gte, lte } = await import("drizzle-orm");
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      // Build where conditions
       const conditions: any[] = [];
-
-      if (effectiveTraderId) {
-        conditions.push(eq(declarations.traderId, effectiveTraderId));
-      }
-
-      if (input.status !== "all") {
-        conditions.push(eq(declarations.status, input.status as any));
-      }
-
-      if (input.riskLane !== "all") {
-        conditions.push(eq(declarations.riskLane, input.riskLane as any));
-      }
-
-      if (input.dateFrom) {
-        conditions.push(gte(declarations.submittedAt, new Date(input.dateFrom)));
-      }
-
+      if (effectiveTraderId) conditions.push(eq(declarations.traderId, effectiveTraderId));
+      if (input.status !== "all") conditions.push(eq(declarations.status, input.status as any));
+      if (input.riskLane !== "all") conditions.push(eq(declarations.riskLane, input.riskLane as any));
+      if (input.dateFrom) conditions.push(gte(declarations.submittedAt, new Date(input.dateFrom)));
       if (input.dateTo) {
         const dateTo = new Date(input.dateTo);
         dateTo.setHours(23, 59, 59, 999);
@@ -144,52 +130,12 @@ export const bulkExportRouter = router({
         .orderBy(declarations.createdAt)
         .limit(input.limit);
 
-      if (input.format === "json") {
-        const jsonStr = JSON.stringify(
-          rows.map((r) => ({
-            ...r,
-            submittedAt: r.submittedAt?.toISOString() ?? null,
-            clearedAt: r.clearedAt?.toISOString() ?? null,
-            createdAt: r.createdAt.toISOString(),
-          })),
-          null,
-          2
-        );
-        return {
-          format: "json" as const,
-          filename: `declarations-export-${new Date().toISOString().slice(0, 10)}.json`,
-          content: Buffer.from(jsonStr).toString("base64"),
-          rowCount: rows.length,
-        };
-      }
-
       const CSV_HEADERS = [
-        "id",
-        "declarationNumber",
-        "ucr",
-        "traderId",
-        "traderName",
-        "declarationType",
-        "status",
-        "riskLane",
-        "riskScore",
-        "hsCode",
-        "goodsDescription",
-        "countryOfOrigin",
-        "countryOfDestination",
-        "portOfEntry",
-        "grossWeight",
-        "netWeight",
-        "numberOfPackages",
-        "invoiceValue",
-        "invoiceCurrency",
-        "dutyAmount",
-        "vatAmount",
-        "levyAmount",
-        "totalDue",
-        "submittedAt",
-        "clearedAt",
-        "createdAt",
+        "id", "declarationNumber", "ucr", "traderId", "traderName", "declarationType",
+        "status", "riskLane", "riskScore", "hsCode", "goodsDescription", "countryOfOrigin",
+        "countryOfDestination", "portOfEntry", "grossWeight", "netWeight", "numberOfPackages",
+        "invoiceValue", "invoiceCurrency", "dutyAmount", "vatAmount", "levyAmount", "totalDue",
+        "submittedAt", "clearedAt", "createdAt",
       ];
 
       const normalizedRows = rows.map((r) => ({
@@ -199,7 +145,15 @@ export const bulkExportRouter = router({
         createdAt: r.createdAt.toISOString(),
       }));
 
-      // ── XLSX export (exceljs — no CVEs) ────────────────────────────────────
+      if (input.format === "json") {
+        return {
+          format: "json" as const,
+          filename: `declarations-export-${new Date().toISOString().slice(0, 10)}.json`,
+          content: Buffer.from(JSON.stringify(normalizedRows, null, 2)).toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
       if (input.format === "xlsx") {
         const ExcelJS = await import("exceljs");
         const wb = new ExcelJS.Workbook();
@@ -210,9 +164,7 @@ export const bulkExportRouter = router({
         const headerRow = ws.getRow(1);
         headerRow.font = { bold: true, color: { argb: "FFD4A017" } };
         headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0A1628" } };
-        normalizedRows.forEach((r) => {
-          ws.addRow(CSV_HEADERS.map((h) => (r as any)[h] ?? ""));
-        });
+        normalizedRows.forEach((r) => ws.addRow(CSV_HEADERS.map((h) => (r as any)[h] ?? "")));
         const xlsxBuffer = await wb.xlsx.writeBuffer();
         return {
           format: "xlsx" as const,
@@ -222,9 +174,7 @@ export const bulkExportRouter = router({
         };
       }
 
-      // ── CSV export ───────────────────────────────────────────────────────────
       const csv = rowsToCsv(CSV_HEADERS, normalizedRows as any);
-
       return {
         format: "csv" as const,
         filename: `declarations-export-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -233,11 +183,279 @@ export const bulkExportRouter = router({
       };
     }),
 
+  // ── EXPORT PAYMENTS / TRANSACTION HISTORY ────────────────────────────────────
+  exportPayments: protectedProcedure
+    .input(
+      z.object({
+        format: z.enum(["csv", "json", "xlsx"]).default("csv"),
+        status: z.enum(["all", "pending", "confirmed", "failed", "refunded"]).default("all"),
+        dateFrom: z.string().optional(),
+        dateTo: z.string().optional(),
+        traderId: z.number().int().positive().optional(),
+        limit: z.number().int().min(1).max(5000).default(1000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ctx.user.role === "admin" || ctx.user.role === "finance";
+      const effectiveTraderId = isAdmin ? (input.traderId ?? null) : ctx.user.id;
+
+      if (input.traderId && !isAdmin) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Insufficient permissions" });
+      }
+
+      const { getDb } = await import("../db");
+      const { payments, declarations, users } = await import("../../drizzle/schema");
+      const { and, eq, gte, lte } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const conditions: any[] = [];
+      if (effectiveTraderId) conditions.push(eq(payments.traderId, effectiveTraderId));
+      if (input.status !== "all") conditions.push(eq(payments.status, input.status as any));
+      if (input.dateFrom) conditions.push(gte(payments.createdAt, new Date(input.dateFrom)));
+      if (input.dateTo) {
+        const dt = new Date(input.dateTo);
+        dt.setHours(23, 59, 59, 999);
+        conditions.push(lte(payments.createdAt, dt));
+      }
+
+      const rows = await db
+        .select({
+          id: payments.id,
+          declarationId: payments.declarationId,
+          declarationNumber: declarations.declarationNumber,
+          traderId: payments.traderId,
+          traderName: users.name,
+          amount: payments.amount,
+          currency: payments.currency,
+          paymentMethod: payments.paymentMethod,
+          status: payments.status,
+          reference: payments.reference,
+          mojalooopTransferId: payments.mojalooopTransferId,
+          confirmedAt: payments.confirmedAt,
+          failureReason: payments.failureReason,
+          createdAt: payments.createdAt,
+        })
+        .from(payments)
+        .leftJoin(declarations, eq(payments.declarationId, declarations.id))
+        .leftJoin(users, eq(payments.traderId, users.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(payments.createdAt)
+        .limit(input.limit);
+
+      const CSV_HEADERS = [
+        "id", "declarationId", "declarationNumber", "traderId", "traderName",
+        "amount", "currency", "paymentMethod", "status", "reference",
+        "mojalooopTransferId", "confirmedAt", "failureReason", "createdAt",
+      ];
+
+      const normalized = rows.map((r) => ({
+        ...r,
+        confirmedAt: r.confirmedAt?.toISOString() ?? "",
+        createdAt: r.createdAt.toISOString(),
+      }));
+
+      if (input.format === "json") {
+        return {
+          format: "json" as const,
+          filename: `payments-export-${new Date().toISOString().slice(0, 10)}.json`,
+          content: Buffer.from(JSON.stringify(normalized, null, 2)).toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
+      if (input.format === "xlsx") {
+        const ExcelJS = await import("exceljs");
+        const wb = new ExcelJS.Workbook();
+        wb.creator = "TradeGateway NGSWTP";
+        const ws = wb.addWorksheet("Payments");
+        ws.columns = CSV_HEADERS.map((h) => ({ header: h, key: h, width: 18 }));
+        ws.getRow(1).font = { bold: true };
+        normalized.forEach((r) => ws.addRow(CSV_HEADERS.map((h) => (r as any)[h] ?? "")));
+        const buf = await wb.xlsx.writeBuffer();
+        return {
+          format: "xlsx" as const,
+          filename: `payments-export-${new Date().toISOString().slice(0, 10)}.xlsx`,
+          content: Buffer.from(buf).toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
+      const csv = rowsToCsv(CSV_HEADERS, normalized as any);
+      return {
+        format: "csv" as const,
+        filename: `payments-export-${new Date().toISOString().slice(0, 10)}.csv`,
+        content: Buffer.from(csv).toString("base64"),
+        rowCount: rows.length,
+      };
+    }),
+
+  // ── EXPORT MOJALOOP TRANSACTION HISTORY ──────────────────────────────────────
+  exportTransactionHistory: protectedProcedure
+    .input(
+      z.object({
+        format: z.enum(["csv", "json", "xlsx"]).default("csv"),
+        status: z.enum(["all", "PENDING", "COMPLETED", "FAILED", "EXPIRED", "CANCELLED"]).default("all"),
+        dateFrom: z.string().optional(),
+        dateTo: z.string().optional(),
+        fspId: z.string().optional(),
+        limit: z.number().int().min(1).max(5000).default(1000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ctx.user.role === "admin" || ctx.user.role === "finance";
+
+      const { getDb } = await import("../db");
+      const { mojaloopTransactions } = await import("../../drizzle/schema");
+      const { and, eq, gte, lte } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const conditions: any[] = [];
+      if (!isAdmin) conditions.push(eq(mojaloopTransactions.initiatedBy, ctx.user.id));
+      if (input.status !== "all") conditions.push(eq(mojaloopTransactions.status, input.status as any));
+      if (input.fspId) conditions.push(eq(mojaloopTransactions.fspId, input.fspId));
+      if (input.dateFrom) conditions.push(gte(mojaloopTransactions.createdAt, new Date(input.dateFrom)));
+      if (input.dateTo) {
+        const dt = new Date(input.dateTo);
+        dt.setHours(23, 59, 59, 999);
+        conditions.push(lte(mojaloopTransactions.createdAt, dt));
+      }
+
+      const rows = await db
+        .select()
+        .from(mojaloopTransactions)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(mojaloopTransactions.createdAt)
+        .limit(input.limit);
+
+      const CSV_HEADERS = [
+        "id", "transferId", "declarationId", "initiatedBy", "fspId", "fspName", "fspType",
+        "payerAccount", "payerName", "amount", "currency", "status",
+        "paymentNote", "expiresAt", "committedAt", "createdAt",
+      ];
+
+      const normalized = rows.map((r) => ({
+        ...r,
+        expiresAt: r.expiresAt?.toISOString() ?? "",
+        committedAt: r.committedAt?.toISOString() ?? "",
+        createdAt: r.createdAt.toISOString(),
+        ilpPacket: undefined,
+        condition: undefined,
+        fulfillment: undefined,
+      }));
+
+      if (input.format === "json") {
+        return {
+          format: "json" as const,
+          filename: `transactions-${new Date().toISOString().slice(0, 10)}.json`,
+          content: Buffer.from(JSON.stringify(normalized, null, 2)).toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
+      if (input.format === "xlsx") {
+        const ExcelJS = await import("exceljs");
+        const wb = new ExcelJS.Workbook();
+        wb.creator = "TradeGateway NGSWTP";
+        const ws = wb.addWorksheet("Transactions");
+        ws.columns = CSV_HEADERS.map((h) => ({ header: h, key: h, width: 20 }));
+        ws.getRow(1).font = { bold: true };
+        normalized.forEach((r) => ws.addRow(CSV_HEADERS.map((h) => (r as any)[h] ?? "")));
+        const buf = await wb.xlsx.writeBuffer();
+        return {
+          format: "xlsx" as const,
+          filename: `transactions-${new Date().toISOString().slice(0, 10)}.xlsx`,
+          content: Buffer.from(buf).toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
+      const csv = rowsToCsv(CSV_HEADERS, normalized as any);
+      return {
+        format: "csv" as const,
+        filename: `transactions-${new Date().toISOString().slice(0, 10)}.csv`,
+        content: Buffer.from(csv).toString("base64"),
+        rowCount: rows.length,
+      };
+    }),
+
+  // ── EXPORT AUDIT LOG ─────────────────────────────────────────────────────────
+  exportAuditLog: protectedProcedure
+    .input(
+      z.object({
+        format: z.enum(["csv", "json"]).default("csv"),
+        entityType: z.string().optional(),
+        actorId: z.number().int().positive().optional(),
+        dateFrom: z.string().optional(),
+        dateTo: z.string().optional(),
+        limit: z.number().int().min(1).max(10000).default(2000),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ctx.user.role === "admin";
+      if (!isAdmin) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only admins can export audit logs" });
+      }
+
+      const { getDb } = await import("../db");
+      const { auditEvents } = await import("../../drizzle/schema");
+      const { and, eq, gte, lte } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const conditions: any[] = [];
+      if (input.entityType) conditions.push(eq(auditEvents.entityType, input.entityType as any));
+      if (input.actorId) conditions.push(eq(auditEvents.actorId, input.actorId));
+      if (input.dateFrom) conditions.push(gte(auditEvents.createdAt, new Date(input.dateFrom)));
+      if (input.dateTo) {
+        const dt = new Date(input.dateTo);
+        dt.setHours(23, 59, 59, 999);
+        conditions.push(lte(auditEvents.createdAt, dt));
+      }
+
+      const rows = await db
+        .select({
+          id: auditEvents.id,
+          entityType: auditEvents.entityType,
+          entityId: auditEvents.entityId,
+          action: auditEvents.action,
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          ipAddress: auditEvents.ipAddress,
+          createdAt: auditEvents.createdAt,
+        })
+        .from(auditEvents)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(auditEvents.createdAt)
+        .limit(input.limit);
+
+      const CSV_HEADERS = ["id", "entityType", "entityId", "action", "actorId", "actorType", "ipAddress", "createdAt"];
+      const normalized = rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+
+      if (input.format === "json") {
+        return {
+          format: "json" as const,
+          filename: `audit-log-${new Date().toISOString().slice(0, 10)}.json`,
+          content: Buffer.from(JSON.stringify(normalized, null, 2)).toString("base64"),
+          rowCount: rows.length,
+        };
+      }
+
+      const csv = rowsToCsv(CSV_HEADERS, normalized as any);
+      return {
+        format: "csv" as const,
+        filename: `audit-log-${new Date().toISOString().slice(0, 10)}.csv`,
+        content: Buffer.from(csv).toString("base64"),
+        rowCount: rows.length,
+      };
+    }),
+
   // ── EXPORT PREVIEW ───────────────────────────────────────────────────────────
-  // Returns a count of how many rows would be exported with the given filters.
   previewCount: protectedProcedure
     .input(
       z.object({
+        exportType: z.enum(["declarations", "payments", "transactions", "auditLog"]).default("declarations"),
         status: z.string().default("all"),
         riskLane: z.string().default("all"),
         dateFrom: z.string().optional(),
@@ -247,49 +465,66 @@ export const bulkExportRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const isOfficerOrAdmin =
-        ctx.user.role === "admin" ||
-        ctx.user.role === "customs_officer" ||
-        ctx.user.role === "finance";
-
-      const effectiveTraderId = isOfficerOrAdmin
-        ? (input.traderId ?? null)
-        : ctx.user.id;
+        ctx.user.role === "admin" || ctx.user.role === "customs_officer" || ctx.user.role === "finance";
+      const effectiveTraderId = isOfficerOrAdmin ? (input.traderId ?? null) : ctx.user.id;
 
       const { getDb } = await import("../db");
-      const { declarations } = await import("../../drizzle/schema");
+      const { declarations, payments, mojaloopTransactions, auditEvents } = await import("../../drizzle/schema");
       const { and, eq, gte, lte, count: countFn } = await import("drizzle-orm");
       const db = await getDb();
       if (!db) return { count: 0 };
 
       const conditions: any[] = [];
-      if (effectiveTraderId) conditions.push(eq(declarations.traderId, effectiveTraderId));
-      if (input.status !== "all") conditions.push(eq(declarations.status, input.status as any));
-      if (input.riskLane !== "all") conditions.push(eq(declarations.riskLane, input.riskLane as any));
-      if (input.dateFrom) conditions.push(gte(declarations.submittedAt, new Date(input.dateFrom)));
-      if (input.dateTo) {
-        const dateTo = new Date(input.dateTo);
-        dateTo.setHours(23, 59, 59, 999);
-        conditions.push(lte(declarations.submittedAt, dateTo));
+      let table: any = declarations;
+
+      if (input.exportType === "declarations") {
+        table = declarations;
+        if (effectiveTraderId) conditions.push(eq(declarations.traderId, effectiveTraderId));
+        if (input.status !== "all") conditions.push(eq(declarations.status, input.status as any));
+        if (input.riskLane !== "all") conditions.push(eq(declarations.riskLane, input.riskLane as any));
+        if (input.dateFrom) conditions.push(gte(declarations.submittedAt, new Date(input.dateFrom)));
+        if (input.dateTo) {
+          const dt = new Date(input.dateTo); dt.setHours(23, 59, 59, 999);
+          conditions.push(lte(declarations.submittedAt, dt));
+        }
+      } else if (input.exportType === "payments") {
+        table = payments;
+        if (effectiveTraderId) conditions.push(eq(payments.traderId, effectiveTraderId));
+        if (input.status !== "all") conditions.push(eq(payments.status, input.status as any));
+        if (input.dateFrom) conditions.push(gte(payments.createdAt, new Date(input.dateFrom)));
+        if (input.dateTo) {
+          const dt = new Date(input.dateTo); dt.setHours(23, 59, 59, 999);
+          conditions.push(lte(payments.createdAt, dt));
+        }
+      } else if (input.exportType === "transactions") {
+        table = mojaloopTransactions;
+        if (!isOfficerOrAdmin) conditions.push(eq(mojaloopTransactions.initiatedBy, ctx.user.id));
+        if (input.status !== "all") conditions.push(eq(mojaloopTransactions.status, input.status as any));
+        if (input.dateFrom) conditions.push(gte(mojaloopTransactions.createdAt, new Date(input.dateFrom)));
+        if (input.dateTo) {
+          const dt = new Date(input.dateTo); dt.setHours(23, 59, 59, 999);
+          conditions.push(lte(mojaloopTransactions.createdAt, dt));
+        }
+      } else {
+        table = auditEvents;
+        if (input.dateFrom) conditions.push(gte(auditEvents.createdAt, new Date(input.dateFrom)));
+        if (input.dateTo) {
+          const dt = new Date(input.dateTo); dt.setHours(23, 59, 59, 999);
+          conditions.push(lte(auditEvents.createdAt, dt));
+        }
       }
 
       const [result] = await db
         .select({ count: countFn() })
-        .from(declarations)
+        .from(table)
         .where(conditions.length > 0 ? and(...conditions) : undefined);
 
       return { count: Number(result?.count ?? 0) };
     }),
 
-  // ── BULK IMPORT ───────────────────────────────────────────────────────────────────────
-  // Accepts a CSV payload (as a string) and batch-inserts declarations as drafts.
-  // Required CSV columns: hsCode, goodsDescription, portOfEntry, countryOfOrigin,
-  //   importerName, exporterName, totalValue, currency, totalWeight, numberOfPackages
+  // ── BULK IMPORT ───────────────────────────────────────────────────────────────
   importDeclarations: protectedProcedure
-    .input(
-      z.object({
-        csvContent: z.string().min(1).max(5_000_000), // 5 MB limit
-      })
-    )
+    .input(z.object({ csvContent: z.string().min(1).max(5_000_000) }))
     .mutation(async ({ ctx, input }) => {
       const { getDb } = await import("../db");
       const { declarations } = await import("../../drizzle/schema");
@@ -301,8 +536,6 @@ export const bulkExportRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "CSV must have a header row and at least one data row" });
       }
 
-      // Required CSV columns map to schema column names:
-      // invoiceValue, invoiceCurrency, grossWeight = totalWeight in CSV
       const REQUIRED_COLS = ["hsCode", "goodsDescription", "portOfEntry", "countryOfOrigin", "invoiceValue", "invoiceCurrency", "grossWeight", "numberOfPackages"];
       const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
       const missingCols = REQUIRED_COLS.filter((c) => !headers.includes(c));
@@ -339,6 +572,7 @@ export const bulkExportRouter = router({
           const declarationNumber = `BULK-${Date.now()}-${suffix}`;
           const netWeightRaw = headers.includes("netWeight") ? cells[colIdx("netWeight")] : null;
           const countryOfDestRaw = headers.includes("countryOfDestination") ? cells[colIdx("countryOfDestination")] : null;
+
           await db.insert(declarations).values({
             declarationNumber,
             traderId: ctx.user.id,

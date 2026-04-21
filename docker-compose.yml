@@ -1,0 +1,274 @@
+# ─── TradeGateway™ NGSWTP — Docker Compose (Full Stack) ─────────────────────
+# Starts the complete platform including all backing services.
+#
+# Usage:
+#   Development:  docker compose up
+#   Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+#   Services only: docker compose up postgres redis
+#
+# Default credentials (override via .env file in production):
+#   PostgreSQL: tradegateway / tradegateway_secure_2026 / db: tradegateway
+#   Redis:      password: tradegateway_redis_2026
+#   Temporal:   no auth (dev mode)
+#
+version: "3.9"
+
+# ─── Shared networks ─────────────────────────────────────────────────────────
+networks:
+  tradegateway-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ─── Persistent volumes ──────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+  temporal_data:
+  prometheus_data:
+  grafana_data:
+  opensearch_data:
+
+# ─── Services ────────────────────────────────────────────────────────────────
+services:
+
+  # ── PostgreSQL 16 ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tradegateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradegateway_secure_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-tradegateway}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/db-startup.sh:/docker-entrypoint-initdb.d/00-startup.sh:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradegateway} -d ${POSTGRES_DB:-tradegateway}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Redis 7 ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tg-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-tradegateway_redis_2026}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-tradegateway_redis_2026}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── TradeGateway Application ─────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: tg-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:-tradegateway_jwt_secret_change_in_production_min_32_chars}
+      VITE_APP_ID: ${VITE_APP_ID:-tradegateway-ngswtp}
+      OAUTH_SERVER_URL: ${OAUTH_SERVER_URL:-https://auth.manus.im}
+      VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-https://auth.manus.im/login}
+      OWNER_OPEN_ID: ${OWNER_OPEN_ID:-owner}
+      OWNER_NAME: ${OWNER_NAME:-TradeGateway Admin}
+      BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-https://api.manus.im}
+      BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
+      VITE_FRONTEND_FORGE_API_KEY: ${VITE_FRONTEND_FORGE_API_KEY:-}
+      VITE_FRONTEND_FORGE_API_URL: ${VITE_FRONTEND_FORGE_API_URL:-https://api.manus.im}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-tradegateway}
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-temporal}
+      TEMPORAL_PORT: ${TEMPORAL_PORT:-7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-tradegateway}
+      DEMO_MODE: ${DEMO_MODE:-false}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health/live', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── MinIO (S3-compatible object storage) ────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: tg-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    volumes:
+      - ./data/minio:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── MinIO bucket initializer ─────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: tg-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin};
+      mc mb --ignore-existing myminio/${S3_BUCKET:-tradegateway};
+      mc anonymous set public myminio/${S3_BUCKET:-tradegateway};
+      echo 'MinIO bucket initialized';
+      "
+    networks:
+      - tradegateway-net
+
+  # ── Temporal (Workflow Engine) ───────────────────────────────────────────────
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: tg-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-tradegateway}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-tradegateway_secure_2026}
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/config/dynamicconfig.yaml
+    volumes:
+      - temporal_data:/etc/temporal/config
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    networks:
+      - tradegateway-net
+
+  # ── Prometheus ───────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: tg-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    networks:
+      - tradegateway-net
+
+  # ── Grafana ──────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: tg-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-tradegateway_grafana_2026}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - tradegateway-net
+
+  # ── OpenSearch (Log Analytics) ───────────────────────────────────────────────
+  opensearch:
+    image: opensearchproject/opensearch:2
+    container_name: tg-opensearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD:-TradeGateway@2026!}
+      DISABLE_SECURITY_PLUGIN: "false"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    networks:
+      - tradegateway-net
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sk -u admin:${OPENSEARCH_PASSWORD:-TradeGateway@2026!} https://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: tg-nginx
+    restart: unless-stopped
+    depends_on:
+      - app
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - tradegateway-net

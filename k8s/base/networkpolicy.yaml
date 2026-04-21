@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tradegateway-netpol
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: tradegateway-app
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432   # PostgreSQL
+        - protocol: TCP
+          port: 6379   # Redis
+        - protocol: TCP
+          port: 7233   # Temporal
+        - protocol: TCP
+          port: 443    # HTTPS external APIs
+        - protocol: TCP
+          port: 53     # DNS
+        - protocol: UDP
+          port: 53     # DNS
