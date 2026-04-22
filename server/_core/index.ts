@@ -22,6 +22,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import cors from "cors";
 import { sanitizeMiddleware } from "./sanitize";
+import compression from "compression";
 import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 
@@ -951,6 +952,17 @@ async function startServer() {
     frameguard: { action: 'deny' },
     noSniff: true,
     xssFilter: true,
+  }));
+  // ── Response compression (gzip/deflate) ──────────────────────────────────────
+  // Compresses all responses > 1KB. Skips already-compressed content types.
+  app.use(compression({
+    level: 6, // balanced speed vs. ratio
+    threshold: 1024, // only compress responses > 1 KB
+    filter: (req, res) => {
+      // Don't compress SSE streams or metrics
+      if (req.path === '/metrics' || req.headers['accept'] === 'text/event-stream') return false;
+      return compression.filter(req, res);
+    },
   }));
   // ── Input sanitization (XSS prevention) ─────────────────────────────────────
   app.use(sanitizeMiddleware);

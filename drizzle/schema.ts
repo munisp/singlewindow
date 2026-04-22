@@ -239,7 +239,14 @@ export const payments = pgTable("payments", {
   failureReason: text("failure_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (t) => [index("idx_pay_declaration_id").on(t.declarationId)]);
+}, (t) => [
+  index("idx_pay_declaration_id").on(t.declarationId),
+  index("idx_pay_trader_id").on(t.traderId),
+  index("idx_pay_status").on(t.status),
+  index("idx_pay_created_at").on(t.createdAt),
+  index("idx_pay_status_created_at").on(t.status, t.createdAt),
+  index("idx_pay_trader_status").on(t.traderId, t.status),
+]);
 
 // ─── AUDIT EVENTS ────────────────────────────────────────────────────────────
 
@@ -256,7 +263,12 @@ export const auditEvents = pgTable("audit_events", {
   userAgent: text("user_agent"),
   metadata: json("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("idx_ae_entity").on(t.entityType, t.entityId)]);
+}, (t) => [
+  index("idx_ae_entity").on(t.entityType, t.entityId),
+  index("idx_ae_actor_id").on(t.actorId),
+  index("idx_ae_created_at").on(t.createdAt),
+  index("idx_ae_entity_created_at").on(t.entityType, t.entityId, t.createdAt),
+]);
 
 // ─── SECURITY ALERTS ─────────────────────────────────────────────────────────
 

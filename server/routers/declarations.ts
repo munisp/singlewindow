@@ -14,6 +14,7 @@ import { assertCan, setOwner } from "../_core/permify";
 import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } from "../_core/wsServer";
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
+import { cacheWrap, cacheDel, cacheKey, TTL } from "../_core/cache";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -553,7 +554,8 @@ export const declarationsRouter = router({
   stats: protectedProcedure.query(async ({ ctx }) => {
     const officerRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
     if (officerRoles.includes(ctx.user.role)) {
-      return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
+      const ck = cacheKey("decl", "stats", "admin");
+      return cacheWrap(ck, TTL.SHORT, () => withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
         const { count, eq } = await import("drizzle-orm");
         const { declarations: decl } = await import("../../drizzle/schema");
         const [total, cleared, pending, rejected, redLane, yellowLane, greenLane] = await Promise.all([
@@ -578,7 +580,7 @@ export const declarationsRouter = router({
           yellow: yellowLane[0]?.count ?? 0,
           green: greenLane[0]?.count ?? 0,
         };
-      });
+      }));
     }
     // Trader: return their own stats
     return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {

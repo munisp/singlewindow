@@ -58,11 +58,22 @@ export function sanitizeMiddleware(req: Request, _res: Response, next: NextFunct
   if (req.body && typeof req.body === "object") {
     req.body = sanitizeObject(req.body);
   }
+  // Express 5: req.query is a getter-only property — use Object.assign to mutate in-place
   if (req.query && typeof req.query === "object") {
-    req.query = sanitizeObject(req.query) as typeof req.query;
+    try {
+      const sanitized = sanitizeObject({ ...req.query });
+      Object.assign(req.query, sanitized);
+    } catch {
+      // Non-fatal: query sanitization failure should not block the request
+    }
   }
   if (req.params && typeof req.params === "object") {
-    req.params = sanitizeObject(req.params) as typeof req.params;
+    try {
+      const sanitized = sanitizeObject({ ...req.params });
+      Object.assign(req.params, sanitized);
+    } catch {
+      // Non-fatal
+    }
   }
   next();
 }

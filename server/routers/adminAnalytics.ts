@@ -9,6 +9,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { declarations, payments } from "../../drizzle/schema";
 import { sql, gte, and, isNotNull } from "drizzle-orm";
+import { cacheWrap, cacheKey, TTL } from "../_core/cache";
 
 const adminOnly = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
@@ -143,7 +144,7 @@ export const adminAnalyticsRouter = router({
   kpiSummary: adminOnly.query(async () => {
     const db = await getDb();
     if (!db) return { totalDeclarations: 0, totalRevenue: 0, avgClearanceHours: null, clearanceRate: 0 };
-
+    return cacheWrap(cacheKey("admin", "kpi"), TTL.SHORT, async () => {
     const [declStats] = await db
       .select({
         total: sql<number>`COUNT(*)::int`.as("total"),
@@ -170,5 +171,6 @@ export const adminAnalyticsRouter = router({
       avgClearanceHours: declStats?.avgHours != null ? Number(Number(declStats.avgHours).toFixed(1)) : null,
       clearanceRate: total > 0 ? Math.round((cleared / total) * 100) : 0,
     };
+    });
   }),
 });
