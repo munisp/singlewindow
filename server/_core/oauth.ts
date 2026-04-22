@@ -9,6 +9,26 @@ function getQueryParam(req: Request, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * Parse the OAuth state parameter to extract the post-login redirect path.
+ * State is base64-encoded JSON: { origin: string, returnPath: string }
+ * Falls back to "/" if state is malformed or returnPath is unsafe (open-redirect prevention).
+ */
+function parseReturnPath(state: string): string {
+  try {
+    const decoded = Buffer.from(state, "base64").toString("utf8");
+    const parsed = JSON.parse(decoded);
+    const returnPath = parsed?.returnPath;
+    // Security: only allow relative paths (no open redirect to external URLs)
+    if (typeof returnPath === "string" && returnPath.startsWith("/") && !returnPath.startsWith("//")) {
+      return returnPath;
+    }
+  } catch {
+    // Malformed state — fall back to home
+  }
+  return "/";
+}
+
 export function registerOAuthRoutes(app: Express) {
   app.get("/api/oauth/callback", async (req: Request, res: Response) => {
     const code = getQueryParam(req, "code");
@@ -44,7 +64,9 @@ export function registerOAuthRoutes(app: Express) {
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
-      res.redirect(302, "/");
+      // Redirect to the returnPath encoded in state (validated to be relative-only)
+      const returnPath = parseReturnPath(state);
+      res.redirect(302, returnPath);
     } catch (error) {
       console.error("[OAuth] Callback failed", error);
       res.status(500).json({ error: "OAuth callback failed" });

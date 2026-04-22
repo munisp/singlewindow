@@ -101,6 +101,14 @@ const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 const SystemStatus = lazy(() => import('./pages/SystemStatus'));
 const DemoLogin = lazy(() => import('./pages/DemoLogin'));
 const NLFinancialQuery = lazy(() => import('./pages/app/NLFinancialQuery'));
+// v31 — New production pages
+const Payments = lazy(() => import('./pages/app/Payments'));
+const AEOApplications = lazy(() => import('./pages/app/AEOApplications'));
+const BulkExport = lazy(() => import('./pages/app/BulkExport'));
+const WebhookLogs = lazy(() => import('./pages/app/WebhookLogs'));
+const SecurityAlerts = lazy(() => import('./pages/app/SecurityAlerts'));
+const TenantManagement = lazy(() => import('./pages/app/TenantManagement'));
+const OnboardingProgress = lazy(() => import('./pages/app/OnboardingProgress'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -434,6 +442,31 @@ function Router() {
       {/* Production Readiness Checklist */}
       <Route path="/app/admin/production-checklist">
         <Suspense fallback={<LazyFallback />}><AdminProductionChecklist /></Suspense>
+      </Route>
+      {/* v31 — New production pages */}
+      <Route path="/app/payments">
+        <Suspense fallback={<LazyFallback />}><Payments /></Suspense>
+      </Route>
+      <Route path="/app/trader/payments-new">
+        <Suspense fallback={<LazyFallback />}><Payments /></Suspense>
+      </Route>
+      <Route path="/app/aeo/applications">
+        <Suspense fallback={<LazyFallback />}><AEOApplications /></Suspense>
+      </Route>
+      <Route path="/app/admin/bulk-export">
+        <Suspense fallback={<LazyFallback />}><BulkExport /></Suspense>
+      </Route>
+      <Route path="/app/developer/webhooks">
+        <Suspense fallback={<LazyFallback />}><WebhookLogs /></Suspense>
+      </Route>
+      <Route path="/app/security/alerts">
+        <Suspense fallback={<LazyFallback />}><SecurityAlerts /></Suspense>
+      </Route>
+      <Route path="/app/admin/tenants-mgmt">
+        <Suspense fallback={<LazyFallback />}><TenantManagement /></Suspense>
+      </Route>
+      <Route path="/app/onboarding/progress">
+        <Suspense fallback={<LazyFallback />}><OnboardingProgress /></Suspense>
       </Route>
       {/* 404 */}
       <Route path="/404" component={NotFound} />

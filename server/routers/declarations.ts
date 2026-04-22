@@ -14,6 +14,7 @@ import { assertCan, setOwner } from "../_core/permify";
 import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } from "../_core/wsServer";
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
+import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -129,6 +130,11 @@ export const declarationsRouter = router({
       invoiceCurrency: z.string().length(3).default("USD"),
     }))
     .mutation(async ({ ctx, input }) => {
+      // Business Rule: Validate HS code format (WCO Harmonised System)
+      const hsValidation = validateHsCode(input.hsCode, (input.countryOfOrigin as any) ?? "default");
+      if (!hsValidation.valid) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: hsValidation.error ?? "Invalid HS code" });
+      }
       const profile = await getProfileByUserId(ctx.user.id);
       if (!profile || profile.status !== "approved") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Your trader profile must be approved before submitting declarations." });
@@ -428,6 +434,13 @@ export const declarationsRouter = router({
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       const decl = await getDeclarationById(input.id);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // Business Rule: Enforce declaration state machine (WCO RKC Standard 6.1)
+      assertValidTransition(
+        (decl.status ?? "draft") as DeclarationStatus,
+        input.status as DeclarationStatus,
+        ctx.user.role
+      );
 
       // Permify: assert officer can assess this declaration
       const permifyAction = input.status === "cleared" ? "release" :

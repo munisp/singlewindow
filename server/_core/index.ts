@@ -967,7 +967,18 @@ async function startServer() {
   // Deep health check endpoints (/api/health, /api/health/live, /api/health/ready)
   registerHealthRoutes(app);
   // Prometheus metrics endpoint — scraped by Prometheus every 15 s
-  app.get("/metrics", async (_req, res) => {
+  // SECURITY: Restricted to internal network (loopback/RFC-1918) or bearer token auth
+  app.get("/metrics", async (req, res) => {
+    const clientIp = (req.headers['x-forwarded-for'] as string || req.ip || req.socket.remoteAddress || '').split(',')[0].trim();
+    const isInternal = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(clientIp)
+      || clientIp.startsWith('10.') || clientIp.startsWith('172.16.') || clientIp.startsWith('192.168.');
+    const metricsToken = process.env.METRICS_BEARER_TOKEN || '';
+    const authHeader = req.headers.authorization || '';
+    const hasValidToken = metricsToken.length > 0 && authHeader === `Bearer ${metricsToken}`;
+    if (!isInternal && !hasValidToken) {
+      res.status(403).json({ error: 'Metrics endpoint restricted to internal network. Provide Bearer token for external access.' });
+      return;
+    }
     try {
       res.set("Content-Type", metricsRegistry.contentType);
       res.end(await metricsRegistry.metrics());
