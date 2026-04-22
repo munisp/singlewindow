@@ -4,7 +4,6 @@ import { getDb } from "../db";
 import { declarations, payments, users, aeoApplications, sanctionsChecks } from "../../drizzle/schema";
 import { eq, desc, gte, count, sql, and } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { cacheWrap, cacheKey, TTL } from "../_core/cache";
 
 // Allowed roles for the executive dashboard
 const EXEC_ROLES = ["admin", "finance"] as const;
@@ -135,47 +134,46 @@ export const executiveDashboardRouter = router({
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-      return cacheWrap(cacheKey("exec", "kpi"), TTL.SHORT, async () => {
-        const thisMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-        const [totalDecls] = await db.select({ count: count() }).from(declarations);
-        const [clearedDecls] = await db
-          .select({ count: count() })
-          .from(declarations)
-          .where(eq(declarations.status, "cleared"));
-        const [registeredTraders] = await db
-          .select({ count: count() })
-          .from(users)
-          .where(eq(users.role, "user"));
-        const [aeoCount] = await db
-          .select({ count: count() })
-          .from(aeoApplications)
-          .where(eq(aeoApplications.status, "approved"));
-        const [sanctionsHits] = await db
-          .select({ count: count() })
-          .from(sanctionsChecks)
-          .where(eq(sanctionsChecks.checkResult, "confirmed_match"));
-        const [monthRevenue] = await db
-          .select({ total: sql<string>`COALESCE(SUM(CAST(amount AS NUMERIC)), 0)` })
-          .from(payments)
-          .where(and(gte(payments.createdAt, thisMonth), eq(payments.status, "confirmed")));
+      const thisMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
-        const td = Number(totalDecls?.count ?? 0);
-        const cd = Number(clearedDecls?.count ?? 0);
-        const rt = Number(registeredTraders?.count ?? 0);
-        const ae = Number(aeoCount?.count ?? 0);
-        const sh = Number(sanctionsHits?.count ?? 0);
-        const mr = parseFloat(monthRevenue?.total ?? "0");
-        return {
-          totalDeclarations: td,
-          clearedDeclarations: cd,
-          clearanceRate: td > 0 ? Math.round((cd / td) * 1000) / 10 : 0,
-          registeredTraders: rt,
-          aeoOperators: ae,
-          sanctionsHitsThisMonth: sh,
-          monthRevenueNaira: mr,
-          asOf: new Date(),
-        };
-      });
+      const [totalDecls] = await db.select({ count: count() }).from(declarations);
+      const [clearedDecls] = await db
+        .select({ count: count() })
+        .from(declarations)
+        .where(eq(declarations.status, "cleared"));
+      const [registeredTraders] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(eq(users.role, "user"));
+      const [aeoCount] = await db
+        .select({ count: count() })
+        .from(aeoApplications)
+        .where(eq(aeoApplications.status, "approved"));
+      const [sanctionsHits] = await db
+        .select({ count: count() })
+        .from(sanctionsChecks)
+        .where(eq(sanctionsChecks.checkResult, "confirmed_match"));
+      const [monthRevenue] = await db
+        .select({ total: sql<string>`COALESCE(SUM(CAST(amount AS NUMERIC)), 0)` })
+        .from(payments)
+        .where(and(gte(payments.createdAt, thisMonth), eq(payments.status, "confirmed")));
+
+      const td = Number(totalDecls?.count ?? 0);
+      const cd = Number(clearedDecls?.count ?? 0);
+      const rt = Number(registeredTraders?.count ?? 0);
+      const ae = Number(aeoCount?.count ?? 0);
+      const sh = Number(sanctionsHits?.count ?? 0);
+      const mr = parseFloat(monthRevenue?.total ?? "0");
+      return {
+        totalDeclarations: td,
+        clearedDeclarations: cd,
+        clearanceRate: td > 0 ? Math.round((cd / td) * 1000) / 10 : 0,
+        registeredTraders: rt,
+        aeoOperators: ae,
+        sanctionsHitsThisMonth: sh,
+        monthRevenueNaira: mr,
+        asOf: new Date(),
+      };
     }),
 
   // Export revenue data as CSV for a date range

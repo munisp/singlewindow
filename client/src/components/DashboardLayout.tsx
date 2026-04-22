@@ -76,6 +76,7 @@ import {
   Mail,
   Rocket,
   Server,
+  Layers,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -283,6 +284,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: BarChart3, label: "Revenue Reports", path: "/app/finance" },
           { icon: RotateCcw, label: "Duty Refunds", path: "/app/finance/drawback" },
           { icon: RotateCcw, label: "Drawback Automation", path: "/app/finance/drawback-automation" },
+          { icon: Layers, label: "Payment Queue", path: "/app/finance/payment-queue" },
           { icon: Coins, label: "Ledger (TigerBeetle)", path: "/app/finance/ledger" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: BarChart2, label: "Executive Dashboard", path: "/app/executive-dashboard" },
@@ -307,6 +309,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: BarChart3, label: "Performance Scorecard", path: "/app/trader/scorecard" },
         { icon: CreditCard, label: "Duty Payments", path: "/app/trader/payments" },
         { icon: RotateCcw, label: "Duty Refund Requests", path: "/app/trader/drawback" },
+        { icon: Layers, label: "Payment Queue", path: "/app/trader/payment-queue" },
         { icon: Fingerprint, label: "Identity Verification", path: "/app/trader/kyc" },
         { icon: Anchor, label: "Cargo Tracking Map", path: "/app/geo/cargo-tracking" },
         { icon: CheckCircle, label: "Account Setup Wizard", path: "/app/onboarding" },

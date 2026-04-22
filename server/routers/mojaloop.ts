@@ -24,6 +24,9 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { paymentIdempotencyKeys } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import {
@@ -233,6 +236,24 @@ export const mojaloopRouter = router({
         });
       }
 
+      // ── Idempotency check (1B payments/day pattern) ─────────────────────────
+      // Hash: userId + declarationId + amount + currency + fspId + payerAccount
+      const idempotencyInput = `${ctx.user.id}:${input.declarationId}:${input.amount}:${input.currency}:${input.fspId}:${input.payerAccount}`;
+      const encoder = new TextEncoder();
+      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(idempotencyInput));
+      const keyHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+      const idemDb = await getDb();
+      if (idemDb) {
+        const [existingKey] = await idemDb.select().from(paymentIdempotencyKeys).where(eq(paymentIdempotencyKeys.keyHash, keyHash)).limit(1);
+        if (existingKey) {
+          const cached = existingKey.responseSnapshot as Record<string, unknown> | null;
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `Duplicate payment detected. Transfer ${cached?.transferId ?? "unknown"} already initiated for this declaration/amount/FSP combination within 24 hours. Use the existing transfer ID to check status.`,
+          });
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────────
       const transferId = `TRF-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
       const ilpPacket = generateILPPacket();
       const condition = generateCondition();
@@ -257,6 +278,16 @@ export const mojaloopRouter = router({
         expiresAt,
       });
 
+      // Store idempotency key so duplicate submissions within 24h are rejected
+      if (idemDb) {
+        const idemExpiresAt = new Date(Date.now() + 86_400_000);
+        await idemDb.insert(paymentIdempotencyKeys).values({
+          keyHash,
+          transferId,
+          responseSnapshot: { transferId, queueId: txRecord.id, status: "PENDING" },
+          expiresAt: idemExpiresAt,
+        }).onConflictDoNothing();
+      }
       // Log audit event
       await logAuditEvent({
         entityType: "payment",

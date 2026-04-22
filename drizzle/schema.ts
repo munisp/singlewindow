@@ -239,14 +239,7 @@ export const payments = pgTable("payments", {
   failureReason: text("failure_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (t) => [
-  index("idx_pay_declaration_id").on(t.declarationId),
-  index("idx_pay_trader_id").on(t.traderId),
-  index("idx_pay_status").on(t.status),
-  index("idx_pay_created_at").on(t.createdAt),
-  index("idx_pay_status_created_at").on(t.status, t.createdAt),
-  index("idx_pay_trader_status").on(t.traderId, t.status),
-]);
+}, (t) => [index("idx_pay_declaration_id").on(t.declarationId)]);
 
 // ─── AUDIT EVENTS ────────────────────────────────────────────────────────────
 
@@ -263,12 +256,7 @@ export const auditEvents = pgTable("audit_events", {
   userAgent: text("user_agent"),
   metadata: json("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [
-  index("idx_ae_entity").on(t.entityType, t.entityId),
-  index("idx_ae_actor_id").on(t.actorId),
-  index("idx_ae_created_at").on(t.createdAt),
-  index("idx_ae_entity_created_at").on(t.entityType, t.entityId, t.createdAt),
-]);
+}, (t) => [index("idx_ae_entity").on(t.entityType, t.entityId)]);
 
 // ─── SECURITY ALERTS ─────────────────────────────────────────────────────────
 
@@ -1420,3 +1408,106 @@ export const documentVersions = pgTable("document_versions", {
   index("idx_docver_declaration_id").on(t.declarationId),
 ]);
 export type DocumentVersion = typeof documentVersions.$inferSelect;
+
+// ─── 1B PAYMENTS/DAY ARCHITECTURE ────────────────────────────────────────────
+// Implements the async payment queue pattern from:
+// https://backend.how/posts/1b-payments-per-day/
+// https://github.com/pratikgajjar/1b-payments
+
+export const paymentQueueStatusEnum = pgEnum("payment_queue_status", [
+  "queued", "processing", "committed", "failed", "dead_letter",
+]);
+
+export const paymentAccountTypeEnum = pgEnum("payment_account_type", [
+  "trader", "customs_duty", "vat", "levy", "bond", "suspense",
+]);
+
+export const paymentArchivalTierEnum = pgEnum("payment_archival_tier", [
+  "hot", "warm", "cold",
+]);
+
+export const paymentArchivalJobStatusEnum = pgEnum("payment_archival_job_status", [
+  "pending", "running", "completed", "failed",
+]);
+
+export const paymentQueue = pgTable("payment_queue", {
+  id: serial("id").primaryKey(),
+  transferId: varchar("transfer_id", { length: 128 }).notNull().unique(),
+  debitAccountId: varchar("debit_account_id", { length: 128 }).notNull(),
+  creditAccountId: varchar("credit_account_id", { length: 128 }).notNull(),
+  amountMinorUnits: bigint("amount_minor_units", { mode: "bigint" }).notNull(),
+  currency: varchar("currency", { length: 8 }).notNull().default("GHS"),
+  ledger: integer("ledger").notNull().default(1),
+  status: paymentQueueStatusEnum("status").notNull().default("queued"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  lastError: text("last_error"),
+  nextRetryAt: timestamp("next_retry_at"),
+  deadLetteredAt: timestamp("dead_lettered_at"),
+  committedAt: timestamp("committed_at"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pq_status_retry").on(t.status, t.nextRetryAt),
+  index("idx_pq_transfer_id").on(t.transferId),
+  index("idx_pq_created_at").on(t.createdAt),
+]);
+export type PaymentQueueItem = typeof paymentQueue.$inferSelect;
+export type InsertPaymentQueueItem = typeof paymentQueue.$inferInsert;
+
+export const paymentAccounts = pgTable("payment_accounts", {
+  id: serial("id").primaryKey(),
+  accountId: varchar("account_id", { length: 128 }).notNull().unique(),
+  traderId: integer("trader_id").references(() => users.id),
+  accountType: paymentAccountTypeEnum("account_type").notNull().default("trader"),
+  currency: varchar("currency", { length: 8 }).notNull().default("GHS"),
+  ledger: integer("ledger").notNull().default(1),
+  shardKey: integer("shard_key").notNull().default(0),
+  debitsPosted: bigint("debits_posted", { mode: "bigint" }).notNull().default(BigInt(0)),
+  creditsPosted: bigint("credits_posted", { mode: "bigint" }).notNull().default(BigInt(0)),
+  debitsPending: bigint("debits_pending", { mode: "bigint" }).notNull().default(BigInt(0)),
+  creditsPending: bigint("credits_pending", { mode: "bigint" }).notNull().default(BigInt(0)),
+  lastSyncAt: timestamp("last_sync_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pa_account_id").on(t.accountId),
+  index("idx_pa_trader_id").on(t.traderId),
+  index("idx_pa_shard_key").on(t.shardKey),
+]);
+export type PaymentAccount = typeof paymentAccounts.$inferSelect;
+export type InsertPaymentAccount = typeof paymentAccounts.$inferInsert;
+
+export const paymentIdempotencyKeys = pgTable("payment_idempotency_keys", {
+  id: serial("id").primaryKey(),
+  keyHash: varchar("key_hash", { length: 64 }).notNull().unique(),
+  transferId: varchar("transfer_id", { length: 128 }).notNull(),
+  responseSnapshot: jsonb("response_snapshot"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pik_key_hash").on(t.keyHash),
+  index("idx_pik_expires_at").on(t.expiresAt),
+]);
+export type PaymentIdempotencyKey = typeof paymentIdempotencyKeys.$inferSelect;
+export type InsertPaymentIdempotencyKey = typeof paymentIdempotencyKeys.$inferInsert;
+
+export const paymentArchivalJobs = pgTable("payment_archival_jobs", {
+  id: serial("id").primaryKey(),
+  jobId: varchar("job_id", { length: 128 }).notNull().unique(),
+  tier: paymentArchivalTierEnum("tier").notNull(),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  transfersArchived: integer("transfers_archived").notNull().default(0),
+  bytesWritten: bigint("bytes_written", { mode: "bigint" }).notNull().default(BigInt(0)),
+  storageUri: text("storage_uri"),
+  status: paymentArchivalJobStatusEnum("status").notNull().default("pending"),
+  errorMessage: text("error_message"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_paj_tier_created").on(t.tier, t.createdAt),
+  index("idx_paj_job_id").on(t.jobId),
+]);
+export type PaymentArchivalJob = typeof paymentArchivalJobs.$inferSelect;
+export type InsertPaymentArchivalJob = typeof paymentArchivalJobs.$inferInsert;

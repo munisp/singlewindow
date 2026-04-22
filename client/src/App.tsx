@@ -44,6 +44,7 @@ const Notifications = lazy(() => import("./pages/app/Notifications"));
 const Finance = lazy(() => import("./pages/app/Finance"));
 const PostClearanceAudit = lazy(() => import("./pages/app/PostClearanceAudit"));
 const DutyDrawback = lazy(() => import('./pages/app/DutyDrawback'));
+const PaymentQueue = lazy(() => import('./pages/app/PaymentQueue'));
 const KnowledgeGraph = lazy(() => import('./pages/app/KnowledgeGraph'));
 const FraudNetwork = lazy(() => import('./pages/app/FraudNetwork'));
 const FraudCases = lazy(() => import('./pages/app/FraudCases'));
@@ -225,6 +226,13 @@ function Router() {
       {/* Sprint 60 — Drawback Automation */}
       <Route path="/app/finance/drawback-automation">
         <Suspense fallback={<LazyFallback />}><DrawbackAutomation /></Suspense>
+      </Route>
+      {/* 1B Payments/Day — Async Payment Queue */}
+      <Route path="/app/trader/payment-queue">
+        <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
+      </Route>
+      <Route path="/app/finance/payment-queue">
+        <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
       </Route>
       {/* Sprint 61 — Trader Performance Scorecard */}
       <Route path="/app/trader/scorecard">
@@ -432,7 +440,6 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <a href="#main-content" className="skip-to-content">Skip to main content</a>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />

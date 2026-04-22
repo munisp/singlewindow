@@ -167,51 +167,6 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
-    // Production performance: minify, tree-shake, and split chunks
-    minify: "esbuild",
-    target: "es2020",
-    cssMinify: true,
-    reportCompressedSize: false, // faster builds
-    chunkSizeWarningLimit: 600,
-    rollupOptions: {
-      output: {
-        // Manual chunk splitting for optimal caching
-        manualChunks: (id) => {
-          // Vendor: React core
-          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
-            return "vendor-react";
-          }
-          // Vendor: tRPC + tanstack-query
-          if (id.includes("@trpc") || id.includes("@tanstack")) {
-            return "vendor-trpc";
-          }
-          // Vendor: Radix UI + shadcn
-          if (id.includes("@radix-ui") || id.includes("cmdk") || id.includes("vaul")) {
-            return "vendor-ui";
-          }
-          // Vendor: Charts
-          if (id.includes("recharts") || id.includes("d3") || id.includes("chart.js")) {
-            return "vendor-charts";
-          }
-          // Vendor: Maps
-          if (id.includes("leaflet") || id.includes("mapbox") || id.includes("google")) {
-            return "vendor-maps";
-          }
-          // Vendor: Date/time utilities
-          if (id.includes("date-fns") || id.includes("dayjs") || id.includes("luxon")) {
-            return "vendor-date";
-          }
-          // Vendor: Everything else from node_modules
-          if (id.includes("node_modules")) {
-            return "vendor-misc";
-          }
-        },
-        // Consistent asset naming for long-term caching
-        assetFileNames: "assets/[name]-[hash][extname]",
-        chunkFileNames: "assets/[name]-[hash].js",
-        entryFileNames: "assets/[name]-[hash].js",
-      },
-    },
   },
   server: {
     host: true,

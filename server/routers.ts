@@ -22,6 +22,7 @@ import { geospatialRouter } from "./routers/geospatial";
 import { financeRouter } from "./routers/finance";
 import { postAuditRouter } from "./routers/postAudit";
 import { drawbackRouter } from "./routers/drawback";
+import { batchPaymentsRouter } from "./routers/batchPayments";
 import { knowledgeGraphRouter } from "./routers/knowledgeGraph";
 import { fraudCasesRouter } from "./routers/fraudCases";
 import { alertsRouter } from "./routers/alerts";
@@ -63,11 +64,6 @@ import { pilotRouter } from "./routers/pilot";
 import { executiveDashboardRouter } from "./routers/executiveDashboard";
 import { nigeriaIdRouter } from "./routers/nigeriaId";
 import { siteSettingsRouter } from "./routers/siteSettings";
-import { dutyDrawbackRouter } from "./routers/dutyDrawback";
-import { aeoRenewalRouter } from "./routers/aeoRenewal";
-import { originCertificatesRouter } from "./routers/originCertificates";
-import { clearanceCertificatesRouter } from "./routers/clearanceCertificates";
-import { complianceEmailRouter } from "./routers/complianceEmail";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -200,6 +196,7 @@ export const appRouter = router({
   finance: financeRouter,
   postAudit: postAuditRouter,
   drawback: drawbackRouter,
+  batchPayments: batchPaymentsRouter,
   knowledgeGraph: knowledgeGraphRouter,
   fraudCases: fraudCasesRouter,
   alerts: alertsRouter,
@@ -242,11 +239,6 @@ export const appRouter = router({
   executiveDashboard: executiveDashboardRouter,
   nigeriaId: nigeriaIdRouter,
   siteSettings: siteSettingsRouter,
-  dutyDrawback: dutyDrawbackRouter,
-  aeoRenewal: aeoRenewalRouter,
-  originCertificates: originCertificatesRouter,
-  clearanceCertificates: clearanceCertificatesRouter,
-  complianceEmail: complianceEmailRouter,
 });
 
 export type AppRouter = typeof appRouter;

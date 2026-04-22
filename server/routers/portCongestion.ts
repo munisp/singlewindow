@@ -8,7 +8,6 @@
  */
 import { z } from "zod";
 import { publicProcedure, router } from "../_core/trpc";
-import { cacheWrap, cacheKey, TTL } from "../_core/cache";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -213,22 +212,20 @@ export const portCongestionRouter = router({
     }),
 
   getAllForecasts: publicProcedure.query(() => {
-    return cacheWrap(cacheKey("port", "forecasts"), TTL.SHORT, async () =>
-      Object.keys(PORT_PROFILES).map((code) => {
-        const f = buildPortForecast(code);
-        return {
-          portCode: f.portCode,
-          portName: f.portName,
-          country: f.country,
-          currentScore: f.currentScore,
-          currentLevel: f.currentLevel,
-          peakScore: f.peakHour.predictedScore,
-          peakHour: f.peakHour.hour,
-          slaBreachCount: f.slaBreachAlerts.length,
-          updatedAt: f.updatedAt,
-        };
-      })
-    );
+    return Object.keys(PORT_PROFILES).map((code) => {
+      const f = buildPortForecast(code);
+      return {
+        portCode: f.portCode,
+        portName: f.portName,
+        country: f.country,
+        currentScore: f.currentScore,
+        currentLevel: f.currentLevel,
+        peakScore: f.peakHour.predictedScore,
+        peakHour: f.peakHour.hour,
+        slaBreachCount: f.slaBreachAlerts.length,
+        updatedAt: f.updatedAt,
+      };
+    });
   }),
 
   getSlaBreachAlerts: publicProcedure
