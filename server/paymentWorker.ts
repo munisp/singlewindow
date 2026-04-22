@@ -311,17 +311,32 @@ export async function runPaymentWorkerCycle(): Promise<void> {
   }
 }
 
-// ─── Start the worker ─────────────────────────────────────────────────────────
+// ─── Worker health state ─────────────────────────────────────────────────────────
 
 let workerTimer: ReturnType<typeof setInterval> | null = null;
+let _workerStartedAt: Date | null = null;
+let _workerLastCycleAt: Date | null = null;
+let _workerItemsProcessedTotal = 0;
+
+export function getWorkerStatus() {
+  return {
+    running: workerTimer !== null,
+    startedAt: _workerStartedAt,
+    lastCycleAt: _workerLastCycleAt,
+    itemsProcessedTotal: _workerItemsProcessedTotal,
+  };
+}
+
+// ─── Start the worker ─────────────────────────────────────────────────────────
 
 export function startPaymentWorker(): void {
   if (workerTimer) return; // already running
+  _workerStartedAt = new Date();
   console.log(`[Worker] Payment queue worker started (interval: ${WORKER_INTERVAL_MS}ms, batch: ${WORKER_BATCH_SIZE})`);
   // Run immediately on startup, then on interval
-  runPaymentWorkerCycle().catch(console.error);
+  runPaymentWorkerCycle().then((n) => { _workerLastCycleAt = new Date(); _workerItemsProcessedTotal += (n ?? 0); }).catch(console.error);
   workerTimer = setInterval(() => {
-    runPaymentWorkerCycle().catch(console.error);
+    runPaymentWorkerCycle().then((n) => { _workerLastCycleAt = new Date(); _workerItemsProcessedTotal += (n ?? 0); }).catch(console.error);
   }, WORKER_INTERVAL_MS);
 }
 

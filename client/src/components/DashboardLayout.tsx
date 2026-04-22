@@ -285,6 +285,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: RotateCcw, label: "Duty Refunds", path: "/app/finance/drawback" },
           { icon: RotateCcw, label: "Drawback Automation", path: "/app/finance/drawback-automation" },
           { icon: Layers, label: "Payment Queue", path: "/app/finance/payment-queue" },
+          { icon: BarChart2, label: "Balance Accounts", path: "/app/finance/balance-accounts" },
           { icon: Coins, label: "Ledger (TigerBeetle)", path: "/app/finance/ledger" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: BarChart2, label: "Executive Dashboard", path: "/app/executive-dashboard" },

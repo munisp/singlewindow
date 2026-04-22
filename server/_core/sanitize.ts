@@ -55,14 +55,31 @@ export function sanitizeObject<T>(obj: T): T {
  * Applied globally to all routes.
  */
 export function sanitizeMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  if (req.body && typeof req.body === "object") {
-    req.body = sanitizeObject(req.body);
-  }
-  if (req.query && typeof req.query === "object") {
-    req.query = sanitizeObject(req.query) as typeof req.query;
-  }
-  if (req.params && typeof req.params === "object") {
-    req.params = sanitizeObject(req.params) as typeof req.params;
+  try {
+    if (req.body && typeof req.body === "object") {
+      req.body = sanitizeObject(req.body);
+    }
+    // Express 5: req.query is a getter-only property on IncomingMessage.
+    // We must NOT assign to it. Instead, sanitize the values in-place by
+    // iterating the existing object and replacing string values directly.
+    if (req.query && typeof req.query === "object") {
+      const q = req.query as Record<string, unknown>;
+      for (const key of Object.keys(q)) {
+        if (typeof q[key] === "string") {
+          q[key] = sanitizeString(q[key] as string);
+        }
+      }
+    }
+    if (req.params && typeof req.params === "object") {
+      const p = req.params as Record<string, string>;
+      for (const key of Object.keys(p)) {
+        if (typeof p[key] === "string") {
+          p[key] = sanitizeString(p[key]);
+        }
+      }
+    }
+  } catch {
+    // Sanitization errors must never block the request
   }
   next();
 }

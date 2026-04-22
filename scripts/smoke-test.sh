@@ -100,6 +100,7 @@ check "GET /api/health/live — liveness probe" "200" "GET" "${BASE_URL}/api/hea
 check "GET /api/health/ready — readiness probe" "200" "GET" "${BASE_URL}/api/health/ready"
 check_json "GET /api/health — status field" "${BASE_URL}/api/health" "d['status']" "ok"
 check_json "GET /api/health — database healthy" "${BASE_URL}/api/health" "d['components']['database']['status']" "ok"
+check_json "GET /api/health — worker status present" "${BASE_URL}/api/health" "'workerStatus' in d" "True"
 
 # ── 2. Static Assets ──────────────────────────────────────────────────────────
 echo ""
@@ -181,10 +182,25 @@ if [ -n "$AUTH_FLAGS" ]; then
   check "tRPC siteSettings.get — returns site settings" "200" "GET" \
     "${BASE_URL}/api/trpc/siteSettings.get?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D" \
     "" "$AUTH_FLAGS"
+  check "tRPC batchPayments.getQueueStats — returns queue stats" "200" "GET" \
+    "${BASE_URL}/api/trpc/batchPayments.getQueueStats?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D" \
+    "" "$AUTH_FLAGS"
+  check "tRPC soc.getAlerts — requires auth (returns 200 with auth)" "200" "GET" \
+    "${BASE_URL}/api/trpc/soc.getAlerts?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22limit%22%3A5%7D%7D%7D" \
+    "" "$AUTH_FLAGS"
 else
   echo -e "${YELLOW}SKIP${NC} tRPC endpoint tests (no auth token)"
-  TOTAL=$((TOTAL + 10))
+  TOTAL=$((TOTAL + 12))
 fi
+
+# ── 5b. Auth-required endpoints return 401 without token ──────────────────────
+echo ""
+echo -e "${YELLOW}[5b] Auth Enforcement (unauthenticated requests must be rejected)${NC}"
+check "tRPC soc.getAgentStatus — 403 without auth" "403" "GET" \
+  "${BASE_URL}/api/trpc/soc.getAgentStatus?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
+check "tRPC batchPayments.retryDeadLetters — 403 without auth" "403" "POST" \
+  "${BASE_URL}/api/trpc/batchPayments.retryDeadLetters?batch=1" \
+  '{"0":{"json":{}}}' ""
 
 # ── 6. Webhook Endpoints ──────────────────────────────────────────────────────
 echo ""

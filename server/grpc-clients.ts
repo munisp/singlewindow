@@ -23,10 +23,11 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import path from "path";
-import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROTO_DIR = path.resolve(__dirname, "../services/proto");
+// Resolve proto directory relative to the project root (process.cwd()).
+// Using process.cwd() instead of import.meta.url avoids the Vite 8 SSR
+// transform injecting __vite_ssr_exportName__ which breaks vitest 2.x.
+const PROTO_DIR = path.resolve(process.cwd(), "services/proto");
 
 // ─── SERVICE ADDRESSES ────────────────────────────────────────────────────────
 

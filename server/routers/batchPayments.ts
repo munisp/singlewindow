@@ -168,4 +168,72 @@ export const batchPaymentsRouter = router({
         totalPages: Math.ceil(Number(total) / input.pageSize),
       };
     }),
+
+  /**
+   * List all payment accounts with live net balance.
+   * Used by the Balance Accounts dashboard page.
+   */
+  listAllAccounts: protectedProcedure
+    .input(z.object({
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(50),
+      currency: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const offset = (input.page - 1) * input.pageSize;
+      const whereClause = input.currency ? eq(paymentAccounts.currency, input.currency) : undefined;
+      const [accounts, [{ total }]] = await Promise.all([
+        db.select().from(paymentAccounts).where(whereClause).orderBy(desc(paymentAccounts.lastSyncAt)).limit(input.pageSize).offset(offset),
+        db.select({ total: count() }).from(paymentAccounts).where(whereClause),
+      ]);
+      return {
+        accounts: accounts.map((a) => ({
+          ...a,
+          debitsPosted: Number(a.debitsPosted),
+          creditsPosted: Number(a.creditsPosted),
+          debitsPending: Number(a.debitsPending),
+          creditsPending: Number(a.creditsPending),
+          netBalance: Number(a.creditsPosted) - Number(a.debitsPosted),
+        })),
+        total: Number(total),
+        page: input.page,
+        pageSize: input.pageSize,
+        totalPages: Math.ceil(Number(total) / input.pageSize),
+      };
+    }),
+
+  /**
+   * Admin-only: Manually trigger a balance drift reconciliation check.
+   */
+  runDriftCheck: adminProcedure.mutation(async () => {
+    try {
+      const { runBalanceDriftCheck } = await import("../balanceDrift");
+      const result = await runBalanceDriftCheck();
+      return {
+        success: true,
+        checkedAt: result.checkedAt,
+        accountsChecked: result.accountsChecked,
+        clean: result.clean,
+        driftingAccounts: result.driftingAccounts.map((d) => ({
+          accountId: d.accountId,
+          currency: d.currency,
+          mirrorCredits: Number(d.mirrorCredits),
+          queueCredits: Number(d.queueCredits),
+          creditDrift: Number(d.creditDrift),
+          mirrorDebits: Number(d.mirrorDebits),
+          queueDebits: Number(d.queueDebits),
+          debitDrift: Number(d.debitDrift),
+        })),
+        totalCreditDrift: Number(result.totalCreditDrift),
+        totalDebitDrift: Number(result.totalDebitDrift),
+      };
+    } catch (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err instanceof Error ? err.message : "Drift check failed",
+      });
+    }
+  }),
 });

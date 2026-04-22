@@ -16,6 +16,7 @@
 import type { Express } from "express";
 import { getDb } from "../db";
 import { redisHealthCheck } from "../_core/redis";
+import { getWorkerStatus } from "../paymentWorker";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type HealthStatus = "ok" | "degraded" | "down";
@@ -43,6 +44,12 @@ interface HealthReport {
     permify: ComponentHealth;
   };
   demoMode: boolean;
+  workerStatus: {
+    running: boolean;
+    startedAt: Date | null;
+    lastCycleAt: Date | null;
+    itemsProcessedTotal: number;
+  };
 }
 
 // ─── Probe helpers ────────────────────────────────────────────────────────────
@@ -144,6 +151,7 @@ async function buildHealthReport(): Promise<HealthReport> {
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     demoMode: isDemoMode,
+    workerStatus: getWorkerStatus(),
     components: {
       database,
       redis,

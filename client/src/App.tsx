@@ -46,6 +46,7 @@ const PostClearanceAudit = lazy(() => import("./pages/app/PostClearanceAudit"));
 const DutyDrawback = lazy(() => import('./pages/app/DutyDrawback'));
 const PaymentQueue = lazy(() => import('./pages/app/PaymentQueue'));
 const KnowledgeGraph = lazy(() => import('./pages/app/KnowledgeGraph'));
+const BalanceAccounts = lazy(() => import('./pages/app/BalanceAccounts'));
 const FraudNetwork = lazy(() => import('./pages/app/FraudNetwork'));
 const FraudCases = lazy(() => import('./pages/app/FraudCases'));
 const RiskAlerts = lazy(() => import('./pages/app/RiskAlerts'));
@@ -233,6 +234,10 @@ function Router() {
       </Route>
       <Route path="/app/finance/payment-queue">
         <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
+      </Route>
+      {/* Balance Accounts — Payment Mirror */}
+      <Route path="/app/finance/balance-accounts">
+        <Suspense fallback={<LazyFallback />}><BalanceAccounts /></Suspense>
       </Route>
       {/* Sprint 61 — Trader Performance Scorecard */}
       <Route path="/app/trader/scorecard">

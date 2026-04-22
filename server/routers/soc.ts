@@ -2,10 +2,13 @@
  * SOC Router — Sprint 54: Wazuh SIEM/XDR Integration
  * Provides procedures for security alerts, incident management,
  * MITRE ATT&CK stats, and agent status from the wazuh-svc.
+ *
+ * Security: ALL procedures require authentication.
+ * Admin-only: ingestAlert, createIncident, updateIncident, getAgentStatus, getMitreStats.
  */
 
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 
 const WAZUH_SVC = process.env.WAZUH_SVC_URL ?? "http://localhost:8108";
 
@@ -24,7 +27,7 @@ async function callWazuh<T>(path: string, options?: RequestInit): Promise<T> {
 export const socRouter = router({
   // ─── Alerts ────────────────────────────────────────────────────────────────
 
-  getAlerts: publicProcedure
+  getAlerts: protectedProcedure
     .input(
       z.object({
         severity: z.enum(["low", "medium", "high", "critical"]).optional(),
@@ -46,24 +49,24 @@ export const socRouter = router({
       return callWazuh<{ total: number; alerts: unknown[] }>(`/alerts?${params}`);
     }),
 
-  acknowledgeAlert: publicProcedure
-    .input(z.object({ alertId: z.string() }))
+  acknowledgeAlert: adminProcedure
+    .input(z.object({ alertId: z.string().min(1).max(128) }))
     .mutation(async ({ input }) => {
       return callWazuh(`/alerts/${input.alertId}/acknowledge`, { method: "POST" });
     }),
 
-  ingestAlert: publicProcedure
+  ingestAlert: adminProcedure
     .input(
       z.object({
-        ruleId: z.string(),
+        ruleId: z.string().min(1).max(64),
         level: z.number().int().min(1).max(15),
-        description: z.string(),
-        agentId: z.string(),
-        agentName: z.string(),
-        srcIp: z.string().default(""),
-        dstIp: z.string().default(""),
-        declarationId: z.string().optional(),
-        traderId: z.string().optional(),
+        description: z.string().min(1).max(1024),
+        agentId: z.string().min(1).max(64),
+        agentName: z.string().min(1).max(128),
+        srcIp: z.string().max(45).default(""),
+        dstIp: z.string().max(45).default(""),
+        declarationId: z.string().max(128).optional(),
+        traderId: z.string().max(128).optional(),
         extraData: z.record(z.string(), z.unknown()).default({}),
       })
     )
@@ -87,7 +90,7 @@ export const socRouter = router({
 
   // ─── Incidents ─────────────────────────────────────────────────────────────
 
-  getIncidents: publicProcedure
+  getIncidents: protectedProcedure
     .input(
       z.object({
         status: z.enum(["open", "investigating", "contained", "resolved"]).optional(),
@@ -103,20 +106,20 @@ export const socRouter = router({
       return callWazuh<{ total: number; incidents: unknown[] }>(`/incidents?${params}`);
     }),
 
-  getIncident: publicProcedure
-    .input(z.object({ incidentId: z.string() }))
+  getIncident: protectedProcedure
+    .input(z.object({ incidentId: z.string().min(1).max(128) }))
     .query(async ({ input }) => {
       return callWazuh(`/incidents/${input.incidentId}`);
     }),
 
-  createIncident: publicProcedure
+  createIncident: adminProcedure
     .input(
       z.object({
-        title: z.string().min(3),
+        title: z.string().min(3).max(256),
         severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
-        alertIds: z.array(z.string()).default([]),
-        description: z.string().default(""),
-        assignedTo: z.string().default(""),
+        alertIds: z.array(z.string().max(128)).max(50).default([]),
+        description: z.string().max(4096).default(""),
+        assignedTo: z.string().max(128).default(""),
       })
     )
     .mutation(async ({ input }) => {
@@ -132,15 +135,15 @@ export const socRouter = router({
       });
     }),
 
-  updateIncident: publicProcedure
+  updateIncident: adminProcedure
     .input(
       z.object({
-        incidentId: z.string(),
+        incidentId: z.string().min(1).max(128),
         status: z.enum(["open", "investigating", "contained", "resolved"]).optional(),
         severity: z.enum(["low", "medium", "high", "critical"]).optional(),
-        assignedTo: z.string().optional(),
-        description: z.string().optional(),
-        resolutionNotes: z.string().optional(),
+        assignedTo: z.string().max(128).optional(),
+        description: z.string().max(4096).optional(),
+        resolutionNotes: z.string().max(4096).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -159,19 +162,19 @@ export const socRouter = router({
 
   // ─── Correlation ───────────────────────────────────────────────────────────
 
-  correlateDeclaration: publicProcedure
-    .input(z.object({ declarationId: z.string() }))
+  correlateDeclaration: protectedProcedure
+    .input(z.object({ declarationId: z.string().min(1).max(128) }))
     .query(async ({ input }) => {
       return callWazuh(`/correlate/declaration/${input.declarationId}`);
     }),
 
-  // ─── Agents & Stats ────────────────────────────────────────────────────────
+  // ─── Agents & Stats (admin-only — exposes infrastructure topology) ──────────
 
-  getAgentStatus: publicProcedure.query(async () => {
+  getAgentStatus: adminProcedure.query(async () => {
     return callWazuh("/agents");
   }),
 
-  getMitreStats: publicProcedure.query(async () => {
+  getMitreStats: adminProcedure.query(async () => {
     return callWazuh("/stats/mitre");
   }),
 });
