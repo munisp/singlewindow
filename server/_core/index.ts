@@ -964,6 +964,19 @@ async function startServer() {
       return compression.filter(req, res);
     },
   }));
+  // ── X-Response-Time header for performance monitoring ──────────────────────
+  app.use((req: any, res: any, next: any) => {
+    const start = process.hrtime.bigint();
+    const originalEnd = res.end.bind(res);
+    res.end = function (...args: any[]) {
+      const durationMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+      if (!res.headersSent) {
+        res.setHeader('X-Response-Time', `${durationMs.toFixed(2)}ms`);
+      }
+      return originalEnd(...args);
+    };
+    next();
+  });
   // ── Input sanitization (XSS prevention) ─────────────────────────────────────
   app.use(sanitizeMiddleware);
   // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)

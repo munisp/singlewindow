@@ -432,6 +432,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
+      <a href="#main-content" className="skip-to-content">Skip to main content</a>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
