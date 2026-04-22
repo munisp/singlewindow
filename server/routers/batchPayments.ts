@@ -17,6 +17,10 @@ import {
 } from "../../drizzle/schema";
 import { eq, desc, and, count, gte, lt } from "drizzle-orm";
 
+export async function sha256ForEnqueue(input: string): Promise<string> {
+  return sha256(input);
+}
+
 async function sha256(input: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(input);

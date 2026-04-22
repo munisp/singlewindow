@@ -1,0 +1,103 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tradegateway-prod
+
+resources:
+  - ../../base
+
+# Production-specific image tag — CI/CD pipeline replaces :latest with the exact SHA
+images:
+  - name: tradegateway/ngswtp
+    newTag: "1.0.0"
+
+# Scale up replicas for production
+replicas:
+  - name: tradegateway-app
+    count: 5
+
+# Patch: production resource limits (higher than base)
+patches:
+  - target:
+      kind: Deployment
+      name: tradegateway-app
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "1Gi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "2000m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "2Gi"
+      - op: replace
+        path: /spec/template/spec/terminationGracePeriodSeconds
+        value: 60
+
+  # Production: enforce strict pod anti-affinity (required, not preferred)
+  - target:
+      kind: Deployment
+      name: tradegateway-app
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution
+        value: []
+      - op: add
+        path: /spec/template/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution
+        value:
+          - labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - tradegateway-app
+            topologyKey: kubernetes.io/hostname
+
+  # Production: increase HPA max replicas
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: tradegateway-hpa
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 5
+      - op: replace
+        path: /spec/maxReplicas
+        value: 20
+
+  # Production: update ingress host
+  - target:
+      kind: Ingress
+      name: tradegateway-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: tradegateway.gov.ng
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: tradegateway.gov.ng
+      - op: replace
+        path: /spec/tls/0/secretName
+        value: tradegateway-prod-tls
+
+configMapGenerator:
+  - name: tradegateway-prod-config
+    literals:
+      - NODE_ENV=production
+      - LOG_LEVEL=warn
+      - DEMO_MODE=false
+      - RATE_LIMIT_WINDOW_MS=60000
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - CORS_ORIGINS=https://tradegateway.gov.ng
+      - SENTRY_ENVIRONMENT=production
+
+secretGenerator:
+  - name: tradegateway-prod-secrets
+    envs:
+      - prod.env
+    options:
+      disableNameSuffixHash: true
