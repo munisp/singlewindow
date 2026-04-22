@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +58,8 @@ export default function PaymentQueue() {
   const [archivalTier, setArchivalTier] = useState<ArchivalTier>("all");
   const [archivalPage, setArchivalPage] = useState(1);
   const [activeTab, setActiveTab] = useState<"queue" | "archival">("queue");
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const statsQuery = trpc.batchPayments.getQueueStats.useQuery(undefined, {
     refetchInterval: 10_000,
@@ -183,12 +186,13 @@ export default function PaymentQueue() {
                   ))}
                 </SelectContent>
               </Select>
-              {(queueStatus === "dead_letter" || queueStatus === "all") && (
+              {isAdmin && (queueStatus === "dead_letter" || queueStatus === "all") && (
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={() => retryMutation.mutate({ limit: 10 })}
                   disabled={retryMutation.isPending}
+                  title="Admin only — replay dead-letter payments"
                 >
                   {retryMutation.isPending
                     ? <Loader2 size={14} className="animate-spin mr-1.5" />

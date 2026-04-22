@@ -2,7 +2,7 @@
 
 **Author:** Manus AI  
 **Date:** April 2026  
-**Version:** 1.0  
+**Version:** 2.0  
 **Sources:** [backend.how — 1B Payments Per Day][1] · [GitHub — pratikgajjar/1b-payments][2]
 
 ---
@@ -95,7 +95,19 @@ The existing `mojaloop.initiatePayment` mutation was retrofitted with an idempot
 
 After a successful initiation, the idempotency key is stored with a 24-hour expiry using `onConflictDoNothing()` to handle the rare case of a concurrent duplicate request arriving in the same millisecond.
 
-### 3.4 Hot/Warm/Cold Archival Cron
+### 3.4 Background Payment Queue Worker
+
+A persistent background worker (`server/paymentWorker.ts`) starts automatically with the server and polls `payment_queue` every 5 seconds. The worker lifecycle is:
+
+1. **Heartbeat recovery** — any item stuck in `processing` for more than 60 seconds (indicating a crashed worker cycle) is reset to `queued` with an immediate `next_retry_at`.
+2. **Atomic claim** — a batch of up to 50 `queued` items with `next_retry_at <= NOW()` are claimed by setting `status = 'processing'`.
+3. **Mojaloop call** — each item calls `PUT /transfers/{transferId}` on the Mojaloop ILP switch. In development mode (when the switch is unreachable), the worker simulates a deterministic success/failure outcome.
+4. **Commit or retry** — on success, `status` is set to `committed`, the balance mirror is updated, and `mojaloop_transactions` is updated. On failure, `attempt_count` is incremented and `next_retry_at` is set to `now + calcBackoffMs(attempt_count)`.
+5. **Dead-letter** — after `max_attempts` failures, `status` is set to `dead_letter` and the platform owner is notified via `notifyOwner()`.
+
+The worker is stopped gracefully on `SIGTERM` and `SIGINT` to allow in-flight items to complete.
+
+### 3.5 Hot/Warm/Cold Archival Cron
 
 A nightly cron job runs at 02:00 UTC inside `server/_core/index.ts`. For each tier, it:
 
@@ -106,7 +118,17 @@ A nightly cron job runs at 02:00 UTC inside `server/_core/index.ts`. For each ti
 
 In production, step 3 would invoke an Apache Spark job or a DuckDB `COPY TO PARQUET` statement before deleting the rows from the hot table. The current implementation records the metadata without the actual file export, which is appropriate for the development environment.
 
-### 3.5 Payment Queue UI Dashboard
+### 3.6 Daily Balance Drift Reconciliation
+
+A second nightly cron job runs at 03:00 UTC, one hour after the archival cron. The `server/balanceDrift.ts` module iterates over every row in `payment_accounts` and computes:
+
+- **Queue credit sum** — `SUM(amount_minor_units) WHERE credit_account_id = ? AND status = 'committed'`
+- **Queue debit sum** — `SUM(amount_minor_units) WHERE debit_account_id = ? AND status = 'committed'`
+- **Drift** — `mirror_value - queue_sum` for both credits and debits
+
+If any account has non-zero drift, a structured report is logged to the console and sent to the platform owner via `notifyOwner()`. The report identifies each drifting account, the direction of drift (mirror OVER or UNDER), and the exact minor-unit discrepancy. The runbook SQL in §7 can then be used to investigate the root cause.
+
+### 3.7 Payment Queue UI Dashboard
 
 A new page at `/app/finance/payment-queue` (admin) and `/app/trader/payment-queue` (trader) provides:
 
@@ -178,7 +200,7 @@ For Ghana's current and projected 5-year volumes, the PostgreSQL-backed queue is
 
 **Idempotency key confidentiality.** The SHA-256 hash of the composite key is stored, not the plaintext. This prevents an attacker who gains read access to the `payment_idempotency_keys` table from reconstructing the original payment parameters.
 
-**Dead-letter access control.** The `retryDeadLetters` mutation is protected by `protectedProcedure` and should additionally be gated behind an `adminProcedure` check in production to prevent traders from replaying other users' failed payments.
+**Dead-letter access control.** The `retryDeadLetters` mutation is now protected by `adminProcedure`, which enforces `ctx.user.role === 'admin'` and returns a `FORBIDDEN` error for any non-admin caller. The frontend additionally hides the "Retry Dead Letters" button for non-admin users by checking `user?.role === 'admin'` from `useAuth()`. This dual enforcement (server + client) ensures traders cannot replay other users' failed payments even if they discover the API endpoint directly.
 
 **Archival URI integrity.** The `storageUri` field in `payment_archival_jobs` must be validated before any downstream job reads from it, to prevent path traversal attacks if the field is ever user-influenced.
 

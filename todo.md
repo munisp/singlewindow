@@ -65,3 +65,10 @@
 - [x] Final smoke tests: 17/17 pass
 - [x] Final tests: 1,679 passing
 - [ ] Generate comprehensive v26 archive (in progress)
+
+## Sprint: 1B Payments Next Steps (Apr 2026)
+- [x] Background payment queue worker — poll payment_queue, call Mojaloop ILP, commit/retry with exponential back-off
+- [x] Daily balance drift reconciliation cron — compare payment_accounts mirror vs committed queue sums, notify owner on drift
+- [x] Admin-only guard on retryDeadLetters — wrap with adminProcedure so only admins can replay dead-letter payments
+- [x] Tests for worker logic, drift detection, and admin guard
+- [x] Update docs/1b-payments-architecture.md with worker and drift alert sections

@@ -640,6 +640,8 @@ console.log("[Cron] AEO renewal reminders scheduled at 03:10 UTC daily");
 // Fires at 04:00 UTC every day. Emails yesterday's revocation log CSV to all
 // active compliance officer addresses in the compliance_email_schedule table.
 import { runNightlyRevocationCsv } from "../jobs/nightlyRevocationCsv";
+import { startPaymentWorker, stopPaymentWorker } from "../paymentWorker";
+import { runScheduledBalanceDriftCheck } from "../balanceDrift";
 cron.schedule("0 0 4 * * *", async () => {
   await runNightlyRevocationCsv();
 }, { timezone: "UTC" });
@@ -1112,6 +1114,15 @@ async function startServer() {
 
 startServer().catch(console.error);
 
+// ── Payment Queue Background Worker ────────────────────────────────────────
+// Polls payment_queue every 5s, calls Mojaloop ILP, commits/retries with
+// exponential back-off. Dead-letters after max_attempts (default 5).
+startPaymentWorker();
+
+// Graceful shutdown: stop worker before process exits
+process.once("SIGTERM", () => stopPaymentWorker());
+process.once("SIGINT",  () => stopPaymentWorker());
+
 // ── Payment Archive Tiering Cron (1B payments/day pattern) ──────────────────
 // Inspired by: https://backend.how/posts/1b-payments-per-day/
 // Hot  (≤7 days):   fast read path, full PostgreSQL row
@@ -1170,3 +1181,9 @@ async function runPaymentArchivalCron() {
 // Run archival daily at 04:00 UTC
 cron.schedule("0 0 4 * * *", runPaymentArchivalCron, { timezone: "UTC" });
 console.log("[Cron] Payment archival (Hot/Warm/Cold) scheduled at 04:00 UTC daily");
+
+// ── Balance Drift Reconciliation Cron (daily at 03:00 UTC) ─────────────────
+// Compares payment_accounts mirror vs committed payment_queue sums.
+// Notifies owner if any account has non-zero drift.
+cron.schedule("0 0 3 * * *", runScheduledBalanceDriftCheck, { timezone: "UTC" });
+console.log("[Cron] Balance drift reconciliation scheduled at 03:00 UTC daily");

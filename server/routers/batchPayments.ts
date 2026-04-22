@@ -7,7 +7,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   paymentQueue,
@@ -81,7 +81,12 @@ export const batchPaymentsRouter = router({
     };
   }),
 
-  retryDeadLetters: protectedProcedure
+  /**
+   * Admin-only: Bulk-retry dead-letter payment items.
+   * Restricted to admin role — traders must not be able to replay other users' failed payments.
+   * See: docs/1b-payments-architecture.md §6 Security Considerations
+   */
+  retryDeadLetters: adminProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).default(10) }))
     .mutation(async ({ input }) => {
       const db = await getDb();
