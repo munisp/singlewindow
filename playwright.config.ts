@@ -40,6 +40,9 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    // Use demo admin session by default so all tests run as authenticated admin
+    // Individual tests can override with test.use({ storageState: "..." })
+    storageState: "e2e/.auth/demo.json",
   },
 
   projects: [

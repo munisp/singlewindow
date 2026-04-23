@@ -29,7 +29,7 @@ export const TEST_ADMIN = {
  */
 export async function gotoApp(page: Page, path = "/") {
   await page.goto(`${BASE_URL}${path}`);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("load");
 }
 
 /**

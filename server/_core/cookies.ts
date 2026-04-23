@@ -8,6 +8,10 @@ function isIpAddress(host: string) {
   return host.includes(":");
 }
 
+function isLocalRequest(req: Request) {
+  const hostname = req.hostname || "";
+  return LOCAL_HOSTS.has(hostname) || isIpAddress(hostname);
+}
 function isSecureRequest(req: Request) {
   if (req.protocol === "https") return true;
 
@@ -39,10 +43,14 @@ export function getSessionCookieOptions(
   //       ? hostname
   //       : undefined;
 
+  const secure = isSecureRequest(req);
+  const local = isLocalRequest(req);
   return {
     httpOnly: true,
     path: "/",
-    sameSite: "none",
-    secure: isSecureRequest(req),
+    // Use "lax" for localhost (allows Playwright/test runners to save cookies).
+    // Use "none" for cross-origin HTTPS deployments (requires secure:true).
+    sameSite: local ? "lax" : "none",
+    secure: local ? false : secure,
   };
 }
