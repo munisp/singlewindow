@@ -2,6 +2,7 @@
  * TradeGateway™ NGSWTP — React Native Navigation
  * Mirrors the PWA navigation structure with bottom tabs + stack navigation.
  * All screens connect to the same tRPC backend as the PWA.
+ * v33: Added 9 new screens for full PWA parity.
  */
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
@@ -33,6 +34,18 @@ import TraderScorecardScreen from "../screens/app/TraderScorecardScreen";
 import HSCodeLookupScreen from "../screens/app/HSCodeLookupScreen";
 import ScanDocumentScreen from "../screens/app/ScanDocumentScreen";
 
+// v33 — New screens for full PWA parity
+import TradeAnalyticsScreen from "../screens/app/TradeAnalyticsScreen";
+import DutyDrawbackScreen from "../screens/app/DutyDrawbackScreen";
+import PostClearanceAuditScreen from "../screens/app/PostClearanceAuditScreen";
+import SanctionsScreeningScreen from "../screens/app/SanctionsScreeningScreen";
+import BondedWarehouseScreen from "../screens/app/BondedWarehouseScreen";
+import PaymentQueueScreen from "../screens/app/PaymentQueueScreen";
+import TraderOnboardingScreen from "../screens/app/TraderOnboardingScreen";
+import RulesOfOriginScreen from "../screens/app/RulesOfOriginScreen";
+import SecurityAlertsScreen from "../screens/app/SecurityAlertsScreen";
+import FinanceScreen from "../screens/app/FinanceScreen";
+
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
@@ -47,12 +60,22 @@ export type MainDrawerParamList = {
   HomeTabs: undefined;
   Declarations: undefined;
   Payments: undefined;
+  PaymentQueue: undefined;
   CargoTracking: undefined;
   DocumentVault: undefined;
   OGAStatus: undefined;
   KYC: undefined;
   AEO: undefined;
   TraderScorecard: undefined;
+  TraderOnboarding: undefined;
+  TradeAnalytics: undefined;
+  DutyDrawback: undefined;
+  PostClearanceAudit: undefined;
+  SanctionsScreening: undefined;
+  BondedWarehouse: undefined;
+  RulesOfOrigin: undefined;
+  Finance: undefined;
+  SecurityAlerts: undefined;
   SystemStatus: undefined;
   Profile: undefined;
 };
@@ -133,15 +156,34 @@ function MainNavigator() {
         headerTintColor: "#FFFFFF",
       }}
     >
+      {/* Core */}
       <MainDrawer.Screen name="HomeTabs" component={HomeTabsNavigator} options={{ title: "TradeGateway", drawerLabel: "Home" }} />
       <MainDrawer.Screen name="Declarations" component={DeclarationsNavigator} options={{ title: "Declarations" }} />
       <MainDrawer.Screen name="Payments" component={PaymentsScreen} options={{ title: "Payments" }} />
+      <MainDrawer.Screen name="PaymentQueue" component={PaymentQueueScreen} options={{ title: "Payment Queue" }} />
       <MainDrawer.Screen name="CargoTracking" component={CargoTrackingScreen} options={{ title: "Cargo Tracking" }} />
       <MainDrawer.Screen name="DocumentVault" component={DocumentVaultScreen} options={{ title: "Document Vault" }} />
+
+      {/* Compliance & Trade */}
       <MainDrawer.Screen name="OGAStatus" component={OGAStatusScreen} options={{ title: "OGA Status" }} />
       <MainDrawer.Screen name="KYC" component={KYCScreen} options={{ title: "KYC Verification" }} />
       <MainDrawer.Screen name="AEO" component={AEOScreen} options={{ title: "AEO Programme" }} />
       <MainDrawer.Screen name="TraderScorecard" component={TraderScorecardScreen} options={{ title: "Trader Scorecard" }} />
+      <MainDrawer.Screen name="TraderOnboarding" component={TraderOnboardingScreen} options={{ title: "Trader Onboarding" }} />
+      <MainDrawer.Screen name="RulesOfOrigin" component={RulesOfOriginScreen} options={{ title: "Rules of Origin" }} />
+      <MainDrawer.Screen name="SanctionsScreening" component={SanctionsScreeningScreen} options={{ title: "Sanctions Screening" }} />
+
+      {/* Customs Operations */}
+      <MainDrawer.Screen name="DutyDrawback" component={DutyDrawbackScreen} options={{ title: "Duty Drawback" }} />
+      <MainDrawer.Screen name="PostClearanceAudit" component={PostClearanceAuditScreen} options={{ title: "Post-Clearance Audit" }} />
+      <MainDrawer.Screen name="BondedWarehouse" component={BondedWarehouseScreen} options={{ title: "Bonded Warehouse" }} />
+
+      {/* Analytics & Finance */}
+      <MainDrawer.Screen name="TradeAnalytics" component={TradeAnalyticsScreen} options={{ title: "Trade Analytics" }} />
+      <MainDrawer.Screen name="Finance" component={FinanceScreen} options={{ title: "Finance & Ledger" }} />
+
+      {/* Security & System */}
+      <MainDrawer.Screen name="SecurityAlerts" component={SecurityAlertsScreen} options={{ title: "Security Alerts" }} />
       <MainDrawer.Screen name="SystemStatus" component={SystemStatusScreen} options={{ title: "System Status" }} />
       <MainDrawer.Screen name="Profile" component={ProfileScreen} options={{ title: "My Profile" }} />
     </MainDrawer.Navigator>

@@ -73,6 +73,77 @@ export const ENV = {
 
   // ─── Kubecost ─────────────────────────────────────────────────────────────
   kubecostUrl: process.env.KUBECOST_URL ?? "http://localhost:9090",
+
+  // ─── ASEAN Single Window ──────────────────────────────────────────────────
+  aseanSwServiceUrl: process.env.ASEAN_SW_SERVICE_URL ?? process.env.ASEAN_SW_URL ?? "http://localhost:8091",
+  aseanGatewayGrpcAddr: process.env.ASEAN_GATEWAY_GRPC_ADDR ?? "localhost:50091",
+
+  // ─── Free Zone Service ────────────────────────────────────────────────────
+  freeZoneServiceUrl: process.env.FREEZONE_SERVICE_URL ?? "http://localhost:8092",
+
+  // ─── CEN (WCO) Service ────────────────────────────────────────────────────
+  cenServiceUrl: process.env.CEN_SERVICE_URL ?? "http://localhost:8093",
+
+  // ─── TigerBeetle Bridge ───────────────────────────────────────────────────
+  tbBridgeUrl: process.env.TB_BRIDGE_URL ?? process.env.TB_GO_BRIDGE_HTTP_ADDR ?? "http://localhost:8094",
+  tbRustBridgeUrl: process.env.TB_RUST_BRIDGE_HTTP_ADDR ?? "http://localhost:8095",
+
+  // ─── Fluvio Extended ──────────────────────────────────────────────────────
+  fluvioSvcUrl: process.env.FLUVIO_SVC_URL ?? "http://localhost:8096",
+  fluvioWsUrl: process.env.FLUVIO_WS_URL ?? "ws://localhost:8097",
+
+  // ─── Delta Lake / Flink Analytics ────────────────────────────────────────
+  deltaLakeSvcUrl: process.env.DELTALAKE_SVC_URL ?? "http://localhost:8098",
+  flinkCepSvcUrl: process.env.FLINK_CEP_SVC_URL ?? "http://localhost:8099",
+  flinkStreamGrpcAddr: process.env.FLINK_STREAM_GRPC_ADDR ?? "localhost:50099",
+
+  // ─── Apache Sedona (Geospatial) ───────────────────────────────────────────
+  sedonaSvcUrl: process.env.SEDONA_SVC_URL ?? "http://localhost:8100",
+  sedonaGeoGrpcAddr: process.env.SEDONA_GEO_GRPC_ADDR ?? "localhost:50100",
+
+  // ─── Rust File Storage (RustFS) ───────────────────────────────────────────
+  rustFsSvcUrl: process.env.RUSTFS_SVC_URL ?? "http://localhost:8101",
+
+  // ─── Knowledge Graph Bridge ───────────────────────────────────────────────
+  graphBridgeUrl: process.env.GRAPH_BRIDGE_URL ?? "http://localhost:8102",
+
+  // ─── Risk Engine ──────────────────────────────────────────────────────────
+  riskScorerUrl: process.env.RISK_SCORER_URL ?? "http://localhost:8103",
+  paymentRiskUrl: process.env.PAYMENT_RISK_URL ?? "http://localhost:8104",
+
+  // ─── Vision / Document AI ─────────────────────────────────────────────────
+  visionServiceUrl: process.env.VISION_SERVICE_URL ?? "http://localhost:8105",
+
+  // ─── Warehouse Service ────────────────────────────────────────────────────
+  warehouseServiceUrl: process.env.WAREHOUSE_SERVICE_URL ?? "http://localhost:8106",
+
+  // ─── Mojaloop ─────────────────────────────────────────────────────────────
+  mojaloopUrl: process.env.MOJALOOP_URL ?? "http://localhost:3001",
+
+  // ─── Sanctions Webhook ────────────────────────────────────────────────────
+  sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
+
+  // ─── Email Digest ─────────────────────────────────────────────────────────
+  digestFromEmail: process.env.DIGEST_FROM_EMAIL ?? "digest@tradegateway.gov.ng",
+  digestRecipients: (process.env.DIGEST_RECIPIENTS ?? "").split(",").filter(Boolean),
+
+  // ─── gRPC Service Addresses ───────────────────────────────────────────────
+  declarationGrpcAddr: process.env.DECLARATION_GRPC_ADDR ?? "localhost:50051",
+  riskEngineGrpcAddr: process.env.RISK_ENGINE_GRPC_ADDR ?? "localhost:50052",
+  paymentGrpcAddr: process.env.PAYMENT_GRPC_ADDR ?? "localhost:50053",
+  cargoTrackingGrpcAddr: process.env.CARGO_TRACKING_GRPC_ADDR ?? "localhost:50054",
+  documentVaultGrpcAddr: process.env.DOCUMENT_VAULT_GRPC_ADDR ?? "localhost:50055",
+  profileGrpcAddr: process.env.PROFILE_GRPC_ADDR ?? "localhost:50056",
+  bondedWarehouseGrpcAddr: process.env.BONDED_WAREHOUSE_GRPC_ADDR ?? "localhost:50057",
+  auditSvcGrpcAddr: process.env.AUDIT_SVC_GRPC_ADDR ?? "localhost:50058",
+  workflowEngineGrpcAddr: process.env.WORKFLOW_ENGINE_GRPC_ADDR ?? "localhost:50059",
+  keycloakProxyGrpcAddr: process.env.KEYCLOAK_PROXY_GRPC_ADDR ?? "localhost:50060",
+  openctiProxyGrpcAddr: process.env.OPENCTI_PROXY_GRPC_ADDR ?? "localhost:50061",
+  wazuhProxyGrpcAddr: process.env.WAZUH_PROXY_GRPC_ADDR ?? "localhost:50062",
+  kubecostProxyGrpcAddr: process.env.KUBECOST_PROXY_GRPC_ADDR ?? "localhost:50063",
+
+  // ─── App Version ──────────────────────────────────────────────────────────
+  appVersion: process.env.APP_VERSION ?? "1.0.0",
 };
 
 // ─── Production validation — logs warnings for missing secrets ────────────────

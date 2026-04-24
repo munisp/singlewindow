@@ -237,7 +237,7 @@ export default function PilotDashboard() {
                         <td className="py-2 px-3">{((r.avgClearanceHoursX100 as number) / 100).toFixed(1)}h</td>
                         <td className="py-2 px-3">₦{((r.totalDutyCollectedKobo as number) / 100).toLocaleString()}</td>
                         <td className="py-2 px-3">
-                          <Button size="sm" variant="ghost" className="h-6 text-xs gap-1 text-primary hover:text-primary">
+                          <Button size="sm" variant="ghost" className="h-6 text-xs gap-1 text-primary hover:text-primary" onClick={(e) => { e.stopPropagation(); setSelectedReportId(r.id as number); }}>
                             Details <ChevronRight className="h-3 w-3" />
                           </Button>
                         </td>

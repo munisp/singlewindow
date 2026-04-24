@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
@@ -24,7 +25,7 @@ const LANE_CFG = {
   green: { badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", dot: "bg-emerald-400" },
 };
 
-function DeclarationRow({ d }: { d: any }) {
+function DeclarationRow({ d, onNavigate }: { d: any; onNavigate: (id: number) => void }) {
   const lane = (d.riskLane as "red" | "yellow" | "green") ?? "green";
   const cfg = LANE_CFG[lane] ?? LANE_CFG.green;
   return (
@@ -42,13 +43,14 @@ function DeclarationRow({ d }: { d: any }) {
           <p className="text-xs text-muted-foreground">{d.declaredValue ? `$${Number(d.declaredValue).toLocaleString()}` : "—"}</p>
         </div>
         <Badge variant="outline" className={cfg.badge}>{d.riskScore ?? "—"}</Badge>
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><ChevronRight className="h-3.5 w-3.5" /></Button>
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onNavigate(d.id)}><ChevronRight className="h-3.5 w-3.5" /></Button>
       </div>
     </div>
   );
 }
 
 export default function CustomsRisk() {
+  const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [laneFilter, setLaneFilter] = useState<"all" | "red" | "yellow" | "green">("all");
   const { data: allData, isLoading, refetch, isFetching, isError} = trpc.declarations.all.useQuery({ limit: 200 });
@@ -138,7 +140,7 @@ export default function CustomsRisk() {
                     </div>
                   ) : (
                     <div className="divide-y max-h-[500px] overflow-y-auto">
-                      {declarations.map((d: any) => <DeclarationRow key={d.id} d={d} />)}
+                      {declarations.map((d: any) => <DeclarationRow key={d.id} d={d} onNavigate={(id) => setLocation(`/app/customs/declarations/${id}`)} />)}
                     </div>
                   )}
                 </CardContent></Card>

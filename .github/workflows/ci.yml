@@ -27,7 +27,7 @@ jobs:
 
   # ─── Unit & Integration Tests ──────────────────────────────────────────────
   test:
-    name: Test Suite (1679+ tests)
+    name: Test Suite (1766+ tests)
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -199,7 +199,7 @@ print(f'Extracted {len(groups)} rule groups')
 
   # ─── Authenticated E2E Playwright Tests ────────────────────────────────────
   playwright-e2e:
-    name: Authenticated E2E Tests (Journey 8)
+    name: Authenticated E2E Tests (All 9 Journeys)
     runs-on: ubuntu-latest
     needs: [test]
     services:
@@ -247,13 +247,13 @@ print(f'Extracted {len(groups)} rule groups')
             fi
             sleep 2
           done
-      - name: Run authenticated E2E tests (Journey 8)
-        run: npx playwright test e2e/journey8-authenticated-declaration-flow.spec.ts --reporter=html
+      - name: Run all E2E journey tests
+        run: npx playwright test e2e/ --workers=1 --reporter=html
       - name: Upload Playwright HTML report on failure
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report-journey8
+          name: playwright-report-all-journeys
           path: playwright-report/
           retention-days: 14
       - name: Stop dev server

@@ -1,4 +1,5 @@
 /// TradeGateway™ NGSWTP — Flutter GoRouter Navigation
+/// v33: Added 5 new screens for full PWA parity.
 library;
 
 import "package:flutter/material.dart";
@@ -23,6 +24,13 @@ import "../screens/app/trader_scorecard_screen.dart";
 import "../screens/app/system_status_screen.dart";
 import "../screens/app/hs_code_lookup_screen.dart";
 import "../screens/app/scan_document_screen.dart";
+// v33 — New screens for full PWA parity
+import "../screens/app/trade_analytics_screen.dart";
+import "../screens/app/duty_drawback_screen.dart";
+import "../screens/app/post_clearance_audit_screen.dart";
+import "../screens/app/sanctions_screening_screen.dart";
+import "../screens/app/bonded_warehouse_screen.dart";
+import "../screens/app/security_alerts_screen.dart";
 import "../widgets/scaffold_with_nav.dart";
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -42,6 +50,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ShellRoute(
         builder: (context, state, child) => ScaffoldWithNav(child: child),
         routes: [
+          // Core
           GoRoute(path: "/", builder: (_, __) => const DashboardScreen()),
           GoRoute(path: "/declarations", builder: (_, __) => const DeclarationsScreen()),
           GoRoute(path: "/declarations/new", builder: (_, __) => const NewDeclarationScreen()),
@@ -51,13 +60,27 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: "/documents", builder: (_, __) => const DocumentVaultScreen()),
           GoRoute(path: "/profile", builder: (_, __) => const ProfileScreen()),
           GoRoute(path: "/notifications", builder: (_, __) => const NotificationsScreen()),
+
+          // Compliance & Trade
           GoRoute(path: "/oga", builder: (_, __) => const OGAStatusScreen()),
           GoRoute(path: "/kyc", builder: (_, __) => const KYCScreen()),
           GoRoute(path: "/aeo", builder: (_, __) => const AEOScreen()),
           GoRoute(path: "/scorecard", builder: (_, __) => const TraderScorecardScreen()),
-          GoRoute(path: "/status", builder: (_, __) => const SystemStatusScreen()),
           GoRoute(path: "/hs-lookup", builder: (_, __) => const HSCodeLookupScreen()),
           GoRoute(path: "/scan", builder: (_, __) => const ScanDocumentScreen()),
+          GoRoute(path: "/sanctions", builder: (_, __) => const SanctionsScreeningScreen()),
+
+          // Customs Operations
+          GoRoute(path: "/duty-drawback", builder: (_, __) => const DutyDrawbackScreen()),
+          GoRoute(path: "/post-clearance-audit", builder: (_, __) => const PostClearanceAuditScreen()),
+          GoRoute(path: "/bonded-warehouse", builder: (_, __) => const BondedWarehouseScreen()),
+
+          // Analytics & Finance
+          GoRoute(path: "/trade-analytics", builder: (_, __) => const TradeAnalyticsScreen()),
+
+          // Security & System
+          GoRoute(path: "/security-alerts", builder: (_, __) => const SecurityAlertsScreen()),
+          GoRoute(path: "/status", builder: (_, __) => const SystemStatusScreen()),
         ],
       ),
     ],
