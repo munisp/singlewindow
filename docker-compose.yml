@@ -272,3 +272,415 @@ services:
       - "443:443"
     networks:
       - tradegateway-net
+
+  # ── Microservices ─────────────────────────────────────────────────────────────
+  # All 15 microservices are built from source in microservices/<name>/
+  # They communicate with the main app via HTTP REST and gRPC.
+  # Port assignments (no conflicts):
+  #   declaration-service:  8083  (gRPC: 50051)
+  #   payment-service:      8082  (gRPC: 50053)
+  #   oga-service:          8084  (gRPC: 50054)
+  #   analytics-service:    8085  (gRPC: 50055)
+  #   profile-service:      8086  (gRPC: 50056)
+  #   risk-engine:          8087  (gRPC: 50052)
+  #   cargo-tracking:       8088  (gRPC: 50057)
+  #   sanctions-service:    8089  (gRPC: 50058)
+  #   temporal-worker:      8090
+  #   anomaly-detection:    8091
+  #   gnn-risk:             8092
+  #   hs-classifier:        8093
+  #   risk-ai:              8094
+  #   vision-service:       8095
+  #   fluvio-consumer:      8096
+
+  # ── Declaration Service (Go) ─────────────────────────────────────────────────
+  declaration-service:
+    build:
+      context: ./microservices/declaration-service
+      dockerfile: Dockerfile
+    container_name: tg-declaration-svc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 8083
+      GRPC_PORT: 50051
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+    ports:
+      - "8083:8083"
+      - "50051:50051"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Payment Service (Go) ─────────────────────────────────────────────────────
+  payment-service:
+    build:
+      context: ./microservices/payment-service
+      dockerfile: Dockerfile
+    container_name: tg-payment-svc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 8082
+      GRPC_PORT: 50053
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+      MOJALOOP_HUB_URL: ${MOJALOOP_HUB_URL:-http://mojaloop-hub:3001}
+    ports:
+      - "8082:8082"
+      - "50053:50053"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── OGA Service (Go) ─────────────────────────────────────────────────────────
+  oga-service:
+    build:
+      context: ./microservices/oga-service
+      dockerfile: Dockerfile
+    container_name: tg-oga-svc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8084
+      GRPC_PORT: 50054
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8084:8084"
+      - "50054:50054"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Analytics Service (Go) ───────────────────────────────────────────────────
+  analytics-service:
+    build:
+      context: ./microservices/analytics-service
+      dockerfile: Dockerfile
+    container_name: tg-analytics-svc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8085
+      GRPC_PORT: 50055
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8085:8085"
+      - "50055:50055"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Profile Service (Go) ─────────────────────────────────────────────────────
+  profile-service:
+    build:
+      context: ./microservices/profile-service
+      dockerfile: Dockerfile
+    container_name: tg-profile-svc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8086
+      GRPC_PORT: 50056
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8086:8086"
+      - "50056:50056"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Risk Engine (Go + Python) ────────────────────────────────────────────────
+  risk-engine:
+    build:
+      context: ./microservices/risk-engine
+      dockerfile: Dockerfile
+    container_name: tg-risk-engine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 8087
+      GRPC_PORT: 50052
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+      GNN_RISK_URL: http://gnn-risk:8092
+      ANOMALY_DETECTION_URL: http://anomaly-detection:8091
+    ports:
+      - "8087:8087"
+      - "50052:50052"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Cargo Tracking Service (Go) ──────────────────────────────────────────────
+  cargo-tracking-service:
+    build:
+      context: ./microservices/cargo-tracking-service
+      dockerfile: Dockerfile
+    container_name: tg-cargo-tracking
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8088
+      GRPC_PORT: 50057
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8088:8088"
+      - "50057:50057"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Sanctions Service (Go) ───────────────────────────────────────────────────
+  sanctions-service:
+    build:
+      context: ./microservices/sanctions-service
+      dockerfile: Dockerfile
+    container_name: tg-sanctions-svc
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8089
+      GRPC_PORT: 50058
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      OFAC_API_URL: ${OFAC_API_URL:-https://api.trade.gov/consolidated_screening_list/search}
+      OFAC_API_KEY: ${OFAC_API_KEY:-}
+    ports:
+      - "8089:8089"
+      - "50058:50058"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8089/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Temporal Worker (Go) ─────────────────────────────────────────────────────
+  temporal-worker:
+    build:
+      context: ./microservices/temporal-worker
+      dockerfile: Dockerfile
+    container_name: tg-temporal-worker
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8090
+      TEMPORAL_HOST: temporal
+      TEMPORAL_PORT: 7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-tradegateway}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8090:8090"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── Anomaly Detection (Python) ───────────────────────────────────────────────
+  anomaly-detection:
+    build:
+      context: ./microservices/anomaly-detection
+      dockerfile: Dockerfile
+    container_name: tg-anomaly-detection
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8091
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8091:8091"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── GNN Risk (Python) ────────────────────────────────────────────────────────
+  gnn-risk:
+    build:
+      context: ./microservices/gnn-risk
+      dockerfile: Dockerfile
+    container_name: tg-gnn-risk
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8092
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8092:8092"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── HS Classifier (Python) ───────────────────────────────────────────────────
+  hs-classifier:
+    build:
+      context: ./microservices/hs-classifier
+      dockerfile: Dockerfile
+    container_name: tg-hs-classifier
+    restart: unless-stopped
+    environment:
+      PORT: 8093
+    ports:
+      - "8093:8093"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── Risk AI (Python) ─────────────────────────────────────────────────────────
+  risk-ai:
+    build:
+      context: ./microservices/risk-ai
+      dockerfile: Dockerfile
+    container_name: tg-risk-ai
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8094
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+    ports:
+      - "8094:8094"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8094/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── Vision Service (Python) ──────────────────────────────────────────────────
+  vision-service:
+    build:
+      context: ./microservices/vision-service
+      dockerfile: Dockerfile
+    container_name: tg-vision-svc
+    restart: unless-stopped
+    environment:
+      PORT: 8095
+      S3_ENDPOINT: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "8095:8095"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── Fluvio Consumer (Go) ─────────────────────────────────────────────────────
+  fluvio-consumer:
+    build:
+      context: ./microservices/fluvio-consumer
+      dockerfile: Dockerfile
+    container_name: tg-fluvio-consumer
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 8096
+      FLUVIO_ENDPOINT: ${FLUVIO_ENDPOINT:-localhost:9003}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+    ports:
+      - "8096:8096"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

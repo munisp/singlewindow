@@ -1,5 +1,5 @@
 /// TradeGateway™ NGSWTP — Flutter GoRouter Navigation
-/// v33: Added 5 new screens for full PWA parity.
+/// v34: Added 5 new screens for complete PWA parity (29 screens total).
 library;
 
 import "package:flutter/material.dart";
@@ -24,13 +24,19 @@ import "../screens/app/trader_scorecard_screen.dart";
 import "../screens/app/system_status_screen.dart";
 import "../screens/app/hs_code_lookup_screen.dart";
 import "../screens/app/scan_document_screen.dart";
-// v33 — New screens for full PWA parity
+// v33 screens
 import "../screens/app/trade_analytics_screen.dart";
 import "../screens/app/duty_drawback_screen.dart";
 import "../screens/app/post_clearance_audit_screen.dart";
 import "../screens/app/sanctions_screening_screen.dart";
 import "../screens/app/bonded_warehouse_screen.dart";
 import "../screens/app/security_alerts_screen.dart";
+// v34 screens — full PWA parity
+import "../screens/app/ai_assistant_screen.dart";
+import "../screens/app/aeo_self_assessment_screen.dart";
+import "../screens/app/mojaloop_payments_screen.dart";
+import "../screens/app/rules_of_origin_screen.dart";
+import "../screens/app/finance_screen.dart";
 import "../widgets/scaffold_with_nav.dart";
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -50,7 +56,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ShellRoute(
         builder: (context, state, child) => ScaffoldWithNav(child: child),
         routes: [
-          // Core
+          // ── Core ──────────────────────────────────────────────────────────
           GoRoute(path: "/", builder: (_, __) => const DashboardScreen()),
           GoRoute(path: "/declarations", builder: (_, __) => const DeclarationsScreen()),
           GoRoute(path: "/declarations/new", builder: (_, __) => const NewDeclarationScreen()),
@@ -61,24 +67,31 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: "/profile", builder: (_, __) => const ProfileScreen()),
           GoRoute(path: "/notifications", builder: (_, __) => const NotificationsScreen()),
 
-          // Compliance & Trade
+          // ── Compliance & Trade ────────────────────────────────────────────
           GoRoute(path: "/oga", builder: (_, __) => const OGAStatusScreen()),
           GoRoute(path: "/kyc", builder: (_, __) => const KYCScreen()),
           GoRoute(path: "/aeo", builder: (_, __) => const AEOScreen()),
+          GoRoute(path: "/aeo/self-assessment", builder: (_, __) => const AeoSelfAssessmentScreen()),
           GoRoute(path: "/scorecard", builder: (_, __) => const TraderScorecardScreen()),
           GoRoute(path: "/hs-lookup", builder: (_, __) => const HSCodeLookupScreen()),
           GoRoute(path: "/scan", builder: (_, __) => const ScanDocumentScreen()),
           GoRoute(path: "/sanctions", builder: (_, __) => const SanctionsScreeningScreen()),
+          GoRoute(path: "/rules-of-origin", builder: (_, __) => const RulesOfOriginScreen()),
 
-          // Customs Operations
+          // ── Customs Operations ────────────────────────────────────────────
           GoRoute(path: "/duty-drawback", builder: (_, __) => const DutyDrawbackScreen()),
           GoRoute(path: "/post-clearance-audit", builder: (_, __) => const PostClearanceAuditScreen()),
           GoRoute(path: "/bonded-warehouse", builder: (_, __) => const BondedWarehouseScreen()),
 
-          // Analytics & Finance
+          // ── Analytics & Finance ───────────────────────────────────────────
           GoRoute(path: "/trade-analytics", builder: (_, __) => const TradeAnalyticsScreen()),
+          GoRoute(path: "/finance", builder: (_, __) => const FinanceScreen()),
+          GoRoute(path: "/mojaloop-payments", builder: (_, __) => const MojaloopPaymentsScreen()),
 
-          // Security & System
+          // ── AI & Intelligence ─────────────────────────────────────────────
+          GoRoute(path: "/ai-assistant", builder: (_, __) => const AiAssistantScreen()),
+
+          // ── Security & System ─────────────────────────────────────────────
           GoRoute(path: "/security-alerts", builder: (_, __) => const SecurityAlertsScreen()),
           GoRoute(path: "/status", builder: (_, __) => const SystemStatusScreen()),
         ],

@@ -35,6 +35,10 @@ import HSCodeLookupScreen from "../screens/app/HSCodeLookupScreen";
 import ScanDocumentScreen from "../screens/app/ScanDocumentScreen";
 
 // v33 — New screens for full PWA parity
+// v34 — Final parity screens
+import AiAssistantScreen from "../screens/app/AiAssistantScreen";
+import AeoSelfAssessmentScreen from "../screens/app/AeoSelfAssessmentScreen";
+import MojaloopPaymentsScreen from "../screens/app/MojaloopPaymentsScreen";
 import TradeAnalyticsScreen from "../screens/app/TradeAnalyticsScreen";
 import DutyDrawbackScreen from "../screens/app/DutyDrawbackScreen";
 import PostClearanceAuditScreen from "../screens/app/PostClearanceAuditScreen";
@@ -75,6 +79,9 @@ export type MainDrawerParamList = {
   BondedWarehouse: undefined;
   RulesOfOrigin: undefined;
   Finance: undefined;
+  MojaloopPayments: undefined;
+  AiAssistant: undefined;
+  AeoSelfAssessment: undefined;
   SecurityAlerts: undefined;
   SystemStatus: undefined;
   Profile: undefined;
@@ -181,6 +188,11 @@ function MainNavigator() {
       {/* Analytics & Finance */}
       <MainDrawer.Screen name="TradeAnalytics" component={TradeAnalyticsScreen} options={{ title: "Trade Analytics" }} />
       <MainDrawer.Screen name="Finance" component={FinanceScreen} options={{ title: "Finance & Ledger" }} />
+      <MainDrawer.Screen name="MojaloopPayments" component={MojaloopPaymentsScreen} options={{ title: "Mojaloop Payments" }} />
+
+      {/* AI & Intelligence */}
+      <MainDrawer.Screen name="AiAssistant" component={AiAssistantScreen} options={{ title: "AI Trade Assistant" }} />
+      <MainDrawer.Screen name="AeoSelfAssessment" component={AeoSelfAssessmentScreen} options={{ title: "AEO Self-Assessment" }} />
 
       {/* Security & System */}
       <MainDrawer.Screen name="SecurityAlerts" component={SecurityAlertsScreen} options={{ title: "Security Alerts" }} />

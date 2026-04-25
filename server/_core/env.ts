@@ -142,6 +142,25 @@ export const ENV = {
   wazuhProxyGrpcAddr: process.env.WAZUH_PROXY_GRPC_ADDR ?? "localhost:50062",
   kubecostProxyGrpcAddr: process.env.KUBECOST_PROXY_GRPC_ADDR ?? "localhost:50063",
 
+  // ─── Microservice HTTP URLs (match docker-compose port assignments) ─────────
+  // Go microservices
+  declarationServiceUrl: process.env.DECLARATION_SERVICE_URL ?? "http://localhost:8083",
+  paymentServiceUrl: process.env.PAYMENT_SERVICE_URL ?? "http://localhost:8082",
+  ogaServiceUrl: process.env.OGA_SERVICE_URL ?? "http://localhost:8084",
+  analyticsServiceUrl: process.env.ANALYTICS_SERVICE_URL ?? "http://localhost:8085",
+  profileServiceUrl: process.env.PROFILE_SERVICE_URL ?? "http://localhost:8086",
+  riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8087",
+  cargoTrackingServiceUrl: process.env.CARGO_TRACKING_SERVICE_URL ?? "http://localhost:8088",
+  sanctionsServiceUrl: process.env.SANCTIONS_SERVICE_URL ?? "http://localhost:8089",
+  temporalWorkerUrl: process.env.TEMPORAL_WORKER_URL ?? "http://localhost:8090",
+  // Python microservices
+  anomalyDetectionUrl: process.env.ANOMALY_DETECTION_URL ?? "http://localhost:8091",
+  gnnRiskUrl: process.env.GNN_RISK_URL ?? "http://localhost:8092",
+  hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://localhost:8093",
+  riskAiUrl: process.env.RISK_AI_URL ?? "http://localhost:8094",
+  visionSvcUrl: process.env.VISION_SVC_URL ?? "http://localhost:8095",
+  fluvioConsumerUrl: process.env.FLUVIO_CONSUMER_URL ?? "http://localhost:8096",
+
   // ─── App Version ──────────────────────────────────────────────────────────
   appVersion: process.env.APP_VERSION ?? "1.0.0",
 };
