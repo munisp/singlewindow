@@ -21,6 +21,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { notifyOwner } from "../_core/notification";
+import { assertCan } from "../_core/permify";
 import {
   createKYCDocument,
   getKYCDocument,
@@ -406,6 +407,7 @@ export const kycRouter = router({
       applicantType: z.enum(["INDIVIDUAL", "BUSINESS"]).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await assertCan(String(ctx.user.id), "kyc_verification", String(input.verificationId), "review");
       const verification = await updateKYCVerification(input.verificationId, {
         status: input.decision,
         reviewedBy: ctx.user.id,

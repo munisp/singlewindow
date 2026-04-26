@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { assertCan, setOwner } from "../_core/permify";
 import {
   createAeoApplication, getAeoApplicationsByTrader, getAllAeoApplications,
   updateAeoApplication, logAuditEvent, createNotification, getProfileByUserId,
@@ -98,6 +99,7 @@ export const aeoRouter = router({
     .input(z.object({ applicationId: z.number() }))
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      await assertCan(String(ctx.user.id), "aeo_application", String(input.applicationId), "approve");
       const certNumber = `AEO-${new Date().getFullYear()}-${nanoid(8).toUpperCase()}`;
       const expiresAt = new Date();
       expiresAt.setFullYear(expiresAt.getFullYear() + 3);
@@ -136,6 +138,7 @@ export const aeoRouter = router({
     .input(z.object({ applicationId: z.number(), reason: z.string().min(10) }))
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
+      await assertCan(String(ctx.user.id), "aeo_application", String(input.applicationId), "reject");
       const updated = await updateAeoApplication(input.applicationId, {
         status: "rejected",
         assignedReviewerId: ctx.user.id,

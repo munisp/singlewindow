@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+import { assertCan } from "../_core/permify";
 import {
   getFinanceKPIs,
   getRevenueByHsChapter,
@@ -116,6 +117,7 @@ export const financeRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       assertFinanceAccess(ctx.user.role);
+      await assertCan(String(ctx.user.id), "finance_report", "export", "export");
       const { getDb } = await import("../db");
       const { payments, declarations } = await import("../../drizzle/schema");
       const { eq, and, gte, lte, desc } = await import("drizzle-orm");

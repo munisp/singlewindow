@@ -320,6 +320,10 @@ export const systemRouter = router({
    */
   microserviceHealth: adminProcedure
     .query(async () => {
+      // In dev/staging, set MICROSERVICE_MOCK_HEALTH=true to simulate healthy microservices
+      // without requiring the full Docker stack to be running.
+      const useMock = process.env.MICROSERVICE_MOCK_HEALTH === "true";
+
       const microservices: Array<{ name: string; url: string; category: string }> = [
         { name: "risk-engine",         url: ENV.riskEngineUrl,         category: "AI/ML" },
         { name: "risk-ai",             url: ENV.riskAiUrl,             category: "AI/ML" },
@@ -337,16 +341,30 @@ export const systemRouter = router({
         { name: "vision-ocr",          url: ENV.visionSvcUrl,          category: "AI/ML" },
         { name: "nlp-service",         url: ENV.visionServiceUrl,      category: "AI/ML" },
       ];
-      const results = await Promise.allSettled(
-        microservices.map(svc => checkHttpHealth(svc.url))
-      );
-      const services = microservices.map((svc, i) => ({
-        name: svc.name,
-        category: svc.category,
-        url: svc.url,
-        healthy: results[i].status === "fulfilled" ? results[i].value : false,
-        checkedAt: Date.now(),
-      }));
+      let services: Array<{ name: string; category: string; url: string; healthy: boolean; checkedAt: number; mock?: boolean }>;
+
+      if (useMock) {
+        // Return simulated healthy state for all services (dev/staging without Docker)
+        services = microservices.map(svc => ({
+          name: svc.name,
+          category: svc.category,
+          url: svc.url,
+          healthy: true,
+          checkedAt: Date.now(),
+          mock: true,
+        }));
+      } else {
+        const results = await Promise.allSettled(
+          microservices.map(svc => checkHttpHealth(svc.url))
+        );
+        services = microservices.map((svc, i) => ({
+          name: svc.name,
+          category: svc.category,
+          url: svc.url,
+          healthy: results[i].status === "fulfilled" ? (results[i] as PromiseFulfilledResult<boolean>).value : false,
+          checkedAt: Date.now(),
+        }));
+      }
       const healthyCount = services.filter(s => s.healthy).length;
       return {
         services,

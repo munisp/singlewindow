@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+import { assertCan } from "../_core/permify";
 
 function escapeCsv(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -77,6 +78,7 @@ export const bulkExportRouter = router({
           message: "Only admins and officers can export other traders' declarations",
         });
       }
+      await assertCan(String(ctx.user.id), "bulk_export", "declarations", "export");
 
       const { getDb } = await import("../db");
       const { declarations, users } = await import("../../drizzle/schema");

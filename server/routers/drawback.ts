@@ -8,6 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
+import { assertCan } from "../_core/permify";
 import {
   dutyDrawbackClaims, declarations, payments,
 } from "../../drizzle/schema";
@@ -270,6 +271,7 @@ export const drawbackRouter = router({
     .mutation(async ({ ctx, input }) => {
       const isReviewer = ["customs_officer", "admin", "finance"].includes(ctx.user.role);
       if (!isReviewer) throw new TRPCError({ code: "FORBIDDEN", message: "Only finance/customs officers can review claims" });
+      await assertCan(String(ctx.user.id), "duty_drawback_claim", String(input.id), "review");
 
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
