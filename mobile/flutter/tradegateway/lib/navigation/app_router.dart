@@ -37,6 +37,10 @@ import "../screens/app/aeo_self_assessment_screen.dart";
 import "../screens/app/mojaloop_payments_screen.dart";
 import "../screens/app/rules_of_origin_screen.dart";
 import "../screens/app/finance_screen.dart";
+// v35 screens — trader self-service parity
+import "../screens/app/my_certificates_screen.dart";
+import "../screens/app/notification_preferences_screen.dart";
+import "../screens/app/onboarding_progress_screen.dart";
 import "../widgets/scaffold_with_nav.dart";
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -94,6 +98,11 @@ final routerProvider = Provider<GoRouter>((ref) {
           // ── Security & System ─────────────────────────────────────────────
           GoRoute(path: "/security-alerts", builder: (_, __) => const SecurityAlertsScreen()),
           GoRoute(path: "/status", builder: (_, __) => const SystemStatusScreen()),
+
+          // ── Trader Self-Service ──────────────────────────────────────
+          GoRoute(path: "/certificates", builder: (_, __) => const MyCertificatesScreen()),
+          GoRoute(path: "/notification-preferences", builder: (_, __) => const NotificationPreferencesScreen()),
+          GoRoute(path: "/onboarding-progress", builder: (_, __) => const OnboardingProgressScreen()),
         ],
       ),
     ],

@@ -241,6 +241,9 @@ importers:
       express-rate-limit:
         specifier: ^8.3.0
         version: 8.3.0(express@5.2.1)
+      express-slow-down:
+        specifier: ^3.1.0
+        version: 3.1.0(express@5.2.1)
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
@@ -3356,6 +3359,12 @@ packages:
     engines: {node: '>= 16'}
     peerDependencies:
       express: '>= 4.11'
+
+  express-slow-down@3.1.0:
+    resolution: {integrity: sha512-0gZ1HHow8H83z1/+81DdWB60RSGHI0mJB0ZM1m5P6/BexORFcA8P1TgU0NKEwOiRmxyCIoktZYqmA+1UCc83+A==}
+    engines: {node: '>= 16'}
+    peerDependencies:
+      express: 4 || 5 || ^5.0.0-beta.1
 
   express@5.2.1:
     resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
@@ -8558,6 +8567,11 @@ snapshots:
     dependencies:
       express: 5.2.1
       ip-address: 10.1.0
+
+  express-slow-down@3.1.0(express@5.2.1):
+    dependencies:
+      express: 5.2.1
+      express-rate-limit: 8.3.0(express@5.2.1)
 
   express@5.2.1:
     dependencies:

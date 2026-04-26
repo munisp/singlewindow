@@ -19,6 +19,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
+import { ddosSlowDown, financialRateLimit, adminOperationRateLimit, fileUploadGuard } from "./security";
 import helmet from "helmet";
 import cors from "cors";
 import { sanitizeMiddleware } from "./sanitize";
@@ -917,6 +918,9 @@ async function startServer() {
     /^https?:\/\/localhost(:\d+)?$/,
     /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
   ];
+  // ── DDoS slow-down (global — applied before CORS so it catches all traffic) ──
+  app.use("/api", ddosSlowDown);
+
   app.use(cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
@@ -956,6 +960,21 @@ async function startServer() {
   }));
   // ── Input sanitization (XSS prevention) ─────────────────────────────────────
   app.use(sanitizeMiddleware);
+  // ── File upload guard (ransomware/malware delivery prevention) ─────────────
+  app.use("/api/upload", fileUploadGuard);
+
+  // ── Financial operation rate limiting ────────────────────────────────────────
+  app.use("/api/trpc/payments", financialRateLimit);
+  app.use("/api/trpc/mojaloop", financialRateLimit);
+  app.use("/api/trpc/batchPayments", financialRateLimit);
+  app.use("/api/trpc/ledger", financialRateLimit);
+  app.use("/api/trpc/drawback", financialRateLimit);
+
+  // ── Admin operation rate limiting ─────────────────────────────────────────────
+  app.use("/api/trpc/bulkExport", adminOperationRateLimit);
+  app.use("/api/trpc/tenant", adminOperationRateLimit);
+  app.use("/api/trpc/keycloak", adminOperationRateLimit);
+
   // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));

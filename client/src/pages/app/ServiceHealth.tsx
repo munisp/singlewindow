@@ -196,6 +196,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function ServiceHealth() {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<"grpc" | "http" | "circuits" | "security">("grpc");
 
   const { data: tbModes } = trpc.system.tigerbeetleModes.useQuery(undefined, {
     refetchInterval: 30_000,
@@ -206,6 +207,21 @@ export default function ServiceHealth() {
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
+
+  const { data: httpHealth, isLoading: httpLoading } = trpc.system.microserviceHealth.useQuery(undefined, {
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
+  });
+
+  const { data: circuitData, isLoading: circuitLoading } = trpc.system.circuitBreakerStatus.useQuery(undefined, {
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
+  });
+
+  const { data: securityData, isLoading: securityLoading } = trpc.system.securityEvents.useQuery(
+    { limit: 50 },
+    { refetchInterval: 15_000, refetchIntervalInBackground: true }
+  );
 
   const services = data?.services ?? {};
   const allHealthy = data?.allHealthy ?? false;
@@ -247,15 +263,45 @@ export default function ServiceHealth() {
           variant="outline"
           size="sm"
           onClick={() => setRefreshKey((k) => k + 1)}
-          disabled={isLoading}
+          disabled={isLoading || httpLoading}
           className="gap-2"
         >
-          <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`h-4 w-4 ${(isLoading || httpLoading) ? "animate-spin" : ""}`} />
           Refresh
         </Button>
       </div>
 
+      {/* ── Tab Navigation ──────────────────────────────────────────────── */}
+      <div className="flex gap-1 border-b border-border">
+        {([
+          { id: "grpc",     label: "gRPC Services",   count: totalCount },
+          { id: "http",     label: "HTTP Microservices", count: httpHealth?.totalCount ?? 15 },
+          { id: "circuits", label: "Circuit Breakers", count: circuitData?.circuits.length ?? 0 },
+          { id: "security", label: "Security Events",  count: securityData?.total ?? 0 },
+        ] as const).map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+            {tab.count > 0 && (
+              <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab Content ─────────────────────────────────────────────────── */}
+
       {/* ── Summary Banner ──────────────────────────────────────────────── */}
+      {activeTab === "grpc" && (<>
       <div
         className={`rounded-lg border px-5 py-4 flex items-center gap-4 ${
           isLoading
@@ -453,6 +499,169 @@ export default function ServiceHealth() {
           </p>
         </CardContent>
       </Card>
+      </>)}
+
+      {/* ── HTTP Microservices Tab ────────────────────────────────────────── */}
+      {activeTab === "http" && (
+        <div className="space-y-4">
+          <div className={`rounded-lg border px-5 py-4 flex items-center gap-4 ${
+            httpLoading ? "border-border bg-muted/30" :
+            httpHealth?.allHealthy ? "border-green-500/30 bg-green-500/5" :
+            "border-amber-500/30 bg-amber-500/5"
+          }`}>
+            {httpLoading ? (
+              <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            ) : httpHealth?.allHealthy ? (
+              <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
+            ) : (
+              <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
+            )}
+            <div className="flex-1">
+              <p className="font-semibold text-foreground">
+                {httpLoading ? "Checking HTTP microservices…" :
+                 httpHealth?.allHealthy ? "All HTTP microservices healthy" :
+                 `${(httpHealth?.totalCount ?? 0) - (httpHealth?.healthyCount ?? 0)} service(s) offline`}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {httpHealth?.healthyCount ?? 0} / {httpHealth?.totalCount ?? 15} healthy
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {(httpHealth?.services ?? []).map(svc => (
+              <div key={svc.name} className={`rounded-lg border p-4 flex items-start gap-3 ${
+                svc.healthy ? "border-border bg-card" : "border-destructive/30 bg-destructive/5"
+              }`}>
+                <div className={`rounded-md p-2 border shrink-0 ${
+                  svc.category === "AI/ML" ? CATEGORY_COLORS["Intelligence"] :
+                  svc.category === "Core" ? CATEGORY_COLORS["Core Customs"] :
+                  svc.category === "Compliance" ? CATEGORY_COLORS["Compliance"] :
+                  svc.category === "Analytics" ? CATEGORY_COLORS["Analytics"] :
+                  CATEGORY_COLORS["Infrastructure"]
+                }`}>
+                  <Cpu className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium text-sm text-foreground truncate">{svc.name}</p>
+                    {svc.healthy ? (
+                      <Badge variant="outline" className="text-green-500 border-green-500/30 bg-green-500/5 shrink-0 text-xs">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />Healthy
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-destructive border-destructive/30 bg-destructive/5 shrink-0 text-xs">
+                        <XCircle className="h-3 w-3 mr-1" />Offline
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{svc.category}</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1 truncate">{svc.url}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Circuit Breakers Tab ─────────────────────────────────────────── */}
+      {activeTab === "circuits" && (
+        <div className="space-y-4">
+          {circuitLoading && (
+            <div className="text-center text-muted-foreground text-sm py-8">Loading circuit breaker status…</div>
+          )}
+          {!circuitLoading && (circuitData?.circuits.length ?? 0) === 0 && (
+            <Card>
+              <CardContent className="pt-6 text-center text-muted-foreground text-sm">
+                No circuit breakers registered. Circuit breakers are created automatically when
+                microservice calls are made in production.
+              </CardContent>
+            </Card>
+          )}
+          {(circuitData?.circuits ?? []).map(cb => (
+            <div key={cb.name} className={`rounded-lg border p-4 flex items-center gap-4 ${
+              cb.state === "open" ? "border-destructive/30 bg-destructive/5" :
+              cb.state === "half-open" ? "border-amber-500/30 bg-amber-500/5" :
+              "border-border bg-card"
+            }`}>
+              <div className={`rounded-full h-3 w-3 shrink-0 ${
+                cb.state === "open" ? "bg-destructive" :
+                cb.state === "half-open" ? "bg-amber-500" :
+                "bg-green-500"
+              }`} />
+              <div className="flex-1">
+                <p className="font-medium text-sm text-foreground">{cb.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  Failures: {cb.failures} (total: {cb.totalFailures}) / {cb.totalCalls} calls
+                  {cb.lastFailureAt ? ` · Last failure: ${new Date(cb.lastFailureAt).toLocaleTimeString()}` : ""}
+                </p>
+              </div>
+              <Badge variant="outline" className={`text-xs ${
+                cb.state === "open" ? "text-destructive border-destructive/30" :
+                cb.state === "half-open" ? "text-amber-500 border-amber-500/30" :
+                "text-green-500 border-green-500/30"
+              }`}>
+                {cb.state.toUpperCase()}
+              </Badge>
+            </div>
+          ))}
+          {circuitData && circuitData.openCount > 0 && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-5 py-3 text-sm text-destructive">
+              {circuitData.openCount} circuit breaker(s) are OPEN — downstream calls to these services are being blocked.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Security Events Tab ──────────────────────────────────────────── */}
+      {activeTab === "security" && (
+        <div className="space-y-3">
+          {securityLoading && (
+            <div className="text-center text-muted-foreground text-sm py-8">Loading security events…</div>
+          )}
+          {!securityLoading && (securityData?.events.length ?? 0) === 0 && (
+            <Card>
+              <CardContent className="pt-6 text-center text-muted-foreground text-sm">
+                No recent security events. All clear.
+              </CardContent>
+            </Card>
+          )}
+          {(securityData?.events ?? []).map((ev, i) => {
+            const isCritical = ev.type === "malware_detected" || ev.type === "ddos_detected" || ev.type === "replay_attack";
+            const isHigh = ev.type === "pbac_denied" || ev.type === "amount_tamper" || ev.type === "circuit_open";
+            return (
+            <div key={i} className={`rounded-lg border p-4 flex items-start gap-3 ${
+              isCritical ? "border-destructive/30 bg-destructive/5" :
+              isHigh ? "border-amber-500/30 bg-amber-500/5" :
+              "border-border bg-card"
+            }`}>
+              <Shield className={`h-4 w-4 shrink-0 mt-0.5 ${
+                isCritical ? "text-destructive" :
+                isHigh ? "text-amber-500" :
+                "text-muted-foreground"
+              }`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium text-sm text-foreground">{ev.type}</p>
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {new Date(ev.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  IP: {ev.ip} · Path: {ev.path}
+                </p>
+              </div>
+              <Badge variant="outline" className={`text-xs shrink-0 ${
+                isCritical ? "text-destructive border-destructive/30" :
+                isHigh ? "text-amber-500 border-amber-500/30" :
+                "text-muted-foreground"
+              }`}>
+                {isCritical ? "CRITICAL" : isHigh ? "HIGH" : "INFO"}
+              </Badge>
+            </div>
+          );
+          })}
+        </div>
+      )}
     </div>
   );
 }

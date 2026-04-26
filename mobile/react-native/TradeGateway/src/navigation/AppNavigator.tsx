@@ -36,6 +36,10 @@ import ScanDocumentScreen from "../screens/app/ScanDocumentScreen";
 
 // v33 — New screens for full PWA parity
 // v34 — Final parity screens
+// v35 — Remaining trader-facing screens
+import MyCertificatesScreen from "../screens/app/MyCertificatesScreen";
+import NotificationPreferencesScreen from "../screens/app/NotificationPreferencesScreen";
+import OnboardingProgressScreen from "../screens/app/OnboardingProgressScreen";
 import AiAssistantScreen from "../screens/app/AiAssistantScreen";
 import AeoSelfAssessmentScreen from "../screens/app/AeoSelfAssessmentScreen";
 import MojaloopPaymentsScreen from "../screens/app/MojaloopPaymentsScreen";
@@ -85,6 +89,9 @@ export type MainDrawerParamList = {
   SecurityAlerts: undefined;
   SystemStatus: undefined;
   Profile: undefined;
+  MyCertificates: undefined;
+  NotificationPreferences: undefined;
+  OnboardingProgress: undefined;
 };
 
 export type HomeTabsParamList = {
@@ -198,6 +205,11 @@ function MainNavigator() {
       <MainDrawer.Screen name="SecurityAlerts" component={SecurityAlertsScreen} options={{ title: "Security Alerts" }} />
       <MainDrawer.Screen name="SystemStatus" component={SystemStatusScreen} options={{ title: "System Status" }} />
       <MainDrawer.Screen name="Profile" component={ProfileScreen} options={{ title: "My Profile" }} />
+
+      {/* Trader Self-Service */}
+      <MainDrawer.Screen name="MyCertificates" component={MyCertificatesScreen} options={{ title: "My Certificates" }} />
+      <MainDrawer.Screen name="NotificationPreferences" component={NotificationPreferencesScreen} options={{ title: "Notification Preferences" }} />
+      <MainDrawer.Screen name="OnboardingProgress" component={OnboardingProgressScreen} options={{ title: "Onboarding Progress" }} />
     </MainDrawer.Navigator>
   );
 }

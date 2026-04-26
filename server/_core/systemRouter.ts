@@ -1,11 +1,23 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
+import { getAllCircuitStatus, getRecentSecurityEvents } from "./security";
+import { ENV } from "./env";
 import { adminProcedure, publicProcedure, router, getRateLimitStats } from "./trpc";
 import { getServiceHealthSummary, getTigerBeetleBridgeModes } from "../grpc-clients";
 import { redisHealthCheck } from "./redis";
 import { getDb } from "../db";
 import { desc, eq, and, gte, lte, like, sql } from "drizzle-orm";
 import { auditEvents } from "../../drizzle/schema";
+
+// ─── Microservice HTTP health check helper ───────────────────────────────────
+async function checkHttpHealth(url: string, timeoutMs = 3000): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 export const systemRouter = router({
   /**
@@ -299,5 +311,78 @@ export const systemRouter = router({
       return {
         success: delivered,
       } as const;
+    }),
+
+  /**
+   * HTTP health check for all 15 docker-compose microservices.
+   * Runs all checks in parallel with a 3-second timeout each.
+   * Used by the ServiceHealth dashboard "Microservices" tab.
+   */
+  microserviceHealth: adminProcedure
+    .query(async () => {
+      const microservices: Array<{ name: string; url: string; category: string }> = [
+        { name: "risk-engine",         url: ENV.riskEngineUrl,         category: "AI/ML" },
+        { name: "risk-ai",             url: ENV.riskAiUrl,             category: "AI/ML" },
+        { name: "hs-classifier",       url: ENV.hsClassifierUrl,       category: "AI/ML" },
+        { name: "gnn-risk",            url: ENV.gnnRiskUrl,            category: "AI/ML" },
+        { name: "anomaly-detection",   url: ENV.anomalyDetectionUrl,   category: "AI/ML" },
+        { name: "declaration",         url: ENV.declarationServiceUrl, category: "Core" },
+        { name: "payment",             url: ENV.paymentServiceUrl,     category: "Core" },
+        { name: "oga",                 url: ENV.ogaServiceUrl,         category: "Core" },
+        { name: "cargo-tracking",      url: ENV.cargoTrackingServiceUrl, category: "Core" },
+        { name: "profile",             url: ENV.profileServiceUrl,     category: "Core" },
+        { name: "sanctions",           url: ENV.sanctionsServiceUrl,   category: "Compliance" },
+        { name: "analytics",           url: ENV.analyticsServiceUrl,   category: "Analytics" },
+        { name: "temporal-worker",     url: ENV.temporalWorkerUrl,     category: "Workflow" },
+        { name: "vision-ocr",          url: ENV.visionSvcUrl,          category: "AI/ML" },
+        { name: "nlp-service",         url: ENV.visionServiceUrl,      category: "AI/ML" },
+      ];
+      const results = await Promise.allSettled(
+        microservices.map(svc => checkHttpHealth(svc.url))
+      );
+      const services = microservices.map((svc, i) => ({
+        name: svc.name,
+        category: svc.category,
+        url: svc.url,
+        healthy: results[i].status === "fulfilled" ? results[i].value : false,
+        checkedAt: Date.now(),
+      }));
+      const healthyCount = services.filter(s => s.healthy).length;
+      return {
+        services,
+        healthyCount,
+        totalCount: services.length,
+        allHealthy: healthyCount === services.length,
+        checkedAt: Date.now(),
+      };
+    }),
+
+  /**
+   * Circuit breaker status for all registered downstream service calls.
+   * Shows open/closed/half-open state, failure counts, and last failure time.
+   */
+  circuitBreakerStatus: adminProcedure
+    .query(async () => {
+      const circuits = getAllCircuitStatus();
+      return {
+        circuits,
+        openCount: circuits.filter(c => c.state === "open").length,
+        checkedAt: Date.now(),
+      };
+    }),
+
+  /**
+   * Recent security events from the in-memory security event queue.
+   * Returns the last 100 events (rate limit exceeded, PBAC denied, malware, etc.).
+   */
+  securityEvents: adminProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(500).default(100) }))
+    .query(async ({ input }) => {
+      const events = getRecentSecurityEvents(input.limit);
+      return {
+        events,
+        total: events.length,
+        checkedAt: Date.now(),
+      };
     }),
 });
