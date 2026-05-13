@@ -26,41 +26,36 @@ import {
 import {
   DollarSign,
   Server,
-  HardDrive,
-  Cpu,
-  Network,
   TrendingDown,
   AlertCircle,
   Zap,
+  Cpu,
 } from "lucide-react";
 
-const PLAN_COLORS: Record<string, string> = {
-  enterprise: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  standard: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  starter: "bg-green-500/20 text-green-400 border-green-500/30",
-};
-
 export default function CostManagement() {
-  const [period] = useState("2025-02");
+  const [period] = useState<"day" | "week" | "month">("month");
 
   const summaryQuery = trpc.cost.getClusterSummary.useQuery();
   const tenantCostsQuery = trpc.cost.getTenantCosts.useQuery({ period });
-  const chargebackQuery = trpc.cost.getChargebackReport.useQuery({ period });
   const idleQuery = trpc.cost.getIdleResources.useQuery();
   const trendQuery = trpc.cost.getCostTrend.useQuery({ days: 30 });
   const statusQuery = trpc.cost.getServiceStatus.useQuery();
 
-  const summary = summaryQuery.data;
-  const tenantCosts = tenantCostsQuery.data ?? [];
-  const idleResources = idleQuery.data ?? [];
-  const trendData = (trendQuery.data ?? []).map((d) => ({
-    ...d,
-    date: d.date.slice(5), // MM-DD
-    total: Math.round(d.total_cost_usd),
-    cpu: Math.round(d.cpu_cost_usd),
-    memory: Math.round(d.memory_cost_usd),
-    storage: Math.round(d.storage_cost_usd),
+  const summary = summaryQuery.data as any;
+  const tenantCostsRaw = tenantCostsQuery.data as any;
+  const tenantCosts: any[] = Array.isArray(tenantCostsRaw)
+    ? tenantCostsRaw
+    : (tenantCostsRaw?.tenants ?? []);
+  const idleResources = (idleQuery.data ?? []) as any[];
+  const trendData = ((trendQuery.data ?? []) as any[]).map((d: any) => ({
+    date: String(d.period_date ?? d.date ?? "").slice(5),
+    total: Math.round(Number(d.total_cost_usd ?? 0)),
+    compute: Math.round(Number(d.compute_cost_usd ?? 0)),
+    storage: Math.round(Number(d.storage_cost_usd ?? 0)),
+    network: Math.round(Number(d.network_cost_usd ?? 0)),
   }));
+
+  const currentMonth = summary?.current_month as any;
 
   return (
     <DashboardLayout title="Cost Management (Kubecost)">
@@ -74,9 +69,9 @@ export default function CostManagement() {
             </p>
           </div>
           {statusQuery.data && (
-            <Badge variant="outline" className={statusQuery.data.online ? "border-green-500 text-green-400" : "border-yellow-500 text-yellow-400"}>
+            <Badge variant="outline" className="border-yellow-500 text-yellow-400">
               <Zap className="h-3 w-3 mr-1" />
-              {statusQuery.data.online ? "Kubecost Online" : "Mock Mode"}
+              DB Mode — {(statusQuery.data as any).records?.toLocaleString()} records
             </Badge>
           )}
         </div>
@@ -91,7 +86,7 @@ export default function CostManagement() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-foreground">
-                    ${summary?.total_cost_usd.toFixed(0) ?? "—"}
+                    ${Number(currentMonth?.total ?? 0).toFixed(0)}
                   </p>
                   <p className="text-xs text-muted-foreground">Total Monthly Cost</p>
                 </div>
@@ -106,9 +101,9 @@ export default function CostManagement() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-foreground">
-                    ${summary?.cpu_cost_usd.toFixed(0) ?? "—"}
+                    ${Number(currentMonth?.compute ?? 0).toFixed(0)}
                   </p>
-                  <p className="text-xs text-muted-foreground">CPU Cost</p>
+                  <p className="text-xs text-muted-foreground">Compute Cost</p>
                 </div>
               </div>
             </CardContent>
@@ -121,9 +116,9 @@ export default function CostManagement() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-foreground">
-                    ${summary?.idle_cost_usd.toFixed(0) ?? "—"}
+                    {summary?.mom_change_pct ?? 0}%
                   </p>
-                  <p className="text-xs text-muted-foreground">Idle Waste</p>
+                  <p className="text-xs text-muted-foreground">MoM Change</p>
                 </div>
               </div>
             </CardContent>
@@ -136,9 +131,9 @@ export default function CostManagement() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-foreground">
-                    {summary?.efficiency_pct.toFixed(1) ?? "—"}%
+                    {Number(currentMonth?.avg_efficiency ?? 0).toFixed(0)}%
                   </p>
-                  <p className="text-xs text-muted-foreground">Efficiency</p>
+                  <p className="text-xs text-muted-foreground">Avg Efficiency</p>
                 </div>
               </div>
             </CardContent>
@@ -164,9 +159,9 @@ export default function CostManagement() {
                   />
                   <Legend />
                   <Line type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} dot={false} name="Total" />
-                  <Line type="monotone" dataKey="cpu" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="CPU" />
-                  <Line type="monotone" dataKey="memory" stroke="#10b981" strokeWidth={1.5} dot={false} name="Memory" />
+                  <Line type="monotone" dataKey="compute" stroke="#3b82f6" strokeWidth={1.5} dot={false} name="Compute" />
                   <Line type="monotone" dataKey="storage" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Storage" />
+                  <Line type="monotone" dataKey="network" stroke="#10b981" strokeWidth={1.5} dot={false} name="Network" />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
@@ -178,19 +173,18 @@ export default function CostManagement() {
         {/* Per-Tenant Chargeback */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Per-Tenant Chargeback — {period}</CardTitle>
+            <CardTitle className="text-base">Per-Tenant Cost Allocation</CardTitle>
           </CardHeader>
           <CardContent>
             {tenantCosts.length > 0 ? (
               <>
                 <div className="mb-4">
                   <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={tenantCosts.map((t) => ({
-                      name: t.tenant_name.split(" ").slice(0, 2).join(" "),
-                      CPU: Math.round(t.cpu_cost_usd),
-                      Memory: Math.round(t.memory_cost_usd),
-                      Storage: Math.round(t.storage_cost_usd),
-                      Network: Math.round(t.network_cost_usd),
+                    <BarChart data={tenantCosts.map((t: any) => ({
+                      name: String(t.tenant_name ?? "").split("-").slice(0, 2).join("-"),
+                      Compute: Math.round(Number(t.compute_cost_usd ?? 0)),
+                      Storage: Math.round(Number(t.storage_cost_usd ?? 0)),
+                      Network: Math.round(Number(t.network_cost_usd ?? 0)),
                     }))}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                       <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9ca3af" }} />
@@ -200,8 +194,7 @@ export default function CostManagement() {
                         formatter={(v: number) => [`$${v}`, ""]}
                       />
                       <Legend />
-                      <Bar dataKey="CPU" stackId="a" fill="#3b82f6" />
-                      <Bar dataKey="Memory" stackId="a" fill="#10b981" />
+                      <Bar dataKey="Compute" stackId="a" fill="#3b82f6" />
                       <Bar dataKey="Storage" stackId="a" fill="#f59e0b" />
                       <Bar dataKey="Network" stackId="a" fill="#8b5cf6" />
                     </BarChart>
@@ -211,9 +204,8 @@ export default function CostManagement() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Tenant</TableHead>
-                      <TableHead>Plan</TableHead>
-                      <TableHead>CPU</TableHead>
-                      <TableHead>Memory</TableHead>
+                      <TableHead>Namespace</TableHead>
+                      <TableHead>Compute</TableHead>
                       <TableHead>Storage</TableHead>
                       <TableHead>Network</TableHead>
                       <TableHead>Total</TableHead>
@@ -221,27 +213,19 @@ export default function CostManagement() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {tenantCosts.map((t) => (
-                      <TableRow key={t.tenant_id}>
+                    {tenantCosts.map((t: any, i: number) => (
+                      <TableRow key={i}>
                         <TableCell>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{t.tenant_name}</p>
-                            <p className="text-xs text-muted-foreground font-mono">{t.tenant_id}</p>
-                          </div>
+                          <p className="text-sm font-medium text-foreground">{t.tenant_name}</p>
                         </TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">{t.namespace}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">${Number(t.compute_cost_usd ?? 0).toFixed(0)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">${Number(t.storage_cost_usd ?? 0).toFixed(0)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">${Number(t.network_cost_usd ?? 0).toFixed(0)}</TableCell>
+                        <TableCell className="text-sm font-semibold text-foreground">${Number(t.total_cost_usd ?? 0).toFixed(0)}</TableCell>
                         <TableCell>
-                          <Badge variant="outline" className={PLAN_COLORS[t.plan] ?? ""}>
-                            {t.plan}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">${t.cpu_cost_usd.toFixed(2)}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">${t.memory_cost_usd.toFixed(2)}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">${t.storage_cost_usd.toFixed(2)}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">${t.network_cost_usd.toFixed(2)}</TableCell>
-                        <TableCell className="text-sm font-semibold text-foreground">${t.total_cost_usd.toFixed(2)}</TableCell>
-                        <TableCell>
-                          <span className={`text-sm font-medium ${t.efficiency_pct >= 90 ? "text-green-400" : t.efficiency_pct >= 75 ? "text-yellow-400" : "text-red-400"}`}>
-                            {t.efficiency_pct.toFixed(1)}%
+                          <span className={`text-sm font-medium ${Number(t.avg_efficiency ?? 0) >= 75 ? "text-green-400" : "text-yellow-400"}`}>
+                            {Number(t.avg_efficiency ?? 0).toFixed(0)}%
                           </span>
                         </TableCell>
                       </TableRow>
@@ -260,7 +244,7 @@ export default function CostManagement() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-yellow-400" />
-              Idle Resource Recommendations
+              Low-Efficiency Services (Idle Resource Candidates)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -268,18 +252,22 @@ export default function CostManagement() {
               <div className="text-center py-6 text-muted-foreground">No idle resources detected</div>
             ) : (
               <div className="space-y-3">
-                {idleResources.map((r, i) => (
+                {idleResources.map((r: any, i: number) => (
                   <div key={i} className="p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/5">
                     <div className="flex items-start justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">
-                          {r.resource_type}: <span className="font-mono">{r.resource_name}</span>
+                          {r.service} <span className="text-muted-foreground font-normal">in</span> {r.namespace}
                         </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">Namespace: {r.namespace}</p>
-                        <p className="text-xs text-yellow-300 mt-1">{r.recommendation}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Tenant: {r.tenant_name} · Category: {r.category}
+                        </p>
+                        <p className="text-xs text-yellow-300 mt-1">
+                          Avg efficiency {Number(r.avg_efficiency ?? 0).toFixed(0)}% — consider right-sizing
+                        </p>
                       </div>
                       <Badge variant="outline" className="border-yellow-500/30 text-yellow-400 text-xs whitespace-nowrap ml-3">
-                        ${r.idle_cost_usd_per_day.toFixed(2)}/day waste
+                        ${Number(r.wasted_cost_usd ?? 0).toFixed(0)} wasted
                       </Badge>
                     </div>
                   </div>

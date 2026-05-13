@@ -123,3 +123,69 @@
 - [x] Vitest: 1,766 tests passing (61 files)
 - [x] TypeScript: 0 errors
 - [x] Playwright: 232 passed, 14 skipped, 0 failed (1 worker)
+
+## v37 Sprint — Orphan/Scaffolded/Generic Feature Implementation
+
+### Server Routers — Replace In-Memory/Mock Data with DB
+- [ ] cargoTracking.ts — replace BASE_VESSELS in-memory array with vesselTrackingEvents DB; add insert/update mutations
+- [ ] portCongestion.ts — replace PORT_PROFILES in-memory with portLocations+portCongestionEvents DB; add record mutation
+- [ ] bondedWarehouse.ts — replace _warehouses/_inventory/_permits in-memory with new DB tables
+- [ ] cep.ts — replace MOCK_PATTERNS/MOCK_ALERTS with DB-backed cep_patterns+cep_alerts tables
+- [ ] cost.ts — replace MOCK_TENANT_COSTS/MOCK_COST_TREND with DB-backed cost_records table
+- [ ] devPortal.ts — replace Math.random() IDs with DB sequences; wire real apiUsageLogs queries
+
+### DB Schema — New Tables
+- [ ] Add bonded_warehouses, bonded_inventory, ex_bond_permits tables
+- [ ] Add cep_patterns, cep_alerts tables
+- [ ] Add cost_records table
+- [ ] Run pnpm db:push
+
+### Server Routers — Add Missing Domain Business Logic
+- [ ] traderScorecard.ts — add updateScorecard mutation + trend calculation
+- [ ] officerWorkload.ts — add assignDeclaration mutation + workload rebalancing
+- [ ] executiveDashboard.ts — add exportReport + KPI target mutations
+- [ ] pilot.ts — replace Math.random() simulation with real DB queries
+
+### PWA Pages — Wire Missing tRPC Calls
+- [ ] FreeZoneOps.tsx — add live tRPC queries for freeZone router
+- [ ] Create PortCongestion.tsx wired to portCongestion router
+- [ ] AdminDeclarations.tsx — add bulk approve/assign mutations
+- [ ] TraderDeclarations.tsx — add declaration submission workflow
+- [ ] OfficerWorkload.tsx — add assignment mutation UI
+- [ ] ExecutiveDashboard.tsx — add export and KPI target UI
+
+### Flutter Screens — Implement 16 TODO Stubs
+- [ ] declarations_screen.dart — wire ApiService().listDeclarations()
+- [ ] declaration_detail_screen.dart — wire ApiService().getDeclaration()
+- [ ] new_declaration_screen.dart — wire ApiService().createDeclaration()
+- [ ] payments_screen.dart — wire ApiService().listPayments()
+- [ ] notifications_screen.dart — wire ApiService().listNotifications()
+- [ ] kyc_screen.dart — wire ApiService().getKYCStatus()
+- [ ] dashboard_screen.dart — wire ApiService().getMe() + stats
+- [ ] profile_screen.dart — wire ApiService().getMyProfile() + update
+- [ ] cargo_tracking_screen.dart — wire ApiService().listCargoTracking()
+- [ ] document_vault_screen.dart — wire ApiService().listDocuments()
+- [ ] hs_code_lookup_screen.dart — wire ApiService().searchHsCode()
+- [ ] oga_status_screen.dart — add + wire ApiService().getOgaStatus()
+- [ ] system_status_screen.dart — wire ApiService().getSystemStatus()
+- [ ] trader_scorecard_screen.dart — wire ApiService().getTraderScorecard()
+- [ ] aeo_screen.dart — add + wire ApiService().getAeoApplications()
+- [ ] scan_document_screen.dart — wire document upload flow
+
+### Flutter ApiService — Add Missing Methods
+- [ ] Add getOgaStatus() to api_service.dart
+- [ ] Add getAeoApplications() + submitAeoApplication() to api_service.dart
+- [ ] Add uploadDocument() to api_service.dart
+
+## v37 Sprint — Orphan/Scaffold Elimination (COMPLETED)
+- [x] Deep scan: identified 5 in-memory routers, 17 Flutter stub screens, 2 missing utility exports
+- [x] bondedWarehouse.ts: rewrote with real DB (bonded_warehouses, bonded_inventory, ex_bond_permits tables)
+- [x] cep.ts: rewrote with real DB (cep_patterns, cep_alerts tables)
+- [x] cost.ts: rewrote with real DB (cost_records table) + added getClusterSummary, getChargebackReport, getServiceStatus
+- [x] portCongestion.ts: rewrote to query real port_locations and port_congestion_events tables
+- [x] cargoTracking.ts: rewrote getLiveVessels to query real vessel_tracking_events table
+- [x] cargoTracking.ts: added sync getLiveVesselsData() shim with 30s DB cache refresh
+- [x] bondedWarehouse.ts: exported isBondExpiringSoon() and generatePermitNo() for test compatibility
+- [x] generatePermitNo: fixed format to BW-YYYY-XXXXXX (6 uppercase hex)
+- [x] 17 Flutter screens: wired with real API calls (declarations, dashboard, payments, cargo, etc.)
+- [x] All 1766 tests passing (61 test files)

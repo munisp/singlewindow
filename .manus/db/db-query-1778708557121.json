@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS bonded_warehouses (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  license_no VARCHAR(50) NOT NULL UNIQUE,\n  name VARCHAR(200) NOT NULL,\n  operator_id INT,\n  operator_name VARCHAR(200) NOT NULL,\n  country VARCHAR(3) NOT NULL DEFAULT 'NGA',\n  address TEXT NOT NULL,\n  port_code VARCHAR(10),\n  capacity_cbm INT NOT NULL DEFAULT 0,\n  used_cbm INT NOT NULL DEFAULT 0,\n  bond_amount_usd BIGINT NOT NULL DEFAULT 0,\n  bond_expiry DATETIME,\n  status ENUM('active','suspended','revoked','pending_renewal') NOT NULL DEFAULT 'active',\n  approved_at DATETIME,\n  approved_by INT,\n  created_at DATETIME NOT NULL DEFAULT NOW(),\n  updated_at DATETIME NOT NULL DEFAULT NOW(),\n  INDEX idx_bw_operator (operator_id),\n  INDEX idx_bw_status (status),\n  INDEX idx_bw_port (port_code)\n)",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 2t5rixfHAYLQmtB.root --database jXBmDbCKSCugxa7Gwg2VnA --execute CREATE TABLE IF NOT EXISTS bonded_warehouses (\n  id INT AUTO_INCREMENT PRIMARY KEY,\n  license_no VARCHAR(50) NOT NULL UNIQUE,\n  name VARCHAR(200) NOT NULL,\n  operator_id INT,\n  operator_name VARCHAR(200) NOT NULL,\n  country VARCHAR(3) NOT NULL DEFAULT 'NGA',\n  address TEXT NOT NULL,\n  port_code VARCHAR(10),\n  capacity_cbm INT NOT NULL DEFAULT 0,\n  used_cbm INT NOT NULL DEFAULT 0,\n  bond_amount_usd BIGINT NOT NULL DEFAULT 0,\n  bond_expiry DATETIME,\n  status ENUM('active','suspended','revoked','pending_renewal') NOT NULL DEFAULT 'active',\n  approved_at DATETIME,\n  approved_by INT,\n  created_at DATETIME NOT NULL DEFAULT NOW(),\n  updated_at DATETIME NOT NULL DEFAULT NOW(),\n  INDEX idx_bw_operator (operator_id),\n  INDEX idx_bw_status (status),\n  INDEX idx_bw_port (port_code)\n)",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 677
+}

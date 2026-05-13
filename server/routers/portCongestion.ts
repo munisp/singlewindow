@@ -1,13 +1,55 @@
 /**
- * Sprint 59 — Real-Time Port Congestion Prediction
+ * Port Congestion Router — DB-backed (v37)
  * Forecasts berth congestion 24–72 hours ahead using:
- *   - Vessel AIS density (vessels per sq-km near port)
- *   - Historical dwell time (avg hours per vessel per port)
- *   - Declared cargo volume (pending declarations per port)
+ *   - Real port_locations, port_congestion_events, port_congestion_alerts tables
+ *   - Historical dwell time from DB events
  *   - Day-of-week and time-of-day seasonality factors
  */
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { getDb, getPool } from "../db";
+
+async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  await getDb();
+  const pool = getPool();
+  if (!pool) throw new Error("Database pool not available");
+  const { rows } = await pool.query(sql, params);
+  return rows as T[];
+}
+
+/** Load dynamic port profiles from DB, falling back to static defaults */
+async function getPortProfiles(): Promise<Record<string, typeof PORT_PROFILES[string]>> {
+  const dbPorts = await pgQuery<{
+    port_code: string; port_name: string; country: string;
+    avg_wait: number; avg_vessels: number; avg_backlog: number;
+  }>(
+    `SELECT pl.port_code, pl.port_name, pl.country,
+      COALESCE(AVG(pce.wait_time_hours), 8) AS avg_wait,
+      COALESCE(AVG(pce.vessel_count), 12) AS avg_vessels,
+      COALESCE(AVG(pce.declaration_backlog), 100) AS avg_backlog
+     FROM port_locations pl
+     LEFT JOIN port_congestion_events pce ON pce.port_code = pl.port_code
+       AND pce.recorded_at >= NOW() - INTERVAL '7 days'
+     WHERE pl.is_active = true
+     GROUP BY pl.port_code, pl.port_name, pl.country
+     ORDER BY pl.port_name`
+  );
+  if (dbPorts.length > 0) {
+    const result: Record<string, typeof PORT_PROFILES[string]> = {};
+    for (const p of dbPorts) {
+      result[p.port_code] = {
+        name: p.port_name,
+        country: p.country,
+        baseVessels: Math.round(Number(p.avg_vessels)),
+        baseDwellHours: Math.round(Number(p.avg_wait)),
+        baseDeclarations: Math.round(Number(p.avg_backlog)),
+        slaThreshold: 70,
+      };
+    }
+    return result;
+  }
+  return PORT_PROFILES;
+}
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -143,8 +185,12 @@ function buildForecast(portCode: string, profile: typeof PORT_PROFILES[string], 
   return result;
 }
 
-function buildPortForecast(portCode: string): PortForecast {
-  const profile = PORT_PROFILES[portCode];
+function buildPortForecastFromProfile(portCode: string, profile: typeof PORT_PROFILES[string]): PortForecast {
+  return buildPortForecast(portCode, profile);
+}
+
+function buildPortForecast(portCode: string, profileOverride?: typeof PORT_PROFILES[string]): PortForecast {
+  const profile = profileOverride ?? PORT_PROFILES[portCode];
   if (!profile) throw new Error(`Unknown port: ${portCode}`);
 
   const seed = portCode.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
@@ -196,8 +242,9 @@ function buildPortForecast(portCode: string): PortForecast {
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
 
 export const portCongestionRouter = router({
-  listPorts: publicProcedure.query(() => {
-    return Object.entries(PORT_PROFILES).map(([code, p]) => ({
+  listPorts: publicProcedure.query(async () => {
+    const profiles = await getPortProfiles();
+    return Object.entries(profiles).map(([code, p]) => ({
       portCode: code,
       portName: p.name,
       country: p.country,
@@ -207,13 +254,17 @@ export const portCongestionRouter = router({
 
   getPortForecast: publicProcedure
     .input(z.object({ portCode: z.string() }))
-    .query(({ input }) => {
-      return buildPortForecast(input.portCode);
+    .query(async ({ input }) => {
+      const profiles = await getPortProfiles();
+      const profile = profiles[input.portCode];
+      if (!profile) throw new Error(`Unknown port: ${input.portCode}`);
+      return buildPortForecastFromProfile(input.portCode, profile);
     }),
 
-  getAllForecasts: publicProcedure.query(() => {
-    return Object.keys(PORT_PROFILES).map((code) => {
-      const f = buildPortForecast(code);
+  getAllForecasts: publicProcedure.query(async () => {
+    const profiles = await getPortProfiles();
+    return Object.entries(profiles).map(([code, profile]) => {
+      const f = buildPortForecastFromProfile(code, profile);
       return {
         portCode: f.portCode,
         portName: f.portName,
@@ -230,18 +281,22 @@ export const portCongestionRouter = router({
 
   getSlaBreachAlerts: publicProcedure
     .input(z.object({ portCode: z.string().optional() }))
-    .query(({ input }) => {
-      const ports = input.portCode ? [input.portCode] : Object.keys(PORT_PROFILES);
+    .query(async ({ input }) => {
+      const profiles = await getPortProfiles();
+      const ports = input.portCode ? [input.portCode] : Object.keys(profiles);
       const alerts: SlaBreachAlert[] = [];
       for (const code of ports) {
-        const f = buildPortForecast(code);
+        const profile = profiles[code];
+        if (!profile) continue;
+        const f = buildPortForecastFromProfile(code, profile);
         alerts.push(...f.slaBreachAlerts);
       }
       return alerts.sort((a, b) => b.predictedScore - a.predictedScore);
     }),
 
-  getNetworkSummary: publicProcedure.query(() => {
-    const forecasts = Object.keys(PORT_PROFILES).map(buildPortForecast);
+  getNetworkSummary: publicProcedure.query(async () => {
+    const profiles = await getPortProfiles();
+    const forecasts = Object.entries(profiles).map(([code, profile]) => buildPortForecastFromProfile(code, profile));
     const totalAlerts = forecasts.reduce((sum, f) => sum + f.slaBreachAlerts.length, 0);
     const criticalPorts = forecasts.filter((f) => f.currentLevel === "critical").length;
     const congestedPorts = forecasts.filter((f) => f.currentLevel === "congested").length;
@@ -256,4 +311,39 @@ export const portCongestionRouter = router({
       updatedAt: new Date().toISOString(),
     };
   }),
+
+  getPortHistory: publicProcedure
+    .input(z.object({ portCode: z.string(), days: z.number().min(1).max(30).default(7) }))
+    .query(async ({ input }) => {
+      return pgQuery(
+        `SELECT port_code, congestion_status, vessel_count, wait_time_hours,
+                declaration_backlog, inspection_queue_size, recorded_at
+         FROM port_congestion_events
+         WHERE port_code = $1 AND recorded_at >= NOW() - INTERVAL '1 day' * $2
+         ORDER BY recorded_at ASC`,
+        [input.portCode, input.days]
+      );
+    }),
+
+  recordCongestionEvent: protectedProcedure
+    .input(z.object({
+      portCode: z.string(),
+      vesselCount: z.number().min(0),
+      waitTimeHours: z.number().min(0),
+      declarationBacklog: z.number().min(0).default(0),
+      inspectionQueueSize: z.number().min(0).default(0),
+    }))
+    .mutation(async ({ input }) => {
+      const score = Math.min(100, Math.round((input.vesselCount / 30) * 40 + (input.waitTimeHours / 48) * 35 + (input.declarationBacklog / 500) * 25));
+      const status = score >= 80 ? "critical" : score >= 60 ? "congested" : score >= 35 ? "moderate" : "clear";
+      await pgQuery(
+        `INSERT INTO port_congestion_events
+          (port_code, congestion_status, vessel_count, wait_time_hours,
+           declaration_backlog, inspection_queue_size, recorded_at)
+         VALUES ($1,$2::port_congestion_status,$3,$4,$5,$6,NOW())`,
+        [input.portCode, status, input.vesselCount, input.waitTimeHours,
+         input.declarationBacklog, input.inspectionQueueSize]
+      );
+      return { success: true, status, score };
+    }),
 });

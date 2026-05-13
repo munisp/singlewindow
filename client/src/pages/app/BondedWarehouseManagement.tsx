@@ -37,7 +37,7 @@ const PERMIT_STATUS_COLORS: Record<string, string> = {
 export default function BondedWarehouseManagement() {
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [inventoryStatus, setInventoryStatus] = useState("all");
-  const [selectedWarehouse, setSelectedWarehouse] = useState<string | null>(null);
+  const [selectedWarehouse, setSelectedWarehouse] = useState<number | null>(null);
 
   const { data: warehousesData, isLoading, isError } = trpc.bondedWarehouse.listWarehouses.useQuery({
     status: warehouseFilter === "all" ? undefined : (warehouseFilter as any),
@@ -252,9 +252,8 @@ export default function BondedWarehouseManagement() {
                     <Button size="sm" variant="outline" onClick={() =>
                       issuePermit.mutate({
                         inventoryId: item.id,
-                        destination: "Accra Central Market",
-                        quantity: item.quantity,
-                        issuedBy: "officer-001",
+                        quantityKg: item.quantity_kg ?? item.quantity ?? 1,
+                        dutyPaidUsd: item.duty_liability_usd ?? 0,
                         validDays: 30,
                       })
                     }>
@@ -280,7 +279,7 @@ export default function BondedWarehouseManagement() {
                       <span className="font-mono text-sm font-medium">{permit.permitNo}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground flex gap-3 flex-wrap">
-                      <span>Destination: {permit.destination}</span>
+                      <span>Payment Ref: {permit.payment_ref ?? permit.paymentRef ?? "—"}</span>
                       <span>Qty: {permit.quantity}</span>
                       <span>Issued: {new Date(permit.issuedAt).toLocaleDateString()}</span>
                       <span className={new Date(permit.expiresAt) < new Date() && permit.status === "active" ? "text-red-600 font-medium" : ""}>

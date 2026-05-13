@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid, date
 } from "drizzle-orm/pg-core";
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
@@ -1511,3 +1511,164 @@ export const paymentArchivalJobs = pgTable("payment_archival_jobs", {
 ]);
 export type PaymentArchivalJob = typeof paymentArchivalJobs.$inferSelect;
 export type InsertPaymentArchivalJob = typeof paymentArchivalJobs.$inferInsert;
+
+// ─── Bonded Warehouse Management ─────────────────────────────────────────────
+export const bondedWarehouseStatusEnum = pgEnum("bonded_warehouse_status", [
+  "active", "suspended", "revoked", "pending_renewal",
+]);
+export const bondedInventoryStatusEnum = pgEnum("bonded_inventory_status", [
+  "in_bond", "ex_bonded", "re_exported", "destroyed", "seized",
+]);
+export const exBondPermitStatusEnum = pgEnum("ex_bond_permit_status", [
+  "active", "used", "expired", "cancelled",
+]);
+
+export const bondedWarehouses = pgTable("bonded_warehouses", {
+  id: serial("id").primaryKey(),
+  licenseNo: varchar("license_no", { length: 50 }).notNull().unique(),
+  name: varchar("name", { length: 200 }).notNull(),
+  operatorId: integer("operator_id").references(() => users.id),
+  operatorName: varchar("operator_name", { length: 200 }).notNull(),
+  country: varchar("country", { length: 3 }).notNull().default("NGA"),
+  address: text("address").notNull(),
+  portCode: varchar("port_code", { length: 10 }),
+  capacityCbm: integer("capacity_cbm").notNull().default(0),
+  usedCbm: integer("used_cbm").notNull().default(0),
+  bondAmountUsd: bigint("bond_amount_usd", { mode: "number" }).notNull().default(0),
+  bondExpiry: timestamp("bond_expiry"),
+  status: bondedWarehouseStatusEnum("status").notNull().default("active"),
+  approvedAt: timestamp("approved_at"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_bw_operator").on(t.operatorId),
+  index("idx_bw_status").on(t.status),
+  index("idx_bw_port").on(t.portCode),
+]);
+export type BondedWarehouseRow = typeof bondedWarehouses.$inferSelect;
+
+export const bondedInventory = pgTable("bonded_inventory", {
+  id: serial("id").primaryKey(),
+  warehouseId: integer("warehouse_id").notNull().references(() => bondedWarehouses.id),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  ucr: varchar("ucr", { length: 50 }).notNull(),
+  hsCode: varchar("hs_code", { length: 20 }).notNull(),
+  description: text("description").notNull(),
+  quantityKg: integer("quantity_kg").notNull().default(0),
+  volumeCbm: integer("volume_cbm").notNull().default(0),
+  invoiceValueUsd: bigint("invoice_value_usd", { mode: "number" }).notNull().default(0),
+  dutyLiabilityUsd: bigint("duty_liability_usd", { mode: "number" }).notNull().default(0),
+  originCountry: varchar("origin_country", { length: 3 }),
+  depositedAt: timestamp("deposited_at").defaultNow().notNull(),
+  expiryDate: timestamp("expiry_date"),
+  status: bondedInventoryStatusEnum("status").notNull().default("in_bond"),
+  releasedAt: timestamp("released_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_bi_warehouse").on(t.warehouseId),
+  index("idx_bi_declaration").on(t.declarationId),
+  index("idx_bi_ucr").on(t.ucr),
+  index("idx_bi_status").on(t.status),
+]);
+export type BondedInventoryRow = typeof bondedInventory.$inferSelect;
+
+export const exBondPermits = pgTable("ex_bond_permits", {
+  id: serial("id").primaryKey(),
+  permitNo: varchar("permit_no", { length: 50 }).notNull().unique(),
+  inventoryId: integer("inventory_id").notNull().references(() => bondedInventory.id),
+  warehouseId: integer("warehouse_id").notNull().references(() => bondedWarehouses.id),
+  requestedById: integer("requested_by_id").references(() => users.id),
+  approvedById: integer("approved_by_id").references(() => users.id),
+  quantityKg: integer("quantity_kg").notNull(),
+  dutyPaidUsd: bigint("duty_paid_usd", { mode: "number" }).notNull().default(0),
+  paymentRef: varchar("payment_ref", { length: 100 }),
+  status: exBondPermitStatusEnum("status").notNull().default("active"),
+  issuedAt: timestamp("issued_at").defaultNow().notNull(),
+  usedAt: timestamp("used_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ebp_inventory").on(t.inventoryId),
+  index("idx_ebp_warehouse").on(t.warehouseId),
+  index("idx_ebp_status").on(t.status),
+]);
+export type ExBondPermitRow = typeof exBondPermits.$inferSelect;
+
+// ─── CEP (Complex Event Processing) Patterns & Alerts ────────────────────────
+export const cepPatternStatusEnum = pgEnum("cep_pattern_status", ["enabled", "disabled"]);
+export const cepAlertStatusEnum = pgEnum("cep_alert_status", ["open", "investigating", "resolved", "false_positive"]);
+export const cepAlertSeverityEnum = pgEnum("cep_alert_severity", ["low", "medium", "high", "critical"]);
+
+export const cepPatterns = pgTable("cep_patterns", {
+  id: serial("id").primaryKey(),
+  patternId: varchar("pattern_id", { length: 100 }).notNull().unique(),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description"),
+  status: cepPatternStatusEnum("status").notNull().default("enabled"),
+  parameters: jsonb("parameters").notNull().default({}),
+  triggerCount: integer("trigger_count").notNull().default(0),
+  lastTriggeredAt: timestamp("last_triggered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cep_pattern_status").on(t.status),
+]);
+export type CepPatternRow = typeof cepPatterns.$inferSelect;
+
+export const cepAlerts = pgTable("cep_alerts", {
+  id: serial("id").primaryKey(),
+  alertId: varchar("alert_id", { length: 100 }).notNull().unique(),
+  patternId: varchar("pattern_id", { length: 100 }).notNull(),
+  patternName: varchar("pattern_name", { length: 200 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  traderId: integer("trader_id").references(() => users.id),
+  severity: cepAlertSeverityEnum("severity").notNull().default("medium"),
+  status: cepAlertStatusEnum("status").notNull().default("open"),
+  details: jsonb("details").notNull().default({}),
+  riskScore: integer("risk_score").notNull().default(0),
+  assignedTo: integer("assigned_to").references(() => users.id),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: integer("resolved_by").references(() => users.id),
+  resolutionNote: text("resolution_note"),
+  detectedAt: timestamp("detected_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cep_alert_pattern").on(t.patternId),
+  index("idx_cep_alert_status").on(t.status),
+  index("idx_cep_alert_severity").on(t.severity),
+  index("idx_cep_alert_trader").on(t.traderId),
+  index("idx_cep_alert_detected").on(t.detectedAt),
+]);
+export type CepAlertRow = typeof cepAlerts.$inferSelect;
+
+// ─── Cost Records (Kubecost / FinOps) ────────────────────────────────────────
+export const costCategoryEnum = pgEnum("cost_category", [
+  "compute", "storage", "network", "database", "monitoring", "security", "other",
+]);
+
+export const costRecords = pgTable("cost_records", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id),
+  tenantName: varchar("tenant_name", { length: 200 }),
+  namespace: varchar("namespace", { length: 100 }),
+  service: varchar("service", { length: 100 }),
+  category: costCategoryEnum("category").notNull().default("compute"),
+  periodDate: date("period_date").notNull(),
+  computeCostUsd: integer("compute_cost_usd").notNull().default(0),
+  storageCostUsd: integer("storage_cost_usd").notNull().default(0),
+  networkCostUsd: integer("network_cost_usd").notNull().default(0),
+  totalCostUsd: integer("total_cost_usd").notNull().default(0),
+  cpuRequestMillicores: integer("cpu_request_millicores"),
+  memoryRequestMib: integer("memory_request_mib"),
+  cpuUsageMillicores: integer("cpu_usage_millicores"),
+  memoryUsageMib: integer("memory_usage_mib"),
+  efficiency: integer("efficiency"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cr_tenant").on(t.tenantId),
+  index("idx_cr_period").on(t.periodDate),
+  index("idx_cr_service").on(t.service),
+  index("idx_cr_category").on(t.category),
+]);
+export type CostRecordRow = typeof costRecords.$inferSelect;

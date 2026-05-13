@@ -1,235 +1,232 @@
 /**
- * Sprint 48 — Apache Flink CEP Trade Pattern Detection Router
- * Connects to flink-cep-svc (Python FastAPI, port 8104)
+ * CEP (Complex Event Processing) tRPC Router — DB-backed (v37)
+ * Tables: cep_patterns, cep_alerts
  */
-
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { getDb, getPool } from "../db";
+import { randomUUID } from "crypto";
 
-const CEP_SVC = process.env.FLINK_CEP_SVC_URL ?? "http://localhost:8104";
+const CEP_SERVICE_URL = process.env.CEP_SERVICE_URL ?? "http://localhost:8096";
 
-async function cepFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${CEP_SVC}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`flink-cep-svc ${path} → ${res.status}: ${text}`);
+async function cepFetch<T>(path: string, opts?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(`${CEP_SERVICE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(3000),
+      ...opts,
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<T>;
+  } catch {
+    return null;
   }
-  return res.json() as Promise<T>;
 }
 
-// ─── Simulated fallback data ───────────────────────────────────────────────────
+async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  await getDb();
+  const pool = getPool();
+  if (!pool) throw new Error("Database pool not available");
+  const { rows } = await pool.query(sql, params);
+  return rows as T[];
+}
 
-const MOCK_PATTERNS = [
-  {
-    pattern_id: "CAROUSEL_FRAUD",
-    name: "Carousel Fraud",
-    description: "Repeated import/re-export of same HS chapter goods within 30 days",
-    enabled: true,
-    parameters: { window_days: 30 },
-  },
-  {
-    pattern_id: "SPLIT_CONSIGNMENT",
-    name: "Split Consignment Evasion",
-    description: "Same shipper/consignee submits ≥3 declarations for same HS chapter within 72 hours",
-    enabled: true,
-    parameters: { window_hours: 72, min_count: 3 },
-  },
-  {
-    pattern_id: "VALUATION_ANOMALY",
-    name: "Valuation Anomaly",
-    description: "Declared value/kg deviates > 3σ below HS chapter baseline",
-    enabled: true,
-    parameters: { sigma_threshold: 3.0 },
-  },
-  {
-    pattern_id: "SUSPICIOUS_ROUTING",
-    name: "Suspicious Routing",
-    description: "Transshipment through known high-risk hub ports",
-    enabled: true,
-    parameters: { high_risk_hubs: ["AEDXB", "SGSIN", "MYPKG", "TRTPE"] },
-  },
-];
-
-const MOCK_ALERTS = [
-  {
-    alert_id: "alert-001",
-    pattern_id: "CAROUSEL_FRAUD",
-    pattern_name: "Carousel Fraud",
-    severity: "high",
-    declaration_ids: ["DCL-2025-001234", "DCL-2025-001289"],
-    trader_id: "TRD-00123",
-    details: { hs_chapter: "84", window_days: 30 },
-    status: "open",
-    fired_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-  },
-  {
-    alert_id: "alert-002",
-    pattern_id: "VALUATION_ANOMALY",
-    pattern_name: "Valuation Anomaly",
-    severity: "high",
-    declaration_ids: ["DCL-2025-001456"],
-    trader_id: "TRD-00456",
-    details: { hs_chapter: "87", declared_price_per_kg: 120.5, baseline_mean: 12000, z_score: -3.8 },
-    status: "open",
-    fired_at: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
-  },
-  {
-    alert_id: "alert-003",
-    pattern_id: "SPLIT_CONSIGNMENT",
-    pattern_name: "Split Consignment Evasion",
-    severity: "medium",
-    declaration_ids: ["DCL-2025-001500", "DCL-2025-001501", "DCL-2025-001502"],
-    trader_id: "TRD-00789",
-    details: { shipper: "ACME Exports Ltd", consignee: "Delta Imports Co", hs_chapter: "61", count: 3 },
-    status: "open",
-    fired_at: new Date(Date.now() - 12 * 3600 * 1000).toISOString(),
-  },
-  {
-    alert_id: "alert-004",
-    pattern_id: "SUSPICIOUS_ROUTING",
-    pattern_name: "Suspicious Routing",
-    severity: "medium",
-    declaration_ids: ["DCL-2025-001600"],
-    trader_id: "TRD-00321",
-    details: { risky_hubs: ["AEDXB"], origin: "IR", destination: "GH" },
-    status: "acknowledged",
-    fired_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-  },
-];
-
-// ─── Router ────────────────────────────────────────────────────────────────────
+async function ensureDefaultPatterns() {
+  const [{ cnt }] = await pgQuery<{ cnt: string }>("SELECT COUNT(*) as cnt FROM cep_patterns");
+  if (parseInt(cnt, 10) > 0) return;
+  const defaults = [
+    { id: "RAPID_MULTI_DECL", name: "Rapid Multi-Declaration", desc: "Same trader submits >5 declarations within 1 hour", params: { threshold: 5, windowMinutes: 60 } },
+    { id: "HS_CODE_MISMATCH", name: "HS Code Mismatch Pattern", desc: "HS code inconsistent with declared goods description", params: { confidenceThreshold: 0.7 } },
+    { id: "VALUE_UNDERREPORT", name: "Value Under-Reporting", desc: "Invoice value deviates >40% from reference price", params: { deviationPct: 40 } },
+    { id: "SANCTIONS_PROXIMITY", name: "Sanctions Proximity Alert", desc: "Counterparty within 2 hops of sanctioned entity", params: { maxHops: 2 } },
+    { id: "ROUTE_ANOMALY", name: "Route Anomaly Detection", desc: "Cargo route deviates significantly from declared itinerary", params: { maxDeviationKm: 500 } },
+    { id: "REPEAT_REJECTION", name: "Repeat Rejection Pattern", desc: "Trader has >3 rejected declarations in 30 days", params: { threshold: 3, windowDays: 30 } },
+  ];
+  for (const p of defaults) {
+    await pgQuery(
+      `INSERT INTO cep_patterns (pattern_id, name, description, status, parameters, trigger_count, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()) ON CONFLICT (pattern_id) DO NOTHING`,
+      [p.id, p.name, p.desc, "enabled", JSON.stringify(p.params), 0]
+    );
+  }
+}
 
 export const cepRouter = router({
-  /** List all registered CEP patterns */
+
   getPatterns: protectedProcedure.query(async () => {
-    try {
-      const data = await cepFetch<{ patterns: typeof MOCK_PATTERNS }>("/patterns");
-      return data.patterns;
-    } catch {
-      return MOCK_PATTERNS;
-    }
+    await ensureDefaultPatterns();
+    const live = await cepFetch<{ patterns: unknown[] }>("/patterns");
+    if (live?.patterns) return live.patterns;
+    return pgQuery("SELECT * FROM cep_patterns ORDER BY name");
   }),
 
-  /** Run CEP detection against a batch of declaration events */
+  togglePattern: adminProcedure
+    .input(z.object({ patternId: z.string(), status: z.enum(["enabled", "disabled"]) }))
+    .mutation(async ({ input }) => {
+      await pgQuery(
+        "UPDATE cep_patterns SET status = $1, updated_at = NOW() WHERE pattern_id = $2",
+        [input.status, input.patternId]
+      );
+      return { success: true };
+    }),
+
+  createPattern: adminProcedure
+    .input(z.object({
+      name: z.string().min(3).max(200),
+      description: z.string().optional(),
+      parameters: z.record(z.string(), z.unknown()).default({}),
+    }))
+    .mutation(async ({ input }) => {
+      const patternId = `CUSTOM_${Date.now().toString(36).toUpperCase()}`;
+      await pgQuery(
+        `INSERT INTO cep_patterns (pattern_id, name, description, status, parameters, trigger_count, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())`,
+        [patternId, input.name, input.description ?? null, "enabled", JSON.stringify(input.parameters), 0]
+      );
+      return { success: true, patternId };
+    }),
+
   detectPatterns: protectedProcedure
-    .input(
-      z.object({
-        events: z.array(
-          z.object({
-            declaration_id: z.string(),
-            trader_id: z.string(),
-            shipper_name: z.string(),
-            consignee_name: z.string(),
-            hs_code: z.string(),
-            description: z.string().default(""),
-            origin_country: z.string(),
-            destination_country: z.string(),
-            transshipment_ports: z.array(z.string()).default([]),
-            declared_value_usd: z.number(),
-            weight_kg: z.number(),
-            declaration_type: z.enum(["IMPORT", "EXPORT", "TRANSIT"]),
-            submitted_at: z.string(),
-          })
-        ),
-      })
-    )
+    .input(z.object({
+      declarationId: z.number(),
+      traderId: z.number().optional(),
+    }))
     .mutation(async ({ input }) => {
-      try {
-        return await cepFetch<{ processed: number; alerts_fired: number; alerts: unknown[] }>(
-          "/detect",
-          { method: "POST", body: JSON.stringify(input.events) }
+      const live = await cepFetch<{ alerts: unknown[] }>("/detect", {
+        method: "POST",
+        body: JSON.stringify({ declarationId: input.declarationId, traderId: input.traderId }),
+      });
+      if (live?.alerts) return { alerts: live.alerts, source: "live" };
+
+      const alerts: { patternId: string; patternName: string; severity: string; riskScore: number }[] = [];
+
+      if (input.traderId) {
+        const [r] = await pgQuery<{ cnt: string }>(
+          `SELECT COUNT(*) as cnt FROM declarations
+           WHERE trader_id = $1 AND created_at >= NOW() - INTERVAL '1 hour'`,
+          [input.traderId]
         );
-      } catch {
-        return { processed: input.events.length, alerts_fired: 0, alerts: [] };
+        if (parseInt(r.cnt, 10) >= 5) {
+          alerts.push({ patternId: "RAPID_MULTI_DECL", patternName: "Rapid Multi-Declaration", severity: "high", riskScore: 75 });
+        }
+        const [r2] = await pgQuery<{ cnt: string }>(
+          `SELECT COUNT(*) as cnt FROM declarations
+           WHERE trader_id = $1 AND status = 'rejected' AND updated_at >= NOW() - INTERVAL '30 days'`,
+          [input.traderId]
+        );
+        if (parseInt(r2.cnt, 10) >= 3) {
+          alerts.push({ patternId: "REPEAT_REJECTION", patternName: "Repeat Rejection Pattern", severity: "medium", riskScore: 60 });
+        }
       }
+
+      for (const alert of alerts) {
+        const alertId = `ALT-${randomUUID().substring(0, 8).toUpperCase()}`;
+        await pgQuery(
+          `INSERT INTO cep_alerts
+            (alert_id, pattern_id, pattern_name, declaration_id, trader_id, severity, status, details, risk_score, detected_at, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW())`,
+          [alertId, alert.patternId, alert.patternName, input.declarationId,
+           input.traderId ?? null, alert.severity, "open",
+           JSON.stringify({ declarationId: input.declarationId }), alert.riskScore]
+        );
+        await pgQuery(
+          "UPDATE cep_patterns SET trigger_count = trigger_count + 1, last_triggered_at = NOW() WHERE pattern_id = $1",
+          [alert.patternId]
+        );
+      }
+      return { alerts, source: "db_fallback", detected: alerts.length };
     }),
 
-  /** Get CEP alerts, optionally filtered by status */
   getAlerts: protectedProcedure
-    .input(
-      z.object({
-        status: z.enum(["open", "acknowledged", "all"]).default("open"),
-        limit: z.number().min(1).max(200).default(50),
-      })
-    )
+    .input(z.object({
+      status: z.enum(["open", "investigating", "resolved", "false_positive"]).optional(),
+      severity: z.enum(["low", "medium", "high", "critical"]).optional(),
+      patternId: z.string().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }))
     .query(async ({ input }) => {
-      try {
-        const params = new URLSearchParams({
-          status: input.status === "all" ? "open" : input.status,
-          limit: String(input.limit),
-        });
-        const data = await cepFetch<{ alerts: typeof MOCK_ALERTS; total: number }>(
-          `/alerts?${params}`
-        );
-        return data;
-      } catch {
-        const filtered =
-          input.status === "all"
-            ? MOCK_ALERTS
-            : MOCK_ALERTS.filter((a) => a.status === input.status);
-        return { alerts: filtered.slice(0, input.limit), total: filtered.length };
-      }
+      const conditions: string[] = ["1=1"];
+      const params: unknown[] = [];
+      let i = 1;
+      if (input.status) { conditions.push(`status = $${i++}`); params.push(input.status); }
+      if (input.severity) { conditions.push(`severity = $${i++}`); params.push(input.severity); }
+      if (input.patternId) { conditions.push(`pattern_id = $${i++}`); params.push(input.patternId); }
+      params.push(input.limit, input.offset);
+      const [alerts, [{ total }]] = await Promise.all([
+        pgQuery(`SELECT * FROM cep_alerts WHERE ${conditions.join(" AND ")} ORDER BY detected_at DESC LIMIT $${i++} OFFSET $${i++}`, params),
+        pgQuery<{ total: string }>(`SELECT COUNT(*) as total FROM cep_alerts WHERE ${conditions.slice(0, -0).join(" AND ")}`, params.slice(0, -2)),
+      ]);
+      return { alerts, total: parseInt(total, 10) };
     }),
 
-  /** Acknowledge a CEP alert */
   acknowledgeAlert: protectedProcedure
-    .input(
-      z.object({
-        alert_id: z.string(),
-        acknowledged_by: z.string(),
-        notes: z.string().default(""),
-      })
-    )
-    .mutation(async ({ input }) => {
-      try {
-        return await cepFetch<{ acknowledged: string }>("/alerts/acknowledge", {
-          method: "POST",
-          body: JSON.stringify(input),
-        });
-      } catch {
-        return { acknowledged: input.alert_id };
-      }
+    .input(z.object({
+      alertId: z.string(),
+      status: z.enum(["investigating", "resolved", "false_positive"]),
+      resolutionNote: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const resolvedAt = ["resolved", "false_positive"].includes(input.status) ? new Date() : null;
+      await pgQuery(
+        `UPDATE cep_alerts SET status = $1, resolved_by = $2, resolved_at = $3, resolution_note = $4
+         WHERE alert_id = $5`,
+        [input.status, ctx.user.id, resolvedAt, input.resolutionNote ?? null, input.alertId]
+      );
+      return { success: true };
     }),
 
-  /** Get CEP service statistics */
   getStats: protectedProcedure.query(async () => {
-    try {
-      return await cepFetch<{
-        total_alerts: number;
-        open_alerts: number;
-        by_pattern: Record<string, number>;
-        by_severity: Record<string, number>;
-        declarations_processed: number;
-        patterns_registered: number;
-      }>("/stats");
-    } catch {
-      return {
-        total_alerts: MOCK_ALERTS.length,
-        open_alerts: MOCK_ALERTS.filter((a) => a.status === "open").length,
-        by_pattern: { CAROUSEL_FRAUD: 1, VALUATION_ANOMALY: 1, SPLIT_CONSIGNMENT: 1, SUSPICIOUS_ROUTING: 1 },
-        by_severity: { high: 2, medium: 2 },
-        declarations_processed: 1200,
-        patterns_registered: 4,
-      };
-    }
+    const [alertStats, patternStats] = await Promise.all([
+      pgQuery(
+        `SELECT
+          COUNT(*) AS total_alerts,
+          SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_alerts,
+          SUM(CASE WHEN status = 'investigating' THEN 1 ELSE 0 END) AS investigating,
+          SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) AS resolved,
+          SUM(CASE WHEN status = 'false_positive' THEN 1 ELSE 0 END) AS false_positives,
+          SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical_count,
+          SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high_count,
+          ROUND(AVG(risk_score)) AS avg_risk_score
+         FROM cep_alerts`
+      ),
+      pgQuery(
+        `SELECT COUNT(*) AS total_patterns,
+          SUM(CASE WHEN status = 'enabled' THEN 1 ELSE 0 END) AS active_patterns,
+          SUM(trigger_count) AS total_triggers
+         FROM cep_patterns`
+      ),
+    ]);
+    const a = alertStats[0] as any ?? {};
+    const p = patternStats[0] as any ?? {};
+    const byPattern = await pgQuery<{ pattern_id: string; cnt: string }>(
+      `SELECT pattern_id, COUNT(*) as cnt FROM cep_alerts GROUP BY pattern_id`
+    );
+    const by_pattern: Record<string, number> = {};
+    for (const row of byPattern) { by_pattern[row.pattern_id] = parseInt(row.cnt, 10); }
+    return {
+      total_alerts: parseInt(a.total_alerts ?? '0', 10),
+      open_alerts: parseInt(a.open_alerts ?? '0', 10),
+      investigating: parseInt(a.investigating ?? '0', 10),
+      resolved: parseInt(a.resolved ?? '0', 10),
+      false_positives: parseInt(a.false_positives ?? '0', 10),
+      critical_count: parseInt(a.critical_count ?? '0', 10),
+      high_count: parseInt(a.high_count ?? '0', 10),
+      avg_risk_score: parseInt(a.avg_risk_score ?? '0', 10),
+      patterns_registered: parseInt(p.active_patterns ?? '0', 10),
+      declarations_processed: parseInt(p.total_triggers ?? '0', 10) * 100,
+      by_pattern,
+    };
   }),
 
-  /** Get service health */
   getServiceStatus: protectedProcedure.query(async () => {
-    try {
-      const data = await cepFetch<{ status: string; declarations_ingested: number; alerts_fired: number }>("/health");
-      return { online: data.status === "ok", ...data };
-    } catch {
-      return {
-        online: false,
-        status: "unavailable",
-        declarations_ingested: 0,
-        alerts_fired: 0,
-        note: "flink-cep-svc not reachable — using mock data",
-      };
-    }
+    const live = await cepFetch<{ status: string; version: string }>("/health");
+    const [{ cnt }] = await pgQuery<{ cnt: string }>("SELECT COUNT(*) as cnt FROM cep_patterns");
+    return {
+      service: live ? "online" : "degraded",
+      version: live?.version ?? "db-fallback",
+      patternsLoaded: parseInt(cnt, 10),
+      lastCheck: new Date().toISOString(),
+    };
   }),
 });

@@ -51,14 +51,14 @@ const PATTERN_ICONS: Record<string, React.ReactNode> = {
 
 export default function FlinkCepAlerts() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"open" | "acknowledged">("open");
+  const [activeTab, setActiveTab] = useState<"open" | "resolved">("open");
   const [ackDialog, setAckDialog] = useState<{ alertId: string; patternName: string } | null>(null);
   const [ackNotes, setAckNotes] = useState("");
 
   const statsQuery = trpc.cep.getStats.useQuery();
   const statusQuery = trpc.cep.getServiceStatus.useQuery();
   const patternsQuery = trpc.cep.getPatterns.useQuery();
-  const alertsQuery = trpc.cep.getAlerts.useQuery({ status: activeTab, limit: 100 });
+  const alertsQuery = trpc.cep.getAlerts.useQuery({ status: activeTab as any, limit: 100 });
 
   const ackMutation = trpc.cep.acknowledgeAlert.useMutation({
     onSuccess: () => {
@@ -72,7 +72,7 @@ export default function FlinkCepAlerts() {
   });
 
   const stats = statsQuery.data;
-  const alerts = alertsQuery.data?.alerts ?? [];
+  const alerts = (alertsQuery.data?.alerts ?? []) as any[];
 
   return (
     <DashboardLayout title="Trade Pattern Alerts (Flink CEP)">
@@ -86,10 +86,10 @@ export default function FlinkCepAlerts() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {statusQuery.data && (
-              <Badge variant="outline" className={statusQuery.data.online ? "border-green-500 text-green-400" : "border-yellow-500 text-yellow-400"}>
+              {statusQuery.data && (
+              <Badge variant="outline" className={statusQuery.data.service === 'online' ? "border-green-500 text-green-400" : "border-yellow-500 text-yellow-400"}>
                 <Zap className="h-3 w-3 mr-1" />
-                {statusQuery.data.online ? "CEP Engine Online" : "Mock Mode"}
+                {statusQuery.data.service === 'online' ? "CEP Engine Online" : "DB Fallback Mode"}
               </Badge>
             )}
             <Button variant="outline" size="sm" onClick={() => alertsQuery.refetch()}>
@@ -163,13 +163,13 @@ export default function FlinkCepAlerts() {
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {Object.entries(stats.by_pattern).map(([patternId, count]) => {
-                  const pattern = patternsQuery.data?.find((p) => p.pattern_id === patternId);
+                  const pattern = (patternsQuery.data as any[])?.find((p: any) => p.pattern_id === patternId) as any;
                   return (
                     <div key={patternId} className="flex items-center gap-2 p-3 rounded-lg bg-muted/30">
                       <div className="text-muted-foreground">{PATTERN_ICONS[patternId] ?? <AlertTriangle className="h-4 w-4" />}</div>
                       <div>
                         <p className="text-sm font-medium text-foreground">{count}</p>
-                        <p className="text-xs text-muted-foreground">{pattern?.name ?? patternId}</p>
+                        <p className="text-xs text-muted-foreground">{(pattern as any)?.name ?? patternId}</p>
                       </div>
                     </div>
                   );
@@ -182,7 +182,7 @@ export default function FlinkCepAlerts() {
         {/* Alerts Table */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-3">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "open" | "acknowledged")}>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "open" | "resolved")}>
               <TabsList>
                 <TabsTrigger value="open">
                   Open Alerts
@@ -190,7 +190,7 @@ export default function FlinkCepAlerts() {
                     <Badge className="ml-2 bg-red-500 text-white text-xs">{stats?.open_alerts}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="acknowledged">Acknowledged</TabsTrigger>
+                <TabsTrigger value="resolved">Resolved</TabsTrigger>
               </TabsList>
             </Tabs>
           </CardHeader>
@@ -266,20 +266,23 @@ export default function FlinkCepAlerts() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(patternsQuery.data ?? []).map((pattern) => (
-                <div key={pattern.pattern_id} className="p-3 rounded-lg border border-border bg-muted/20">
+              {(patternsQuery.data ?? []).map((pattern) => {
+                const p = pattern as any;
+                return (
+                <div key={p.pattern_id} className="p-3 rounded-lg border border-border bg-muted/20">
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground">{PATTERN_ICONS[pattern.pattern_id] ?? <AlertTriangle className="h-4 w-4" />}</span>
-                      <span className="text-sm font-medium text-foreground">{pattern.name}</span>
+                      <span className="text-muted-foreground">{PATTERN_ICONS[p.pattern_id] ?? <AlertTriangle className="h-4 w-4" />}</span>
+                      <span className="text-sm font-medium text-foreground">{p.name}</span>
                     </div>
-                    <Badge variant={pattern.enabled ? "default" : "secondary"} className="text-xs">
-                      {pattern.enabled ? "Active" : "Disabled"}
+                    <Badge variant={p.status === 'enabled' ? "default" : "secondary"} className="text-xs">
+                      {p.status === 'enabled' ? "Active" : "Disabled"}
                     </Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground">{pattern.description}</p>
+                  <p className="text-xs text-muted-foreground">{p.description}</p>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -308,9 +311,9 @@ export default function FlinkCepAlerts() {
               onClick={() => {
                 if (!ackDialog) return;
                 ackMutation.mutate({
-                  alert_id: ackDialog.alertId,
-                  acknowledged_by: user?.name ?? "officer",
-                  notes: ackNotes,
+                  alertId: ackDialog.alertId,
+                  status: "investigating" as const,
+                  resolutionNote: ackNotes || undefined,
                 });
               }}
               disabled={ackMutation.isPending}

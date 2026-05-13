@@ -1,449 +1,334 @@
 /**
- * Bonded Warehouse Router — Sprint 56: Bonded Warehouse & Free Zone Management
+ * Bonded Warehouse Router — DB-backed implementation (v37)
  * Manages warehouse registration, goods-in-bond inventory, bond guarantees,
  * ex-bond permit issuance, and expiry alerts.
+ * Tables: bonded_warehouses, bonded_inventory, ex_bond_permits
  */
-
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
-import crypto from "crypto";
+import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { getDb, getPool } from "../db";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export type WarehouseStatus = "active" | "suspended" | "revoked" | "pending_renewal";
-export type InventoryStatus = "in_bond" | "ex_bonded" | "re_exported" | "destroyed" | "seized";
-export type PermitStatus = "active" | "used" | "expired" | "cancelled";
-
-interface BondedWarehouse {
-  id: string;
-  name: string;
-  licenseNo: string;
-  operatorId: string;
-  operatorName: string;
-  country: string;
-  address: string;
-  capacityCbm: number;
-  usedCbm: number;
-  bondAmountUsd: number;
-  bondExpiry: string;
-  status: WarehouseStatus;
-  createdAt: string;
-}
-
-interface BondedInventoryItem {
-  id: string;
-  warehouseId: string;
-  warehouseName: string;
-  declarationId: string;
-  hsCode: string;
-  description: string;
-  quantity: number;
-  unit: string;
-  weightKg: number;
-  volumeCbm: number;
-  valueUsd: number;
-  entryDate: string;
-  expectedExitDate: string;
-  status: InventoryStatus;
-  exBondPermitId: string | null;
-}
-
-interface ExBondPermit {
-  id: string;
-  permitNo: string;
-  inventoryId: string;
-  warehouseId: string;
-  destination: string;
-  quantity: number;
-  issuedAt: string;
-  expiresAt: string;
-  status: PermitStatus;
-  issuedBy: string;
-}
-
-// ─── In-memory stores ────────────────────────────────────────────────────────
-
-const _warehouses: BondedWarehouse[] = [];
-const _inventory: BondedInventoryItem[] = [];
-const _permits: ExBondPermit[] = [];
-let _seeded = false;
-
-// ─── Bond guarantee logic ────────────────────────────────────────────────────
-
-/**
- * Calculates the required bond guarantee amount based on inventory value
- * and warehouse tier. Bond must cover 110% of total goods value.
- */
+/** Bond must cover 110% of total goods value (WCO standard). */
 export function calculateBondRequirement(totalInventoryValueUsd: number): number {
   return Math.ceil(totalInventoryValueUsd * 1.1);
 }
 
 /**
- * Checks if a bond is expiring within the given number of days.
+ * isBondExpiringSoon — returns true if the bond expires within `withinDays` days.
+ * @param bondExpiryDate ISO date string or Date object
+ * @param withinDays threshold in days (default 30)
  */
-export function isBondExpiringSoon(bondExpiry: string, withinDays = 30): boolean {
-  const expiry = new Date(bondExpiry).getTime();
-  const threshold = Date.now() + withinDays * 86400_000;
-  return expiry <= threshold;
+export function isBondExpiringSoon(bondExpiryDate: string | Date, withinDays = 30): boolean {
+  const expiry = new Date(bondExpiryDate);
+  const now = new Date();
+  const diffMs = expiry.getTime() - now.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+  return diffDays <= withinDays;
 }
 
-/**
- * Generates a permit number in the format BW-YYYY-XXXXXX.
- */
 export function generatePermitNo(): string {
   const year = new Date().getFullYear();
-  const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
-  return `BW-${year}-${suffix}`;
+  // 6 uppercase hex characters for uniqueness
+  const hex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, "0").toUpperCase();
+  return `BW-${year}-${hex}`;
 }
 
-// ─── Seed demo data ──────────────────────────────────────────────────────────
-
-function seedDemoData() {
-  if (_seeded) return;
-  _seeded = true;
-
-  const now = Date.now();
-
-  // Warehouses
-  const warehouseData = [
-    { name: "Tema Port Bonded Zone A", country: "GH", operator: "Ghana Ports Authority", capacity: 5000, bond: 2_000_000 },
-    { name: "Kigali Logistics Hub", country: "RW", operator: "Rwanda Trade Logistics Ltd", capacity: 2500, bond: 800_000 },
-    { name: "Mombasa Free Trade Zone", country: "KE", operator: "Kenya Ports Authority", capacity: 8000, bond: 3_500_000 },
-    { name: "Lagos Apapa Bonded Warehouse", country: "NG", operator: "NPA Bonded Services", capacity: 6000, bond: 2_500_000 },
-  ];
-
-  for (let i = 0; i < warehouseData.length; i++) {
-    const w = warehouseData[i];
-    const wh: BondedWarehouse = {
-      id: `wh-${String(i + 1).padStart(3, "0")}`,
-      name: w.name,
-      licenseNo: `BWL-${2024 + i}-${String(i + 1).padStart(4, "0")}`,
-      operatorId: `op-${String(i + 1).padStart(3, "0")}`,
-      operatorName: w.operator,
-      country: w.country,
-      address: `${w.country} Industrial Zone, Unit ${i + 1}`,
-      capacityCbm: w.capacity,
-      usedCbm: Math.floor(w.capacity * (0.3 + i * 0.1)),
-      bondAmountUsd: w.bond,
-      bondExpiry: new Date(now + (90 + i * 30) * 86400_000).toISOString(),
-      status: i === 2 ? "pending_renewal" : "active",
-      createdAt: new Date(now - (365 + i * 30) * 86400_000).toISOString(),
-    };
-    _warehouses.push(wh);
-  }
-
-  // Inventory
-  const hsCodes = ["6204", "8471", "2710", "7108", "3004", "8703"];
-  const descriptions = ["Textile goods", "Computers", "Petroleum products", "Gold bullion", "Pharmaceuticals", "Motor vehicles"];
-
-  for (let i = 0; i < 20; i++) {
-    const wh = _warehouses[i % _warehouses.length];
-    const hsIdx = i % hsCodes.length;
-    const statuses: InventoryStatus[] = ["in_bond", "in_bond", "in_bond", "ex_bonded", "re_exported"];
-    const status = statuses[i % statuses.length];
-    const item: BondedInventoryItem = {
-      id: `inv-${String(i + 1).padStart(4, "0")}`,
-      warehouseId: wh.id,
-      warehouseName: wh.name,
-      declarationId: `DECL-${20000 + i}`,
-      hsCode: hsCodes[hsIdx],
-      description: descriptions[hsIdx],
-      quantity: 10 + i * 5,
-      unit: "units",
-      weightKg: 100 + i * 50,
-      volumeCbm: 1 + i * 0.5,
-      valueUsd: 5000 + i * 2500,
-      entryDate: new Date(now - (30 + i * 5) * 86400_000).toISOString(),
-      expectedExitDate: new Date(now + (60 - i * 3) * 86400_000).toISOString(),
-      status,
-      exBondPermitId: status === "ex_bonded" ? `permit-${String(i + 1).padStart(3, "0")}` : null,
-    };
-    _inventory.push(item);
-  }
-
-  // Permits
-  for (let i = 0; i < 8; i++) {
-    const inv = _inventory.filter((it) => it.status === "ex_bonded")[i % 4];
-    if (!inv) continue;
-    const permitStatuses: PermitStatus[] = ["active", "used", "expired"];
-    _permits.push({
-      id: `permit-${String(i + 1).padStart(3, "0")}`,
-      permitNo: `BW-${2025 + Math.floor(i / 4)}-${String(i + 1).padStart(6, "0")}`,
-      inventoryId: inv.id,
-      warehouseId: inv.warehouseId,
-      destination: ["Accra Central Market", "Kigali Industrial Park", "Nairobi CBD", "Lagos Free Zone"][i % 4],
-      quantity: inv.quantity,
-      issuedAt: new Date(now - (10 + i * 3) * 86400_000).toISOString(),
-      expiresAt: new Date(now + (20 - i * 2) * 86400_000).toISOString(),
-      status: permitStatuses[i % permitStatuses.length],
-      issuedBy: `officer-${String((i % 3) + 1).padStart(3, "0")}`,
-    });
-  }
+function generateLicenseNo(): string {
+  const year = new Date().getFullYear();
+  const rnd = Math.floor(Math.random() * 90000) + 10000;
+  return `BWL-${year}-${rnd}`;
 }
 
-// ─── Router ──────────────────────────────────────────────────────────────────
+async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  await getDb(); // ensure pool is initialised
+  const pool = getPool();
+  if (!pool) throw new Error("Database pool not available");
+  const { rows } = await pool.query(sql, params);
+  return rows as T[];
+}
 
 export const bondedWarehouseRouter = router({
-  // ─── Warehouses ────────────────────────────────────────────────────────────
 
-  listWarehouses: publicProcedure
-    .input(
-      z.object({
-        country: z.string().optional(),
-        status: z.enum(["active", "suspended", "revoked", "pending_renewal"]).optional(),
-      })
-    )
-    .query(({ input }) => {
-      seedDemoData();
-      let results = [..._warehouses];
-      if (input.country) results = results.filter((w) => w.country === input.country);
-      if (input.status) results = results.filter((w) => w.status === input.status);
-      return { total: results.length, warehouses: results };
+  listWarehouses: protectedProcedure
+    .input(z.object({
+      status: z.enum(["active", "suspended", "revoked", "pending_renewal"]).optional(),
+      portCode: z.string().optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const conditions: string[] = ["1=1"];
+      const params: unknown[] = [];
+      let i = 1;
+      if (input.status) { conditions.push(`bw.status = $${i++}`); params.push(input.status); }
+      if (input.portCode) { conditions.push(`bw.port_code = $${i++}`); params.push(input.portCode); }
+      params.push(input.limit, input.offset);
+      const rows = await pgQuery(
+        `SELECT bw.*,
+          (SELECT COUNT(*) FROM bonded_inventory bi WHERE bi.warehouse_id = bw.id AND bi.status = 'in_bond') AS items_in_bond,
+          (SELECT COALESCE(SUM(bi.invoice_value_usd),0) FROM bonded_inventory bi WHERE bi.warehouse_id = bw.id AND bi.status = 'in_bond') AS total_value_usd
+         FROM bonded_warehouses bw WHERE ${conditions.join(" AND ")}
+         ORDER BY bw.created_at DESC LIMIT $${i++} OFFSET $${i++}`,
+        params
+      );
+      const [{ total }] = await pgQuery<{ total: string }>(
+        `SELECT COUNT(*) as total FROM bonded_warehouses WHERE 1=1${input.status ? " AND status=$1" : ""}`,
+        input.status ? [input.status] : []
+      );
+      return { warehouses: rows, total: parseInt(total, 10) };
     }),
 
-  registerWarehouse: publicProcedure
-    .input(
-      z.object({
-        name: z.string().min(3),
-        operatorId: z.string(),
-        operatorName: z.string(),
-        country: z.string().length(2),
-        address: z.string(),
-        capacityCbm: z.number().positive(),
-        bondAmountUsd: z.number().positive(),
-        bondExpiry: z.string(),
-      })
-    )
-    .mutation(({ input }) => {
-      seedDemoData();
-      const now = new Date().toISOString();
-      const wh: BondedWarehouse = {
-        id: `wh-${crypto.randomBytes(4).toString("hex")}`,
-        name: input.name,
-        licenseNo: `BWL-${new Date().getFullYear()}-${crypto.randomBytes(2).toString("hex").toUpperCase()}`,
-        operatorId: input.operatorId,
-        operatorName: input.operatorName,
-        country: input.country,
-        address: input.address,
-        capacityCbm: input.capacityCbm,
-        usedCbm: 0,
-        bondAmountUsd: input.bondAmountUsd,
-        bondExpiry: input.bondExpiry,
-        status: "active",
-        createdAt: now,
-      };
-      _warehouses.push(wh);
-      return wh;
+  registerWarehouse: protectedProcedure
+    .input(z.object({
+      name: z.string().min(3).max(200),
+      operatorName: z.string().min(2).max(200),
+      country: z.string().length(3).default("NGA"),
+      address: z.string().min(10),
+      portCode: z.string().max(10).optional(),
+      capacityCbm: z.number().min(1),
+      bondAmountUsd: z.number().min(0),
+      bondExpiryDays: z.number().min(30).default(365),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const licenseNo = generateLicenseNo();
+      const bondExpiry = new Date(Date.now() + input.bondExpiryDays * 86400_000);
+      const rows = await pgQuery(
+        `INSERT INTO bonded_warehouses
+          (license_no, name, operator_id, operator_name, country, address, port_code,
+           capacity_cbm, bond_amount_usd, bond_expiry, status, created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())
+         RETURNING *`,
+        [licenseNo, input.name, ctx.user.id, input.operatorName, input.country,
+         input.address, input.portCode ?? null, input.capacityCbm,
+         input.bondAmountUsd, bondExpiry, "active"]
+      );
+      return { success: true, warehouse: rows[0], licenseNo };
     }),
 
-  // ─── Inventory ─────────────────────────────────────────────────────────────
-
-  getInventory: publicProcedure
-    .input(
-      z.object({
-        warehouseId: z.string().optional(),
-        status: z.enum(["in_bond", "ex_bonded", "re_exported", "destroyed", "seized"]).optional(),
-        limit: z.number().int().min(1).max(100).default(50),
-        offset: z.number().int().min(0).default(0),
-      })
-    )
-    .query(({ input }) => {
-      seedDemoData();
-      let results = [..._inventory];
-      if (input.warehouseId) results = results.filter((i) => i.warehouseId === input.warehouseId);
-      if (input.status) results = results.filter((i) => i.status === input.status);
-      results.sort((a, b) => b.entryDate.localeCompare(a.entryDate));
-      return { total: results.length, items: results.slice(input.offset, input.offset + input.limit) };
+  getInventory: protectedProcedure
+    .input(z.object({
+      warehouseId: z.number().optional(),
+      status: z.enum(["in_bond", "ex_bonded", "re_exported", "destroyed", "seized"]).optional(),
+      limit: z.number().min(1).max(200).default(50),
+      offset: z.number().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const conditions: string[] = ["1=1"];
+      const params: unknown[] = [];
+      let i = 1;
+      if (input.warehouseId) { conditions.push(`bi.warehouse_id = $${i++}`); params.push(input.warehouseId); }
+      if (input.status) { conditions.push(`bi.status = $${i++}`); params.push(input.status); }
+      params.push(input.limit, input.offset);
+      return pgQuery(
+        `SELECT bi.*, bw.name as warehouse_name, bw.license_no
+         FROM bonded_inventory bi
+         JOIN bonded_warehouses bw ON bi.warehouse_id = bw.id
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY bi.deposited_at DESC LIMIT $${i++} OFFSET $${i++}`,
+        params
+      );
     }),
 
-  recordEntry: publicProcedure
-    .input(
-      z.object({
-        warehouseId: z.string(),
-        declarationId: z.string(),
-        hsCode: z.string(),
-        description: z.string(),
-        quantity: z.number().positive(),
-        unit: z.string().default("units"),
-        weightKg: z.number().positive(),
-        volumeCbm: z.number().positive(),
-        valueUsd: z.number().positive(),
-        expectedExitDate: z.string(),
-      })
-    )
-    .mutation(({ input }) => {
-      seedDemoData();
-      const wh = _warehouses.find((w) => w.id === input.warehouseId);
-      if (!wh) throw new Error(`Warehouse ${input.warehouseId} not found`);
-      if (wh.usedCbm + input.volumeCbm > wh.capacityCbm) {
-        throw new Error("Insufficient warehouse capacity");
+  recordEntry: protectedProcedure
+    .input(z.object({
+      warehouseId: z.number(),
+      declarationId: z.number().optional(),
+      ucr: z.string().min(5).max(50),
+      hsCode: z.string().min(4).max(20),
+      description: z.string().min(5),
+      quantityKg: z.number().min(0),
+      volumeCbm: z.number().min(0),
+      invoiceValueUsd: z.number().min(0),
+      originCountry: z.string().length(3).optional(),
+      expiryDays: z.number().min(1).default(180),
+    }))
+    .mutation(async ({ input }) => {
+      const [w] = await pgQuery<{ capacity_cbm: number; used_cbm: number }>(
+        "SELECT * FROM bonded_warehouses WHERE id = $1 AND status = 'active'", [input.warehouseId]
+      );
+      if (!w) throw new TRPCError({ code: "NOT_FOUND", message: "Warehouse not found or inactive" });
+      if (w.used_cbm + input.volumeCbm > w.capacity_cbm) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Insufficient warehouse capacity" });
       }
-      const item: BondedInventoryItem = {
-        id: `inv-${crypto.randomBytes(4).toString("hex")}`,
-        warehouseId: input.warehouseId,
-        warehouseName: wh.name,
-        declarationId: input.declarationId,
-        hsCode: input.hsCode,
-        description: input.description,
-        quantity: input.quantity,
-        unit: input.unit,
-        weightKg: input.weightKg,
-        volumeCbm: input.volumeCbm,
-        valueUsd: input.valueUsd,
-        entryDate: new Date().toISOString(),
-        expectedExitDate: input.expectedExitDate,
-        status: "in_bond",
-        exBondPermitId: null,
-      };
-      wh.usedCbm += input.volumeCbm;
-      _inventory.push(item);
-      return item;
+      const dutyLiabilityUsd = Math.round(input.invoiceValueUsd * 0.15);
+      const expiryDate = new Date(Date.now() + input.expiryDays * 86400_000);
+      await pgQuery(
+        `INSERT INTO bonded_inventory
+          (warehouse_id, declaration_id, ucr, hs_code, description, quantity_kg, volume_cbm,
+           invoice_value_usd, duty_liability_usd, origin_country, deposited_at, expiry_date, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),$11,$12,NOW())`,
+        [input.warehouseId, input.declarationId ?? null, input.ucr, input.hsCode,
+         input.description, input.quantityKg, input.volumeCbm, input.invoiceValueUsd,
+         dutyLiabilityUsd, input.originCountry ?? null, expiryDate, "in_bond"]
+      );
+      await pgQuery(
+        "UPDATE bonded_warehouses SET used_cbm = used_cbm + $1, updated_at = NOW() WHERE id = $2",
+        [input.volumeCbm, input.warehouseId]
+      );
+      return { success: true, dutyLiabilityUsd, expiryDate };
     }),
 
-  recordExit: publicProcedure
-    .input(
-      z.object({
-        inventoryId: z.string(),
-        exitType: z.enum(["ex_bonded", "re_exported", "destroyed"]),
-        permitId: z.string().optional(),
-      })
-    )
-    .mutation(({ input }) => {
-      seedDemoData();
-      const item = _inventory.find((i) => i.id === input.inventoryId);
-      if (!item) throw new Error(`Inventory item ${input.inventoryId} not found`);
-      if (item.status !== "in_bond") throw new Error("Item is not in bond status");
-      item.status = input.exitType;
-      if (input.permitId) item.exBondPermitId = input.permitId;
-      // Free up warehouse capacity
-      const wh = _warehouses.find((w) => w.id === item.warehouseId);
-      if (wh) wh.usedCbm = Math.max(0, wh.usedCbm - item.volumeCbm);
-      return item;
+  recordExit: protectedProcedure
+    .input(z.object({
+      inventoryId: z.number(),
+      exitReason: z.enum(["ex_bonded", "re_exported", "destroyed", "seized"]).default("ex_bonded"),
+    }))
+    .mutation(async ({ input }) => {
+      const [item] = await pgQuery<{ warehouse_id: number; volume_cbm: number }>(
+        "SELECT * FROM bonded_inventory WHERE id = $1 AND status = 'in_bond'", [input.inventoryId]
+      );
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found or already released" });
+      await pgQuery(
+        "UPDATE bonded_inventory SET status = $1, released_at = NOW() WHERE id = $2",
+        [input.exitReason, input.inventoryId]
+      );
+      await pgQuery(
+        "UPDATE bonded_warehouses SET used_cbm = GREATEST(0, used_cbm - $1), updated_at = NOW() WHERE id = $2",
+        [item.volume_cbm, item.warehouse_id]
+      );
+      return { success: true, status: input.exitReason };
     }),
 
-  // ─── Ex-Bond Permits ───────────────────────────────────────────────────────
-
-  issueExBondPermit: publicProcedure
-    .input(
-      z.object({
-        inventoryId: z.string(),
-        destination: z.string(),
-        quantity: z.number().positive(),
-        issuedBy: z.string(),
-        validDays: z.number().int().min(1).max(90).default(30),
-      })
-    )
-    .mutation(({ input }) => {
-      seedDemoData();
-      const item = _inventory.find((i) => i.id === input.inventoryId);
-      if (!item) throw new Error(`Inventory item ${input.inventoryId} not found`);
-      const now = new Date();
-      const permit: ExBondPermit = {
-        id: `permit-${crypto.randomBytes(4).toString("hex")}`,
-        permitNo: generatePermitNo(),
-        inventoryId: input.inventoryId,
-        warehouseId: item.warehouseId,
-        destination: input.destination,
-        quantity: input.quantity,
-        issuedAt: now.toISOString(),
-        expiresAt: new Date(now.getTime() + input.validDays * 86400_000).toISOString(),
-        status: "active",
-        issuedBy: input.issuedBy,
-      };
-      _permits.push(permit);
-      return permit;
+  issueExBondPermit: protectedProcedure
+    .input(z.object({
+      inventoryId: z.number(),
+      quantityKg: z.number().min(1),
+      dutyPaidUsd: z.number().min(0),
+      paymentRef: z.string().optional(),
+      validDays: z.number().min(1).default(30),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const [inv] = await pgQuery<{ warehouse_id: number; duty_liability_usd: number }>(
+        "SELECT * FROM bonded_inventory WHERE id = $1 AND status = 'in_bond'", [input.inventoryId]
+      );
+      if (!inv) throw new TRPCError({ code: "NOT_FOUND", message: "Inventory item not found" });
+      if (input.dutyPaidUsd < Number(inv.duty_liability_usd)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Duty payment USD ${input.dutyPaidUsd} is less than liability USD ${inv.duty_liability_usd}`
+        });
+      }
+      const permitNo = generatePermitNo();
+      const expiresAt = new Date(Date.now() + input.validDays * 86400_000);
+      await pgQuery(
+        `INSERT INTO ex_bond_permits
+          (permit_no, inventory_id, warehouse_id, requested_by_id, quantity_kg,
+           duty_paid_usd, payment_ref, status, issued_at, expires_at, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),$9,NOW())`,
+        [permitNo, input.inventoryId, inv.warehouse_id, ctx.user.id,
+         input.quantityKg, input.dutyPaidUsd, input.paymentRef ?? null, "active", expiresAt]
+      );
+      return { success: true, permitNo, expiresAt };
     }),
 
-  listPermits: publicProcedure
-    .input(
-      z.object({
-        warehouseId: z.string().optional(),
-        status: z.enum(["active", "used", "expired", "cancelled"]).optional(),
-      })
-    )
-    .query(({ input }) => {
-      seedDemoData();
-      let results = [..._permits];
-      if (input.warehouseId) results = results.filter((p) => p.warehouseId === input.warehouseId);
-      if (input.status) results = results.filter((p) => p.status === input.status);
-      results.sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
-      return { total: results.length, permits: results };
+  listPermits: protectedProcedure
+    .input(z.object({
+      warehouseId: z.number().optional(),
+      status: z.enum(["active", "used", "expired", "cancelled"]).optional(),
+      limit: z.number().min(1).max(100).default(50),
+      offset: z.number().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const conditions: string[] = ["1=1"];
+      const params: unknown[] = [];
+      let i = 1;
+      if (input.warehouseId) { conditions.push(`ep.warehouse_id = $${i++}`); params.push(input.warehouseId); }
+      if (input.status) { conditions.push(`ep.status = $${i++}`); params.push(input.status); }
+      params.push(input.limit, input.offset);
+      return pgQuery(
+        `SELECT ep.*, bw.name as warehouse_name, bi.hs_code, bi.description
+         FROM ex_bond_permits ep
+         JOIN bonded_warehouses bw ON ep.warehouse_id = bw.id
+         JOIN bonded_inventory bi ON ep.inventory_id = bi.id
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY ep.issued_at DESC LIMIT $${i++} OFFSET $${i++}`,
+        params
+      );
     }),
 
-  // ─── Bond Guarantees & Expiry Alerts ──────────────────────────────────────
-
-  getBondGuarantees: publicProcedure.query(() => {
-    seedDemoData();
-    return _warehouses.map((wh) => {
-      const whInventory = _inventory.filter((i) => i.warehouseId === wh.id && i.status === "in_bond");
-      const totalValue = whInventory.reduce((s, i) => s + i.valueUsd, 0);
-      const required = calculateBondRequirement(totalValue);
-      return {
-        warehouseId: wh.id,
-        warehouseName: wh.name,
-        bondAmountUsd: wh.bondAmountUsd,
-        requiredBondUsd: required,
-        inventoryValueUsd: totalValue,
-        isSufficient: wh.bondAmountUsd >= required,
-        bondExpiry: wh.bondExpiry,
-        isExpiringSoon: isBondExpiringSoon(wh.bondExpiry, 30),
-      };
-    });
+  getBondGuarantees: protectedProcedure.query(async () => {
+    const rows = await pgQuery<{
+      bond_amount_usd: number;
+      total_inventory_value_usd: number;
+    }>(
+      `SELECT bw.id, bw.name, bw.license_no, bw.bond_amount_usd, bw.bond_expiry, bw.status,
+        COALESCE(SUM(bi.invoice_value_usd),0) AS total_inventory_value_usd,
+        COALESCE(SUM(bi.duty_liability_usd),0) AS total_duty_liability_usd,
+        COUNT(bi.id) AS items_count
+       FROM bonded_warehouses bw
+       LEFT JOIN bonded_inventory bi ON bi.warehouse_id = bw.id AND bi.status = 'in_bond'
+       GROUP BY bw.id
+       ORDER BY bw.name`
+    );
+    return rows.map((r) => ({
+      ...r,
+      bondRequirement: calculateBondRequirement(Number(r.total_inventory_value_usd)),
+      bondAdequate: Number(r.bond_amount_usd) >= calculateBondRequirement(Number(r.total_inventory_value_usd)),
+    }));
   }),
 
-  getExpiryAlerts: publicProcedure.query(() => {
-    seedDemoData();
-    const now = Date.now();
-    const alerts: Array<{
-      type: "bond_expiry" | "inventory_overdue" | "permit_expiry";
-      id: string;
-      name: string;
-      daysUntilExpiry: number;
-      severity: "warning" | "critical";
-    }> = [];
+  getExpiryAlerts: protectedProcedure.query(async () => {
+    const thirtyDays = new Date(Date.now() + 30 * 86400_000);
+    const [invExpiry, bondExpiry, permitExpiry] = await Promise.all([
+      pgQuery(
+        `SELECT bi.id, bi.ucr, bi.hs_code, bi.description, bi.expiry_date, bi.status,
+                bw.name as warehouse_name, bw.license_no
+         FROM bonded_inventory bi
+         JOIN bonded_warehouses bw ON bi.warehouse_id = bw.id
+         WHERE bi.status = 'in_bond' AND bi.expiry_date IS NOT NULL AND bi.expiry_date <= $1
+         ORDER BY bi.expiry_date ASC`,
+        [thirtyDays]
+      ),
+      pgQuery(
+        `SELECT id, name, license_no, bond_expiry, status
+         FROM bonded_warehouses
+         WHERE status = 'active' AND bond_expiry IS NOT NULL AND bond_expiry <= $1
+         ORDER BY bond_expiry ASC`,
+        [thirtyDays]
+      ),
+      pgQuery(
+        `SELECT ep.id, ep.permit_no, ep.expires_at, bw.name as warehouse_name
+         FROM ex_bond_permits ep
+         JOIN bonded_warehouses bw ON ep.warehouse_id = bw.id
+         WHERE ep.status = 'active' AND ep.expires_at <= $1
+         ORDER BY ep.expires_at ASC`,
+        [thirtyDays]
+      ),
+    ]);
+    return {
+      inventoryExpiring: invExpiry,
+      bondsExpiring: bondExpiry,
+      permitsExpiring: permitExpiry,
+      totalAlerts: invExpiry.length + bondExpiry.length + permitExpiry.length,
+    };
+  }),
 
-    // Bond expiry alerts
-    for (const wh of _warehouses) {
-      const daysLeft = Math.floor((new Date(wh.bondExpiry).getTime() - now) / 86400_000);
-      if (daysLeft <= 60) {
-        alerts.push({
-          type: "bond_expiry",
-          id: wh.id,
-          name: wh.name,
-          daysUntilExpiry: daysLeft,
-          severity: daysLeft <= 14 ? "critical" : "warning",
-        });
-      }
-    }
+  updateWarehouseStatus: adminProcedure
+    .input(z.object({
+      warehouseId: z.number(),
+      status: z.enum(["active", "suspended", "revoked", "pending_renewal"]),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      await pgQuery(
+        "UPDATE bonded_warehouses SET status = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW() WHERE id = $3",
+        [input.status, ctx.user.id, input.warehouseId]
+      );
+      return { success: true };
+    }),
 
-    // Overdue inventory
-    for (const item of _inventory.filter((i) => i.status === "in_bond")) {
-      const daysOverdue = Math.floor((now - new Date(item.expectedExitDate).getTime()) / 86400_000);
-      if (daysOverdue > 0) {
-        alerts.push({
-          type: "inventory_overdue",
-          id: item.id,
-          name: `${item.description} (${item.declarationId})`,
-          daysUntilExpiry: -daysOverdue,
-          severity: daysOverdue > 30 ? "critical" : "warning",
-        });
-      }
-    }
-
-    // Permit expiry
-    for (const permit of _permits.filter((p) => p.status === "active")) {
-      const daysLeft = Math.floor((new Date(permit.expiresAt).getTime() - now) / 86400_000);
-      if (daysLeft <= 7) {
-        alerts.push({
-          type: "permit_expiry",
-          id: permit.id,
-          name: permit.permitNo,
-          daysUntilExpiry: daysLeft,
-          severity: daysLeft <= 2 ? "critical" : "warning",
-        });
-      }
-    }
-
-    return { total: alerts.length, alerts: alerts.sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry) };
+  getDashboardStats: protectedProcedure.query(async () => {
+    const [stats] = await pgQuery(
+      `SELECT
+        COUNT(DISTINCT bw.id) AS total_warehouses,
+        SUM(CASE WHEN bw.status = 'active' THEN 1 ELSE 0 END) AS active_warehouses,
+        COUNT(bi.id) AS total_inventory_items,
+        SUM(CASE WHEN bi.status = 'in_bond' THEN 1 ELSE 0 END) AS items_in_bond,
+        COALESCE(SUM(CASE WHEN bi.status = 'in_bond' THEN bi.invoice_value_usd ELSE 0 END),0) AS total_value_in_bond_usd,
+        COALESCE(SUM(CASE WHEN bi.status = 'in_bond' THEN bi.duty_liability_usd ELSE 0 END),0) AS total_duty_liability_usd
+       FROM bonded_warehouses bw
+       LEFT JOIN bonded_inventory bi ON bi.warehouse_id = bw.id`
+    );
+    return stats ?? {};
   }),
 });

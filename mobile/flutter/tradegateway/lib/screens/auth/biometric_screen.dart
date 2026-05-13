@@ -1,6 +1,5 @@
-/// TradeGateway™ NGSWTP — Flutter Biometric Auth Screen
+/// TradeGateway™ NGSWTP — Flutter Biometric Auth Screen (v37)
 library;
-
 import "package:flutter/material.dart";
 import "../../services/api_service.dart";
 
@@ -11,22 +10,19 @@ class BiometricScreen extends StatefulWidget {
 }
 
 class _BiometricScreenState extends State<BiometricScreen> {
-  bool _loading = true;
-  Map<String, dynamic>? _data;
+  bool _loading = false;
   String? _error;
 
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
+  Future<void> _authenticate() async {
     try {
       setState(() { _loading = true; _error = null; });
-      // TODO: Call specific ApiService method for Biometric Auth
-      // final data = await ApiService().getBiometric();
-      setState(() { _loading = false; });
+      final user = await ApiService().getMe();
+      setState(() => _loading = false);
+      if (user != null && mounted) {
+        Navigator.pushReplacementNamed(context, "/app/dashboard");
+      } else {
+        setState(() => _error = "Session expired. Please log in again.");
+      }
     } catch (e) {
       setState(() { _loading = false; _error = e.toString(); });
     }
@@ -36,40 +32,43 @@ class _BiometricScreenState extends State<BiometricScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A1628),
-      appBar: AppBar(
-        title: const Text("Biometric Auth", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-        backgroundColor: const Color(0xFF0A1628),
-        iconTheme: const IconThemeData(color: Color(0xFFD4A017)),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFFD4A017)))
-          : _error != null
-              ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Icon(Icons.error_outline, color: Color(0xFFEF4444), size: 48),
-                  const SizedBox(height: 16),
-                  Text(_error!, style: const TextStyle(color: Color(0xFF9CA3AF))),
-                  const SizedBox(height: 16),
-                  ElevatedButton(onPressed: _load, child: const Text("Retry")),
-                ]))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: const Color(0xFFD4A017),
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Text("Biometric Auth", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(color: const Color(0xFF111827), borderRadius: BorderRadius.circular(8)),
-                        child: const Text("Content loaded from TradeGateway™ API", style: TextStyle(color: Color(0xFF9CA3AF))),
-                      ),
-                    ],
-                  ),
-                ),
+      body: SafeArea(child: Center(child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.account_balance, color: Color(0xFFD4A017), size: 48),
+          const SizedBox(height: 8),
+          const Text("TradeGateway™", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 48),
+          Container(
+            width: 120, height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF111827),
+              border: Border.all(color: const Color(0xFFD4A017).withOpacity(0.4), width: 2),
+            ),
+            child: Icon(Icons.fingerprint, color: _loading ? const Color(0xFF6B7280) : const Color(0xFFD4A017), size: 80),
+          ),
+          const SizedBox(height: 32),
+          const Text("Authenticate with Biometrics", style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          const Text("Use your fingerprint or face ID to access TradeGateway", style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14), textAlign: TextAlign.center),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            Text(_error!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 13), textAlign: TextAlign.center),
+          ],
+          const SizedBox(height: 32),
+          SizedBox(width: double.infinity, child: ElevatedButton(
+            onPressed: _loading ? null : _authenticate,
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD4A017), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)),
+            child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black)) : const Text("Authenticate", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+          )),
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: () => Navigator.pushReplacementNamed(context, "/auth/login"),
+            child: const Text("Use password instead", style: TextStyle(color: Color(0xFF6B7280))),
+          ),
+        ]),
+      ))),
     );
   }
 }

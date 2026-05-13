@@ -321,38 +321,17 @@ const PORT_ARRIVALS = [
 
 // ─── ROUTER// ─── SHARED DATA HELPER (used by Sprint 70 WS broadcast) ───────────────────────
 
-/**
- * getLiveVesselsData — returns the current drifted vessel positions.
- * Exported so the WS broadcast interval in server/_core/index.ts can call it directly.
- */
-export function getLiveVesselsData(): Array<{
-  mmsi: string;
-  vesselName: string;
-  lat: number;
-  lon: number;
-  speed: number;
-  heading: number;
-  status: string;
-  riskFlag: "green" | "amber" | "red";
-  lastUpdate: string;
-}> {
-  // Cap drift at 120 ticks (1 hour of 30-second intervals) so positions stay near origin
-  const tick = Math.floor(Date.now() / 30000) % 120;
-  return BASE_VESSELS.map(v => {
-    const drifted = driftVessel(v, tick * 0.5);
-    return {
-      mmsi: drifted.mmsi,
-      vesselName: drifted.vesselName,
-      lat: drifted.lat,
-      lon: drifted.lon,
-      speed: drifted.speed,
-      heading: drifted.heading,
-      status: drifted.status,
-      riskFlag: (drifted.riskFlag ?? "green") as "green" | "amber" | "red",
-      lastUpdate: drifted.lastUpdate,
-    };
-  });
+import { getDb, getPool } from "../db";
+
+async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
+  await getDb();
+  const pool = getPool();
+  if (!pool) return [];
+  const { rows } = await pool.query(sql, params);
+  return rows as T[];
 }
+
+// getLiveVesselsData (sync) is defined below the router — see end of file.
 
 // ─── ROUTER ──────────────────────────────────────────────────────
 
@@ -427,25 +406,165 @@ export const cargoTrackingRouter = router({
     };
   }),
 
-  /**
-   * getVesselStats — summary statistics for the map header
+   /**
+   * getVesselStats — summary statistics from DB (falls back to static)
    */
-  getVesselStats: publicProcedure.query(() => {
+  getVesselStats: publicProcedure.query(async () => {
+    try {
+      const [stats] = await pgQuery(
+        `SELECT
+          COUNT(DISTINCT mmsi) AS total,
+          SUM(CASE WHEN speed < 0.5 THEN 1 ELSE 0 END) AS moored,
+          SUM(CASE WHEN speed >= 0.5 AND speed < 2 THEN 1 ELSE 0 END) AS anchored,
+          SUM(CASE WHEN speed >= 2 THEN 1 ELSE 0 END) AS underway,
+          SUM(CASE WHEN flag_country IN ('IRN','PRK','SYR','RUS','BLR') THEN 1 ELSE 0 END) AS red_flag,
+          SUM(CASE WHEN flag_country IN ('LBY','SOM','SDN','YEM','MMR') THEN 1 ELSE 0 END) AS amber_flag
+         FROM (SELECT DISTINCT ON (mmsi) mmsi, speed, flag_country FROM vessel_tracking_events ORDER BY mmsi, recorded_at DESC) l`
+      ) as any[];
+      if (stats) {
+        const total = parseInt(stats.total ?? "0", 10);
+        const red = parseInt(stats.red_flag ?? "0", 10);
+        const amber = parseInt(stats.amber_flag ?? "0", 10);
+        return {
+          total,
+          underway: parseInt(stats.underway ?? "0", 10),
+          moored: parseInt(stats.moored ?? "0", 10),
+          anchored: parseInt(stats.anchored ?? "0", 10),
+          redFlag: red,
+          amberFlag: amber,
+          greenFlag: total - red - amber,
+          withDeclaration: 0,
+        };
+      }
+    } catch { /* fallback */ }
+    // Static fallback
     const underway = BASE_VESSELS.filter(v => v.status === "underway").length;
     const moored = BASE_VESSELS.filter(v => v.status === "moored").length;
     const anchored = BASE_VESSELS.filter(v => v.status === "anchored").length;
     const redFlag = BASE_VESSELS.filter(v => v.riskFlag === "red").length;
     const amberFlag = BASE_VESSELS.filter(v => v.riskFlag === "amber").length;
-
     return {
       total: BASE_VESSELS.length,
-      underway,
-      moored,
-      anchored,
-      redFlag,
-      amberFlag,
+      underway, moored, anchored, redFlag, amberFlag,
       greenFlag: BASE_VESSELS.filter(v => v.riskFlag === "green").length,
       withDeclaration: BASE_VESSELS.filter(v => v.declarationRef !== null).length,
     };
   }),
+
+  /**
+   * searchVessels — search by name, MMSI, or IMO number from DB.
+   */
+  searchVessels: publicProcedure
+    .input(z.object({ q: z.string().min(2).max(100) }))
+    .query(async ({ input }) => {
+      const rows = await pgQuery(
+        `SELECT DISTINCT ON (mmsi) mmsi, vessel_name, imo_number, latitude, longitude,
+                speed, heading, destination_port, eta, cargo_type, flag_country, recorded_at
+         FROM vessel_tracking_events
+         WHERE vessel_name ILIKE $1 OR mmsi ILIKE $1 OR imo_number ILIKE $1
+         ORDER BY mmsi, recorded_at DESC LIMIT 20`,
+        [`%${input.q}%`]
+      );
+      const highRisk = ["IRN","PRK","SYR","RUS","BLR"];
+      const medRisk = ["LBY","SOM","SDN","YEM","MMR"];
+      return rows.map((r: any) => {
+        const flag = String(r.flag_country ?? "");
+        const speed = Number(r.speed ?? 0);
+        return {
+          mmsi: String(r.mmsi),
+          vesselName: String(r.vessel_name),
+          imoNumber: String(r.imo_number ?? ""),
+          lat: Number(r.latitude),
+          lon: Number(r.longitude),
+          speed,
+          heading: Number(r.heading ?? 0),
+          status: speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway",
+          destinationPort: String(r.destination_port ?? ""),
+          eta: r.eta ? new Date(r.eta).toISOString() : null,
+          cargoType: String(r.cargo_type ?? "General"),
+          flagCountry: flag,
+          riskFlag: highRisk.includes(flag) ? "red" : medRisk.includes(flag) ? "amber" : "green",
+          lastUpdate: r.recorded_at ? new Date(r.recorded_at).toISOString() : new Date().toISOString(),
+        };
+      });
+    }),
 });
+
+// ─── Sync shim for WebSocket broadcaster and legacy tests ────────────────────
+// Maintains a hot in-memory cache refreshed every 30s by the async DB query.
+// The sync getLiveVesselsData() returns the last known snapshot immediately.
+let _vesselCache: Array<{
+  mmsi: string; vesselName: string; imoNumber: string;
+  lat: number; lon: number; speed: number; heading: number;
+  status: string; destinationPort: string; eta: string | null;
+  cargoType: string; flagCountry: string; riskFlag: "green" | "amber" | "red";
+  lastUpdate: string;
+}> = BASE_VESSELS.map(v => ({
+  mmsi: v.mmsi,
+  vesselName: v.vesselName,
+  imoNumber: v.imo,
+  lat: v.lat,
+  lon: v.lon,
+  speed: v.speed,
+  heading: v.heading,
+  status: v.status,
+  destinationPort: v.destination,
+  eta: v.eta,
+  cargoType: "Container",
+  flagCountry: v.flag,
+  riskFlag: v.riskFlag ?? "green",
+  lastUpdate: v.lastUpdate,
+}));
+
+// Refresh cache from DB asynchronously (best-effort, non-blocking)
+async function _refreshVesselCache(): Promise<void> {
+  try {
+    const rows = await pgQuery(
+      `SELECT DISTINCT ON (mmsi) mmsi, vessel_name, imo_number, latitude, longitude,
+              speed, heading, destination_port, eta, cargo_type, flag_country, recorded_at
+       FROM vessel_tracking_events
+       ORDER BY mmsi, recorded_at DESC LIMIT 200`
+    );
+    if (rows.length > 0) {
+      const highRisk = ["IR", "KP", "SY", "CU", "IRN", "PRK", "SYR"];
+      const medRisk = ["RU", "BY", "VE", "MM", "RUS", "BLR", "MMR"];
+      _vesselCache = rows.map((r: any) => {
+        const flag = String(r.flag_country ?? "");
+        const speed = Number(r.speed ?? 0);
+        return {
+          mmsi: String(r.mmsi),
+          vesselName: String(r.vessel_name),
+          imoNumber: String(r.imo_number ?? ""),
+          lat: Number(r.latitude),
+          lon: Number(r.longitude),
+          speed,
+          heading: Number(r.heading ?? 0),
+          status: speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway",
+          destinationPort: String(r.destination_port ?? ""),
+          eta: r.eta ? new Date(r.eta as string).toISOString() : null,
+          cargoType: String(r.cargo_type ?? "General"),
+          flagCountry: flag,
+          riskFlag: highRisk.includes(flag) ? "red" : medRisk.includes(flag) ? "amber" : "green",
+          lastUpdate: r.recorded_at ? new Date(r.recorded_at as string).toISOString() : new Date().toISOString(),
+        };
+      });
+    }
+  } catch {
+    // Silently keep existing cache on DB error
+  }
+}
+
+// Schedule background refresh every 30 seconds
+if (typeof setInterval !== "undefined") {
+  setInterval(() => { void _refreshVesselCache(); }, 30_000);
+  void _refreshVesselCache();
+}
+
+/**
+ * getLiveVesselsData — synchronous accessor for the in-memory vessel cache.
+ * Returns the last known snapshot from the DB (refreshed every 30s).
+ * Falls back to BASE_VESSELS seed data when DB is unavailable.
+ */
+export function getLiveVesselsData() {
+  return _vesselCache;
+}
