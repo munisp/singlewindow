@@ -15,25 +15,31 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
   Map<String, dynamic>? _summary;
   List<dynamic> _transactions = [];
   List<dynamic> _duties = [];
+  Map<String, dynamic>? _clusterSummary;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _load();
   }
 
   Future<void> _load() async {
     try {
       setState(() { _loading = true; _error = null; });
-      final summaryData = await ApiService().get("/api/trpc/finance.summary?input=%7B%22json%22%3Anull%7D");
-      final txData = await ApiService().get("/api/trpc/finance.transactions?input=%7B%22json%22%3Anull%7D");
-      final dutiesData = await ApiService().get("/api/trpc/finance.duties?input=%7B%22json%22%3Anull%7D");
+      // Run all 4 API calls in parallel for faster load
+      final results = await Future.wait([
+        ApiService().get("/api/trpc/finance.summary?input=%7B%22json%22%3Anull%7D"),
+        ApiService().get("/api/trpc/finance.transactions?input=%7B%22json%22%3Anull%7D"),
+        ApiService().get("/api/trpc/finance.duties?input=%7B%22json%22%3Anull%7D"),
+        ApiService().get("/api/trpc/finance.clusterSummary?input=%7B%22json%22%3Anull%7D"),
+      ]);
       setState(() {
-        _summary = summaryData["result"]?["data"]?["json"];
-        _transactions = txData["result"]?["data"]?["json"] ?? [];
-        _duties = dutiesData["result"]?["data"]?["json"] ?? [];
+        _summary = results[0]["result"]?["data"]?["json"];
+        _transactions = results[1]["result"]?["data"]?["json"] ?? [];
+        _duties = results[2]["result"]?["data"]?["json"] ?? [];
+        _clusterSummary = results[3]["result"]?["data"]?["json"];
         _loading = false;
       });
     } catch (e) {
@@ -61,7 +67,8 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
           labelColor: const Color(0xFFD4A017),
           unselectedLabelColor: const Color(0xFF9CA3AF),
           indicatorColor: const Color(0xFFD4A017),
-          tabs: const [Tab(text: "Summary"), Tab(text: "Transactions"), Tab(text: "Duties")],
+          tabs: const [Tab(text: "Summary"), Tab(text: "Transactions"), Tab(text: "Duties"), Tab(text: "FinOps")],
+          isScrollable: true,
         ),
       ),
       body: _loading
@@ -75,7 +82,7 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
                 ]))
               : TabBarView(
                   controller: _tabController,
-                  children: [_buildSummary(), _buildTransactions(), _buildDuties()],
+                  children: [_buildSummary(), _buildTransactions(), _buildDuties(), _buildFinOps()],
                 ),
     );
   }
@@ -146,6 +153,144 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
               itemCount: _duties.length,
               itemBuilder: (context, i) => _DutyCard(duty: _duties[i]),
             ),
+    );
+  }
+
+  // ─── FinOps Tab — live cost_records breakdown from cost router ────────────
+  Widget _buildFinOps() {
+    final cs = _clusterSummary;
+    if (cs == null) {
+      return const Center(child: Text("No FinOps data available", style: TextStyle(color: Color(0xFF9CA3AF))));
+    }
+    final services = (cs["services"] as List<dynamic>?) ?? [];
+    final totalMonthly = cs["totalMonthly"] ?? 0;
+    final totalYtd = cs["totalYtd"] ?? 0;
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: const Color(0xFFD4A017),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Monthly + YTD totals
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: const Color(0xFF1E3A5F), borderRadius: BorderRadius.circular(12)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("30-Day Spend", style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text("\$${_fmt(totalMonthly)}", style: const TextStyle(color: Color(0xFFD4A017), fontSize: 22, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: const Color(0xFF1E3A5F), borderRadius: BorderRadius.circular(12)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("YTD Spend", style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text("\$${_fmt(totalYtd)}", style: const TextStyle(color: Color(0xFF60A5FA), fontSize: 22, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const Text("Service Cost Breakdown (30 days)", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+            const SizedBox(height: 12),
+            // Service rows
+            ...services.map((svc) {
+              final total = svc["totalCostUsd"] ?? 0;
+              final compute = svc["computeCostUsd"] ?? 0;
+              final storage = svc["storageCostUsd"] ?? 0;
+              final network = svc["networkCostUsd"] ?? 0;
+              final eff = svc["avgEfficiency"] ?? 0;
+              final effColor = eff >= 75 ? const Color(0xFF10B981) : eff >= 50 ? const Color(0xFFF59E0B) : const Color(0xFFEF4444);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(color: const Color(0xFF1E3A5F), borderRadius: BorderRadius.circular(10)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(child: Text(svc["service"] ?? "", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                        Text("\$${_fmt(total)}", style: const TextStyle(color: Color(0xFFD4A017), fontWeight: FontWeight.bold, fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        _CostChip(label: "Compute", value: "\$${_fmt(compute)}", color: const Color(0xFF3B82F6)),
+                        const SizedBox(width: 6),
+                        _CostChip(label: "Storage", value: "\$${_fmt(storage)}", color: const Color(0xFF8B5CF6)),
+                        const SizedBox(width: 6),
+                        _CostChip(label: "Network", value: "\$${_fmt(network)}", color: const Color(0xFF06B6D4)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Text("Efficiency: ", style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
+                        Text("$eff%", style: TextStyle(color: effColor, fontWeight: FontWeight.bold, fontSize: 12)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: (eff as num).toDouble() / 100,
+                              backgroundColor: const Color(0xFF374151),
+                              valueColor: AlwaysStoppedAnimation<Color>(effColor),
+                              minHeight: 6,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _fmt(dynamic v) {
+    final n = double.tryParse(v.toString()) ?? 0.0;
+    if (n >= 1000000) return "${(n / 1000000).toStringAsFixed(1)}M";
+    if (n >= 1000) return "${(n / 1000).toStringAsFixed(1)}K";
+    return n.toStringAsFixed(0);
+  }
+}
+
+class _CostChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _CostChip({required this.label, required this.value, required this.color});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: BorderRadius.circular(6)),
+      child: Text("$label: $value", style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }
 }

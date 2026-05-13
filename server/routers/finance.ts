@@ -18,6 +18,7 @@ import {
   getRiskLaneRevenueBreakdown,
   getAllPayments,
 } from "../db";
+import { getPool } from "../db";
 
 // Only finance role and admin can access finance procedures
 function assertFinanceAccess(role: string) {
@@ -107,6 +108,113 @@ export const financeRouter = router({
       const txs = await getAllPayments(input.limit, input.offset);
       return { transactions: txs, total: txs.length };
     }),
+
+  // ─── Flutter Mobile Aliases ─────────────────────────────────────────────
+  // These endpoints are called by the Flutter finance_screen.dart.
+  // They map to the canonical procedures above but with mobile-friendly shapes.
+
+  // summary — wraps kpis + 30-day trend for the Flutter Summary tab
+  summary: protectedProcedure.query(async ({ ctx }) => {
+    const kpis = await getFinanceKPIs();
+    const trend = await getPaymentTrend(30);
+    return {
+      totalRevenue: kpis?.totalRevenue ?? 0,
+      pendingAmount: kpis?.pendingAmount ?? 0,
+      pendingCount: kpis?.pendingCount ?? 0,
+      confirmedCount: kpis?.confirmedCount ?? 0,
+      failedCount: kpis?.failedCount ?? 0,
+      dutyRevenue: kpis?.dutyRevenue ?? 0,
+      vatRevenue: kpis?.vatRevenue ?? 0,
+      levyRevenue: kpis?.levyRevenue ?? 0,
+      overdueCount: kpis?.overdueCount ?? 0,
+      trend,
+    };
+  }),
+
+  // transactions — last 50 payments for the Flutter Transactions tab
+  transactions: protectedProcedure.query(async ({ ctx }) => {
+    const pool = getPool();
+    if (!pool) return [];
+    const { rows } = await pool.query(`
+      SELECT
+        p.id, p.reference, p.amount, p.currency, p.status,
+        p.payment_method AS "paymentMethod",
+        p.created_at AS "createdAt",
+        p.confirmed_at AS "confirmedAt",
+        d.declaration_number AS "declarationRef",
+        d.hs_code AS "hsCode",
+        CASE WHEN p.status = 'confirmed' THEN 'credit' ELSE 'debit' END AS type,
+        COALESCE(d.goods_description, 'Customs Duty Payment') AS description
+      FROM payments p
+      LEFT JOIN declarations d ON d.id = p.declaration_id
+      ORDER BY p.created_at DESC
+      LIMIT 50
+    `);
+    return rows;
+  }),
+
+  // duties — pending duty obligations for the Flutter Duties tab
+  duties: protectedProcedure.query(async ({ ctx }) => {
+    const pool = getPool();
+    if (!pool) return [];
+    const { rows } = await pool.query(`
+      SELECT
+        p.id, p.reference, p.amount, p.currency, p.status,
+        d.declaration_number AS "declarationRef",
+        d.hs_code AS "hsCode",
+        COALESCE(d.goods_description, 'Customs Duty') AS description,
+        (p.status = 'confirmed') AS paid,
+        p.created_at AS "createdAt"
+      FROM payments p
+      LEFT JOIN declarations d ON d.id = p.declaration_id
+      WHERE p.status IN ('pending', 'confirmed')
+      ORDER BY p.created_at DESC
+      LIMIT 50
+    `);
+    return rows;
+  }),
+
+  // clusterSummary — FinOps cost breakdown from cost_records table for Flutter Finance screen
+  clusterSummary: protectedProcedure.query(async ({ ctx }) => {
+    const pool = getPool();
+    if (!pool) return { services: [], totalMonthly: 0, totalYtd: 0 };
+    const { rows: serviceRows } = await pool.query(`
+      SELECT
+        service,
+        namespace,
+        category,
+        SUM(total_cost_usd) AS total_cost,
+        SUM(compute_cost_usd) AS compute_cost,
+        SUM(storage_cost_usd) AS storage_cost,
+        SUM(network_cost_usd) AS network_cost,
+        AVG(efficiency) AS avg_efficiency,
+        COUNT(*) AS days
+      FROM cost_records
+      WHERE period_date >= CURRENT_DATE - INTERVAL '30 days'
+      GROUP BY service, namespace, category
+      ORDER BY total_cost DESC
+    `);
+    const { rows: totals } = await pool.query(`
+      SELECT
+        SUM(CASE WHEN period_date >= CURRENT_DATE - INTERVAL '30 days' THEN total_cost_usd ELSE 0 END) AS monthly_total,
+        SUM(CASE WHEN period_date >= DATE_TRUNC('year', CURRENT_DATE) THEN total_cost_usd ELSE 0 END) AS ytd_total
+      FROM cost_records
+    `);
+    return {
+      services: serviceRows.map((r: any) => ({
+        service: r.service,
+        namespace: r.namespace,
+        category: r.category,
+        totalCostUsd: Math.round(Number(r.total_cost) / 100),
+        computeCostUsd: Math.round(Number(r.compute_cost) / 100),
+        storageCostUsd: Math.round(Number(r.storage_cost) / 100),
+        networkCostUsd: Math.round(Number(r.network_cost) / 100),
+        avgEfficiency: Math.round(Number(r.avg_efficiency)),
+      })),
+      totalMonthly: Math.round(Number(totals[0]?.monthly_total ?? 0) / 100),
+      totalYtd: Math.round(Number(totals[0]?.ytd_total ?? 0) / 100),
+    };
+  }),
 
   // CSV export: confirmed payments grouped by HS chapter and corridor for a date range
   exportCSV: protectedProcedure

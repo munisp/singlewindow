@@ -189,3 +189,12 @@
 - [x] generatePermitNo: fixed format to BW-YYYY-XXXXXX (6 uppercase hex)
 - [x] 17 Flutter screens: wired with real API calls (declarations, dashboard, payments, cargo, etc.)
 - [x] All 1766 tests passing (61 test files)
+
+## v38 Sprint — Seed Data + Finance Screen Wiring
+- [ ] Seed bonded_warehouses with 6 realistic demo warehouses
+- [ ] Seed bonded_inventory with 20+ realistic goods-in-bond records
+- [ ] Seed ex_bond_permits with 10 permit records
+- [ ] Pre-populate cep_patterns with 5 WCO standard fraud patterns
+- [ ] Pre-populate cep_alerts with 15 sample alerts linked to patterns
+- [ ] Seed cost_records with realistic FinOps data
+- [x] Wire Flutter finance_screen.dart to trpc.cost.getClusterSummary
