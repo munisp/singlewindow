@@ -283,3 +283,11 @@
 - [x] v52: Amendment review drawer in AdminDeclarations — pending amendments badge in header, Sheet side panel with approve/reject + review notes
 - [x] v52: Trader amendment history card in TraderDeclarations — AmendmentHistoryCard component using new listMine procedure; hidden when empty
 - [x] v52: declarationAmendments.listMine procedure added to server router
+
+## v54 Sprint — Trader Satisfaction Survey, Clearance Time KPI
+- [x] v54: traderRatings table (trader_ratings) created in DB + schema.ts
+- [x] v54: traderRatingsRouter with submit, getMine, getStats procedures
+- [x] v54: TraderRatingWidget (1-5 stars + optional comment) in DeclarationDetail for cleared declarations
+- [x] v54: avgClearanceHours added to getKpiSummary in executiveDashboard router
+- [x] v54: clearance_time_hours KPI target now shows real actual value in ExecutiveDashboard
+- [x] v54: trader_satisfaction KPI target wired to ratingStats.avgRating in ExecutiveDashboard

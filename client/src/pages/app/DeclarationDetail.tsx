@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
   DollarSign, Building2, Anchor, Plane, Train, Download, Loader2, Shield,
-  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon, ChevronDown, Trash2
+  FolderLock, File, Image, Archive, RefreshCw as RefreshCwIcon, ChevronDown, Trash2, Star
 } from "lucide-react";
 import { useState, useRef, useCallback, useMemo } from "react";
 import { Textarea } from "@/components/ui/textarea";
@@ -321,6 +321,89 @@ function DeclarationProgressBar({ status, riskLane }: { status: string; riskLane
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── TRADER RATING WIDGET ────────────────────────────────────────────────────
+
+function TraderRatingWidget({ declarationId, traderId }: { declarationId: number; traderId: number }) {
+  const { user } = useAuth();
+  const [hovered, setHovered] = useState<number | null>(null);
+  const [comment, setComment] = useState("");
+  const [showComment, setShowComment] = useState(false);
+  const utils = trpc.useUtils();
+
+  const { data: existing, isLoading } = trpc.traderRatings.getMine.useQuery(
+    { declarationId },
+    { enabled: user?.id === traderId },
+  );
+
+  const submitMutation = trpc.traderRatings.submit.useMutation({
+    onSuccess: () => {
+      toast.success("Thank you for your feedback!");
+      utils.traderRatings.getMine.invalidate({ declarationId });
+      setShowComment(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  if (isLoading) return null;
+
+  const currentRating = existing?.rating ?? 0;
+  const displayRating = hovered ?? currentRating;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-muted/50">
+      <p className="text-xs text-muted-foreground mb-2 font-medium">Rate your clearance experience</p>
+      <div className="flex items-center gap-1 mb-2">
+        {[1, 2, 3, 4, 5].map((star) => (
+          <button
+            key={star}
+            type="button"
+            className="p-0.5 transition-transform hover:scale-110"
+            onMouseEnter={() => setHovered(star)}
+            onMouseLeave={() => setHovered(null)}
+            onClick={() => {
+              submitMutation.mutate({ declarationId, rating: star, comment: comment || undefined });
+            }}
+          >
+            <Star
+              className={`h-5 w-5 transition-colors ${
+                star <= displayRating
+                  ? "fill-amber-400 text-amber-400"
+                  : "text-muted-foreground/40"
+              }`}
+            />
+          </button>
+        ))}
+        {currentRating > 0 && (
+          <span className="ml-2 text-xs text-muted-foreground">{currentRating}/5 — thank you!</span>
+        )}
+      </div>
+      {!existing && (
+        <button
+          type="button"
+          className="text-xs text-primary hover:underline"
+          onClick={() => setShowComment((v) => !v)}
+        >
+          {showComment ? "Hide comment" : "Add a comment (optional)"}
+        </button>
+      )}
+      {showComment && !existing && (
+        <div className="mt-2 flex gap-2">
+          <input
+            type="text"
+            placeholder="Your feedback..."
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            className="flex-1 h-8 rounded-md border border-input bg-background px-2 text-xs"
+          />
+        </div>
+      )}
+      {existing?.comment && (
+        <p className="text-xs text-muted-foreground italic mt-1">"{existing.comment}"</p>
+      )}
     </div>
   );
 }
@@ -758,6 +841,10 @@ export default function DeclarationDetail() {
                     <DetailRow label="Last Updated" value={new Date(decl.updatedAt).toLocaleString()} />
                     {decl.clearedAt && (
                       <DetailRow label="Cleared At" value={new Date(decl.clearedAt).toLocaleString()} />
+                    )}
+                    {/* Trader satisfaction rating — shown only to the owning trader on cleared declarations */}
+                    {decl.status === "cleared" && user?.id === decl.traderId && (
+                      <TraderRatingWidget declarationId={decl.id} traderId={decl.traderId} />
                     )}
                     {decl.permitNumber && (
                       <>

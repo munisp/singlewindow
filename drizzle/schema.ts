@@ -1710,3 +1710,19 @@ export const kpiTargets = pgTable("kpi_targets", {
   index("idx_kpi_key").on(t.metricKey),
 ]);
 export type KpiTarget = typeof kpiTargets.$inferSelect;
+
+// ─── TRADER SATISFACTION RATINGS ─────────────────────────────────────────────
+import { smallint } from "drizzle-orm/pg-core";
+export const traderRatings = pgTable("trader_ratings", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id, { onDelete: "cascade" }),
+  traderId: integer("trader_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  rating: smallint("rating").notNull(),
+  comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("trader_ratings_decl_trader_unique").on(t.declarationId, t.traderId),
+  index("idx_trader_ratings_trader").on(t.traderId),
+  index("idx_trader_ratings_created").on(t.createdAt),
+]);
+export type TraderRating = typeof traderRatings.$inferSelect;

@@ -158,12 +158,27 @@ export const executiveDashboardRouter = router({
         .from(payments)
         .where(and(gte(payments.createdAt, thisMonth), eq(payments.status, "confirmed")));
 
+      // Average clearance time: hours from submittedAt to clearedAt for cleared declarations
+      const [avgClearance] = await db
+        .select({
+          avgHours: sql<string>`COALESCE(
+            AVG(EXTRACT(EPOCH FROM (cleared_at - submitted_at)) / 3600.0), 0
+          )`,
+        })
+        .from(declarations)
+        .where(and(
+          eq(declarations.status, "cleared"),
+          sql`cleared_at IS NOT NULL`,
+          sql`submitted_at IS NOT NULL`,
+        ));
+
       const td = Number(totalDecls?.count ?? 0);
       const cd = Number(clearedDecls?.count ?? 0);
       const rt = Number(registeredTraders?.count ?? 0);
       const ae = Number(aeoCount?.count ?? 0);
       const sh = Number(sanctionsHits?.count ?? 0);
       const mr = parseFloat(monthRevenue?.total ?? "0");
+      const avgClearanceHours = Math.round(parseFloat(avgClearance?.avgHours ?? "0") * 10) / 10;
       return {
         totalDeclarations: td,
         clearedDeclarations: cd,
@@ -172,6 +187,7 @@ export const executiveDashboardRouter = router({
         aeoOperators: ae,
         sanctionsHitsThisMonth: sh,
         monthRevenueNaira: mr,
+        avgClearanceHours,
         asOf: new Date(),
       };
     }),

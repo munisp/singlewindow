@@ -42,6 +42,7 @@ export default function ExecutiveDashboard() {
 
   const { data: revenue, isLoading, isError, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
   const { data: kpi, refetch: refetchKpi } = trpc.executiveDashboard.getKpiSummary.useQuery();
+  const { data: ratingStats } = trpc.traderRatings.getStats.useQuery(undefined, { enabled: isAdmin });
   const { data: daily } = trpc.executiveDashboard.getDailyCollectionVsTarget.useQuery({ dailyTargetNaira: 500_000_000 });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
   const { data: topScanned } = trpc.rulesOfOrigin.topScanned.useQuery({ limit: 10, days: 30 });
@@ -306,11 +307,11 @@ export default function ExecutiveDashboard() {
         {isAdmin && kpiTargetsList && kpiTargetsList.length > 0 && (() => {
           // Map metricKey → actual current value from kpi query
           const actualMap: Record<string, number | undefined> = kpi ? {
-            clearance_time_hours: undefined, // not directly in summary
+            clearance_time_hours: kpi.avgClearanceHours,
             daily_revenue_ngn: kpi.monthRevenueNaira / 30,
             green_lane_pct: kpi.clearanceRate,
             sla_compliance_pct: kpi.clearanceRate,
-            trader_satisfaction: undefined,
+            trader_satisfaction: ratingStats?.avgRating,
             aeo_operator_count: kpi.aeoOperators,
           } : {};
           const lowerIsBetter = new Set(["clearance_time_hours"]);
