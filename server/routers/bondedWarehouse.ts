@@ -331,4 +331,75 @@ export const bondedWarehouseRouter = router({
     );
     return stats ?? {};
   }),
+
+  /**
+   * runExpiryCheck — admin-only on-demand trigger for the bonded warehouse
+   * expiry notification job. Returns a summary of expiring/expired items
+   * and sends an owner notification if any are found.
+   */
+  runExpiryCheck: adminProcedure.mutation(async () => {
+    const pool = getPool();
+    if (!pool) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+    const { rows } = await pool.query(`
+      SELECT
+        bi.id, bi.ucr, bi.goods_description, bi.quantity, bi.unit,
+        bi.bond_expiry_date,
+        bw.name AS warehouse_name, bw.location AS warehouse_location, bw.license_number
+      FROM bonded_inventory bi
+      JOIN bonded_warehouses bw ON bw.id = bi.warehouse_id
+      WHERE bi.status = 'active' AND bi.bond_expiry_date IS NOT NULL
+      ORDER BY bi.bond_expiry_date ASC
+    `);
+
+    const now = new Date();
+    const expiringSoon: Array<Record<string, unknown> & { daysUntilExpiry: number }> = [];
+    const alreadyExpired: Array<Record<string, unknown> & { daysUntilExpiry: number }> = [];
+
+    for (const row of rows) {
+      const expiryDate = new Date(row.bond_expiry_date as string);
+      const daysUntilExpiry = Math.ceil(
+        (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      if (daysUntilExpiry < 0) {
+        alreadyExpired.push({ ...row, daysUntilExpiry });
+      } else if (isBondExpiringSoon(row.bond_expiry_date as string, 7)) {
+        expiringSoon.push({ ...row, daysUntilExpiry });
+      }
+    }
+
+    const totalFlagged = expiringSoon.length + alreadyExpired.length;
+
+    if (totalFlagged > 0) {
+      const { notifyOwner } = await import("../_core/notification");
+      const lines: string[] = [];
+      if (alreadyExpired.length > 0) {
+        lines.push(`EXPIRED (${alreadyExpired.length} items):`);
+        for (const item of alreadyExpired) {
+          lines.push(`  • UCR ${item.ucr} — ${item.goods_description} @ ${item.warehouse_name} (${Math.abs(item.daysUntilExpiry)}d overdue)`);
+        }
+      }
+      if (expiringSoon.length > 0) {
+        lines.push(`EXPIRING WITHIN 7 DAYS (${expiringSoon.length} items):`);
+        for (const item of expiringSoon) {
+          lines.push(`  • UCR ${item.ucr} — ${item.goods_description} @ ${item.warehouse_name} (${item.daysUntilExpiry}d remaining)`);
+        }
+      }
+      await notifyOwner({
+        title: `Bonded Warehouse Expiry Check — ${totalFlagged} item(s) require attention`,
+        content: lines.join("\n"),
+      });
+    }
+
+    return {
+      scanned: rows.length,
+      expiringSoon: expiringSoon.length,
+      alreadyExpired: alreadyExpired.length,
+      totalFlagged,
+      items: [
+        ...alreadyExpired.map((i) => ({ ...i, flag: "expired" as const })),
+        ...expiringSoon.map((i) => ({ ...i, flag: "expiring_soon" as const })),
+      ],
+    };
+  }),
 });

@@ -327,12 +327,26 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
                         barWidth: 1.5,
                         dotData: const FlDotData(show: false),
                       ),
+                      // Storage cost line (purple)
+                      LineChartBarData(
+                        spots: _costTrend.asMap().entries.map((e) {
+                          final v = double.tryParse(e.value["storage_cost_usd"]?.toString() ?? "0") ?? 0;
+                          return FlSpot(e.key.toDouble(), v);
+                        }).toList(),
+                        isCurved: true,
+                        color: const Color(0xFF8B5CF6),
+                        barWidth: 1.5,
+                        dotData: const FlDotData(show: false),
+                        dashArray: [4, 3],
+                      ),
                     ],
                     lineTouchData: LineTouchData(
                       touchTooltipData: LineTouchTooltipData(
                         getTooltipItems: (spots) => spots.map((s) {
-                          final label = s.barIndex == 0 ? "Total" : "Compute";
-                          final color = s.barIndex == 0 ? const Color(0xFFD4A017) : const Color(0xFF3B82F6);
+                          final labels = ["Total", "Compute", "Storage"];
+                          final colors = [const Color(0xFFD4A017), const Color(0xFF3B82F6), const Color(0xFF8B5CF6)];
+                          final label = s.barIndex < labels.length ? labels[s.barIndex] : "Line ${s.barIndex}";
+                          final color = s.barIndex < colors.length ? colors[s.barIndex] : Colors.white;
                           return LineTooltipItem(
                             "$label: \$${s.y.toStringAsFixed(0)}",
                             TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
@@ -348,8 +362,10 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
             Row(
               children: [
                 _LegendDot(color: const Color(0xFFD4A017), label: "Total Cost"),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 _LegendDot(color: const Color(0xFF3B82F6), label: "Compute"),
+                const SizedBox(width: 12),
+                _LegendDot(color: const Color(0xFF8B5CF6), label: "Storage"),
               ],
             ),
             const SizedBox(height: 20),

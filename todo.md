@@ -203,3 +203,8 @@
 - [x] CEP alert webhook endpoint POST /api/webhooks/cep-event
 - [x] Bonded warehouse expiry notification cron job
 - [x] Flutter FinOps cost trend chart (fl_chart + getCostTrend)
+
+## v40 Sprint — Next Steps Implementation
+- [x] CEP alert Resolve button in FlinkCepAlerts.tsx (cep.ackAlert mutation)
+- [x] bondedWarehouse.runExpiryCheck adminProcedure + trigger button in PWA
+- [x] Storage cost line in Flutter FinOps trend chart

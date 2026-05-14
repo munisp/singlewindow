@@ -8,8 +8,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield,
+  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw,
 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 
 const WAREHOUSE_STATUS_COLORS: Record<string, string> = {
@@ -68,6 +72,23 @@ export default function BondedWarehouseManagement() {
 
   const criticalAlerts = alerts.filter((a: any) => a.severity === "critical");
   const warningAlerts = alerts.filter((a: any) => a.severity === "warning");
+  const { user } = useAuth();
+  const isAdmin = (user as any)?.role === "admin";
+  const [expiryCheckDialog, setExpiryCheckDialog] = useState<null | {
+    scanned: number; expiringSoon: number; alreadyExpired: number; totalFlagged: number;
+    items: Array<Record<string, unknown> & { flag: string }>;
+  }>(null);
+  const runExpiryCheckMutation = trpc.bondedWarehouse.runExpiryCheck.useMutation({
+    onSuccess: (result) => {
+      setExpiryCheckDialog(result as any);
+      if (result.totalFlagged > 0) {
+        toast.warning(`Expiry check complete — ${result.totalFlagged} item(s) flagged`);
+      } else {
+        toast.success("Expiry check complete — no items require attention");
+      }
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   if (isLoading) return (
     <div className="p-6 flex items-center justify-center h-64">
@@ -95,7 +116,19 @@ export default function BondedWarehouseManagement() {
             Warehouse registration, goods-in-bond inventory, bond guarantees, and ex-bond permit issuance
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => runExpiryCheckMutation.mutate()}
+              disabled={runExpiryCheckMutation.isPending}
+              className="text-xs"
+            >
+              <RefreshCw className={"h-3.5 w-3.5 mr-1" + (runExpiryCheckMutation.isPending ? " animate-spin" : "")} />
+              {runExpiryCheckMutation.isPending ? "Scanning…" : "Run Expiry Check"}
+            </Button>
+          )}
           {criticalAlerts.length > 0 && (
             <Badge variant="outline" className="text-red-600 border-red-300">
               <AlertTriangle className="h-3 w-3 mr-1" />
@@ -109,6 +142,59 @@ export default function BondedWarehouseManagement() {
           )}
         </div>
       </div>
+
+      {/* Expiry Check Results Dialog */}
+      <Dialog open={!!expiryCheckDialog} onOpenChange={() => setExpiryCheckDialog(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Bond Expiry Check Results</DialogTitle>
+          </DialogHeader>
+          {expiryCheckDialog && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="p-3 rounded-lg bg-muted/30">
+                  <p className="text-xl font-bold">{expiryCheckDialog.scanned}</p>
+                  <p className="text-xs text-muted-foreground">Scanned</p>
+                </div>
+                <div className="p-3 rounded-lg bg-red-50">
+                  <p className="text-xl font-bold text-red-600">{expiryCheckDialog.alreadyExpired}</p>
+                  <p className="text-xs text-muted-foreground">Expired</p>
+                </div>
+                <div className="p-3 rounded-lg bg-orange-50">
+                  <p className="text-xl font-bold text-orange-600">{expiryCheckDialog.expiringSoon}</p>
+                  <p className="text-xs text-muted-foreground">Expiring ≤7d</p>
+                </div>
+              </div>
+              {expiryCheckDialog.totalFlagged === 0 ? (
+                <p className="text-center text-sm text-green-600 font-medium py-2">✓ All bonds are within their validity period</p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {(expiryCheckDialog.items as any[]).map((item: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className={"flex items-start justify-between p-2.5 rounded-lg border text-sm " +
+                        (item.flag === "expired" ? "border-red-200 bg-red-50" : "border-orange-200 bg-orange-50")}
+                    >
+                      <div>
+                        <p className="font-medium">{item.ucr}</p>
+                        <p className="text-xs text-muted-foreground">{item.goods_description} · {item.warehouse_name}</p>
+                      </div>
+                      <Badge className={item.flag === "expired" ? "bg-red-600 text-white" : "bg-orange-500 text-white"}>
+                        {item.flag === "expired"
+                          ? `${Math.abs(item.daysUntilExpiry)}d overdue`
+                          : `${item.daysUntilExpiry}d left`}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {expiryCheckDialog.totalFlagged > 0 && (
+                <p className="text-xs text-muted-foreground text-center">Owner notification sent</p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Alerts banner */}
       {alerts.length > 0 && (

@@ -21,6 +21,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
 import {
@@ -52,8 +60,9 @@ const PATTERN_ICONS: Record<string, React.ReactNode> = {
 export default function FlinkCepAlerts() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"open" | "resolved">("open");
-  const [ackDialog, setAckDialog] = useState<{ alertId: string; patternName: string } | null>(null);
+  const [ackDialog, setAckDialog] = useState<{ alertId: string; patternName: string; mode: "investigate" | "resolve" } | null>(null);
   const [ackNotes, setAckNotes] = useState("");
+  const [ackStatus, setAckStatus] = useState<"investigating" | "resolved" | "false_positive">("investigating");
 
   const statsQuery = trpc.cep.getStats.useQuery();
   const statusQuery = trpc.cep.getServiceStatus.useQuery();
@@ -61,12 +70,14 @@ export default function FlinkCepAlerts() {
   const alertsQuery = trpc.cep.getAlerts.useQuery({ status: activeTab as any, limit: 100 });
 
   const ackMutation = trpc.cep.acknowledgeAlert.useMutation({
-    onSuccess: () => {
-      toast.success("Alert acknowledged");
+    onSuccess: (_, vars) => {
+      const isResolve = vars.status === "resolved" || vars.status === "false_positive";
+      toast.success(isResolve ? "Alert resolved" : "Alert marked as investigating");
       alertsQuery.refetch();
       statsQuery.refetch();
       setAckDialog(null);
       setAckNotes("");
+      setAckStatus("investigating");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -238,17 +249,46 @@ export default function FlinkCepAlerts() {
                         {new Date(alert.fired_at).toLocaleString()}
                       </TableCell>
                       <TableCell>
-                        {alert.status === "open" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setAckDialog({ alertId: alert.alert_id, patternName: alert.pattern_name })}
-                          >
-                            Acknowledge
-                          </Button>
+                        {(alert.status === "open" || alert.status === "investigating") && (
+                          <div className="flex items-center gap-1.5">
+                            {alert.status === "open" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs h-7"
+                                onClick={() => {
+                                  setAckStatus("investigating");
+                                  setAckDialog({ alertId: alert.alert_id, patternName: alert.pattern_name, mode: "investigate" });
+                                }}
+                              >
+                                Investigate
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="text-xs h-7 bg-green-600 hover:bg-green-700"
+                              onClick={() => {
+                                setAckStatus("resolved");
+                                setAckDialog({ alertId: alert.alert_id, patternName: alert.pattern_name, mode: "resolve" });
+                              }}
+                            >
+                              Resolve
+                            </Button>
+                          </div>
                         )}
-                        {alert.status === "acknowledged" && (
-                          <span className="text-xs text-green-400">✓ Reviewed</span>
+                        {alert.status === "investigating" && (
+                          <span className="text-xs text-yellow-400 font-medium">⚑ Investigating</span>
+                        )}
+                        {(alert.status === "resolved" || alert.status === "false_positive") && (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs text-green-400 font-medium">
+                              {alert.status === "false_positive" ? "✗ False Positive" : "✓ Resolved"}
+                            </span>
+                            {alert.resolved_by && (
+                              <span className="text-xs text-muted-foreground">{alert.resolved_by}</span>
+                            )}
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -288,37 +328,71 @@ export default function FlinkCepAlerts() {
         </Card>
       </div>
 
-      {/* Acknowledge Dialog */}
-      <Dialog open={!!ackDialog} onOpenChange={() => setAckDialog(null)}>
+      {/* Acknowledge / Resolve Dialog */}
+      <Dialog open={!!ackDialog} onOpenChange={() => { setAckDialog(null); setAckNotes(""); setAckStatus("investigating"); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Acknowledge Alert</DialogTitle>
+            <DialogTitle>{ackDialog?.mode === "resolve" ? "Resolve Alert" : "Investigate Alert"}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Acknowledging: <strong>{ackDialog?.patternName}</strong>
+              Alert: <strong className="text-foreground">{ackDialog?.patternName}</strong>
             </p>
-            <Textarea
-              placeholder="Add investigation notes (optional)…"
-              value={ackNotes}
-              onChange={(e) => setAckNotes(e.target.value)}
-              rows={3}
-            />
+
+            {/* Status selector — only shown in resolve mode */}
+            {ackDialog?.mode === "resolve" && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Resolution Status</Label>
+                <Select
+                  value={ackStatus}
+                  onValueChange={(v) => setAckStatus(v as typeof ackStatus)}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="resolved">✓ Resolved — confirmed fraud / actioned</SelectItem>
+                    <SelectItem value="false_positive">✗ False Positive — no further action</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">
+                {ackDialog?.mode === "resolve" ? "Resolution notes (required)" : "Investigation notes (optional)"}
+              </Label>
+              <Textarea
+                placeholder={ackDialog?.mode === "resolve" ? "Describe the outcome and actions taken…" : "Add initial investigation notes…"}
+                value={ackNotes}
+                onChange={(e) => setAckNotes(e.target.value)}
+                rows={3}
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAckDialog(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setAckDialog(null); setAckNotes(""); setAckStatus("investigating"); }}>Cancel</Button>
             <Button
               onClick={() => {
                 if (!ackDialog) return;
+                if (ackDialog.mode === "resolve" && !ackNotes.trim()) {
+                  toast.error("Resolution notes are required when resolving an alert");
+                  return;
+                }
                 ackMutation.mutate({
                   alertId: ackDialog.alertId,
-                  status: "investigating" as const,
-                  resolutionNote: ackNotes || undefined,
+                  status: ackDialog.mode === "resolve" ? ackStatus : "investigating",
+                  resolutionNote: ackNotes.trim() || undefined,
                 });
               }}
               disabled={ackMutation.isPending}
+              className={ackDialog?.mode === "resolve" ? "bg-green-600 hover:bg-green-700" : ""}
             >
-              {ackMutation.isPending ? "Saving…" : "Acknowledge"}
+              {ackMutation.isPending
+                ? "Saving…"
+                : ackDialog?.mode === "resolve"
+                  ? "Confirm Resolution"
+                  : "Start Investigation"}
             </Button>
           </DialogFooter>
         </DialogContent>
