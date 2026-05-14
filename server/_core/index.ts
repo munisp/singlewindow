@@ -353,7 +353,8 @@ async function runBondedWarehouseExpiryCheck() {
       `to renew bonds or initiate ex-bond clearance before expiry to avoid customs penalties.`
     );
 
-    await notifyOwner({
+    const { notifyOwner: _notifyOwner } = await import("./notification");
+    await _notifyOwner({
       title: `🏭 Bonded Warehouse Alert: ${totalAlerts} bond${totalAlerts === 1 ? "" : "s"} expiring soon`,
       content: lines.join("\n"),
     });
@@ -361,7 +362,8 @@ async function runBondedWarehouseExpiryCheck() {
     // Write in-app notifications for each flagged bond so mobile/PWA users see them
     try {
       const { createNotification, getUserByOpenId } = await import("../db");
-      const { env } = await import("./env");
+      const { ENV } = await import("./env");
+      const env = ENV;
       if (env.ownerOpenId) {
         const owner = await getUserByOpenId(env.ownerOpenId);
         if (owner) {
