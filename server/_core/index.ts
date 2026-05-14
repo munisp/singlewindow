@@ -250,6 +250,122 @@ async function runNightlyJobs() {
   await runNightlyRiskScan();
   await runPermitExpiryCheck();
   await runSLABreachScan();
+  await runBondedWarehouseExpiryCheck();
+}
+
+// ── Bonded Warehouse Expiry Notification cron ──────────────────────────────────────────────────
+// Runs nightly as part of runNightlyJobs().
+// Queries bonded_inventory for bonds expiring within 7 days and sends
+// owner notifications via notifyOwner(). Uses the isBondExpiringSoon()
+// utility exported from bondedWarehouse.ts for consistent expiry logic.
+async function runBondedWarehouseExpiryCheck() {
+  try {
+    const { getPool } = await import("../db");
+    const { isBondExpiringSoon } = await import("../routers/bondedWarehouse");
+    const pool = getPool();
+    if (!pool) {
+      console.warn("[Cron] Bonded warehouse expiry check: DB unavailable");
+      return;
+    }
+
+    // Fetch all active inventory items with bond_expiry_date set
+    const { rows } = await pool.query(`
+      SELECT
+        bi.id,
+        bi.ucr,
+        bi.goods_description,
+        bi.quantity,
+        bi.unit,
+        bi.bond_expiry_date,
+        bw.name AS warehouse_name,
+        bw.location AS warehouse_location,
+        bw.license_number
+      FROM bonded_inventory bi
+      JOIN bonded_warehouses bw ON bw.id = bi.warehouse_id
+      WHERE bi.status = 'active'
+        AND bi.bond_expiry_date IS NOT NULL
+      ORDER BY bi.bond_expiry_date ASC
+    `);
+
+    if (!rows.length) {
+      console.log("[Cron] Bonded warehouse expiry check: no active inventory found");
+      return;
+    }
+
+    const expiringSoon: typeof rows = [];
+    const alreadyExpired: typeof rows = [];
+    const now = new Date();
+
+    for (const row of rows) {
+      const expiryDate = new Date(row.bond_expiry_date);
+      const daysUntilExpiry = Math.ceil(
+        (expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      if (daysUntilExpiry < 0) {
+        alreadyExpired.push({ ...row, daysUntilExpiry });
+      } else if (isBondExpiringSoon(row.bond_expiry_date, 7)) {
+        expiringSoon.push({ ...row, daysUntilExpiry });
+      }
+    }
+
+    const totalAlerts = expiringSoon.length + alreadyExpired.length;
+
+    if (totalAlerts === 0) {
+      console.log("[Cron] Bonded warehouse expiry check: no bonds expiring within 7 days");
+      return;
+    }
+
+    // Build notification content
+    const lines: string[] = [
+      `Bonded Warehouse Expiry Report — ${now.toUTCString()}`,
+      "",
+    ];
+
+    if (alreadyExpired.length > 0) {
+      lines.push(`⚠️ ALREADY EXPIRED (${alreadyExpired.length} items):`);
+      for (const item of alreadyExpired) {
+        const expDate = new Date(item.bond_expiry_date).toLocaleDateString("en-GB");
+        lines.push(
+          `  • UCR: ${item.ucr} | ${item.goods_description} | ` +
+          `${item.quantity} ${item.unit} | Warehouse: ${item.warehouse_name} (${item.warehouse_location}) | ` +
+          `Expired: ${expDate} (${Math.abs(item.daysUntilExpiry)} days ago)`
+        );
+      }
+      lines.push("");
+    }
+
+    if (expiringSoon.length > 0) {
+      lines.push(`⏰ EXPIRING WITHIN 7 DAYS (${expiringSoon.length} items):`);
+      for (const item of expiringSoon) {
+        const expDate = new Date(item.bond_expiry_date).toLocaleDateString("en-GB");
+        lines.push(
+          `  • UCR: ${item.ucr} | ${item.goods_description} | ` +
+          `${item.quantity} ${item.unit} | Warehouse: ${item.warehouse_name} (${item.warehouse_location}) | ` +
+          `Expires: ${expDate} (in ${item.daysUntilExpiry} day${item.daysUntilExpiry === 1 ? "" : "s"})`
+        );
+      }
+      lines.push("");
+    }
+
+    lines.push(
+      `Action Required: Log into TradeGateway and navigate to Bonded Warehouse Management ` +
+      `to renew bonds or initiate ex-bond clearance before expiry to avoid customs penalties.`
+    );
+
+    await notifyOwner({
+      title: `🏭 Bonded Warehouse Alert: ${totalAlerts} bond${totalAlerts === 1 ? "" : "s"} expiring soon`,
+      content: lines.join("\n"),
+    });
+
+    console.log(
+      `[Cron] Bonded warehouse expiry check complete — ` +
+      `${expiringSoon.length} expiring soon, ${alreadyExpired.length} already expired. ` +
+      `Owner notification sent.`
+    );
+  } catch (err) {
+    console.error("[Cron] Bonded warehouse expiry check failed:", err);
+  }
 }
 
 // ── Port congestion critical alert scan ────────────────────────────────────────
@@ -1011,6 +1127,9 @@ async function startServer() {
   // Sprint 77: Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
   const { registerSanctionsWebhookRoute } = await import("../webhooks/sanctions");
   registerSanctionsWebhookRoute(app);
+  // v39: Flink CEP alert ingest webhook (POST /api/webhooks/cep-event)
+  const { registerCepWebhookRoute } = await import("../webhooks/cep");
+  registerCepWebhookRoute(app);
   // Sprint 79: Public certificate verification endpoint (GET /api/verify/:certNumber)
   const { registerCertVerifyRoute } = await import("../routes/certVerify");
   registerCertVerifyRoute(app);

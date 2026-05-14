@@ -198,3 +198,8 @@
 - [ ] Pre-populate cep_alerts with 15 sample alerts linked to patterns
 - [ ] Seed cost_records with realistic FinOps data
 - [x] Wire Flutter finance_screen.dart to trpc.cost.getClusterSummary
+
+## v39 Sprint — Next Steps Implementation
+- [x] CEP alert webhook endpoint POST /api/webhooks/cep-event
+- [x] Bonded warehouse expiry notification cron job
+- [x] Flutter FinOps cost trend chart (fl_chart + getCostTrend)

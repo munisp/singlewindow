@@ -1,6 +1,7 @@
 /// TradeGateway™ NGSWTP — Flutter Finance Screen (TigerBeetle Ledger)
 library;
 import "package:flutter/material.dart";
+import "package:fl_chart/fl_chart.dart";
 import "../../services/api_service.dart";
 
 class FinanceScreen extends StatefulWidget {
@@ -16,6 +17,8 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
   List<dynamic> _transactions = [];
   List<dynamic> _duties = [];
   Map<String, dynamic>? _clusterSummary;
+  List<dynamic> _costTrend = [];
+  int _trendDays = 30;
   String? _error;
 
   @override
@@ -28,23 +31,36 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
   Future<void> _load() async {
     try {
       setState(() { _loading = true; _error = null; });
-      // Run all 4 API calls in parallel for faster load
+      // Run all 5 API calls in parallel for faster load
+      final trendInput = Uri.encodeComponent('{"json":{"days":$_trendDays}}');
       final results = await Future.wait([
         ApiService().get("/api/trpc/finance.summary?input=%7B%22json%22%3Anull%7D"),
         ApiService().get("/api/trpc/finance.transactions?input=%7B%22json%22%3Anull%7D"),
         ApiService().get("/api/trpc/finance.duties?input=%7B%22json%22%3Anull%7D"),
         ApiService().get("/api/trpc/finance.clusterSummary?input=%7B%22json%22%3Anull%7D"),
+        ApiService().get("/api/trpc/cost.getCostTrend?input=$trendInput"),
       ]);
       setState(() {
         _summary = results[0]["result"]?["data"]?["json"];
         _transactions = results[1]["result"]?["data"]?["json"] ?? [];
         _duties = results[2]["result"]?["data"]?["json"] ?? [];
         _clusterSummary = results[3]["result"]?["data"]?["json"];
+        _costTrend = results[4]["result"]?["data"]?["json"] ?? [];
         _loading = false;
       });
     } catch (e) {
       setState(() { _loading = false; _error = e.toString(); });
     }
+  }
+
+  /// Reload only the cost trend when the user changes the day range selector.
+  Future<void> _reloadTrend(int days) async {
+    setState(() { _trendDays = days; });
+    try {
+      final trendInput = Uri.encodeComponent('{"json":{"days":$days}}');
+      final result = await ApiService().get("/api/trpc/cost.getCostTrend?input=$trendInput");
+      setState(() { _costTrend = result["result"]?["data"]?["json"] ?? []; });
+    } catch (_) {}
   }
 
   @override
@@ -206,6 +222,134 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
                     ),
                   ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            // ── Cost Trend Chart ─────────────────────────────────────────
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("Daily Cost Trend", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+                // Day range selector
+                Row(
+                  children: [7, 30, 90].map((d) {
+                    final selected = _trendDays == d;
+                    return GestureDetector(
+                      onTap: () => _reloadTrend(d),
+                      child: Container(
+                        margin: const EdgeInsets.only(left: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: selected ? const Color(0xFFD4A017) : const Color(0xFF1E3A5F),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text("${d}d", style: TextStyle(color: selected ? Colors.black : const Color(0xFF9CA3AF), fontSize: 12, fontWeight: FontWeight.w600)),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (_costTrend.isEmpty)
+              Container(
+                height: 160,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: const Color(0xFF1E3A5F), borderRadius: BorderRadius.circular(12)),
+                child: const Text("No trend data", style: TextStyle(color: Color(0xFF9CA3AF))),
+              )
+            else
+              Container(
+                height: 180,
+                padding: const EdgeInsets.fromLTRB(8, 16, 16, 8),
+                decoration: BoxDecoration(color: const Color(0xFF1E3A5F), borderRadius: BorderRadius.circular(12)),
+                child: LineChart(
+                  LineChartData(
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      getDrawingHorizontalLine: (_) => FlLine(color: const Color(0xFF374151), strokeWidth: 0.8),
+                    ),
+                    titlesData: FlTitlesData(
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 42,
+                          getTitlesWidget: (v, _) => Text(
+                            v >= 1000 ? "\$${(v / 1000).toStringAsFixed(0)}K" : "\$${v.toStringAsFixed(0)}",
+                            style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 9),
+                          ),
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 22,
+                          interval: (_costTrend.length > 14 ? (_costTrend.length / 7).ceilToDouble() : 1),
+                          getTitlesWidget: (v, _) {
+                            final idx = v.toInt();
+                            if (idx < 0 || idx >= _costTrend.length) return const SizedBox.shrink();
+                            final dateStr = _costTrend[idx]["period_date"]?.toString() ?? "";
+                            if (dateStr.length < 10) return const SizedBox.shrink();
+                            return Text(dateStr.substring(5), style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 9));
+                          },
+                        ),
+                      ),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    lineBarsData: [
+                      // Total cost line (gold)
+                      LineChartBarData(
+                        spots: _costTrend.asMap().entries.map((e) {
+                          final v = double.tryParse(e.value["total_cost_usd"]?.toString() ?? "0") ?? 0;
+                          return FlSpot(e.key.toDouble(), v);
+                        }).toList(),
+                        isCurved: true,
+                        color: const Color(0xFFD4A017),
+                        barWidth: 2.5,
+                        dotData: const FlDotData(show: false),
+                        belowBarData: BarAreaData(
+                          show: true,
+                          color: const Color(0xFFD4A017).withOpacity(0.12),
+                        ),
+                      ),
+                      // Compute cost line (blue)
+                      LineChartBarData(
+                        spots: _costTrend.asMap().entries.map((e) {
+                          final v = double.tryParse(e.value["compute_cost_usd"]?.toString() ?? "0") ?? 0;
+                          return FlSpot(e.key.toDouble(), v);
+                        }).toList(),
+                        isCurved: true,
+                        color: const Color(0xFF3B82F6),
+                        barWidth: 1.5,
+                        dotData: const FlDotData(show: false),
+                      ),
+                    ],
+                    lineTouchData: LineTouchData(
+                      touchTooltipData: LineTouchTooltipData(
+                        getTooltipItems: (spots) => spots.map((s) {
+                          final label = s.barIndex == 0 ? "Total" : "Compute";
+                          final color = s.barIndex == 0 ? const Color(0xFFD4A017) : const Color(0xFF3B82F6);
+                          return LineTooltipItem(
+                            "$label: \$${s.y.toStringAsFixed(0)}",
+                            TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            // Legend
+            Row(
+              children: [
+                _LegendDot(color: const Color(0xFFD4A017), label: "Total Cost"),
+                const SizedBox(width: 16),
+                _LegendDot(color: const Color(0xFF3B82F6), label: "Compute"),
               ],
             ),
             const SizedBox(height: 20),
@@ -443,6 +587,28 @@ class _DutyCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Legend dot widget for the cost trend chart ──────────────────────────────
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11)),
+      ],
     );
   }
 }
