@@ -230,3 +230,10 @@
 - [x] Download Expiry Report CSV button in BondedWarehouseManagement expiry banner
 - [x] runBondedWarehouseExpiryCheck writes per-bond in-app notifications to notifications table
 - [x] Flutter notifications_screen.dart upgraded with type icons, Bond Expiry filter tab, 30s polling, mark-all-read
+
+## v43 Sprint — CEP Test-Fire, Inventory Search, Mark-All-Read
+- [x] CEP pattern test-fire button with synthetic event preview dialog
+- [x] PWA mark-all-read confirmed already implemented (Notifications.tsx + NotificationCentre.tsx)
+- [x] Bond inventory search bar (UCR/HS code/importer filter) in BondedWarehouseManagement
+- [x] Fixed bonded warehouse expiry cron column names (description, quantity_kg, expiry_date)
+- [x] Restored local PostgreSQL after sandbox hibernation

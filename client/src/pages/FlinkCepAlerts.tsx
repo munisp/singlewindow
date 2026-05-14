@@ -21,6 +21,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -114,6 +115,45 @@ export default function FlinkCepAlerts() {
   const openAlerts = alerts.filter((a: any) => a.status === "open" || a.status === "investigating");
   const allOpenSelected = openAlerts.length > 0 && openAlerts.every((a: any) => selectedIds.has(a.alert_id));
   const someSelected = selectedIds.size > 0;
+
+  // Test-fire state
+  const [testFireDialog, setTestFireDialog] = useState<{ patternId: string; patternName: string } | null>(null);
+  const [testFirePayload, setTestFirePayload] = useState('{"declarationId": 99999, "traderId": 1, "value": 50000}');
+  const [testFireResult, setTestFireResult] = useState<{ alertId?: string; message?: string; error?: boolean } | null>(null);
+  const [testFireLoading, setTestFireLoading] = useState(false);
+
+  const handleTestFire = async () => {
+    if (!testFireDialog) return;
+    setTestFireLoading(true);
+    setTestFireResult(null);
+    try {
+      let payload: Record<string, unknown> = {};
+      try { payload = JSON.parse(testFirePayload); } catch {
+        toast.error("Invalid JSON payload"); setTestFireLoading(false); return;
+      }
+      const res = await fetch("/api/webhooks/cep-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-cep-source": "test-fire" },
+        body: JSON.stringify({ patternId: testFireDialog.patternId, severity: "medium", message: `Test fire for ${testFireDialog.patternName}`, payload }),
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setTestFireResult({ alertId: json.alertId, message: `Alert ${json.alertId} created successfully` });
+        alertsQuery.refetch(); statsQuery.refetch();
+        toast.success(`Test alert created: ${json.alertId}`);
+      } else {
+        setTestFireResult({ message: json.error ?? "Test fire failed", error: true });
+        toast.error(json.error ?? "Test fire failed");
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      setTestFireResult({ message: msg, error: true });
+      toast.error(msg);
+    } finally {
+      setTestFireLoading(false);
+    }
+  };
 
   return (
     <DashboardLayout title="Trade Pattern Alerts (Flink CEP)">
@@ -416,6 +456,18 @@ export default function FlinkCepAlerts() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">{p.description}</p>
+                  {user?.role === "admin" && (
+                    <div className="mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-xs border-yellow-500/40 text-yellow-400 hover:bg-yellow-500/10"
+                        onClick={() => { setTestFireDialog({ patternId: p.pattern_id, patternName: p.name }); setTestFireResult(null); }}
+                      >
+                        <Zap className="h-3 w-3 mr-1" /> Test Pattern
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 );
               })}
@@ -539,6 +591,55 @@ export default function FlinkCepAlerts() {
                 : ackDialog?.mode === "resolve"
                   ? "Confirm Resolution"
                   : "Start Investigation"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Test-Fire Dialog */}
+      <Dialog open={!!testFireDialog} onOpenChange={(open) => { if (!open) { setTestFireDialog(null); setTestFireResult(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-yellow-400" />
+              Test Pattern: {testFireDialog?.patternName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Send a synthetic event to the CEP webhook to validate this pattern fires correctly.
+              A real alert will be created in the database.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Event Payload (JSON)</Label>
+              <Textarea
+                value={testFirePayload}
+                onChange={(e) => setTestFirePayload(e.target.value)}
+                rows={4}
+                className="font-mono text-xs"
+                placeholder='{"declarationId": 99999, "traderId": 1}'
+              />
+            </div>
+            {testFireResult && (
+              <div className={`rounded-lg p-3 text-sm font-mono ${
+                testFireResult.error
+                  ? "bg-red-500/10 border border-red-500/30 text-red-400"
+                  : "bg-green-500/10 border border-green-500/30 text-green-400"
+              }`}>
+                {testFireResult.error ? "✗" : "✓"} {testFireResult.message}
+                {testFireResult.alertId && (
+                  <div className="text-xs mt-1 text-muted-foreground">Alert ID: {testFireResult.alertId}</div>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setTestFireDialog(null); setTestFireResult(null); }}>Close</Button>
+            <Button
+              onClick={handleTestFire}
+              disabled={testFireLoading}
+              className="bg-yellow-500 hover:bg-yellow-600 text-black"
+            >
+              {testFireLoading ? "Firing…" : "Fire Test Event"}
             </Button>
           </DialogFooter>
         </DialogContent>

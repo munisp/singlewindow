@@ -1,0 +1,42 @@
+{
+  "build_command": "pnpm run build",
+  "capabilities": [
+    "db",
+    "server",
+    "user"
+  ],
+  "dev_command": "pnpm run dev",
+  "env_vars": {
+    "DATABASE_URL": "mysql://2t5rixfHAYLQmtB.root:0kGxfI7Z0L7EbXZS32fF@gateway04.us-east-1.prod.aws.tidbcloud.com:4000/jXBmDbCKSCugxa7Gwg2VnA?ssl={\"rejectUnauthorized\":true}"
+  },
+  "experiments": null,
+  "git_remote": {
+    "repo_url": "s3://vida-prod-gitrepo/webdev-git/310519663412555753/jXBmDbCKSCugxa7Gwg2VnA",
+    "access_key_id": "ASIAZV3A2ECZAYNI3UZE",
+    "secret_access_key": "cp03TAsu7dcKuRoUF5UXg3JSAVQa+Hl0SeJ6uDET",
+    "session_token": "IQoJb3JpZ2luX2VjEJT//////////wEaCXVzLWVhc3QtMSJHMEUCIFx2V2b4WowKhWEIeUMyOBK2CnBLAJ68J3rWaff8QTKIAiEAupHLEOdoOOWobBUNBUQ4fhPAeb2u0haHbv3gkUfA1fsq9gMIXBAEGgw2NjUzODYwOTg4NjYiDLtgwBiL0jFLT3q1yirTA+nymF6t9xkSX4ka1IduNlxn8eSVDGgQJKWd6cSCOy52BGNM5v2pTh/VUBfUVLJBOnb7Pa/Vyw39DiQESf/3do+JHs6oDlJxB2kkcaDHP+F56DZkSBKFbZsBSnBrMJF8GEQ0JcAGf80qwfuyQE1RGz29Dh95X1vtln3XPlQuogdfCL4iygQ0SA33Ek+AR6PsWLBedI9dmFt6qB3wH2lHkrYxmUzwCMYcmQXDgiPBU4E/FEOIUnshtUO6TmQtS4u4b1ZbFu41vtfEvrE+KTsRhgMVx5ZfnfBTyexz1Qjb8R+sWaU/AtPMy8trof9DdIjRh6Na5kEy8AjUwY40kpWqs5YrCHmVMqec0MGZJtdrZpc8IEwpA0H5Pmaemd3Sp8p1lO6lc684xlKiIG6exE7KGsrnAYwQjW5V7LxqSj3LG6HVuCZbaCxcUIpPaF0zE4sq0Uj4gYlB2xkvTTGL3iBA3XxeUG54sXDpMUvAMFCaYF6kZmlqqauhRWaRKBIKGGOLMiGX9Ug5O7W3DEYGq+JoMKjp4Y14p2+xCDIuyGfzQTgfylmpVrY7h9D+r9d8EOzYNHs8iQySmMLBzsas7Em0baYAB24E90O2OCFEHTA6xby+Gmh2MN/dltAGOp0BdgnLVXX6CVTrGCOf1RPziCUxWidF1XSWVp4Y3JWMClIwV9sLULqpyidpCSefiPoSQSs1BAYYUjLPJJOaUzWQ7KFFU5k4ZgpMvsBaxm1yqacYRGgHaDtSDFx/hPBoqjVi1L67KOKNT3SQmGJI8gDt/7Yl/QjVDp9jK7OMUB7zq2j09xmjzWEFqRIjCpAV6t1uNpphuwEgZZxfTXivqA==",
+    "expiration": "2026-05-14T23:15:43.000Z"
+  },
+  "name": "tradegateway-ngswtp",
+  "path": "/home/ubuntu/tradegateway-ngswtp",
+  "port": 3000,
+  "secrets": {
+    "BUILT_IN_FORGE_API_KEY": "T8wC2LbNzC5qdyU7hfB4jF",
+    "BUILT_IN_FORGE_API_URL": "https://forge.manus.ai",
+    "DEMO_MODE": "true",
+    "JWT_SECRET": "PmguwNngQrYzcQFKsCfKL5",
+    "OAUTH_SERVER_URL": "https://api.manus.im",
+    "OWNER_NAME": "patrick.munis",
+    "OWNER_OPEN_ID": "GKxccT6bJ24rWwQi7mAXGE",
+    "VITE_ANALYTICS_ENDPOINT": "https://manus-analytics.com",
+    "VITE_ANALYTICS_WEBSITE_ID": "7083d665-738e-4a10-b74f-046c7426bab6",
+    "VITE_APP_ID": "jXBmDbCKSCugxa7Gwg2VnA",
+    "VITE_APP_LOGO": "https://files.manuscdn.com/user_upload_by_module/web_dev_logo/310519663412555753/wkVXDxaBbzQEDEJJ.png",
+    "VITE_APP_TITLE": "TradeGateway™ NGSWTP Revised Technical Specification",
+    "VITE_FRONTEND_FORGE_API_KEY": "nXg2jY4iF4RDi4gEfWuaEX",
+    "VITE_FRONTEND_FORGE_API_URL": "https://forge.manus.ai",
+    "VITE_OAUTH_PORTAL_URL": "https://manus.im"
+  },
+  "template_id": "web-db-user",
+  "test_command": "pnpm test"
+}

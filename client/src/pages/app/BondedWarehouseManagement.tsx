@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw, Download,
+  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw, Download, Search,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -42,6 +43,7 @@ export default function BondedWarehouseManagement() {
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [inventoryStatus, setInventoryStatus] = useState("all");
   const [selectedWarehouse, setSelectedWarehouse] = useState<number | null>(null);
+  const [inventorySearch, setInventorySearch] = useState("");
 
   const { data: warehousesData, isLoading, isError } = trpc.bondedWarehouse.listWarehouses.useQuery({
     status: warehouseFilter === "all" ? undefined : (warehouseFilter as any),
@@ -65,7 +67,18 @@ export default function BondedWarehouseManagement() {
   });
 
   const warehouses = (warehousesData as any)?.warehouses ?? [];
-  const inventory = (inventoryData as any)?.items ?? [];
+  const inventoryRaw = (inventoryData as any)?.items ?? [];
+  const inventory = useMemo(() => {
+    if (!inventorySearch.trim()) return inventoryRaw;
+    const q = inventorySearch.toLowerCase();
+    return inventoryRaw.filter((item: any) =>
+      (item.ucr ?? "").toLowerCase().includes(q) ||
+      (item.description ?? "").toLowerCase().includes(q) ||
+      (item.hsCode ?? "").toLowerCase().includes(q) ||
+      (item.warehouseName ?? "").toLowerCase().includes(q) ||
+      (item.originCountry ?? "").toLowerCase().includes(q)
+    );
+  }, [inventoryRaw, inventorySearch]);
   const permits = (permitsData as any)?.permits ?? [];
   const guarantees = (bondGuarantees as any) ?? [];
   const alerts = (alertsData as any)?.alerts ?? [];
@@ -364,6 +377,16 @@ export default function BondedWarehouseManagement() {
                 <button className="ml-2 text-muted-foreground hover:text-foreground" onClick={() => setSelectedWarehouse(null)}>×</button>
               </Badge>
             )}
+            {/* Search bar */}
+            <div className="relative flex-1 min-w-[200px] max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                value={inventorySearch}
+                onChange={(e) => setInventorySearch(e.target.value)}
+                placeholder="Search UCR, HS code, description…"
+                className="pl-8 h-9 text-sm"
+              />
+            </div>
             <Select value={inventoryStatus} onValueChange={setInventoryStatus}>
               <SelectTrigger className="w-40">
                 <SelectValue placeholder="Status" />
@@ -377,7 +400,12 @@ export default function BondedWarehouseManagement() {
                 <SelectItem value="seized">Seized</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-sm text-muted-foreground">{inventory.length} items</span>
+            <span className="text-sm text-muted-foreground">
+              {inventory.length}{inventorySearch ? ` of ${inventoryRaw.length}` : ""} items
+              {inventorySearch && (
+                <button className="ml-2 text-xs text-muted-foreground hover:text-foreground underline" onClick={() => setInventorySearch("")}>clear</button>
+              )}
+            </span>
           </div>
 
           <div className="space-y-2">

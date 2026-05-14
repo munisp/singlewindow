@@ -273,18 +273,18 @@ async function runBondedWarehouseExpiryCheck() {
       SELECT
         bi.id,
         bi.ucr,
-        bi.goods_description,
-        bi.quantity,
-        bi.unit,
-        bi.bond_expiry_date,
+        bi.description AS goods_description,
+        bi.quantity_kg AS quantity,
+        'kg' AS unit,
+        bi.expiry_date AS bond_expiry_date,
         bw.name AS warehouse_name,
         bw.location AS warehouse_location,
         bw.license_number
       FROM bonded_inventory bi
       JOIN bonded_warehouses bw ON bw.id = bi.warehouse_id
       WHERE bi.status = 'active'
-        AND bi.bond_expiry_date IS NOT NULL
-      ORDER BY bi.bond_expiry_date ASC
+        AND bi.expiry_date IS NOT NULL
+      ORDER BY bi.expiry_date ASC
     `);
 
     if (!rows.length) {
