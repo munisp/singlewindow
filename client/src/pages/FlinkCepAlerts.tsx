@@ -351,6 +351,7 @@ export default function FlinkCepAlerts() {
                       )}
                       <TableHead>Pattern</TableHead>
                       <TableHead>Severity</TableHead>
+                      <TableHead>Risk Score</TableHead>
                       <TableHead>Trader</TableHead>
                       <TableHead>Declarations</TableHead>
                       <TableHead>Fired At</TableHead>
@@ -389,6 +390,19 @@ export default function FlinkCepAlerts() {
                         <Badge className={SEVERITY_COLORS[alert.severity] ?? "bg-gray-500 text-white"}>
                           {alert.severity.toUpperCase()}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {(() => {
+                          const score = alert.risk_score ?? null;
+                          if (score === null) return <span className="text-xs text-muted-foreground">—</span>;
+                          const cls =
+                            score >= 71 ? "bg-red-100 text-red-700" :
+                            score >= 41 ? "bg-amber-100 text-amber-700" :
+                            "bg-green-100 text-green-700";
+                          return (
+                            <Badge className={`${cls} font-mono text-xs`}>{score}</Badge>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground font-mono">{alert.trader_id}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">

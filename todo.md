@@ -242,3 +242,8 @@
 - [x] CEP alert severity filter (All/Low/Medium/High/Critical dropdown above alerts table in FlinkCepAlerts.tsx)
 - [x] Warehouse utilisation progress bar (shadcn Progress with green/amber/red color-coding on each warehouse card)
 - [x] Bond inventory pagination (10-per-page paginator with prev/next + page numbers, resets on search/filter change)
+
+## v45 Sprint — Risk Score Badge, Warehouse Click-Through, Permit Expiry Countdown
+- [x] CEP alert risk-score badge (green 0–40, amber 41–70, red 71–100) added as new column in FlinkCepAlerts.tsx alerts table
+- [x] Warehouse card click-through: clicking a warehouse card switches to Inventory tab and pre-filters by that warehouse
+- [x] Ex-bond permit expiry countdown badge on each active permit (red <3d / amber 3–7d / green >7d)

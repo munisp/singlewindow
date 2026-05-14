@@ -47,6 +47,7 @@ export default function BondedWarehouseManagement() {
   const [inventorySearch, setInventorySearch] = useState("");
   const [inventoryPage, setInventoryPage] = useState(1);
   const INVENTORY_PAGE_SIZE = 10;
+  const [activeTab, setActiveTab] = useState("warehouses");
 
   const { data: warehousesData, isLoading, isError } = trpc.bondedWarehouse.listWarehouses.useQuery({
     status: warehouseFilter === "all" ? undefined : (warehouseFilter as any),
@@ -316,7 +317,7 @@ export default function BondedWarehouseManagement() {
         );
       })()}
 
-      <Tabs defaultValue="warehouses">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="warehouses">Warehouses</TabsTrigger>
           <TabsTrigger value="inventory">Inventory</TabsTrigger>
@@ -345,7 +346,11 @@ export default function BondedWarehouseManagement() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {warehouses.map((wh: any) => (
               <Card key={wh.id} className={`cursor-pointer hover:shadow-md transition-shadow ${selectedWarehouse === wh.id ? "ring-2 ring-primary" : ""}`}
-                onClick={() => setSelectedWarehouse(selectedWarehouse === wh.id ? null : wh.id)}>
+                onClick={() => {
+                  setSelectedWarehouse(wh.id);
+                  setActiveTab("inventory");
+                  setInventoryPage(1);
+                }}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -545,8 +550,25 @@ export default function BondedWarehouseManagement() {
                       <span>Payment Ref: {permit.payment_ref ?? permit.paymentRef ?? "—"}</span>
                       <span>Qty: {permit.quantity}</span>
                       <span>Issued: {new Date(permit.issuedAt).toLocaleDateString()}</span>
-                      <span className={new Date(permit.expiresAt) < new Date() && permit.status === "active" ? "text-red-600 font-medium" : ""}>
+                      <span>
                         Expires: {new Date(permit.expiresAt).toLocaleDateString()}
+                        {permit.status === "active" && (() => {
+                          const daysLeft = Math.ceil(
+                            (new Date(permit.expiresAt).getTime() - Date.now()) / 86_400_000
+                          );
+                          const cls =
+                            daysLeft < 0 ? "bg-red-100 text-red-700" :
+                            daysLeft <= 3 ? "bg-red-100 text-red-700" :
+                            daysLeft <= 7 ? "bg-amber-100 text-amber-700" :
+                            "bg-green-100 text-green-700";
+                          const label =
+                            daysLeft < 0 ? `${Math.abs(daysLeft)}d overdue` :
+                            daysLeft === 0 ? "expires today" :
+                            `${daysLeft}d left`;
+                          return (
+                            <Badge className={`ml-2 text-xs ${cls}`}>{label}</Badge>
+                          );
+                        })()}
                       </span>
                     </div>
                   </div>
