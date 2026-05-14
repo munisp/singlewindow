@@ -229,4 +229,62 @@ export const cepRouter = router({
       lastCheck: new Date().toISOString(),
     };
   }),
+
+  /**
+   * bulkAcknowledge — resolve or mark multiple alerts in one call.
+   * Accepts up to 100 alert IDs and a shared status + optional resolution note.
+   * Returns per-alert success/failure so the UI can surface partial failures.
+   */
+  bulkAcknowledge: protectedProcedure
+    .input(z.object({
+      alertIds: z.array(z.string()).min(1).max(100),
+      status: z.enum(["investigating", "resolved", "false_positive"]),
+      resolutionNote: z.string().max(1000).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const resolvedAt = ["resolved", "false_positive"].includes(input.status) ? new Date() : null;
+      const results: Array<{ alertId: string; success: boolean; error?: string }> = [];
+
+      // Process in parallel — each alert gets its own UPDATE
+      await Promise.all(
+        input.alertIds.map(async (alertId) => {
+          try {
+            const res = await pgQuery(
+              `UPDATE cep_alerts
+               SET status = $1, resolved_by = $2, resolved_at = $3, resolution_note = $4
+               WHERE alert_id = $5 AND status NOT IN ('resolved','false_positive')
+               RETURNING alert_id`,
+              [input.status, ctx.user.id, resolvedAt, input.resolutionNote ?? null, alertId]
+            );
+            results.push({ alertId, success: (res as any[]).length > 0 });
+          } catch (err: any) {
+            results.push({ alertId, success: false, error: err.message });
+          }
+        })
+      );
+
+      // Increment trigger_count on affected patterns for resolved/false_positive
+      if (["resolved", "false_positive"].includes(input.status)) {
+        const successIds = results.filter((r) => r.success).map((r) => r.alertId);
+        if (successIds.length > 0) {
+          const placeholders = successIds.map((_, i) => `$${i + 1}`).join(",");
+          await pgQuery(
+            `UPDATE cep_patterns cp
+             SET trigger_count = trigger_count + sub.cnt
+             FROM (
+               SELECT pattern_id, COUNT(*) AS cnt
+               FROM cep_alerts
+               WHERE alert_id IN (${placeholders})
+               GROUP BY pattern_id
+             ) sub
+             WHERE cp.pattern_id = sub.pattern_id`,
+            successIds
+          );
+        }
+      }
+
+      const succeeded = results.filter((r) => r.success).length;
+      const failed = results.filter((r) => !r.success).length;
+      return { succeeded, failed, results };
+    }),
 });

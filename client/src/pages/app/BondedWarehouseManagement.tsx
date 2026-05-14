@@ -78,12 +78,18 @@ export default function BondedWarehouseManagement() {
     scanned: number; expiringSoon: number; alreadyExpired: number; totalFlagged: number;
     items: Array<Record<string, unknown> & { flag: string }>;
   }>(null);
+  // Cached scan results merged into the alerts banner
+  const [lastScanItems, setLastScanItems] = useState<Array<Record<string, unknown> & { flag: string }>>([]);
+
   const runExpiryCheckMutation = trpc.bondedWarehouse.runExpiryCheck.useMutation({
     onSuccess: (result) => {
       setExpiryCheckDialog(result as any);
+      // Merge flagged items into the banner so they persist across tab switches
       if (result.totalFlagged > 0) {
+        setLastScanItems(result.items as any);
         toast.warning(`Expiry check complete — ${result.totalFlagged} item(s) flagged`);
       } else {
+        setLastScanItems([]);
         toast.success("Expiry check complete — no items require attention");
       }
     },
@@ -196,30 +202,64 @@ export default function BondedWarehouseManagement() {
         </DialogContent>
       </Dialog>
 
-      {/* Alerts banner */}
-      {alerts.length > 0 && (
-        <Card className="border-orange-200 bg-orange-50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="h-4 w-4 text-orange-600" />
-              <span className="font-medium text-orange-800">Expiry Alerts</span>
-            </div>
-            <div className="space-y-1">
-              {alerts.slice(0, 5).map((alert: any) => (
-                <div key={alert.id} className="text-sm flex items-center justify-between">
-                  <span className="text-orange-700">
-                    {alert.type === "bond_expiry" ? "Bond expiry" : alert.type === "inventory_overdue" ? "Overdue inventory" : "Permit expiry"}:
-                    {" "}{alert.name}
-                  </span>
-                  <Badge className={alert.severity === "critical" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}>
-                    {alert.daysUntilExpiry >= 0 ? `${alert.daysUntilExpiry}d left` : `${-alert.daysUntilExpiry}d overdue`}
-                  </Badge>
+      {/* Alerts banner — shows DB alerts merged with latest manual scan results */}
+      {(alerts.length > 0 || lastScanItems.length > 0) && (() => {
+        // Build a unified list: DB alerts first, then scan-only items not already in DB alerts
+        const dbAlertUcrs = new Set(alerts.map((a: any) => a.ucr ?? a.name));
+        const scanOnlyItems = lastScanItems.filter((item) => !dbAlertUcrs.has(item.ucr));
+        const allItems: any[] = [
+          ...alerts.map((a: any) => ({
+            key: a.id ?? a.ucr,
+            label: a.type === "bond_expiry" ? "Bond expiry" : a.type === "inventory_overdue" ? "Overdue inventory" : "Permit expiry",
+            name: a.name,
+            daysUntilExpiry: a.daysUntilExpiry,
+            severity: a.severity,
+            source: "db",
+          })),
+          ...scanOnlyItems.map((item: any) => ({
+            key: `scan-${item.ucr}`,
+            label: item.flag === "expired" ? "Expired bond" : "Expiring soon",
+            name: `${item.ucr} — ${item.goods_description}`,
+            daysUntilExpiry: item.daysUntilExpiry,
+            severity: item.flag === "expired" ? "critical" : "warning",
+            source: "scan",
+          })),
+        ];
+        return (
+          <Card className="border-orange-200 bg-orange-50">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-orange-600" />
+                  <span className="font-medium text-orange-800">Expiry Alerts</span>
+                  <Badge className="bg-orange-200 text-orange-800 text-xs">{allItems.length}</Badge>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                {lastScanItems.length > 0 && (
+                  <span className="text-xs text-orange-600 italic">Includes latest scan results</span>
+                )}
+              </div>
+              <div className="space-y-1">
+                {allItems.slice(0, 8).map((item) => (
+                  <div key={item.key} className="text-sm flex items-center justify-between">
+                    <span className="text-orange-700">
+                      {item.label}: {item.name}
+                      {item.source === "scan" && (
+                        <span className="ml-1 text-xs text-orange-500">(scan)</span>
+                      )}
+                    </span>
+                    <Badge className={item.severity === "critical" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"}>
+                      {item.daysUntilExpiry >= 0 ? `${item.daysUntilExpiry}d left` : `${Math.abs(item.daysUntilExpiry)}d overdue`}
+                    </Badge>
+                  </div>
+                ))}
+                {allItems.length > 8 && (
+                  <p className="text-xs text-orange-600 pt-1">+{allItems.length - 8} more — run expiry check to see full list</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <Tabs defaultValue="warehouses">
         <TabsList>

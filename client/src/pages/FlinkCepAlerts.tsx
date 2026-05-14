@@ -21,6 +21,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -82,8 +83,28 @@ export default function FlinkCepAlerts() {
     onError: (err) => toast.error(err.message),
   });
 
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDialog, setBulkDialog] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<"resolved" | "false_positive">("resolved");
+  const [bulkNotes, setBulkNotes] = useState("");
+
+  const bulkAckMutation = trpc.cep.bulkAcknowledge.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Resolved ${data.succeeded} alert${data.succeeded !== 1 ? "s" : ""}${data.failed > 0 ? ` (${data.failed} failed)` : ""}`);
+      setSelectedIds(new Set());
+      setBulkDialog(false);
+      setBulkNotes("");
+      alertsQuery.refetch();
+      statsQuery.refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const stats = statsQuery.data;
   const alerts = (alertsQuery.data?.alerts ?? []) as any[];
+  const openAlerts = alerts.filter((a: any) => a.status === "open" || a.status === "investigating");
+  const allOpenSelected = openAlerts.length > 0 && openAlerts.every((a: any) => selectedIds.has(a.alert_id));
+  const someSelected = selectedIds.size > 0;
 
   return (
     <DashboardLayout title="Trade Pattern Alerts (Flink CEP)">
@@ -214,20 +235,73 @@ export default function FlinkCepAlerts() {
                 No {activeTab} alerts
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Pattern</TableHead>
-                    <TableHead>Severity</TableHead>
-                    <TableHead>Trader</TableHead>
-                    <TableHead>Declarations</TableHead>
-                    <TableHead>Fired At</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+              <>
+                {/* Bulk action toolbar */}
+                {activeTab === "open" && someSelected && (
+                  <div className="flex items-center gap-3 mb-3 px-2 py-2 rounded-lg bg-muted/40 border border-border">
+                    <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
+                    <Button
+                      size="sm"
+                      className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                      onClick={() => setBulkDialog(true)}
+                    >
+                      Resolve selected
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={() => setSelectedIds(new Set())}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                )}
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {activeTab === "open" && (
+                        <TableHead className="w-8">
+                          <Checkbox
+                            checked={allOpenSelected}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedIds(new Set(openAlerts.map((a: any) => a.alert_id)));
+                              } else {
+                                setSelectedIds(new Set());
+                              }
+                            }}
+                          />
+                        </TableHead>
+                      )}
+                      <TableHead>Pattern</TableHead>
+                      <TableHead>Severity</TableHead>
+                      <TableHead>Trader</TableHead>
+                      <TableHead>Declarations</TableHead>
+                      <TableHead>Fired At</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {alerts.map((alert) => (
-                    <TableRow key={alert.alert_id}>
+                    <TableRow key={alert.alert_id} className={selectedIds.has(alert.alert_id) ? "bg-muted/30" : ""}>
+                      {activeTab === "open" && (
+                        <TableCell className="w-8">
+                          {(alert.status === "open" || alert.status === "investigating") && (
+                            <Checkbox
+                              checked={selectedIds.has(alert.alert_id)}
+                              onCheckedChange={(checked) => {
+                                setSelectedIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (checked) next.add(alert.alert_id);
+                                  else next.delete(alert.alert_id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground">
@@ -294,7 +368,8 @@ export default function FlinkCepAlerts() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                </Table>
+              </>
             )}
           </CardContent>
         </Card>
@@ -327,6 +402,56 @@ export default function FlinkCepAlerts() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Bulk Resolve Dialog */}
+      <Dialog open={bulkDialog} onOpenChange={(open) => { if (!open) { setBulkDialog(false); setBulkNotes(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Bulk Resolve {selectedIds.size} Alert{selectedIds.size !== 1 ? "s" : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This will mark all {selectedIds.size} selected alert{selectedIds.size !== 1 ? "s" : ""} as resolved in parallel.
+              Already-resolved alerts are automatically skipped.
+            </p>
+            <div className="space-y-2">
+              <Label>Resolution status</Label>
+              <Select value={bulkStatus} onValueChange={(v) => setBulkStatus(v as "resolved" | "false_positive")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="resolved">Resolved</SelectItem>
+                  <SelectItem value="false_positive">False Positive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Resolution notes (optional)</Label>
+              <Textarea
+                value={bulkNotes}
+                onChange={(e) => setBulkNotes(e.target.value)}
+                placeholder="Describe the bulk resolution outcome…"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDialog(false)}>Cancel</Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700"
+              disabled={bulkAckMutation.isPending}
+              onClick={() => bulkAckMutation.mutate({
+                alertIds: Array.from(selectedIds),
+                status: bulkStatus,
+                resolutionNote: bulkNotes || undefined,
+              })}
+            >
+              {bulkAckMutation.isPending ? "Resolving…" : `Resolve ${selectedIds.size}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Acknowledge / Resolve Dialog */}
       <Dialog open={!!ackDialog} onOpenChange={() => { setAckDialog(null); setAckNotes(""); setAckStatus("investigating"); }}>

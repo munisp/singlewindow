@@ -208,3 +208,8 @@
 - [x] CEP alert Resolve button in FlinkCepAlerts.tsx (cep.ackAlert mutation)
 - [x] bondedWarehouse.runExpiryCheck adminProcedure + trigger button in PWA
 - [x] Storage cost line in Flutter FinOps trend chart
+
+## v41 Sprint — Next Steps Implementation
+- [ ] Bulk resolve action for CEP alerts table (checkbox + toolbar)
+- [ ] Merge runExpiryCheck results into Expiry Alerts banner in BondedWarehouseManagement
+- [ ] Network cost line (teal) in Flutter FinOps trend chart

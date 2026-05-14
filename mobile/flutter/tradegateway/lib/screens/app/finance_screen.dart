@@ -339,12 +339,24 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
                         dotData: const FlDotData(show: false),
                         dashArray: [4, 3],
                       ),
+                      // Network cost line (teal)
+                      LineChartBarData(
+                        spots: _costTrend.asMap().entries.map((e) {
+                          final v = double.tryParse(e.value["network_cost_usd"]?.toString() ?? "0") ?? 0;
+                          return FlSpot(e.key.toDouble(), v);
+                        }).toList(),
+                        isCurved: true,
+                        color: const Color(0xFF14B8A6),
+                        barWidth: 1.5,
+                        dotData: const FlDotData(show: false),
+                        dashArray: [2, 4],
+                      ),
                     ],
                     lineTouchData: LineTouchData(
                       touchTooltipData: LineTouchTooltipData(
                         getTooltipItems: (spots) => spots.map((s) {
-                          final labels = ["Total", "Compute", "Storage"];
-                          final colors = [const Color(0xFFD4A017), const Color(0xFF3B82F6), const Color(0xFF8B5CF6)];
+                          final labels = ["Total", "Compute", "Storage", "Network"];
+                          final colors = [const Color(0xFFD4A017), const Color(0xFF3B82F6), const Color(0xFF8B5CF6), const Color(0xFF14B8A6)];
                           final label = s.barIndex < labels.length ? labels[s.barIndex] : "Line ${s.barIndex}";
                           final color = s.barIndex < colors.length ? colors[s.barIndex] : Colors.white;
                           return LineTooltipItem(
@@ -366,6 +378,8 @@ class _FinanceScreenState extends State<FinanceScreen> with SingleTickerProvider
                 _LegendDot(color: const Color(0xFF3B82F6), label: "Compute"),
                 const SizedBox(width: 12),
                 _LegendDot(color: const Color(0xFF8B5CF6), label: "Storage"),
+                const SizedBox(width: 12),
+                _LegendDot(color: const Color(0xFF14B8A6), label: "Network"),
               ],
             ),
             const SizedBox(height: 20),
