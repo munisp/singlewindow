@@ -1,6 +1,7 @@
 import { PageSkeleton as _PageSkeleton } from "@/components/LoadingIndicator";
 import { Toaster } from "@/components/ui/sonner";
 import DemoModeBanner from "@/components/DemoModeBanner";
+import OfflineBanner from "@/components/OfflineBanner";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -481,6 +482,7 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
+          <OfflineBanner />
           <DemoModeBanner />
           <Router />
           <MobileBottomNav />

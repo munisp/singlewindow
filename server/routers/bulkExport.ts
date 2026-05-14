@@ -528,6 +528,10 @@ export const bulkExportRouter = router({
   importDeclarations: protectedProcedure
     .input(z.object({ csvContent: z.string().min(1).max(5_000_000) }))
     .mutation(async ({ ctx, input }) => {
+      const allowedImportRoles = ["admin", "customs_officer"];
+      if (!allowedImportRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only admins and customs officers can import declarations." });
+      }
       const { getDb } = await import("../db");
       const { declarations } = await import("../../drizzle/schema");
       const db = await getDb();

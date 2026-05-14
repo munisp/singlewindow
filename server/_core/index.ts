@@ -246,11 +246,59 @@ async function runSLABreachScan() {
   }
 }
 
+async function runAmendmentSLACheck() {
+  console.log("[Cron] Amendment SLA check starting…");
+  try {
+    const { getPool } = await import("../db");
+    const pool = getPool();
+    if (!pool) {
+      console.warn("[Cron] Amendment SLA check: DB unavailable");
+      return;
+    }
+    const { rows } = await pool.query(`
+      SELECT
+        da.id,
+        da.declaration_id,
+        da.field,
+        da.proposed_value,
+        da.created_at,
+        EXTRACT(EPOCH FROM (NOW() - da.created_at)) / 86400 AS age_days,
+        u.name AS requester_name
+      FROM declaration_amendments da
+      LEFT JOIN users u ON u.id = da.requested_by_id
+      WHERE da.status = 'pending'
+        AND da.created_at < NOW() - INTERVAL '7 days'
+      ORDER BY da.created_at ASC
+      LIMIT 100
+    `);
+    if (!rows.length) {
+      console.log("[Cron] Amendment SLA: no overdue pending amendments");
+      return;
+    }
+    const lines = rows.map((r: any) =>
+      `  \u2022 Amendment #${r.id} on Declaration #${r.declaration_id} \u2014 field: ${r.field}, ` +
+      `requested by ${r.requester_name ?? 'unknown'}, ` +
+      `${parseFloat(r.age_days).toFixed(1)} days old`
+    ).join("\n");
+    try {
+      const { notifyOwner } = await import("./notification");
+      await notifyOwner({
+        title: `\u26a0\ufe0f ${rows.length} Amendment Request(s) Overdue (>5 business days)`,
+        content: `The following amendment requests have exceeded the 5-business-day SLA and require immediate review:\n\n${lines}\n\nPlease log in to AdminDeclarations > Pending Amendments to action these.`,
+      });
+    } catch { /* non-fatal */ }
+    console.log(`[Cron] Amendment SLA: ${rows.length} overdue amendment(s) flagged`);
+  } catch (err) {
+    console.error("[Cron] Amendment SLA check failed:", err);
+  }
+}
+
 async function runNightlyJobs() {
   await runNightlyRiskScan();
   await runPermitExpiryCheck();
   await runSLABreachScan();
   await runBondedWarehouseExpiryCheck();
+  await runAmendmentSLACheck();
 }
 
 // ── Bonded Warehouse Expiry Notification cron ──────────────────────────────────────────────────

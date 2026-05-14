@@ -404,6 +404,46 @@ export default function ExecutiveDashboard() {
           </Card>
           );
         })()}
+        {/* Trader Satisfaction Distribution (admin only) */}
+        {isAdmin && ratingStats && ratingStats.totalRatings > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <span>⭐</span> Trader Satisfaction
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="text-4xl font-bold text-amber-500">{ratingStats.avgRating.toFixed(1)}</div>
+                <div>
+                  <p className="text-sm font-medium">Average Rating</p>
+                  <p className="text-xs text-muted-foreground">{ratingStats.totalRatings.toLocaleString()} total ratings</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {([5, 4, 3, 2, 1] as const).map((star) => {
+                  const count = ratingStats.distribution[star] ?? 0;
+                  const pct = ratingStats.totalRatings > 0 ? (count / ratingStats.totalRatings) * 100 : 0;
+                  return (
+                    <div key={star} className="flex items-center gap-2 text-xs">
+                      <span className="w-4 text-right font-medium">{star}</span>
+                      <span className="text-amber-400">★</span>
+                      <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-2 rounded-full transition-all ${
+                            star >= 4 ? "bg-emerald-500" : star === 3 ? "bg-amber-400" : "bg-red-400"
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right text-muted-foreground">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {/* Last updated */}
         {revenue && (
           <p className="text-xs text-muted-foreground text-right">
