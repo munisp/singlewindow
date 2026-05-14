@@ -237,3 +237,8 @@
 - [x] Bond inventory search bar (UCR/HS code/importer filter) in BondedWarehouseManagement
 - [x] Fixed bonded warehouse expiry cron column names (description, quantity_kg, expiry_date)
 - [x] Restored local PostgreSQL after sandbox hibernation
+
+## v44 Sprint — Severity Filter, Utilisation Bar, Inventory Pagination
+- [x] CEP alert severity filter (All/Low/Medium/High/Critical dropdown above alerts table in FlinkCepAlerts.tsx)
+- [x] Warehouse utilisation progress bar (shadcn Progress with green/amber/red color-coding on each warehouse card)
+- [x] Bond inventory pagination (10-per-page paginator with prev/next + page numbers, resets on search/filter change)

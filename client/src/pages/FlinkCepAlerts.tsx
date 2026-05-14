@@ -85,6 +85,8 @@ export default function FlinkCepAlerts() {
     onError: (err) => toast.error(err.message),
   });
 
+  const [severityFilter, setSeverityFilter] = useState("all");
+
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDialog, setBulkDialog] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<"resolved" | "false_positive">("resolved");
@@ -111,7 +113,10 @@ export default function FlinkCepAlerts() {
   });
 
   const stats = statsQuery.data;
-  const alerts = (alertsQuery.data?.alerts ?? []) as any[];
+  const allAlerts = (alertsQuery.data?.alerts ?? []) as any[];
+  const alerts = severityFilter === "all"
+    ? allAlerts
+    : allAlerts.filter((a: any) => a.severity === severityFilter);
   const openAlerts = alerts.filter((a: any) => a.status === "open" || a.status === "investigating");
   const allOpenSelected = openAlerts.length > 0 && openAlerts.every((a: any) => selectedIds.has(a.alert_id));
   const someSelected = selectedIds.size > 0;
@@ -276,12 +281,33 @@ export default function FlinkCepAlerts() {
             </Tabs>
           </CardHeader>
           <CardContent>
+            {/* Severity filter */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xs text-muted-foreground font-medium">Severity:</span>
+              <Select value={severityFilter} onValueChange={(v) => { setSeverityFilter(v); setSelectedIds(new Set()); }}>
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severities</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+              {severityFilter !== "all" && (
+                <span className="text-xs text-muted-foreground">
+                  {alerts.length} of {allAlerts.length} alert{allAlerts.length !== 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
             {alertsQuery.isLoading ? (
               <div className="text-center py-8 text-muted-foreground">Loading alerts…</div>
             ) : alerts.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-400" />
-                No {activeTab} alerts
+                {severityFilter !== "all" ? `No ${activeTab} ${severityFilter} alerts` : `No ${activeTab} alerts`}
               </div>
             ) : (
               <>

@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -44,6 +45,8 @@ export default function BondedWarehouseManagement() {
   const [inventoryStatus, setInventoryStatus] = useState("all");
   const [selectedWarehouse, setSelectedWarehouse] = useState<number | null>(null);
   const [inventorySearch, setInventorySearch] = useState("");
+  const [inventoryPage, setInventoryPage] = useState(1);
+  const INVENTORY_PAGE_SIZE = 10;
 
   const { data: warehousesData, isLoading, isError } = trpc.bondedWarehouse.listWarehouses.useQuery({
     status: warehouseFilter === "all" ? undefined : (warehouseFilter as any),
@@ -68,7 +71,7 @@ export default function BondedWarehouseManagement() {
 
   const warehouses = (warehousesData as any)?.warehouses ?? [];
   const inventoryRaw = (inventoryData as any)?.items ?? [];
-  const inventory = useMemo(() => {
+  const filteredInventory = useMemo(() => {
     if (!inventorySearch.trim()) return inventoryRaw;
     const q = inventorySearch.toLowerCase();
     return inventoryRaw.filter((item: any) =>
@@ -79,6 +82,15 @@ export default function BondedWarehouseManagement() {
       (item.originCountry ?? "").toLowerCase().includes(q)
     );
   }, [inventoryRaw, inventorySearch]);
+
+  // Reset to page 1 when search query or status filter changes
+  useEffect(() => { setInventoryPage(1); }, [inventorySearch, inventoryStatus]);
+
+  const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventory.length / INVENTORY_PAGE_SIZE));
+  const inventory = filteredInventory.slice(
+    (inventoryPage - 1) * INVENTORY_PAGE_SIZE,
+    inventoryPage * INVENTORY_PAGE_SIZE
+  );
   const permits = (permitsData as any)?.permits ?? [];
   const guarantees = (bondGuarantees as any) ?? [];
   const alerts = (alertsData as any)?.alerts ?? [];
@@ -344,22 +356,31 @@ export default function BondedWarehouseManagement() {
                       <div className="mt-1 text-xs text-muted-foreground">
                         {wh.licenseNo} · {wh.country} · {wh.operatorName}
                       </div>
-                      <div className="mt-2 space-y-1">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-muted-foreground">Capacity</span>
-                          <span>{wh.usedCbm.toLocaleString()} / {wh.capacityCbm.toLocaleString()} m³</span>
-                        </div>
-                        <div className="bg-muted rounded-full h-1.5">
-                          <div
-                            className={`h-1.5 rounded-full ${wh.usedCbm / wh.capacityCbm > 0.85 ? "bg-red-500" : "bg-blue-500"}`}
-                            style={{ width: `${Math.min(100, (wh.usedCbm / wh.capacityCbm) * 100)}%` }}
+                      {(() => {
+                          const utilPct = Math.round(Math.min(100, (wh.usedCbm / wh.capacityCbm) * 100));
+                          const barColor =
+                            utilPct >= 90 ? "bg-red-500" :
+                            utilPct >= 70 ? "bg-amber-500" :
+                            "bg-green-500";
+                          return (
+                        <div className="mt-2 space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Utilisation</span>
+                            <span className={utilPct >= 90 ? "text-red-600 font-medium" : utilPct >= 70 ? "text-amber-600 font-medium" : "text-green-700"}>
+                              {wh.usedCbm.toLocaleString()} / {wh.capacityCbm.toLocaleString()} m³ ({utilPct}%)
+                            </span>
+                          </div>
+                          <Progress
+                            value={utilPct}
+                            className={`h-2 bg-muted [&>[data-slot=progress-indicator]]:${barColor}`}
                           />
-                        </div>
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">Bond</span>
                           <span>${wh.bondAmountUsd.toLocaleString()} · expires {new Date(wh.bondExpiry).toLocaleDateString()}</span>
                         </div>
                       </div>
+                          );
+                      })()}
                     </div>
                   </div>
                 </CardContent>
@@ -401,7 +422,7 @@ export default function BondedWarehouseManagement() {
               </SelectContent>
             </Select>
             <span className="text-sm text-muted-foreground">
-              {inventory.length}{inventorySearch ? ` of ${inventoryRaw.length}` : ""} items
+              {filteredInventory.length}{inventorySearch ? ` of ${inventoryRaw.length}` : ""} items
               {inventorySearch && (
                 <button className="ml-2 text-xs text-muted-foreground hover:text-foreground underline" onClick={() => setInventorySearch("")}>clear</button>
               )}
@@ -409,6 +430,12 @@ export default function BondedWarehouseManagement() {
           </div>
 
           <div className="space-y-2">
+            {inventory.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground">
+                <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                No inventory items match your search.
+              </div>
+            )}
             {inventory.map((item: any) => (
               <Card key={item.id}>
                 <CardContent className="p-4 flex items-start justify-between gap-4">
@@ -449,6 +476,58 @@ export default function BondedWarehouseManagement() {
               </Card>
             ))}
           </div>
+
+          {/* Pagination */}
+          {inventoryTotalPages > 1 && (
+            <div className="flex items-center justify-between pt-3 border-t border-border">
+              <span className="text-xs text-muted-foreground">
+                Page {inventoryPage} of {inventoryTotalPages} &middot; {filteredInventory.length} item{filteredInventory.length !== 1 ? "s" : ""}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  disabled={inventoryPage === 1}
+                  onClick={() => setInventoryPage((p) => p - 1)}
+                >
+                  ← Prev
+                </Button>
+                {Array.from({ length: inventoryTotalPages }, (_, i) => i + 1)
+                  .filter((p) => p === 1 || p === inventoryTotalPages || Math.abs(p - inventoryPage) <= 1)
+                  .reduce<(number | "...")[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push("...");
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, idx) =>
+                    p === "..." ? (
+                      <span key={`ellipsis-${idx}`} className="text-xs text-muted-foreground px-1">…</span>
+                    ) : (
+                      <Button
+                        key={p}
+                        variant={inventoryPage === p ? "default" : "outline"}
+                        size="sm"
+                        className="h-7 w-7 p-0 text-xs"
+                        onClick={() => setInventoryPage(p as number)}
+                      >
+                        {p}
+                      </Button>
+                    )
+                  )
+                }
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  disabled={inventoryPage === inventoryTotalPages}
+                  onClick={() => setInventoryPage((p) => p + 1)}
+                >
+                  Next →
+                </Button>
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* Permits */}
