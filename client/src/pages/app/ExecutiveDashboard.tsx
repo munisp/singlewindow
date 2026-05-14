@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
   TrendingUp, DollarSign, FileText, Users, Shield, CheckCircle,
-  Download, RefreshCw, BarChart2, AlertTriangle,
+  Download, RefreshCw, BarChart2, AlertTriangle, Target, Pencil, Check, X, Loader2,
 } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
 
 function fmt(n: number) {
   if (n >= 1_000_000_000) return `₦${(n / 1_000_000_000).toFixed(2)}B`;
@@ -24,6 +25,20 @@ export default function ExecutiveDashboard() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [isExporting, setIsExporting] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const utils = trpc.useUtils();
+  const { data: kpiTargetsList } = trpc.kpiTargets.list.useQuery(undefined, { enabled: isAdmin });
+  const setKpiTargetMutation = trpc.kpiTargets.setTarget.useMutation({
+    onSuccess: () => {
+      toast.success("KPI target updated");
+      setEditingKey(null);
+      utils.kpiTargets.list.invalidate();
+    },
+    onError: (err) => toast.error("Failed to update target", { description: err.message }),
+  });
 
   const { data: revenue, isLoading, isError, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
   const { data: kpi, refetch: refetchKpi } = trpc.executiveDashboard.getKpiSummary.useQuery();
@@ -287,6 +302,107 @@ export default function ExecutiveDashboard() {
           </Card>
         )}
 
+        {/* KPI Targets (admin only) */}
+        {isAdmin && kpiTargetsList && kpiTargetsList.length > 0 && (() => {
+          // Map metricKey → actual current value from kpi query
+          const actualMap: Record<string, number | undefined> = kpi ? {
+            clearance_time_hours: undefined, // not directly in summary
+            daily_revenue_ngn: kpi.monthRevenueNaira / 30,
+            green_lane_pct: kpi.clearanceRate,
+            sla_compliance_pct: kpi.clearanceRate,
+            trader_satisfaction: undefined,
+            aeo_operator_count: kpi.aeoOperators,
+          } : {};
+          const lowerIsBetter = new Set(["clearance_time_hours"]);
+          const getRag = (key: string, actual: number | undefined, target: number) => {
+            if (actual === undefined) return { cls: "text-muted-foreground", label: "N/A" };
+            const ratio = actual / target;
+            if (lowerIsBetter.has(key)) {
+              if (ratio <= 1) return { cls: "text-emerald-600 font-semibold", label: "✓" };
+              if (ratio <= 1.5) return { cls: "text-amber-600 font-semibold", label: "~" };
+              return { cls: "text-red-600 font-semibold", label: "↑" };
+            }
+            if (ratio >= 1) return { cls: "text-emerald-600 font-semibold", label: "✓" };
+            if (ratio >= 0.85) return { cls: "text-amber-600 font-semibold", label: "~" };
+            return { cls: "text-red-600 font-semibold", label: "↓" };
+          };
+          return (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Target className="h-4 w-4 text-primary" />
+                KPI Targets
+                <span className="ml-1 text-xs font-normal text-muted-foreground">Actual vs. target — ✓ on track, ~ near miss, ↓/↑ off target</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="divide-y divide-border/40">
+                {kpiTargetsList.map((kpiT: any) => {
+                  const actual = actualMap[kpiT.metricKey];
+                  const target = parseFloat(kpiT.targetValue);
+                  const rag = getRag(kpiT.metricKey, actual, target);
+                  return (
+                  <div key={kpiT.metricKey} className="flex items-center justify-between py-2.5 gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{kpiT.label}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{kpiT.metricKey}</p>
+                    </div>
+                    {/* Actual value */}
+                    <div className="text-right min-w-[90px]">
+                      {actual !== undefined ? (
+                        <span className={`text-sm tabular-nums ${rag.cls}`}>
+                          {rag.label} {actual.toLocaleString(undefined, { maximumFractionDigits: 1 })} {kpiT.unit}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                      <p className="text-[10px] text-muted-foreground">actual</p>
+                    </div>
+                    {editingKey === kpiT.metricKey ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number" step="any" value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          className="h-7 w-28 rounded-md border border-input bg-background px-2 text-xs"
+                          autoFocus
+                        />
+                        <span className="text-xs text-muted-foreground">{kpiT.unit}</span>
+                        <Button size="sm" className="h-7 w-7 p-0"
+                          disabled={setKpiTargetMutation.isPending}
+                          onClick={() => setKpiTargetMutation.mutate({
+                            metricKey: kpiT.metricKey, label: kpiT.label,
+                            targetValue: parseFloat(editValue), unit: kpiT.unit ?? undefined,
+                          })}
+                        >
+                          {setKpiTargetMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setEditingKey(null)}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <span className="text-sm font-semibold tabular-nums">
+                            {target.toLocaleString()} {kpiT.unit}
+                          </span>
+                          <p className="text-[10px] text-muted-foreground">target</p>
+                        </div>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => { setEditingKey(kpiT.metricKey); setEditValue(kpiT.targetValue); }}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+          );
+        })()}
         {/* Last updated */}
         {revenue && (
           <p className="text-xs text-muted-foreground text-right">

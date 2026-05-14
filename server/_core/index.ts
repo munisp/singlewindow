@@ -1187,6 +1187,12 @@ async function startServer() {
     registerDemoAuthRoute(app);
   }
 
+  // Scheduled Heartbeat handlers — must be before Vite/static fallthrough
+  {
+    const { bondExpiryDigestHandler } = await import("../scheduled/bondExpiryDigest");
+    app.post("/api/scheduled/bond-expiry-digest", bondExpiryDigestHandler);
+  }
+
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(
@@ -1210,10 +1216,11 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
+    server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Seed default KPI targets on startup (idempotent)
+    import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
   });
-
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const gracefulShutdown = async (signal: string) => {
     console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);

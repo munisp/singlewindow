@@ -272,3 +272,14 @@
 - [x] AdminUsers: suspend/reactivate profile action (profiles.suspend + profiles.approve mutations, reason dialog, profile status badge column)
 - [x] declarations.bulk.test.ts: 8 unit tests covering bulkUpdateStatus input validation and role guard
 - [x] All 65 test files, 1819 tests passing, zero TypeScript errors
+
+## v51 Sprint — Amendment Flow, KPI Targets, Bond Expiry Digest
+- [x] v51: Declaration amendment flow — declarationAmendments router (requestAmendment/listAmendments/reviewAmendment), DB table, DeclarationAmendmentsPanel in DeclarationDetail.tsx
+- [x] v51: Executive Dashboard KPI targets — kpiTargets router (list/setTarget/seed), DB table, editable KPI targets card in ExecutiveDashboard.tsx (admin-only, pencil-edit inline)
+- [x] v51: Bond expiry Heartbeat endpoint — /api/scheduled/bond-expiry-digest wired in index.ts; nightly cron already runs runBondedWarehouseExpiryCheck() at 02:00 UTC
+
+## v52 Sprint — Amendment Review, KPI Seed, Trader Amendment History
+- [x] v52: KPI targets auto-seed on startup — seedDefaultKpiTargets() called from server.listen callback; 6th KPI (aeo_operator_count) added
+- [x] v52: Amendment review drawer in AdminDeclarations — pending amendments badge in header, Sheet side panel with approve/reject + review notes
+- [x] v52: Trader amendment history card in TraderDeclarations — AmendmentHistoryCard component using new listMine procedure; hidden when empty
+- [x] v52: declarationAmendments.listMine procedure added to server router

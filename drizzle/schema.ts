@@ -1672,3 +1672,41 @@ export const costRecords = pgTable("cost_records", {
   index("idx_cr_category").on(t.category),
 ]);
 export type CostRecordRow = typeof costRecords.$inferSelect;
+
+// ─── Declaration Amendments ───────────────────────────────────────────────────
+export const amendmentStatusEnum = pgEnum("amendment_status", [
+  "pending", "approved", "rejected",
+]);
+export const declarationAmendments = pgTable("declaration_amendments", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  requestedBy: integer("requested_by").notNull().references(() => users.id),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  status: amendmentStatusEnum("status").default("pending").notNull(),
+  fieldName: varchar("field_name", { length: 128 }).notNull(),
+  oldValue: text("old_value"),
+  newValue: text("new_value").notNull(),
+  reason: text("reason").notNull(),
+  reviewNotes: text("review_notes"),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewed_at"),
+}, (t) => [
+  index("idx_da_declaration").on(t.declarationId),
+  index("idx_da_status").on(t.status),
+  index("idx_da_requester").on(t.requestedBy),
+]);
+export type DeclarationAmendment = typeof declarationAmendments.$inferSelect;
+
+// ─── KPI Targets ─────────────────────────────────────────────────────────────
+export const kpiTargets = pgTable("kpi_targets", {
+  id: serial("id").primaryKey(),
+  metricKey: varchar("metric_key", { length: 128 }).notNull().unique(),
+  label: varchar("label", { length: 255 }).notNull(),
+  targetValue: decimal("target_value", { precision: 15, scale: 4 }).notNull(),
+  unit: varchar("unit", { length: 32 }),
+  updatedBy: integer("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kpi_key").on(t.metricKey),
+]);
+export type KpiTarget = typeof kpiTargets.$inferSelect;

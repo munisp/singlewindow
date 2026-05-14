@@ -914,8 +914,178 @@ export default function DeclarationDetail() {
 
         {/* Attached Documents from Document Vault */}
         {declarationId > 0 && <AttachedDocuments declarationId={declarationId} declarationStatus={decl?.status ?? ""} />}
+        {/* Declaration Amendments */}
+        {declarationId > 0 && <DeclarationAmendmentsPanel declarationId={declarationId} declarationStatus={decl?.status ?? ""} isOfficer={isOfficer} />}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── Declaration Amendments Panel ───────────────────────────────────────────
+
+function DeclarationAmendmentsPanel({ declarationId, declarationStatus, isOfficer }: {
+  declarationId: number;
+  declarationStatus: string;
+  isOfficer: boolean;
+}) {
+  const { user } = useAuth();
+  const utils = trpc.useUtils();
+  const [showForm, setShowForm] = useState(false);
+  const [fieldName, setFieldName] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [reason, setReason] = useState("");
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewingId, setReviewingId] = useState<number | null>(null);
+
+  const { data: amendments, isLoading } = trpc.declarationAmendments.listByDeclaration.useQuery(
+    { declarationId },
+    { enabled: !!declarationId }
+  );
+
+  const requestMutation = trpc.declarationAmendments.requestAmendment.useMutation({
+    onSuccess: () => {
+      toast.success("Amendment request submitted");
+      setShowForm(false);
+      setFieldName(""); setNewValue(""); setReason("");
+      utils.declarationAmendments.listByDeclaration.invalidate({ declarationId });
+    },
+    onError: (err) => toast.error("Failed to submit amendment", { description: err.message }),
+  });
+
+  const reviewMutation = trpc.declarationAmendments.reviewAmendment.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Amendment ${data.status}`);
+      setReviewingId(null); setReviewNotes("");
+      utils.declarationAmendments.listByDeclaration.invalidate({ declarationId });
+    },
+    onError: (err) => toast.error("Review failed", { description: err.message }),
+  });
+
+  const canRequest = declarationStatus === "cleared" || isOfficer;
+
+  const AMENDMENT_FIELDS = [
+    "goodsDescription", "hsCode", "countryOfOrigin", "portOfEntry",
+    "grossWeight", "netWeight", "numberOfPackages", "invoiceValue", "invoiceCurrency",
+  ];
+
+  return (
+    <Card className="mt-6">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base font-semibold flex items-center gap-2">
+          <FileText className="h-4 w-4 text-primary" />
+          Declaration Amendments
+          {amendments && amendments.length > 0 && (
+            <span className="ml-1 text-sm font-normal text-muted-foreground">({amendments.length})</span>
+          )}
+          {canRequest && (
+            <Button variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => setShowForm(v => !v)}>
+              {showForm ? "Cancel" : "+ Request Amendment"}
+            </Button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {showForm && (
+          <div className="rounded-lg border border-border/60 p-4 bg-muted/20 space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">New Amendment Request</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Field to Amend</label>
+                <select
+                  value={fieldName}
+                  onChange={e => setFieldName(e.target.value)}
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Select field…</option>
+                  {AMENDMENT_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">New Value</label>
+                <input
+                  type="text"
+                  value={newValue}
+                  onChange={e => setNewValue(e.target.value)}
+                  placeholder="Enter new value"
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Reason (min 10 chars)</label>
+              <Textarea
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                placeholder="Explain why this amendment is needed…"
+                className="text-xs min-h-[60px]"
+              />
+            </div>
+            <Button
+              size="sm"
+              disabled={!fieldName || !newValue || reason.length < 10 || requestMutation.isPending}
+              onClick={() => requestMutation.mutate({ declarationId, fieldName, newValue, reason })}
+            >
+              {requestMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Submit Request
+            </Button>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-12 w-full" />)}</div>
+        ) : !amendments || amendments.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">No amendment requests yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {amendments.map((a: any) => (
+              <div key={a.id} className="rounded-lg border border-border/40 p-3 text-sm">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={
+                      a.status === "approved" ? "text-emerald-700 border-emerald-300 bg-emerald-50" :
+                      a.status === "rejected" ? "text-red-700 border-red-300 bg-red-50" :
+                      "text-amber-700 border-amber-300 bg-amber-50"
+                    }>{a.status}</Badge>
+                    <span className="font-mono text-xs font-semibold">{a.fieldName}</span>
+                    <span className="text-muted-foreground text-xs">→</span>
+                    <span className="font-medium text-xs">{a.newValue}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{new Date(a.requestedAt).toLocaleDateString()}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">{a.reason}</p>
+                {a.reviewNotes && <p className="text-xs text-muted-foreground mt-1 italic">Review: {a.reviewNotes}</p>}
+                {isOfficer && a.status === "pending" && (
+                  <div className="mt-2 space-y-2">
+                    {reviewingId === a.id ? (
+                      <div className="flex gap-2 items-end">
+                        <input
+                          type="text"
+                          placeholder="Review notes (optional)"
+                          value={reviewNotes}
+                          onChange={e => setReviewNotes(e.target.value)}
+                          className="h-7 flex-1 rounded-md border border-input bg-background px-2 text-xs"
+                        />
+                        <Button size="sm" className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
+                          disabled={reviewMutation.isPending}
+                          onClick={() => reviewMutation.mutate({ amendmentId: a.id, decision: "approved", reviewNotes })}
+                        >Approve</Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 border-red-300"
+                          disabled={reviewMutation.isPending}
+                          onClick={() => reviewMutation.mutate({ amendmentId: a.id, decision: "rejected", reviewNotes })}
+                        >Reject</Button>
+                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setReviewingId(null)}>Cancel</Button>
+                      </div>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setReviewingId(a.id)}>Review</Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

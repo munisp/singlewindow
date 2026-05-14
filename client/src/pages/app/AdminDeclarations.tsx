@@ -18,8 +18,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
-import { ClipboardList, Search, Eye, RefreshCw, Download, CalendarDays, X, CheckSquare } from "lucide-react";
+import { ClipboardList, Search, Eye, RefreshCw, Download, CalendarDays, X, CheckSquare, FileEdit, CheckCircle2, XCircle } from "lucide-react";
 import { ExportDeclarationsDialog } from "@/components/ExportDeclarationsDialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Textarea } from "@/components/ui/textarea";
 
 const RISK_COLORS: Record<string, string> = {
   GREEN: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
@@ -143,6 +145,21 @@ export default function AdminDeclarations() {
     });
   };
 
+  // Pending amendments
+  const { data: pendingAmendments, refetch: refetchAmendments } = trpc.declarationAmendments.listPending.useQuery();
+  const [amendmentDrawer, setAmendmentDrawer] = useState(false);
+  const [reviewingAmendment, setReviewingAmendment] = useState<{ id: number; declarationId: number; reason: string; requestedChanges: string } | null>(null);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const reviewAmendment = trpc.declarationAmendments.reviewAmendment.useMutation({
+    onSuccess: (res) => {
+      toast.success(`Amendment ${res.status === 'approved' ? 'approved' : 'rejected'}`);
+      setReviewingAmendment(null);
+      setReviewNotes("");
+      refetchAmendments();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const bulkUpdate = trpc.declarations.bulkUpdateStatus.useMutation({
     onSuccess: (res) => {
       toast.success(`Updated ${res.updated} declaration${res.updated !== 1 ? "s" : ""} to "${res.status.replace(/_/g, " ")}"`);
@@ -167,6 +184,15 @@ export default function AdminDeclarations() {
             <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
               <ClipboardList className="h-6 w-6 text-primary" />
               All Declarations
+              {pendingAmendments && pendingAmendments.length > 0 && (
+                <button
+                  onClick={() => setAmendmentDrawer(true)}
+                  className="ml-2 inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2.5 py-0.5 text-xs font-semibold hover:bg-amber-200 transition-colors"
+                >
+                  <FileEdit className="h-3 w-3" />
+                  {pendingAmendments.length} pending amendment{pendingAmendments.length !== 1 ? 's' : ''}
+                </button>
+              )}
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
               System-wide declaration management — {data.length} loaded
@@ -429,6 +455,78 @@ export default function AdminDeclarations() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Pending Amendments Drawer */}
+      <Sheet open={amendmentDrawer} onOpenChange={setAmendmentDrawer}>
+        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <FileEdit className="h-5 w-5 text-amber-500" />
+              Pending Amendments ({pendingAmendments?.length ?? 0})
+            </SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-3">
+            {!pendingAmendments || pendingAmendments.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No pending amendments.</p>
+            ) : pendingAmendments.map((a: any) => (
+              <div key={a.id} className="border rounded-lg p-4 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">Declaration #{a.declarationId}</p>
+                    <p className="text-xs text-muted-foreground">Submitted {new Date(a.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">pending</Badge>
+                </div>
+                <div className="text-xs space-y-1">
+                  <p><span className="font-medium">Reason:</span> {a.reason}</p>
+                  {a.requestedChanges && (
+                    <p><span className="font-medium">Requested changes:</span> {a.requestedChanges}</p>
+                  )}
+                </div>
+                {reviewingAmendment?.id === a.id ? (
+                  <div className="space-y-2 pt-1">
+                    <Textarea
+                      placeholder="Review notes (optional)…"
+                      value={reviewNotes}
+                      onChange={(e) => setReviewNotes(e.target.value)}
+                      className="text-xs h-16 resize-none"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        disabled={reviewAmendment.isPending}
+                        onClick={() => reviewAmendment.mutate({ amendmentId: a.id, decision: 'approved', reviewNotes: reviewNotes || undefined })}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="gap-1"
+                        disabled={reviewAmendment.isPending}
+                        onClick={() => reviewAmendment.mutate({ amendmentId: a.id, decision: 'rejected', reviewNotes: reviewNotes || undefined })}
+                      >
+                        <XCircle className="h-3.5 w-3.5" /> Reject
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setReviewingAmendment(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 text-xs"
+                    onClick={() => setReviewingAmendment({ id: a.id, declarationId: a.declarationId, reason: a.reason, requestedChanges: a.requestedChanges ?? '' })}
+                  >
+                    <FileEdit className="h-3 w-3" /> Review
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
     </DashboardLayout>
   );
 }

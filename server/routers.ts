@@ -64,6 +64,8 @@ import { pilotRouter } from "./routers/pilot";
 import { executiveDashboardRouter } from "./routers/executiveDashboard";
 import { nigeriaIdRouter } from "./routers/nigeriaId";
 import { siteSettingsRouter } from "./routers/siteSettings";
+import { declarationAmendmentsRouter } from "./routers/declarationAmendments";
+import { kpiTargetsRouter } from "./routers/kpiTargets";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -239,6 +241,8 @@ export const appRouter = router({
   executiveDashboard: executiveDashboardRouter,
   nigeriaId: nigeriaIdRouter,
   siteSettings: siteSettingsRouter,
+  declarationAmendments: declarationAmendmentsRouter,
+  kpiTargets: kpiTargetsRouter,
 });
 
 export type AppRouter = typeof appRouter;

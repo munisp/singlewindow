@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { FileText, Plus, RefreshCw, Download, Upload, Search, X } from "lucide-react";
+import { FileText, Plus, RefreshCw, Download, Upload, Search, X, History, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { ExportDeclarationsDialog } from "@/components/ExportDeclarationsDialog";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
 import { useLocation } from "wouter";
@@ -270,6 +270,62 @@ export default function TraderDeclarations() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Amendment History */}
+      <AmendmentHistoryCard />
     </DashboardLayout>
+  );
+}
+
+const AMENDMENT_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-amber-50 text-amber-700 border-amber-200",
+  approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  rejected: "bg-red-50 text-red-700 border-red-200",
+};
+
+const AMENDMENT_STATUS_ICONS: Record<string, React.ReactNode> = {
+  pending: <Clock className="h-3 w-3" />,
+  approved: <CheckCircle2 className="h-3 w-3" />,
+  rejected: <XCircle className="h-3 w-3" />,
+};
+
+function AmendmentHistoryCard() {
+  const { data: amendments, isLoading } = trpc.declarationAmendments.listMine.useQuery();
+  if (!isLoading && (!amendments || amendments.length === 0)) return null;
+  return (
+    <div className="max-w-6xl mt-2">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <History className="h-4 w-4 text-primary" />
+            My Amendment Requests
+            {amendments && amendments.length > 0 && (
+              <span className="text-muted-foreground font-normal text-sm">({amendments.length})</span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-4 space-y-2">{Array.from({length:3}).map((_,i)=><Skeleton key={i} className="h-10 w-full"/>)}</div>
+          ) : (
+            <div className="divide-y">
+              {amendments?.map((a: any) => (
+                <div key={a.id} className="px-4 py-3 flex items-start gap-3">
+                  <Badge variant="outline" className={`text-[10px] px-1.5 py-0.5 flex items-center gap-1 shrink-0 ${AMENDMENT_STATUS_STYLES[a.status] ?? ""}`}>
+                    {AMENDMENT_STATUS_ICONS[a.status]}
+                    {a.status}
+                  </Badge>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium">Declaration #{a.declarationId} — {a.reason}</p>
+                    {a.reviewNotes && <p className="text-xs text-muted-foreground mt-0.5">Review notes: {a.reviewNotes}</p>}
+                  </div>
+                  <span className="text-xs text-muted-foreground shrink-0">{new Date(a.createdAt).toLocaleDateString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
