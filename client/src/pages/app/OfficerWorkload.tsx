@@ -19,6 +19,10 @@ import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -32,6 +36,8 @@ import {
   WifiOff,
   RefreshCw,
   Activity,
+  UserCog,
+  Shuffle,
 } from "lucide-react";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -92,8 +98,20 @@ export default function OfficerWorkload() {
   const [slaTargetHours, setSlaTargetHours] = useState(24);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [reassignOfficer, setReassignOfficer] = useState<{ id: number; name: string } | null>(null);
+  const [reassignDeclId, setReassignDeclId] = useState("");
 
   const utils = trpc.useUtils();
+
+  const assignOfficerMutation = trpc.declarations.assignOfficer.useMutation({
+    onSuccess: () => {
+      toast.success("Declaration assigned successfully");
+      setReassignOfficer(null);
+      setReassignDeclId("");
+      utils.declarations.workload.invalidate();
+    },
+    onError: (err) => toast.error("Assignment failed", { description: err.message }),
+  });
 
   // Use the new declarations.workload procedure
   const { data, isLoading, error, isError, refetch } = trpc.declarations.workload.useQuery(undefined, {
@@ -314,6 +332,9 @@ export default function OfficerWorkload() {
                           <th className="text-left px-4 py-2.5 text-slate-400 font-normal">
                             Status
                           </th>
+                          <th className="text-left px-4 py-2.5 text-slate-400 font-normal">
+                            Actions
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -390,6 +411,16 @@ export default function OfficerWorkload() {
                                   </Badge>
                                 )}
                               </td>
+                              <td className="px-4 py-3">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="gap-1 text-xs h-7 px-2"
+                                  onClick={() => setReassignOfficer({ id: o.id, name: o.name })}
+                                >
+                                  <UserCog className="w-3 h-3" /> Assign Decl.
+                                </Button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -418,6 +449,48 @@ export default function OfficerWorkload() {
           </div>
         </ScrollArea>
       </div>
+      {/* Assign Declaration Dialog */}
+      <Dialog open={!!reassignOfficer} onOpenChange={(open) => { if (!open) { setReassignOfficer(null); setReassignDeclId(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserCog className="w-5 h-5" />
+              Assign Declaration to {reassignOfficer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Declaration ID</Label>
+              <Input
+                placeholder="Enter declaration ID (e.g. 1001)"
+                value={reassignDeclId}
+                onChange={(e) => setReassignDeclId(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && reassignOfficer && reassignDeclId) {
+                    const declId = parseInt(reassignDeclId);
+                    if (!isNaN(declId)) assignOfficerMutation.mutate({ declarationId: declId, officerId: reassignOfficer.id });
+                  }
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">This will assign the declaration to {reassignOfficer?.name} and add an audit log entry.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setReassignOfficer(null); setReassignDeclId(""); }}>Cancel</Button>
+            <Button
+              disabled={!reassignDeclId || assignOfficerMutation.isPending}
+              onClick={() => {
+                if (!reassignOfficer) return;
+                const declId = parseInt(reassignDeclId);
+                if (isNaN(declId)) { toast.error("Invalid declaration ID"); return; }
+                assignOfficerMutation.mutate({ declarationId: declId, officerId: reassignOfficer.id });
+              }}
+            >
+              {assignOfficerMutation.isPending ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Assigning…</> : "Assign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

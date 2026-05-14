@@ -43,6 +43,7 @@ export default function ExecutiveDashboard() {
   const { data: revenue, isLoading, isError, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
   const { data: kpi, refetch: refetchKpi } = trpc.executiveDashboard.getKpiSummary.useQuery();
   const { data: ratingStats } = trpc.traderRatings.getStats.useQuery(undefined, { enabled: isAdmin });
+  const { data: ratingTrend } = trpc.traderRatings.getTrend.useQuery({ days: 30 }, { enabled: isAdmin });
   const { data: daily } = trpc.executiveDashboard.getDailyCollectionVsTarget.useQuery({ dailyTargetNaira: 500_000_000 });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
   const { data: topScanned } = trpc.rulesOfOrigin.topScanned.useQuery({ limit: 10, days: 30 });
@@ -444,6 +445,64 @@ export default function ExecutiveDashboard() {
             </CardContent>
           </Card>
         )}
+        {/* Trader Satisfaction 30-Day Trend (admin only) */}
+        {isAdmin && ratingTrend && ratingTrend.length > 1 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <TrendingUp size={16} className="text-amber-500" />
+                Trader Satisfaction — 30-Day Trend
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="w-full overflow-x-auto">
+                <svg
+                  viewBox={`0 0 ${Math.max(ratingTrend.length * 24, 300)} 80`}
+                  className="w-full h-20"
+                  preserveAspectRatio="none"
+                >
+                  {/* Grid lines at 1,2,3,4,5 */}
+                  {[1, 2, 3, 4, 5].map((v) => (
+                    <line
+                      key={v}
+                      x1="0" y1={80 - ((v - 1) / 4) * 80}
+                      x2={Math.max(ratingTrend.length * 24, 300)} y2={80 - ((v - 1) / 4) * 80}
+                      stroke="#e5e7eb" strokeWidth="0.5"
+                    />
+                  ))}
+                  {/* Trend line */}
+                  <polyline
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    points={ratingTrend.map((d, i) => {
+                      const x = (i / (ratingTrend.length - 1)) * Math.max(ratingTrend.length * 24, 300);
+                      const y = 80 - ((d.avgRating - 1) / 4) * 72;
+                      return `${x},${y}`;
+                    }).join(" ")}
+                  />
+                  {/* Data points */}
+                  {ratingTrend.map((d, i) => {
+                    const x = (i / (ratingTrend.length - 1)) * Math.max(ratingTrend.length * 24, 300);
+                    const y = 80 - ((d.avgRating - 1) / 4) * 72;
+                    return (
+                      <circle key={i} cx={x} cy={y} r="3" fill="#f59e0b" />
+                    );
+                  })}
+                </svg>
+                <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                  <span>{ratingTrend[0]?.day}</span>
+                  <span className="text-amber-600 font-medium">
+                    Latest: {ratingTrend[ratingTrend.length - 1]?.avgRating.toFixed(2)} ★
+                  </span>
+                  <span>{ratingTrend[ratingTrend.length - 1]?.day}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Last updated */}
         {revenue && (
           <p className="text-xs text-muted-foreground text-right">

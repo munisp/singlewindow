@@ -2,7 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { traderRatings, declarations } from "../../drizzle/schema";
-import { eq, and, avg, count, sql } from "drizzle-orm";
+import { eq, and, avg, count, sql, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 export const traderRatingsRouter = router({
@@ -97,5 +97,36 @@ export const traderRatingsRouter = router({
           1: Number(stats?.oneStar ?? 0),
         },
       };
+    }),
+
+  // Admin: get 30-day daily average rating trend for line chart
+  getTrend: protectedProcedure
+    .input(z.object({ days: z.number().int().min(7).max(90).default(30) }))
+    .query(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin" && ctx.user.role !== "finance") {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const since = new Date();
+      since.setDate(since.getDate() - input.days);
+
+      const rows = await db
+        .select({
+          day: sql<string>`DATE(created_at)`,
+          avgRating: avg(traderRatings.rating),
+          count: count(),
+        })
+        .from(traderRatings)
+        .where(gte(traderRatings.createdAt, since))
+        .groupBy(sql`DATE(created_at)`)
+        .orderBy(sql`DATE(created_at)`);
+
+      return rows.map((r) => ({
+        day: r.day,
+        avgRating: parseFloat(r.avgRating ?? "0"),
+        count: Number(r.count),
+      }));
     }),
 });

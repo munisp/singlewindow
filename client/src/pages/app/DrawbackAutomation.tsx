@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/select";
 import {
   CheckCircle2, XCircle, Calculator, FileText, ArrowRight,
-  DollarSign, Percent, Info,
+  DollarSign, Percent, Info, PlusCircle, Send, List,
 } from "lucide-react";
+import { toast } from "sonner";
 
 type DrawbackType = "manufacturing" | "unused_merchandise" | "rejected_merchandise" | "substitution";
 
@@ -285,6 +286,167 @@ function RefundCalculator() {
   );
 }
 
+// ─── CLAIMS MANAGER ─────────────────────────────────────────────────────────
+
+function ClaimsManager() {
+  const utils = trpc.useUtils();
+  const [showCreate, setShowCreate] = useState(false);
+  const [importDeclId, setImportDeclId] = useState("");
+  const [exportDeclId, setExportDeclId] = useState("");
+  const [drawbackType, setDrawbackType] = useState<DrawbackType>("manufacturing");
+  const [dutyPaid, setDutyPaid] = useState("");
+  const [exportQty, setExportQty] = useState("");
+  const [importQty, setImportQty] = useState("");
+
+  const { data: claims, isLoading } = trpc.drawback.list.useQuery({ limit: 50, offset: 0 });
+  const createMutation = trpc.drawback.create.useMutation({
+    onSuccess: () => {
+      toast.success("Drawback claim created");
+      setShowCreate(false);
+      setImportDeclId(""); setExportDeclId(""); setDutyPaid(""); setExportQty(""); setImportQty("");
+      utils.drawback.list.invalidate();
+    },
+    onError: (err) => toast.error("Failed to create claim", { description: err.message }),
+  });
+  const submitMutation = trpc.drawback.submit.useMutation({
+    onSuccess: () => { toast.success("Claim submitted for review"); utils.drawback.list.invalidate(); },
+    onError: (err) => toast.error("Submit failed", { description: err.message }),
+  });
+
+  function handleCreate() {
+    const importId = parseInt(importDeclId);
+    const exportId = parseInt(exportDeclId);
+    const duty = parseFloat(dutyPaid);
+    if (!importId || !exportId || isNaN(duty)) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+    createMutation.mutate({
+      importDeclarationId: importId,
+      exportDeclarationId: exportId,
+      drawbackType,
+      claimedAmount: duty,
+      exportQuantity: exportQty ? parseFloat(exportQty) : undefined,
+      importQuantity: importQty ? parseFloat(importQty) : undefined,
+    });
+  }
+
+  const statusColors: Record<string, string> = {
+    draft: "bg-muted text-muted-foreground",
+    submitted: "bg-blue-500/20 text-blue-400",
+    under_review: "bg-amber-500/20 text-amber-400",
+    approved: "bg-emerald-500/20 text-emerald-400",
+    rejected: "bg-red-500/20 text-red-400",
+    paid: "bg-green-500/20 text-green-400",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">Manage and track your duty drawback claims.</p>
+        <Button size="sm" className="gap-2" onClick={() => setShowCreate(!showCreate)}>
+          <PlusCircle className="w-4 h-4" />
+          {showCreate ? "Cancel" : "New Claim"}
+        </Button>
+      </div>
+
+      {showCreate && (
+        <Card className="border-amber-500/30">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Create Drawback Claim</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Import Declaration ID *</Label>
+                <Input placeholder="e.g. 1001" value={importDeclId} onChange={(e) => setImportDeclId(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Export Declaration ID *</Label>
+                <Input placeholder="e.g. 2001" value={exportDeclId} onChange={(e) => setExportDeclId(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Drawback Type *</Label>
+                <Select value={drawbackType} onValueChange={(v) => setDrawbackType(v as DrawbackType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(DRAWBACK_TYPE_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Duty Paid (USD) *</Label>
+                <Input type="number" placeholder="e.g. 5000" value={dutyPaid} onChange={(e) => setDutyPaid(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Import Quantity</Label>
+                <Input type="number" placeholder="e.g. 1000" value={importQty} onChange={(e) => setImportQty(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Export Quantity</Label>
+                <Input type="number" placeholder="e.g. 800" value={exportQty} onChange={(e) => setExportQty(e.target.value)} />
+              </div>
+            </div>
+            <Button onClick={handleCreate} disabled={createMutation.isPending} className="gap-2">
+              <PlusCircle className="w-4 h-4" />
+              {createMutation.isPending ? "Creating…" : "Create Claim"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8 text-muted-foreground text-sm">Loading claims…</div>
+      ) : !claims?.claims?.length ? (
+        <div className="text-center py-12 text-muted-foreground">
+          <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p>No drawback claims yet. Create your first claim above.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {claims.claims.map((claim: any) => (
+            <div key={claim.id} className="flex items-center justify-between p-3 rounded-lg border bg-card/50">
+              <div>
+                <div className="text-sm font-medium">Claim #{claim.id}</div>
+                <div className="text-xs text-muted-foreground">
+                  Import #{claim.importDeclarationId} → Export #{claim.exportDeclarationId}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {DRAWBACK_TYPE_LABELS[claim.drawbackType as DrawbackType] ?? claim.drawbackType}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <div className="text-sm font-bold text-emerald-400">
+                    USD {Number(claim.estimatedRefund ?? 0).toLocaleString()}
+                  </div>
+                  <div className="text-xs text-muted-foreground">est. refund</div>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColors[claim.status] ?? "bg-muted"}`}>
+                  {claim.status}
+                </span>
+                {claim.status === "draft" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 text-xs"
+                    disabled={submitMutation.isPending}
+                    onClick={() => submitMutation.mutate({ id: claim.id })}
+                  >
+                    <Send className="w-3 h-3" /> Submit
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
 export default function DrawbackAutomation() {
@@ -309,12 +471,18 @@ export default function DrawbackAutomation() {
             <TabsTrigger value="calculator" className="gap-2">
               <Calculator className="w-4 h-4" /> Refund Calculator
             </TabsTrigger>
+            <TabsTrigger value="claims" className="gap-2">
+              <List className="w-4 h-4" /> My Claims
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="eligibility" className="mt-4">
             <EligibilityChecker />
           </TabsContent>
           <TabsContent value="calculator" className="mt-4">
             <RefundCalculator />
+          </TabsContent>
+          <TabsContent value="claims" className="mt-4">
+            <ClaimsManager />
           </TabsContent>
         </Tabs>
       </div>
