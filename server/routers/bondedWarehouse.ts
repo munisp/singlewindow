@@ -402,4 +402,22 @@ export const bondedWarehouseRouter = router({
       ],
     };
   }),
+
+  renewBond: adminProcedure
+    .input(z.object({
+      warehouseId: z.number(),
+      newBondAmountUsd: z.number().min(1),
+      newBondExpiryDays: z.number().min(1).default(365),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const newExpiry = new Date(Date.now() + input.newBondExpiryDays * 86_400_000);
+      await pgQuery(
+        `UPDATE bonded_warehouses
+           SET bond_amount_usd = $1, bond_expiry = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [input.newBondAmountUsd, newExpiry, input.warehouseId]
+      );
+      return { success: true, newExpiry };
+    }),
 });

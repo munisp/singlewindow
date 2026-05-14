@@ -1553,6 +1553,31 @@ ${riskScore !== null ? `<div class="section"><div class="section-title">Risk Ass
       return { assigned: input.declarationIds.length, officerId: input.officerId, officerName: officer.name };
     }),
 
+  // Sprint 49: bulk status update for admin/officer
+  bulkUpdateStatus: protectedProcedure
+    .input(z.object({
+      ids: z.array(z.number().int()).min(1).max(100),
+      status: z.enum(["docs_required", "payment_pending", "under_examination", "examination_complete", "cleared", "rejected"]),
+      notes: z.string().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const allowedRoles = ["admin", "customs_officer", "inspector"];
+      if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const updateData: Record<string, unknown> = { status: input.status, updatedAt: new Date() };
+      if (input.status === "cleared") updateData.clearedAt = new Date();
+      await db.update(declarations).set(updateData as any).where(inArray(declarations.id, input.ids));
+      await logAuditEvent({
+        actorId: ctx.user.id as unknown as number,
+        action: "declarations.bulkUpdateStatus",
+        entityType: "declaration" as any,
+        entityId: input.ids[0],
+        metadata: { ids: input.ids, status: input.status, count: input.ids.length, notes: input.notes },
+      });
+      return { updated: input.ids.length, status: input.status };
+    }),
+
   // Sprint 116: list bulk export history for the current officer
   listBulkExports: protectedProcedure
     .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))

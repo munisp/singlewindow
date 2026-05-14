@@ -13,8 +13,9 @@ import {
   Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw, Download, Search,
 } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 
@@ -48,6 +49,29 @@ export default function BondedWarehouseManagement() {
   const [inventoryPage, setInventoryPage] = useState(1);
   const INVENTORY_PAGE_SIZE = 10;
   const [activeTab, setActiveTab] = useState("warehouses");
+  const [permitSearch, setPermitSearch] = useState("");
+  const [permitStatusFilter, setPermitStatusFilter] = useState("all");
+  const [entryDialog, setEntryDialog] = useState(false);
+  const [renewDialog, setRenewDialog] = useState<{ warehouseId: number; warehouseName: string } | null>(null);
+  const [renewForm, setRenewForm] = useState({ newBondAmountUsd: "", newBondExpiryDays: "365", notes: "" });
+  const [exitDialog, setExitDialog] = useState<{ inventoryId: number; description: string } | null>(null);
+  const [exitReason, setExitReason] = useState<"ex_bonded" | "re_exported" | "destroyed" | "seized">("ex_bonded");
+  const [registerDialog, setRegisterDialog] = useState(false);
+  const [registerForm, setRegisterForm] = useState({
+    name: "", operatorName: "", country: "NGA", address: "",
+    portCode: "", capacityCbm: "", bondAmountUsd: "", bondExpiryDays: "365",
+  });
+  const [entryForm, setEntryForm] = useState({
+    warehouseId: "",
+    ucr: "",
+    hsCode: "",
+    description: "",
+    quantityKg: "",
+    volumeCbm: "",
+    invoiceValueUsd: "",
+    originCountry: "",
+    expiryDays: "180",
+  });
 
   const { data: warehousesData, isLoading, isError } = trpc.bondedWarehouse.listWarehouses.useQuery({
     status: warehouseFilter === "all" ? undefined : (warehouseFilter as any),
@@ -58,6 +82,9 @@ export default function BondedWarehouseManagement() {
     status: inventoryStatus === "all" ? undefined : (inventoryStatus as any),
     limit: 50,
   });
+
+  // Fetch all inventory (no warehouse filter) for per-warehouse status summary chips
+  const { data: allInventoryData } = trpc.bondedWarehouse.getInventory.useQuery({ limit: 200 });
 
   const { data: permitsData } = trpc.bondedWarehouse.listPermits.useQuery({
     warehouseId: selectedWarehouse ?? undefined,
@@ -70,7 +97,54 @@ export default function BondedWarehouseManagement() {
     onSuccess: () => toast.success("Ex-bond permit issued"),
   });
 
+  const registerWarehouse = trpc.bondedWarehouse.registerWarehouse.useMutation({
+    onSuccess: (res: any) => {
+      toast.success(`Warehouse registered — License: ${res.licenseNo}`);
+      setRegisterDialog(false);
+      setRegisterForm({ name: "", operatorName: "", country: "NGA", address: "", portCode: "", capacityCbm: "", bondAmountUsd: "", bondExpiryDays: "365" });
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const recordExit = trpc.bondedWarehouse.recordExit.useMutation({
+    onSuccess: () => {
+      toast.success("Item released from bond");
+      setExitDialog(null);
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const renewBond = trpc.bondedWarehouse.renewBond.useMutation({
+    onSuccess: () => {
+      toast.success("Bond renewed successfully");
+      setRenewDialog(null);
+      setRenewForm({ newBondAmountUsd: "", newBondExpiryDays: "365", notes: "" });
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
+  const recordEntry = trpc.bondedWarehouse.recordEntry.useMutation({
+    onSuccess: (res: any) => {
+      toast.success(`Entry recorded — duty liability: $${res.dutyLiabilityUsd?.toLocaleString() ?? 0}`);
+      setEntryDialog(false);
+      setEntryForm({ warehouseId: "", ucr: "", hsCode: "", description: "", quantityKg: "", volumeCbm: "", invoiceValueUsd: "", originCountry: "", expiryDays: "180" });
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
+
   const warehouses = (warehousesData as any)?.warehouses ?? [];
+  const allInventoryItems: any[] = (allInventoryData as any)?.items ?? [];
+
+  // Build per-warehouse status count map
+  const warehouseStatusCounts = useMemo(() => {
+    const map: Record<number, Record<string, number>> = {};
+    for (const item of allInventoryItems) {
+      const wid = item.warehouse_id;
+      if (!map[wid]) map[wid] = {};
+      map[wid][item.status] = (map[wid][item.status] ?? 0) + 1;
+    }
+    return map;
+  }, [allInventoryItems]);
   const inventoryRaw = (inventoryData as any)?.items ?? [];
   const filteredInventory = useMemo(() => {
     if (!inventorySearch.trim()) return inventoryRaw;
@@ -341,6 +415,10 @@ export default function BondedWarehouseManagement() {
               </SelectContent>
             </Select>
             <span className="text-sm text-muted-foreground">{warehouses.length} warehouses</span>
+            <Button size="sm" className="ml-auto h-8 text-xs gap-1.5" onClick={() => setRegisterDialog(true)}>
+              <Warehouse className="h-3.5 w-3.5" />
+              Register Warehouse
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -383,6 +461,24 @@ export default function BondedWarehouseManagement() {
                           <span className="text-muted-foreground">Bond</span>
                           <span>${wh.bondAmountUsd.toLocaleString()} · expires {new Date(wh.bondExpiry).toLocaleDateString()}</span>
                         </div>
+                        {/* Inventory status summary chips */}
+                        {(() => {
+                          const counts = warehouseStatusCounts[wh.id] ?? {};
+                          const chips: { label: string; cls: string }[] = [];
+                          if (counts["in_bond"]) chips.push({ label: `${counts["in_bond"]} in bond`, cls: "bg-blue-100 text-blue-700" });
+                          if (counts["ex_bonded"]) chips.push({ label: `${counts["ex_bonded"]} ex-bonded`, cls: "bg-purple-100 text-purple-700" });
+                          if (counts["re_exported"]) chips.push({ label: `${counts["re_exported"]} re-exported`, cls: "bg-green-100 text-green-700" });
+                          if (counts["seized"]) chips.push({ label: `${counts["seized"]} seized`, cls: "bg-red-100 text-red-700" });
+                          if (counts["destroyed"]) chips.push({ label: `${counts["destroyed"]} destroyed`, cls: "bg-gray-100 text-gray-600" });
+                          if (chips.length === 0) return null;
+                          return (
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {chips.map((c) => (
+                                <span key={c.label} className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${c.cls}`}>{c.label}</span>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </div>
                           );
                       })()}
@@ -432,6 +528,10 @@ export default function BondedWarehouseManagement() {
                 <button className="ml-2 text-xs text-muted-foreground hover:text-foreground underline" onClick={() => setInventorySearch("")}>clear</button>
               )}
             </span>
+            <Button size="sm" className="ml-auto h-8 text-xs gap-1.5" onClick={() => setEntryDialog(true)}>
+              <Package className="h-3.5 w-3.5" />
+              Record Entry
+            </Button>
           </div>
 
           <div className="space-y-2">
@@ -465,17 +565,28 @@ export default function BondedWarehouseManagement() {
                     </div>
                   </div>
                   {item.status === "in_bond" && (
-                    <Button size="sm" variant="outline" onClick={() =>
-                      issuePermit.mutate({
-                        inventoryId: item.id,
-                        quantityKg: item.quantity_kg ?? item.quantity ?? 1,
-                        dutyPaidUsd: item.duty_liability_usd ?? 0,
-                        validDays: 30,
-                      })
-                    }>
-                      <FileText className="h-3 w-3 mr-1" />
-                      Issue Permit
-                    </Button>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      <Button size="sm" variant="outline" onClick={() =>
+                        issuePermit.mutate({
+                          inventoryId: item.id,
+                          quantityKg: item.quantity_kg ?? item.quantity ?? 1,
+                          dutyPaidUsd: item.duty_liability_usd ?? 0,
+                          validDays: 30,
+                        })
+                      }>
+                        <FileText className="h-3 w-3 mr-1" />
+                        Issue Permit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-xs border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => { setExitReason("ex_bonded"); setExitDialog({ inventoryId: item.id, description: item.description }); }}
+                      >
+                        <ChevronRight className="h-3 w-3 mr-1" />
+                        Release
+                      </Button>
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -537,8 +648,47 @@ export default function BondedWarehouseManagement() {
 
         {/* Permits */}
         <TabsContent value="permits" className="space-y-4">
+          {/* Search + filter bar */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[200px] max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <Input
+                value={permitSearch}
+                onChange={(e) => setPermitSearch(e.target.value)}
+                placeholder="Search permit no. or payment ref…"
+                className="pl-8 h-9 text-sm"
+              />
+            </div>
+            <Select value={permitStatusFilter} onValueChange={setPermitStatusFilter}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="used">Used</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-sm text-muted-foreground">
+              {permits.filter((p: any) => {
+                const matchSearch = !permitSearch.trim() ||
+                  (p.permitNo ?? "").toLowerCase().includes(permitSearch.toLowerCase()) ||
+                  (p.payment_ref ?? p.paymentRef ?? "").toLowerCase().includes(permitSearch.toLowerCase());
+                const matchStatus = permitStatusFilter === "all" || p.status === permitStatusFilter;
+                return matchSearch && matchStatus;
+              }).length} of {permits.length} permits
+            </span>
+          </div>
           <div className="space-y-2">
-            {permits.map((permit: any) => (
+            {permits.filter((permit: any) => {
+              const matchSearch = !permitSearch.trim() ||
+                (permit.permitNo ?? "").toLowerCase().includes(permitSearch.toLowerCase()) ||
+                (permit.payment_ref ?? permit.paymentRef ?? "").toLowerCase().includes(permitSearch.toLowerCase());
+              const matchStatus = permitStatusFilter === "all" || permit.status === permitStatusFilter;
+              return matchSearch && matchStatus;
+            }).map((permit: any) => (
               <Card key={permit.id}>
                 <CardContent className="p-4 flex items-start justify-between gap-4">
                   <div className="flex-1">
@@ -592,7 +742,7 @@ export default function BondedWarehouseManagement() {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Shield className={`h-4 w-4 ${g.isSufficient ? "text-green-600" : "text-red-600"}`} />
                         <span className="font-medium text-sm">{g.warehouseName}</span>
                         {!g.isSufficient && <Badge className="bg-red-100 text-red-700">Insufficient Bond</Badge>}
@@ -619,6 +769,15 @@ export default function BondedWarehouseManagement() {
                         </div>
                       </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs shrink-0"
+                      onClick={() => setRenewDialog({ warehouseId: g.warehouseId, warehouseName: g.warehouseName })}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Renew Bond
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -626,6 +785,261 @@ export default function BondedWarehouseManagement() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Register Warehouse Dialog */}
+      <Dialog open={registerDialog} onOpenChange={setRegisterDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Warehouse className="h-5 w-5" />
+              Register New Bonded Warehouse
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="col-span-2 space-y-1.5">
+              <Label className="text-xs">Warehouse Name *</Label>
+              <Input className="h-9 text-sm" placeholder="e.g. Lagos Port Bonded Store A" value={registerForm.name} onChange={(e) => setRegisterForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Operator Name *</Label>
+              <Input className="h-9 text-sm" placeholder="Company name" value={registerForm.operatorName} onChange={(e) => setRegisterForm((f) => ({ ...f, operatorName: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Country (ISO-3)</Label>
+              <Input className="h-9 text-sm" maxLength={3} value={registerForm.country} onChange={(e) => setRegisterForm((f) => ({ ...f, country: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label className="text-xs">Address *</Label>
+              <Input className="h-9 text-sm" placeholder="Full address" value={registerForm.address} onChange={(e) => setRegisterForm((f) => ({ ...f, address: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Port Code</Label>
+              <Input className="h-9 text-sm" placeholder="NGLOS" value={registerForm.portCode} onChange={(e) => setRegisterForm((f) => ({ ...f, portCode: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Capacity (m³) *</Label>
+              <Input type="number" min="1" className="h-9 text-sm" placeholder="5000" value={registerForm.capacityCbm} onChange={(e) => setRegisterForm((f) => ({ ...f, capacityCbm: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Bond Amount (USD) *</Label>
+              <Input type="number" min="0" className="h-9 text-sm" placeholder="500000" value={registerForm.bondAmountUsd} onChange={(e) => setRegisterForm((f) => ({ ...f, bondAmountUsd: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Bond Duration (days)</Label>
+              <Input type="number" min="30" className="h-9 text-sm" value={registerForm.bondExpiryDays} onChange={(e) => setRegisterForm((f) => ({ ...f, bondExpiryDays: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRegisterDialog(false)}>Cancel</Button>
+            <Button
+              disabled={registerWarehouse.isPending}
+              onClick={() => {
+                if (!registerForm.name || !registerForm.operatorName || !registerForm.address || !registerForm.capacityCbm) {
+                  toast.error("Please fill in all required fields");
+                  return;
+                }
+                registerWarehouse.mutate({
+                  name: registerForm.name,
+                  operatorName: registerForm.operatorName,
+                  country: registerForm.country || "NGA",
+                  address: registerForm.address,
+                  portCode: registerForm.portCode || undefined,
+                  capacityCbm: Number(registerForm.capacityCbm),
+                  bondAmountUsd: Number(registerForm.bondAmountUsd) || 0,
+                  bondExpiryDays: Number(registerForm.bondExpiryDays) || 365,
+                });
+              }}
+            >
+              {registerWarehouse.isPending ? "Registering…" : "Register Warehouse"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Release Item Dialog */}
+      <Dialog open={!!exitDialog} onOpenChange={(open) => { if (!open) setExitDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Release from Bond</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Release <span className="font-medium text-foreground">{exitDialog?.description}</span> from bonded storage.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Exit Reason *</Label>
+              <Select value={exitReason} onValueChange={(v) => setExitReason(v as any)}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ex_bonded">Ex-Bonded (duty paid)</SelectItem>
+                  <SelectItem value="re_exported">Re-Exported</SelectItem>
+                  <SelectItem value="destroyed">Destroyed</SelectItem>
+                  <SelectItem value="seized">Seized</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExitDialog(null)}>Cancel</Button>
+            <Button
+              disabled={recordExit.isPending}
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                if (!exitDialog) return;
+                recordExit.mutate({ inventoryId: exitDialog.inventoryId, exitReason });
+              }}
+            >
+              {recordExit.isPending ? "Releasing…" : "Confirm Release"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renew Bond Dialog */}
+      <Dialog open={!!renewDialog} onOpenChange={(open) => { if (!open) setRenewDialog(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Renew Bond — {renewDialog?.warehouseName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">New Bond Amount (USD) *</Label>
+              <Input
+                type="number" min="1" className="h-9 text-sm"
+                placeholder="e.g. 500000"
+                value={renewForm.newBondAmountUsd}
+                onChange={(e) => setRenewForm((f) => ({ ...f, newBondAmountUsd: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Bond Duration (days)</Label>
+              <Input
+                type="number" min="1" className="h-9 text-sm"
+                value={renewForm.newBondExpiryDays}
+                onChange={(e) => setRenewForm((f) => ({ ...f, newBondExpiryDays: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notes (optional)</Label>
+              <Input
+                className="h-9 text-sm"
+                placeholder="Reference number, insurer, etc."
+                value={renewForm.notes}
+                onChange={(e) => setRenewForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenewDialog(null)}>Cancel</Button>
+            <Button
+              disabled={renewBond.isPending}
+              onClick={() => {
+                if (!renewDialog || !renewForm.newBondAmountUsd) {
+                  toast.error("Bond amount is required");
+                  return;
+                }
+                renewBond.mutate({
+                  warehouseId: renewDialog.warehouseId,
+                  newBondAmountUsd: Number(renewForm.newBondAmountUsd),
+                  newBondExpiryDays: Number(renewForm.newBondExpiryDays) || 365,
+                  notes: renewForm.notes || undefined,
+                });
+              }}
+            >
+              {renewBond.isPending ? "Renewing…" : "Confirm Renewal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Record Entry Dialog */}
+      <Dialog open={entryDialog} onOpenChange={setEntryDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Record Bonded Warehouse Entry
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="col-span-2 space-y-1.5">
+              <Label className="text-xs">Warehouse *</Label>
+              <Select value={entryForm.warehouseId} onValueChange={(v) => setEntryForm((f) => ({ ...f, warehouseId: v }))}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Select warehouse" />
+                </SelectTrigger>
+                <SelectContent>
+                  {warehouses.filter((w: any) => w.status === "active").map((w: any) => (
+                    <SelectItem key={w.id} value={String(w.id)}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">UCR *</Label>
+              <Input className="h-9 text-sm" placeholder="UCR-2026-XXXXX" value={entryForm.ucr} onChange={(e) => setEntryForm((f) => ({ ...f, ucr: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">HS Code *</Label>
+              <Input className="h-9 text-sm" placeholder="8471.30" value={entryForm.hsCode} onChange={(e) => setEntryForm((f) => ({ ...f, hsCode: e.target.value }))} />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label className="text-xs">Description *</Label>
+              <Input className="h-9 text-sm" placeholder="Goods description" value={entryForm.description} onChange={(e) => setEntryForm((f) => ({ ...f, description: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Quantity (kg) *</Label>
+              <Input type="number" min="0" className="h-9 text-sm" placeholder="0" value={entryForm.quantityKg} onChange={(e) => setEntryForm((f) => ({ ...f, quantityKg: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Volume (m³) *</Label>
+              <Input type="number" min="0" step="0.01" className="h-9 text-sm" placeholder="0.00" value={entryForm.volumeCbm} onChange={(e) => setEntryForm((f) => ({ ...f, volumeCbm: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Invoice Value (USD) *</Label>
+              <Input type="number" min="0" className="h-9 text-sm" placeholder="0" value={entryForm.invoiceValueUsd} onChange={(e) => setEntryForm((f) => ({ ...f, invoiceValueUsd: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Origin Country (ISO-3)</Label>
+              <Input className="h-9 text-sm" placeholder="GHA" maxLength={3} value={entryForm.originCountry} onChange={(e) => setEntryForm((f) => ({ ...f, originCountry: e.target.value.toUpperCase() }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Bond Period (days)</Label>
+              <Input type="number" min="1" className="h-9 text-sm" value={entryForm.expiryDays} onChange={(e) => setEntryForm((f) => ({ ...f, expiryDays: e.target.value }))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEntryDialog(false)}>Cancel</Button>
+            <Button
+              disabled={recordEntry.isPending}
+              onClick={() => {
+                if (!entryForm.warehouseId || !entryForm.ucr || !entryForm.hsCode || !entryForm.description) {
+                  toast.error("Please fill in all required fields");
+                  return;
+                }
+                recordEntry.mutate({
+                  warehouseId: Number(entryForm.warehouseId),
+                  ucr: entryForm.ucr,
+                  hsCode: entryForm.hsCode,
+                  description: entryForm.description,
+                  quantityKg: Number(entryForm.quantityKg) || 0,
+                  volumeCbm: Number(entryForm.volumeCbm) || 0,
+                  invoiceValueUsd: Number(entryForm.invoiceValueUsd) || 0,
+                  originCountry: entryForm.originCountry || undefined,
+                  expiryDays: Number(entryForm.expiryDays) || 180,
+                });
+              }}
+            >
+              {recordEntry.isPending ? "Recording…" : "Record Entry"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

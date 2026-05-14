@@ -1,5 +1,6 @@
 /**
  * AdminUsers — full user management with search, role filter, role change, name edit, stats
+ * v50: Added suspend/reactivate profile action (via profiles.suspend + profiles.updateStatus)
  */
 import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -13,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Users, ShieldCheck, Search, RefreshCw, Edit2, ChevronDown, BarChart3 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Users, ShieldCheck, Search, RefreshCw, Edit2, ChevronDown, BarChart3, UserX, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLE_OPTIONS = [
@@ -44,6 +46,10 @@ export default function AdminUsers() {
   const [editUser, setEditUser] = useState<{ id: number; name: string } | null>(null);
   const [editName, setEditName] = useState("");
 
+  // Suspend dialog state
+  const [suspendTarget, setSuspendTarget] = useState<{ userId: number; profileId: number; name: string } | null>(null);
+  const [suspendReason, setSuspendReason] = useState("");
+
   // 300ms debounce
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchInput), 300);
@@ -54,6 +60,9 @@ export default function AdminUsers() {
     search: debouncedSearch || undefined,
     role: roleFilter !== "ALL" ? roleFilter : undefined,
   });
+
+  const { data: usersWithProfiles } = trpc.profiles.usersWithProfiles.useQuery({ limit: 500, offset: 0 });
+  const profileMap = new Map((usersWithProfiles ?? []).map((u: any) => [u.id, u.profile]));
 
   const { data: stats } = trpc.auth.userStats.useQuery();
 
@@ -73,6 +82,24 @@ export default function AdminUsers() {
       setEditUser(null);
     },
     onError: (err) => toast.error("Failed to update name", { description: err.message }),
+  });
+
+  const suspendMutation = trpc.profiles.suspend.useMutation({
+    onSuccess: () => {
+      toast.success(`Profile suspended for ${suspendTarget?.name ?? "user"}`);
+      utils.profiles.usersWithProfiles.invalidate();
+      setSuspendTarget(null);
+      setSuspendReason("");
+    },
+    onError: (err) => toast.error("Failed to suspend profile", { description: err.message }),
+  });
+
+  const reactivateMutation = trpc.profiles.approve.useMutation({
+    onSuccess: () => {
+      toast.success("Profile reactivated");
+      utils.profiles.usersWithProfiles.invalidate();
+    },
+    onError: (err) => toast.error("Failed to reactivate profile", { description: err.message }),
   });
 
   const openEdit = (u: { id: number; name: string | null }) => {
@@ -162,69 +189,113 @@ export default function AdminUsers() {
                       <th className="text-left p-3 font-medium text-muted-foreground">Name</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Email</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Role</th>
+                      <th className="text-left p-3 font-medium text-muted-foreground">Profile Status</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Last Sign-in</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Joined</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {users.map((u: any) => (
-                      <tr key={u.id} className="hover:bg-muted/20">
-                        <td className="p-3">
-                          <div className="flex items-center gap-2">
-                            <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
-                              {(u.name ?? u.email ?? "?")[0].toUpperCase()}
-                            </div>
-                            <span className="font-medium">{u.name ?? "—"}</span>
-                            {u.id === me?.id && <Badge variant="outline" className="text-xs py-0 h-4">You</Badge>}
-                          </div>
-                        </td>
-                        <td className="p-3 text-muted-foreground text-xs">{u.email ?? "—"}</td>
-                        <td className="p-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ROLE_COLORS[u.role] ?? ROLE_COLORS.user}`}>
-                            {u.role}
-                          </span>
-                        </td>
-                        <td className="p-3 text-xs text-muted-foreground">
-                          {u.lastSignedIn ? new Date(u.lastSignedIn).toLocaleDateString() : "—"}
-                        </td>
-                        <td className="p-3 text-xs text-muted-foreground">
-                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
-                        </td>
-                        <td className="p-3">
-                          {u.id === me?.id ? (
-                            <span className="text-xs text-muted-foreground italic">Current user</span>
-                          ) : (
+                    {users.map((u: any) => {
+                      const profile = profileMap.get(u.id);
+                      const isSuspended = profile?.status === "suspended";
+                      return (
+                        <tr key={u.id} className={`hover:bg-muted/20 ${isSuspended ? "opacity-60" : ""}`}>
+                          <td className="p-3">
                             <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost" size="sm" className="h-7 px-2 gap-1 text-xs"
-                                onClick={() => openEdit(u)}
-                              >
-                                <Edit2 className="h-3 w-3" />Edit
-                              </Button>
-                              <Select
-                                value={u.role}
-                                onValueChange={(newRole) => changeRoleMutation.mutate({ userId: u.id, role: newRole as any })}
-                                disabled={changeRoleMutation.isPending}
-                              >
-                                <SelectTrigger className="h-7 w-36 text-xs">
-                                  <SelectValue />
-                                  <ChevronDown className="h-3 w-3 ml-auto" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="user">user</SelectItem>
-                                  <SelectItem value="admin">admin</SelectItem>
-                                  <SelectItem value="customs_officer">customs_officer</SelectItem>
-                                  <SelectItem value="oga_officer">oga_officer</SelectItem>
-                                  <SelectItem value="inspector">inspector</SelectItem>
-                                  <SelectItem value="finance">finance</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                                {(u.name ?? u.email ?? "?")[0].toUpperCase()}
+                              </div>
+                              <span className="font-medium">{u.name ?? "—"}</span>
+                              {u.id === me?.id && <Badge variant="outline" className="text-xs py-0 h-4">You</Badge>}
                             </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="p-3 text-muted-foreground text-xs">{u.email ?? "—"}</td>
+                          <td className="p-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ROLE_COLORS[u.role] ?? ROLE_COLORS.user}`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            {profile ? (
+                              <Badge
+                                variant="outline"
+                                className={
+                                  profile.status === "approved" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                                  profile.status === "suspended" ? "bg-red-500/10 text-red-400 border-red-500/20" :
+                                  profile.status === "pending" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                                  "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                                }
+                              >
+                                {profile.status}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No profile</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-xs text-muted-foreground">
+                            {u.lastSignedIn ? new Date(u.lastSignedIn).toLocaleDateString() : "—"}
+                          </td>
+                          <td className="p-3 text-xs text-muted-foreground">
+                            {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                          </td>
+                          <td className="p-3">
+                            {u.id === me?.id ? (
+                              <span className="text-xs text-muted-foreground italic">Current user</span>
+                            ) : (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <Button
+                                  variant="ghost" size="sm" className="h-7 px-2 gap-1 text-xs"
+                                  onClick={() => openEdit(u)}
+                                >
+                                  <Edit2 className="h-3 w-3" />Edit
+                                </Button>
+                                <Select
+                                  value={u.role}
+                                  onValueChange={(newRole) => changeRoleMutation.mutate({ userId: u.id, role: newRole as any })}
+                                  disabled={changeRoleMutation.isPending}
+                                >
+                                  <SelectTrigger className="h-7 w-36 text-xs">
+                                    <SelectValue />
+                                    <ChevronDown className="h-3 w-3 ml-auto" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="user">user</SelectItem>
+                                    <SelectItem value="admin">admin</SelectItem>
+                                    <SelectItem value="customs_officer">customs_officer</SelectItem>
+                                    <SelectItem value="oga_officer">oga_officer</SelectItem>
+                                    <SelectItem value="inspector">inspector</SelectItem>
+                                    <SelectItem value="finance">finance</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {profile && (
+                                  isSuspended ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 gap-1 text-xs text-emerald-600 border-emerald-300 hover:bg-emerald-50"
+                                      disabled={reactivateMutation.isPending}
+                                      onClick={() => reactivateMutation.mutate({ profileId: profile.id })}
+                                    >
+                                      <UserCheck className="h-3 w-3" />Reactivate
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 px-2 gap-1 text-xs text-red-600 border-red-300 hover:bg-red-50"
+                                      onClick={() => setSuspendTarget({ userId: u.id, profileId: profile.id, name: u.name ?? u.email ?? "User" })}
+                                    >
+                                      <UserX className="h-3 w-3" />Suspend
+                                    </Button>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -260,6 +331,47 @@ export default function AdminUsers() {
               disabled={updateNameMutation.isPending || !editName.trim()}
             >
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suspend Profile Dialog */}
+      <Dialog open={!!suspendTarget} onOpenChange={(open) => { if (!open) { setSuspendTarget(null); setSuspendReason(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <UserX className="h-5 w-5" />
+              Suspend Profile — {suspendTarget?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Suspending this profile will prevent the user from submitting new declarations and accessing trader features. This action is logged in the audit trail.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reason for suspension (min 10 characters) *</Label>
+              <Textarea
+                placeholder="e.g. Repeated non-compliance with customs regulations…"
+                value={suspendReason}
+                onChange={e => setSuspendReason(e.target.value)}
+                rows={3}
+                className="text-sm resize-none"
+              />
+              <p className="text-xs text-muted-foreground text-right">{suspendReason.length}/10 min</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setSuspendTarget(null); setSuspendReason(""); }}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={suspendMutation.isPending || suspendReason.trim().length < 10 || !suspendTarget}
+              onClick={() => {
+                if (!suspendTarget) return;
+                suspendMutation.mutate({ profileId: suspendTarget.profileId, reason: suspendReason.trim() });
+              }}
+            >
+              {suspendMutation.isPending ? "Suspending…" : "Suspend Profile"}
             </Button>
           </DialogFooter>
         </DialogContent>

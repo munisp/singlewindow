@@ -1,4 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import {
   Monitor,
   Globe,
   ArrowRight,
+  Download,
 } from "lucide-react";
 import { useState, useCallback } from "react";
 
@@ -317,16 +319,42 @@ export default function AuditLog() {
               </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="gap-2"
-          >
-            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                const rows = data?.rows ?? [];
+                if (rows.length === 0) { toast.error("No data to export"); return; }
+                const headers = ["id","entityType","entityId","action","actorId","actorType","ipAddress","createdAt"];
+                const csv = [
+                  headers.join(","),
+                  ...rows.map((r: any) => headers.map(h => JSON.stringify(r[h] ?? "")).join(",")),
+                ].join("\n");
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `audit-log-${new Date().toISOString().slice(0,10)}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}

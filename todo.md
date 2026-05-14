@@ -247,3 +247,28 @@
 - [x] CEP alert risk-score badge (green 0–40, amber 41–70, red 71–100) added as new column in FlinkCepAlerts.tsx alerts table
 - [x] Warehouse card click-through: clicking a warehouse card switches to Inventory tab and pre-filters by that warehouse
 - [x] Ex-bond permit expiry countdown badge on each active permit (red <3d / amber 3–7d / green >7d)
+
+## v46 Sprint — Alert Detail Drawer, Warehouse Summary Chips, Permit Search/Filter
+- [x] CEP alert detail drawer (Sheet side panel with full payload, declaration IDs, resolution history, quick-action buttons)
+- [x] Warehouse inventory summary chips on each card (in bond / ex-bonded / re-exported / seized / destroyed counts)
+- [x] Permit search/filter bar in Permits tab (text search by permit no. or payment ref + status Select dropdown)
+
+## v47 Sprint — CSV Export, Record Entry Form, Renew Bond
+- [x] CEP alert export to CSV (Export CSV button respects active severity filter and tab, downloads dated file)
+- [x] Bond inventory Record Entry form (full dialog with warehouse select, UCR, HS code, qty, volume, value, origin, expiry days)
+- [x] Bond Guarantees Renew Bond action (Renew Bond button per guarantee card, dialog updates bond amount + expiry, admin-only mutation)
+
+## v48 Sprint — Release Form, Register Warehouse, Pattern Toggle (confirmed existing)
+- [x] Inventory Release form (Release button on each in-bond item, dialog with exit reason select: ex-bonded/re-exported/destroyed/seized)
+- [x] Warehouse Registration form (Register Warehouse button in Warehouses tab, full dialog with name, operator, address, capacity, bond amount/duration)
+- [x] CEP pattern enable/disable toggle confirmed already implemented (Switch + admin guard in Patterns tab)
+
+## v49 Sprint — Bulk Declaration Update, Audit CSV Export
+- [x] Admin Declarations bulk select + bulk status update (checkboxes on each row, select-all, Bulk Update button with status dialog, server mutation with audit log)
+- [x] Audit Log Export CSV button (exports current page to dated CSV file)
+- [x] Declarations bulkUpdateStatus tRPC mutation (admin/officer only, inArray update, audit log entry)
+
+## v50 Sprint — Production Hardening
+- [x] AdminUsers: suspend/reactivate profile action (profiles.suspend + profiles.approve mutations, reason dialog, profile status badge column)
+- [x] declarations.bulk.test.ts: 8 unit tests covering bulkUpdateStatus input validation and role guard
+- [x] All 65 test files, 1819 tests passing, zero TypeScript errors

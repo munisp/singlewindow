@@ -2,6 +2,7 @@
  * Admin Declarations — All declarations across all traders.
  * Wired to real tRPC declarations.all with server-side dateFrom/dateTo filtering.
  * Supports ?date=YYYY-MM-DD query param for drill-through from Pilot Dashboard trend chart.
+ * v49: Added bulk select + bulk status update.
  */
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
@@ -12,9 +13,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
-import { ClipboardList, Search, Eye, RefreshCw, Download, CalendarDays, X } from "lucide-react";
+import { ClipboardList, Search, Eye, RefreshCw, Download, CalendarDays, X, CheckSquare } from "lucide-react";
 import { ExportDeclarationsDialog } from "@/components/ExportDeclarationsDialog";
 
 const RISK_COLORS: Record<string, string> = {
@@ -32,12 +36,28 @@ const STATUS_COLORS: Record<string, string> = {
   CLEARED: "bg-teal-500/10 text-teal-400 border-teal-500/20",
 };
 
+const BULK_STATUSES = [
+  { value: "docs_required", label: "Docs Required" },
+  { value: "payment_pending", label: "Payment Pending" },
+  { value: "under_examination", label: "Under Examination" },
+  { value: "examination_complete", label: "Examination Complete" },
+  { value: "cleared", label: "Cleared" },
+  { value: "rejected", label: "Rejected" },
+];
+
 export default function AdminDeclarations() {
+  const utils = trpc.useUtils();
   const [location, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [page, setPage] = useState(0);
   const PAGE_SIZE = 25;
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDialog, setBulkDialog] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<string>("docs_required");
+  const [bulkNotes, setBulkNotes] = useState("");
 
   // Date filter state — initialised from ?date= query param for drill-through
   const [dateFromStr, setDateFromStr] = useState<string>(() => {
@@ -103,6 +123,37 @@ export default function AdminDeclarations() {
     (d.goodsDescription ?? "").toLowerCase().includes(search.toLowerCase())
   );
 
+  const allSelected = filtered.length > 0 && filtered.every((d) => selectedIds.has(d.id));
+  const someSelected = filtered.some((d) => selectedIds.has(d.id));
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((d) => d.id)));
+    }
+  };
+
+  const toggleOne = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const bulkUpdate = trpc.declarations.bulkUpdateStatus.useMutation({
+    onSuccess: (res) => {
+      toast.success(`Updated ${res.updated} declaration${res.updated !== 1 ? "s" : ""} to "${res.status.replace(/_/g, " ")}"`);
+      setBulkDialog(false);
+      setBulkNotes("");
+      setSelectedIds(new Set());
+      utils.declarations.all.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   return (
     <DashboardLayout title="All Declarations">
       {isError && (
@@ -122,6 +173,16 @@ export default function AdminDeclarations() {
             </p>
           </div>
           <div className="flex gap-2">
+            {selectedIds.size > 0 && (
+              <Button
+                size="sm"
+                className="gap-1.5 bg-amber-600 hover:bg-amber-700"
+                onClick={() => setBulkDialog(true)}
+              >
+                <CheckSquare className="h-4 w-4" />
+                Bulk Update ({selectedIds.size})
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
               <RefreshCw className="h-4 w-4" />
               Refresh
@@ -229,6 +290,14 @@ export default function AdminDeclarations() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/30">
+                      <th className="p-3 w-10">
+                        <Checkbox
+                          checked={allSelected}
+                          onCheckedChange={toggleAll}
+                          aria-label="Select all"
+                          className={someSelected && !allSelected ? "opacity-50" : ""}
+                        />
+                      </th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Declaration #</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">Origin</th>
                       <th className="text-left p-3 font-medium text-muted-foreground">HS Code</th>
@@ -241,7 +310,17 @@ export default function AdminDeclarations() {
                   </thead>
                   <tbody className="divide-y">
                     {filtered.map((d) => (
-                      <tr key={d.id} className="hover:bg-muted/20 transition-colors">
+                      <tr
+                        key={d.id}
+                        className={`hover:bg-muted/20 transition-colors ${selectedIds.has(d.id) ? "bg-primary/5" : ""}`}
+                      >
+                        <td className="p-3">
+                          <Checkbox
+                            checked={selectedIds.has(d.id)}
+                            onCheckedChange={() => toggleOne(d.id)}
+                            aria-label={`Select ${d.declarationNumber}`}
+                          />
+                        </td>
                         <td className="p-3 font-mono text-xs font-medium">{d.declarationNumber}</td>
                         <td className="p-3 text-sm">{d.countryOfOrigin ?? "—"}</td>
                         <td className="p-3 font-mono text-xs">{d.hsCode ?? "—"}</td>
@@ -298,6 +377,58 @@ export default function AdminDeclarations() {
           </div>
         )}
       </div>
+
+      {/* Bulk Update Dialog */}
+      <Dialog open={bulkDialog} onOpenChange={(open) => { if (!open) { setBulkDialog(false); setBulkNotes(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Bulk Update {selectedIds.size} Declaration{selectedIds.size !== 1 ? "s" : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">New Status *</Label>
+              <Select value={bulkStatus} onValueChange={setBulkStatus}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BULK_STATUSES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Notes (optional)</Label>
+              <Input
+                className="h-9 text-sm"
+                placeholder="Reason for bulk update…"
+                value={bulkNotes}
+                onChange={(e) => setBulkNotes(e.target.value)}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This will update {selectedIds.size} declaration{selectedIds.size !== 1 ? "s" : ""} to
+              "{BULK_STATUSES.find(s => s.value === bulkStatus)?.label}". This action is logged in the audit trail.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDialog(false)}>Cancel</Button>
+            <Button
+              disabled={bulkUpdate.isPending}
+              onClick={() => {
+                bulkUpdate.mutate({
+                  ids: Array.from(selectedIds),
+                  status: bulkStatus as any,
+                  notes: bulkNotes || undefined,
+                });
+              }}
+            >
+              {bulkUpdate.isPending ? "Updating…" : `Update ${selectedIds.size} Declaration${selectedIds.size !== 1 ? "s" : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

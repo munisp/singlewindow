@@ -20,6 +20,12 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,6 +50,7 @@ import {
   Route,
   Package,
   Zap,
+  Download,
 } from "lucide-react";
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -120,6 +127,9 @@ export default function FlinkCepAlerts() {
   const openAlerts = alerts.filter((a: any) => a.status === "open" || a.status === "investigating");
   const allOpenSelected = openAlerts.length > 0 && openAlerts.every((a: any) => selectedIds.has(a.alert_id));
   const someSelected = selectedIds.size > 0;
+
+  // Detail drawer state
+  const [drawerAlert, setDrawerAlert] = useState<any | null>(null);
 
   // Test-fire state
   const [testFireDialog, setTestFireDialog] = useState<{ patternId: string; patternName: string } | null>(null);
@@ -281,8 +291,8 @@ export default function FlinkCepAlerts() {
             </Tabs>
           </CardHeader>
           <CardContent>
-            {/* Severity filter */}
-            <div className="flex items-center gap-2 mb-4">
+            {/* Severity filter + CSV export */}
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
               <span className="text-xs text-muted-foreground font-medium">Severity:</span>
               <Select value={severityFilter} onValueChange={(v) => { setSeverityFilter(v); setSelectedIds(new Set()); }}>
                 <SelectTrigger className="h-8 w-36 text-xs">
@@ -301,6 +311,38 @@ export default function FlinkCepAlerts() {
                   {alerts.length} of {allAlerts.length} alert{allAlerts.length !== 1 ? "s" : ""}
                 </span>
               )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto h-8 text-xs gap-1.5"
+                disabled={alerts.length === 0}
+                onClick={() => {
+                  const headers = ["Alert ID", "Pattern", "Severity", "Risk Score", "Trader ID", "Declarations", "Status", "Fired At", "Resolved By", "Resolution Note"];
+                  const rows = alerts.map((a: any) => [
+                    a.alert_id,
+                    a.pattern_name,
+                    a.severity,
+                    a.risk_score ?? "",
+                    a.trader_id,
+                    (a.declaration_ids ?? []).join(";"),
+                    a.status,
+                    new Date(a.fired_at).toISOString(),
+                    a.resolved_by ?? "",
+                    (a.resolution_note ?? "").replace(/,/g, " "),
+                  ]);
+                  const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+                  const blob = new Blob([csv], { type: "text/csv" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `cep-alerts-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export CSV
+              </Button>
             </div>
             {alertsQuery.isLoading ? (
               <div className="text-center py-8 text-muted-foreground">Loading alerts…</div>
@@ -412,6 +454,15 @@ export default function FlinkCepAlerts() {
                         {new Date(alert.fired_at).toLocaleString()}
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-xs h-7 text-blue-400 hover:text-blue-300"
+                          onClick={() => setDrawerAlert(alert)}
+                        >
+                          View
+                        </Button>
                         {(alert.status === "open" || alert.status === "investigating") && (
                           <div className="flex items-center gap-1.5">
                             {alert.status === "open" && (
@@ -453,6 +504,7 @@ export default function FlinkCepAlerts() {
                             )}
                           </div>
                         )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -635,6 +687,132 @@ export default function FlinkCepAlerts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Alert Detail Drawer */}
+      <Sheet open={!!drawerAlert} onOpenChange={(open) => { if (!open) setDrawerAlert(null); }}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+          <SheetHeader className="pb-2">
+            <SheetTitle className="flex items-center gap-2 text-base">
+              <span className="text-muted-foreground">
+                {drawerAlert && (PATTERN_ICONS[drawerAlert.pattern_id] ?? <AlertTriangle className="h-4 w-4" />)}
+              </span>
+              {drawerAlert?.pattern_name}
+            </SheetTitle>
+          </SheetHeader>
+          {drawerAlert && (
+            <div className="px-4 pb-6 space-y-5">
+              {/* Status + Severity row */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className={SEVERITY_COLORS[drawerAlert.severity] ?? "bg-gray-500 text-white"}>
+                  {drawerAlert.severity.toUpperCase()}
+                </Badge>
+                <Badge variant="outline" className="text-xs capitalize">{drawerAlert.status.replace(/_/g, " ")}</Badge>
+                {drawerAlert.risk_score !== null && drawerAlert.risk_score !== undefined && (
+                  <Badge className={`font-mono text-xs ${
+                    drawerAlert.risk_score >= 71 ? "bg-red-100 text-red-700" :
+                    drawerAlert.risk_score >= 41 ? "bg-amber-100 text-amber-700" :
+                    "bg-green-100 text-green-700"
+                  }`}>Risk {drawerAlert.risk_score}</Badge>
+                )}
+              </div>
+
+              {/* Key metadata */}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Alert ID</p>
+                  <p className="font-mono text-xs">{drawerAlert.alert_id}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Trader ID</p>
+                  <p className="font-mono text-xs">{drawerAlert.trader_id}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">Fired At</p>
+                  <p className="text-xs">{new Date(drawerAlert.fired_at).toLocaleString()}</p>
+                </div>
+                {drawerAlert.resolved_at && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Resolved At</p>
+                    <p className="text-xs">{new Date(drawerAlert.resolved_at).toLocaleString()}</p>
+                  </div>
+                )}
+                {drawerAlert.resolved_by && (
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Resolved By</p>
+                    <p className="text-xs">{drawerAlert.resolved_by}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Declaration IDs */}
+              {drawerAlert.declaration_ids?.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1.5">Linked Declarations ({drawerAlert.declaration_ids.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {drawerAlert.declaration_ids.map((id: string | number) => (
+                      <Badge key={id} variant="outline" className="font-mono text-xs">{id}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Details payload */}
+              {drawerAlert.details && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1.5">Event Payload</p>
+                  <pre className="bg-muted/40 rounded-lg p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all border border-border">
+                    {JSON.stringify(
+                      typeof drawerAlert.details === "string"
+                        ? JSON.parse(drawerAlert.details)
+                        : drawerAlert.details,
+                      null, 2
+                    )}
+                  </pre>
+                </div>
+              )}
+
+              {/* Resolution note */}
+              {drawerAlert.resolution_note && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1.5">Resolution Notes</p>
+                  <p className="text-sm bg-muted/30 rounded-lg p-3 border border-border">{drawerAlert.resolution_note}</p>
+                </div>
+              )}
+
+              {/* Quick-action buttons */}
+              {(drawerAlert.status === "open" || drawerAlert.status === "investigating") && (
+                <div className="flex gap-2 pt-2 border-t border-border">
+                  {drawerAlert.status === "open" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs"
+                      onClick={() => {
+                        setAckStatus("investigating");
+                        setAckDialog({ alertId: drawerAlert.alert_id, patternName: drawerAlert.pattern_name, mode: "investigate" });
+                        setDrawerAlert(null);
+                      }}
+                    >
+                      Investigate
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="text-xs bg-green-600 hover:bg-green-700"
+                    onClick={() => {
+                      setAckStatus("resolved");
+                      setAckDialog({ alertId: drawerAlert.alert_id, patternName: drawerAlert.pattern_name, mode: "resolve" });
+                      setDrawerAlert(null);
+                    }}
+                  >
+                    Resolve
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
       {/* Test-Fire Dialog */}
       <Dialog open={!!testFireDialog} onOpenChange={(open) => { if (!open) { setTestFireDialog(null); setTestFireResult(null); } }}>
         <DialogContent className="max-w-lg">
