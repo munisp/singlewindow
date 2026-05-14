@@ -358,6 +358,43 @@ async function runBondedWarehouseExpiryCheck() {
       content: lines.join("\n"),
     });
 
+    // Write in-app notifications for each flagged bond so mobile/PWA users see them
+    try {
+      const { createNotification, getUserByOpenId } = await import("../db");
+      const { env } = await import("./env");
+      if (env.ownerOpenId) {
+        const owner = await getUserByOpenId(env.ownerOpenId);
+        if (owner) {
+          const allFlagged = [
+            ...alreadyExpired.map((item: any) => ({ ...item, flag: "expired" })),
+            ...expiringSoon.map((item: any) => ({ ...item, flag: "expiring_soon" })),
+          ];
+          for (const item of allFlagged) {
+            const daysUntilExpiry = Math.ceil(
+              (new Date(item.bond_expiry_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+            );
+            const isExpired = daysUntilExpiry < 0;
+            await createNotification({
+              userId: owner.id,
+              type: "permit_expiry_warning",
+              title: isExpired
+                ? `Bond Expired: ${item.ucr} (${Math.abs(daysUntilExpiry)}d overdue)`
+                : `Bond Expiring Soon: ${item.ucr} (${daysUntilExpiry}d left)`,
+              message: `${item.goods_description} — ${item.quantity} ${item.unit} at ${item.warehouse_name} (${item.warehouse_location}). ` +
+                (isExpired
+                  ? `Bond expired ${Math.abs(daysUntilExpiry)} day${Math.abs(daysUntilExpiry) === 1 ? "" : "s"} ago. Immediate action required.`
+                  : `Bond expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}. Initiate ex-bond clearance or renewal.`),
+              entityType: "bonded_inventory",
+              entityId: item.id,
+            });
+          }
+          console.log(`[Cron] Bonded warehouse expiry check: ${allFlagged.length} in-app notification(s) created for owner`);
+        }
+      }
+    } catch (notifErr) {
+      console.warn("[Cron] Bonded warehouse expiry check: failed to write in-app notifications:", notifErr);
+    }
+
     console.log(
       `[Cron] Bonded warehouse expiry check complete — ` +
       `${expiringSoon.length} expiring soon, ${alreadyExpired.length} already expired. ` +

@@ -213,3 +213,20 @@
 - [ ] Bulk resolve action for CEP alerts table (checkbox + toolbar)
 - [ ] Merge runExpiryCheck results into Expiry Alerts banner in BondedWarehouseManagement
 - [ ] Network cost line (teal) in Flutter FinOps trend chart
+
+## v42 Sprint — CEP Toggle, CSV Export, Flutter Notifications
+- [ ] CEP pattern enable/disable toggle (adminProcedure + Switch in FlinkCepAlerts.tsx)
+- [ ] Bonded warehouse expiry CSV export button (URL.createObjectURL)
+- [ ] Flutter in-app bond expiry notifications (notifications table + polling in notifications_screen.dart)
+
+## v42 Sprint — CEP Toggle, CSV Export, Flutter Bond Expiry Notifications
+- [x] CEP pattern enable/disable toggle (adminProcedure + toggle switch in PWA pattern cards)
+- [x] Download Expiry Report CSV button in BondedWarehouseManagement expiry banner
+- [x] runBondedWarehouseExpiryCheck writes per-bond in-app notifications to notifications table
+- [x] Flutter notifications_screen.dart upgraded with type icons, Bond Expiry filter tab, 30s polling, mark-all-read
+
+## v42 Sprint — CEP Toggle, CSV Export, Flutter Bond Expiry Notifications
+- [x] CEP pattern enable/disable toggle (adminProcedure + toggle switch in PWA pattern cards)
+- [x] Download Expiry Report CSV button in BondedWarehouseManagement expiry banner
+- [x] runBondedWarehouseExpiryCheck writes per-bond in-app notifications to notifications table
+- [x] Flutter notifications_screen.dart upgraded with type icons, Bond Expiry filter tab, 30s polling, mark-all-read

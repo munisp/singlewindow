@@ -67,7 +67,11 @@ export const cepRouter = router({
         "UPDATE cep_patterns SET status = $1, updated_at = NOW() WHERE pattern_id = $2",
         [input.status, input.patternId]
       );
-      return { success: true };
+      const rows = await pgQuery<{ name: string; status: string }>(
+        "SELECT name, status FROM cep_patterns WHERE pattern_id = $1",
+        [input.patternId]
+      );
+      return { success: true, name: rows[0]?.name ?? input.patternId, status: rows[0]?.status ?? input.status };
     }),
 
   createPattern: adminProcedure
@@ -287,4 +291,5 @@ export const cepRouter = router({
       const failed = results.filter((r) => !r.success).length;
       return { succeeded, failed, results };
     }),
+
 });

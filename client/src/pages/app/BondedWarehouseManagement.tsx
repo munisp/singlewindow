@@ -8,7 +8,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw,
+  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw, Download,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -95,6 +95,26 @@ export default function BondedWarehouseManagement() {
     },
     onError: (err) => toast.error(err.message),
   });
+
+  /** Export allItems from the expiry banner as a CSV download */
+  const exportExpiryCSV = (allItems: any[]) => {
+    const headers = ["UCR / Name", "Type", "Days Until Expiry", "Severity", "Source"];
+    const rows = allItems.map((item) => [
+      `"${String(item.name).replace(/"/g, '""')}"`,
+      `"${item.label}"`,
+      item.daysUntilExpiry >= 0 ? item.daysUntilExpiry : `${Math.abs(item.daysUntilExpiry)} (overdue)`,
+      item.severity,
+      item.source,
+    ]);
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bond-expiry-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   if (isLoading) return (
     <div className="p-6 flex items-center justify-center h-64">
@@ -234,9 +254,19 @@ export default function BondedWarehouseManagement() {
                   <span className="font-medium text-orange-800">Expiry Alerts</span>
                   <Badge className="bg-orange-200 text-orange-800 text-xs">{allItems.length}</Badge>
                 </div>
-                {lastScanItems.length > 0 && (
-                  <span className="text-xs text-orange-600 italic">Includes latest scan results</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {lastScanItems.length > 0 && (
+                    <span className="text-xs text-orange-600 italic">Includes latest scan results</span>
+                  )}
+                  <button
+                    onClick={() => exportExpiryCSV(allItems)}
+                    className="flex items-center gap-1 text-xs text-orange-700 hover:text-orange-900 font-medium border border-orange-300 rounded px-2 py-0.5 bg-white/60 hover:bg-white/90 transition-colors"
+                    title="Download expiry report as CSV"
+                  >
+                    <Download className="h-3 w-3" />
+                    Export CSV
+                  </button>
+                </div>
               </div>
               <div className="space-y-1">
                 {allItems.slice(0, 8).map((item) => (

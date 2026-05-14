@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -96,6 +97,14 @@ export default function FlinkCepAlerts() {
       setBulkNotes("");
       alertsQuery.refetch();
       statsQuery.refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const togglePatternMutation = trpc.cep.togglePattern.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Pattern "${data.name}" ${data.status === "enabled" ? "enabled" : "disabled"}`);
+      patternsQuery.refetch();
     },
     onError: (err) => toast.error(err.message),
   });
@@ -390,9 +399,21 @@ export default function FlinkCepAlerts() {
                       <span className="text-muted-foreground">{PATTERN_ICONS[p.pattern_id] ?? <AlertTriangle className="h-4 w-4" />}</span>
                       <span className="text-sm font-medium text-foreground">{p.name}</span>
                     </div>
-                    <Badge variant={p.status === 'enabled' ? "default" : "secondary"} className="text-xs">
-                      {p.status === 'enabled' ? "Active" : "Disabled"}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={p.status === "enabled" ? "default" : "secondary"} className="text-xs">
+                        {p.status === "enabled" ? "Active" : "Disabled"}
+                      </Badge>
+                      {user?.role === "admin" && (
+                        <Switch
+                          checked={p.status === "enabled"}
+                          disabled={togglePatternMutation.isPending}
+                          onCheckedChange={(checked) =>
+                            togglePatternMutation.mutate({ patternId: p.pattern_id, status: checked ? "enabled" : "disabled" })
+                          }
+                          aria-label={`Toggle ${p.name}`}
+                        />
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-muted-foreground">{p.description}</p>
                 </div>
