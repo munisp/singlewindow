@@ -57,3 +57,10 @@
 - [x] Kubernetes: Deployment + Service + HPA manifests for all 8 polyglot services
 - [x] TypeScript BFF: polyglotClients.ts wiring Go/Rust/Python services via gRPC + HTTP
 - [x] TypeScript BFF: AI risk scorer integrated into declarations router with LLM fallback
+
+## Final Verification
+- [x] Flutter api_service.dart — added getOgaStatus, listOgaAgencies, getAeoApplications, submitAeoApplication, getAeoStatus, uploadDocument
+- [x] React Native — verified tRPC type-safe client covers all 519 procedures via AppRouter type
+- [x] All 1846/1846 tests passing — 66/66 test files green
+- [x] Local PostgreSQL with all 71 tables applied and schema migrations clean
+- [x] Checkpoint saved: 778be513 (pre-polyglot) + final checkpoint

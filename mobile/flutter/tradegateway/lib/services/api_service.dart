@@ -184,6 +184,67 @@ class ApiService {
     return _parseRaw(res);
   }
 
+  // ─── OGA Status ──────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getOgaStatus({String? declarationId}) async {
+    final res = await _dio.get("/oga.getDeclarationOgaStatus", queryParameters: {
+      if (declarationId != null)
+        "input": jsonEncode({"json": {"declarationId": int.tryParse(declarationId) ?? 0}}),
+    });
+    return _parseRaw(res);
+  }
+
+  Future<List<Map<String, dynamic>>> listOgaAgencies() async {
+    final res = await _dio.get("/oga.listAgencies", queryParameters: {
+      "input": jsonEncode({"json": {}}),
+    });
+    final raw = _parseRaw(res);
+    return List<Map<String, dynamic>>.from(raw["agencies"] ?? []);
+  }
+
+  // ─── AEO ──────────────────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getAeoApplications({int page = 1}) async {
+    final res = await _dio.get("/aeo.listApplications", queryParameters: {
+      "input": jsonEncode({"json": {"page": page, "limit": 20}}),
+    });
+    return _parseRaw(res);
+  }
+
+  Future<Map<String, dynamic>> submitAeoApplication(Map<String, dynamic> data) async {
+    final res = await _dio.post("/aeo.submitApplication", data: {"json": data});
+    return _parseRaw(res);
+  }
+
+  Future<Map<String, dynamic>> getAeoStatus() async {
+    final res = await _dio.get("/aeo.getMyAeoStatus", queryParameters: {
+      "input": jsonEncode({"json": {}}),
+    });
+    return _parseRaw(res);
+  }
+
+  // ─── Document Upload ──────────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> uploadDocument({
+    required String filePath,
+    required String fileName,
+    required String mimeType,
+    String? declarationId,
+    String? documentType,
+  }) async {
+    final formData = FormData.fromMap({
+      "file": await MultipartFile.fromFile(filePath, filename: fileName),
+      if (declarationId != null) "declarationId": declarationId,
+      if (documentType != null) "documentType": documentType,
+    });
+    final res = await _dio.post(
+      "/documents.upload",
+      data: formData,
+      options: Options(contentType: "multipart/form-data"),
+    );
+    return _parseRaw(res);
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   T _parseResult<T>(Response res, T Function(Map<String, dynamic>) fromJson) {
