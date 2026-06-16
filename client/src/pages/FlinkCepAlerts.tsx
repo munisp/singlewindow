@@ -119,6 +119,21 @@ export default function FlinkCepAlerts() {
     onError: (err) => toast.error(err.message),
   });
 
+  const [createPatternDialog, setCreatePatternDialog] = useState(false);
+  const [newPatternName, setNewPatternName] = useState("");
+  const [newPatternDesc, setNewPatternDesc] = useState("");
+  const createPatternMutation = trpc.cep.createPattern.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Pattern created: ${data.patternId}`);
+      patternsQuery.refetch();
+      statsQuery.refetch();
+      setCreatePatternDialog(false);
+      setNewPatternName("");
+      setNewPatternDesc("");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   const stats = statsQuery.data;
   const allAlerts = (alertsQuery.data?.alerts ?? []) as any[];
   const alerts = severityFilter === "all"
@@ -518,7 +533,18 @@ export default function FlinkCepAlerts() {
         {/* Active Patterns */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Registered CEP Patterns</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Registered CEP Patterns</CardTitle>
+              {user?.role === "admin" && (
+                <Button
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setCreatePatternDialog(true)}
+                >
+                  + Add Pattern
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -567,6 +593,47 @@ export default function FlinkCepAlerts() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Create Pattern Dialog */}
+      <Dialog open={createPatternDialog} onOpenChange={(open) => { if (!open) { setCreatePatternDialog(false); setNewPatternName(""); setNewPatternDesc(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Custom CEP Pattern</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Custom patterns are evaluated against all incoming declarations. A unique pattern ID will be auto-generated.
+            </p>
+            <div className="space-y-2">
+              <Label>Pattern Name <span className="text-red-500">*</span></Label>
+              <Input
+                value={newPatternName}
+                onChange={(e) => setNewPatternName(e.target.value)}
+                placeholder="e.g. High-Value Low-Duty Mismatch"
+                maxLength={200}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                value={newPatternDesc}
+                onChange={(e) => setNewPatternDesc(e.target.value)}
+                placeholder="Describe what this pattern detects and when it fires…"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreatePatternDialog(false)}>Cancel</Button>
+            <Button
+              disabled={newPatternName.trim().length < 3 || createPatternMutation.isPending}
+              onClick={() => createPatternMutation.mutate({ name: newPatternName.trim(), description: newPatternDesc.trim() || undefined })}
+            >
+              {createPatternMutation.isPending ? "Creating…" : "Create Pattern"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bulk Resolve Dialog */}
       <Dialog open={bulkDialog} onOpenChange={(open) => { if (!open) { setBulkDialog(false); setBulkNotes(""); } }}>

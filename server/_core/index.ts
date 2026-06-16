@@ -1276,6 +1276,8 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
     // Seed default KPI targets on startup (idempotent)
     import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
+    // Seed demo data (bonded warehouses, CEP patterns, cost records) — idempotent
+    import("../seedDemoData").then(({ seedAllDemoData }) => seedAllDemoData()).catch(() => {});
   });
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const gracefulShutdown = async (signal: string) => {

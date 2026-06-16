@@ -113,6 +113,13 @@ class ApiService {
     return _parseRaw(res);
   }
 
+  Future<Map<String, dynamic>> getPaymentById(String paymentId) async {
+    final res = await _dio.get("/payments.getById", queryParameters: {
+      "input": jsonEncode({"json": {"paymentId": paymentId}}),
+    });
+    return _parseRaw(res);
+  }
+
   // ─── Cargo Tracking ───────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> listCargoTracking({int page = 1}) async {

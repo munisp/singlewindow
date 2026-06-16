@@ -1,4 +1,4 @@
-/// TradeGateway™ NGSWTP — Flutter Scan Document Screen (v37 — DB-backed)
+/// TradeGateway™ NGSWTP — Flutter Scan Document Screen (v43 — uploadDocument flow wired)
 library;
 import "package:flutter/material.dart";
 import "../../services/api_service.dart";
@@ -13,6 +13,8 @@ class _ScanDocumentScreenState extends State<ScanDocumentScreen> {
   bool _loading = true;
   Map<String, dynamic>? _stats;
   String? _error;
+  bool _uploading = false;
+  Map<String, dynamic>? _uploadResult;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -27,6 +29,35 @@ class _ScanDocumentScreenState extends State<ScanDocumentScreen> {
     }
   }
 
+  /// Simulate picking a file and uploading it via uploadDocument().
+  /// In production, integrate image_picker or file_picker package.
+  Future<void> _simulateUpload(String docType) async {
+    setState(() { _uploading = true; _uploadResult = null; });
+    try {
+      // Simulate upload with a placeholder path (in production use image_picker)
+      final result = await ApiService().uploadDocument(
+        filePath: "/tmp/placeholder_${docType.toLowerCase()}.pdf",
+        fileName: "placeholder_${docType.toLowerCase()}.pdf",
+        mimeType: "application/pdf",
+        documentType: docType,
+        declarationId: null,
+      );
+      setState(() { _uploadResult = result; _uploading = false; });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("${docType} uploaded successfully"), backgroundColor: const Color(0xFF10B981)),
+        );
+      }
+    } catch (e) {
+      setState(() { _uploading = false; });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Upload failed: ${e.toString()}"), backgroundColor: const Color(0xFFEF4444)),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -37,6 +68,7 @@ class _ScanDocumentScreenState extends State<ScanDocumentScreen> {
         iconTheme: const IconThemeData(color: Color(0xFFD4A017)),
       ),
       body: ListView(padding: const EdgeInsets.all(16), children: [
+        // Camera viewfinder placeholder
         Container(
           height: 240,
           decoration: BoxDecoration(color: const Color(0xFF111827), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFD4A017).withOpacity(0.3), width: 2)),
@@ -55,6 +87,38 @@ class _ScanDocumentScreenState extends State<ScanDocumentScreen> {
             ),
           ]),
         ),
+        const SizedBox(height: 24),
+        // Document type quick upload buttons
+        const Text("Quick Upload", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 12),
+        if (_uploading)
+          const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(color: Color(0xFFD4A017))))
+        else
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final docType in ["invoice", "bill_of_lading", "packing_list", "certificate_of_origin", "import_permit"])
+              OutlinedButton.icon(
+                onPressed: () => _simulateUpload(docType),
+                icon: const Icon(Icons.upload_file, size: 16),
+                label: Text(docType.replaceAll("_", " ").toUpperCase(), style: const TextStyle(fontSize: 11)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFD4A017),
+                  side: const BorderSide(color: Color(0xFFD4A017), width: 0.5),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+              ),
+          ]),
+        if (_uploadResult != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: const Color(0xFF10B981).withOpacity(0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3))),
+            child: Row(children: [
+              const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text("Uploaded: ${_uploadResult!["fileName"] ?? _uploadResult!["url"] ?? "Document"}", style: const TextStyle(color: Color(0xFF10B981), fontSize: 12))),
+            ]),
+          ),
+        ],
         const SizedBox(height: 24),
         const Text("Recent Activity", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),

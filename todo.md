@@ -64,7 +64,7 @@
 - [x] All 15 demo accounts promoted to admin role
 - [x] Final smoke tests: 17/17 pass
 - [x] Final tests: 1,679 passing
-- [ ] Generate comprehensive v26 archive (in progress)
+- [x] Generate comprehensive v26 archive (in progress)
 
 ## Sprint: 1B Payments Next Steps (Apr 2026)
 - [x] Background payment queue worker — poll payment_queue, call Mojaloop ILP, commit/retry with exponential back-off
@@ -76,40 +76,40 @@
 ## v33 Comprehensive Audit Fixes (Apr 24, 2026)
 
 ### PWA Critical Fixes
-- [ ] Fix PilotDashboard "Details" button — add onClick navigation to declaration detail
-- [ ] Fix CustomsRisk row ChevronRight button — add onClick navigation to declaration detail
-- [ ] Fix FreeZoneOps "Register Zone" dialog — wire submit to freeZone.registerZone mutation
-- [ ] Update CI workflow to run all 9 journey E2E specs (not just journey8)
-- [ ] Add missing env vars to env.ts: ASEAN_SW_SERVICE_URL, FREEZONE_SERVICE_URL, etc.
-- [ ] Replace cep.ts MOCK_ data with DB-backed fallback
-- [ ] Replace cost.ts MOCK_ data with DB-backed fallback
+- [x] Fix PilotDashboard "Details" button — add onClick navigation to declaration detail
+- [x] Fix CustomsRisk row ChevronRight button — add onClick navigation to declaration detail
+- [x] Fix FreeZoneOps "Register Zone" dialog — wire submit to freeZone.registerZone mutation
+- [x] Update CI workflow to run all 9 journey E2E specs (not just journey8)
+- [x] Add missing env vars to env.ts: ASEAN_SW_SERVICE_URL, FREEZONE_SERVICE_URL, etc.
+- [x] Replace cep.ts MOCK_ data with DB-backed fallback
+- [x] Replace cost.ts MOCK_ data with DB-backed fallback
 
 ### Mobile Parity — React Native (10 new screens)
-- [ ] Add AIAssistantScreen to RN (AI chat with trpc.ai.chat)
-- [ ] Add DutyDrawbackScreen to RN (trpc.drawback.*)
-- [ ] Add FinanceScreen to RN (trpc.finance.*)
-- [ ] Add PostClearanceAuditScreen to RN (trpc.postAudit.*)
-- [ ] Add NotificationPreferencesScreen to RN (trpc.notificationPreferences.*)
-- [ ] Add OnboardingProgressScreen to RN (trpc.onboarding.*)
-- [ ] Add MyCertificatesScreen to RN (trpc.rulesOfOrigin.myCerts)
-- [ ] Add RulesOfOriginScreen to RN (trpc.rulesOfOrigin.*)
-- [ ] Add MojaloopPaymentsScreen to RN (trpc.mojaloop.*)
-- [ ] Add AeoSelfAssessmentScreen to RN (trpc.aeo.selfAssessment*)
-- [ ] Wire all new RN screens into AppNavigator.tsx
+- [x] Add AIAssistantScreen to RN (AI chat with trpc.ai.chat)
+- [x] Add DutyDrawbackScreen to RN (trpc.drawback.*)
+- [x] Add FinanceScreen to RN (trpc.finance.*)
+- [x] Add PostClearanceAuditScreen to RN (trpc.postAudit.*)
+- [x] Add NotificationPreferencesScreen to RN (trpc.notificationPreferences.*)
+- [x] Add OnboardingProgressScreen to RN (trpc.onboarding.*)
+- [x] Add MyCertificatesScreen to RN (trpc.rulesOfOrigin.myCerts)
+- [x] Add RulesOfOriginScreen to RN (trpc.rulesOfOrigin.*)
+- [x] Add MojaloopPaymentsScreen to RN (trpc.mojaloop.*)
+- [x] Add AeoSelfAssessmentScreen to RN (trpc.aeo.selfAssessment*)
+- [x] Wire all new RN screens into AppNavigator.tsx
 
 ### Mobile Parity — Flutter (10 new screens)
-- [ ] Add ai_assistant_screen.dart to Flutter
-- [ ] Add duty_drawback_screen.dart to Flutter
-- [ ] Add finance_screen.dart to Flutter
-- [ ] Add post_clearance_audit_screen.dart to Flutter
-- [ ] Add notification_preferences_screen.dart to Flutter
-- [ ] Add onboarding_progress_screen.dart to Flutter
-- [ ] Add my_certificates_screen.dart to Flutter
-- [ ] Add rules_of_origin_screen.dart to Flutter
-- [ ] Add mojaloop_payments_screen.dart to Flutter
-- [ ] Add aeo_self_assessment_screen.dart to Flutter
-- [ ] Add payment_detail_screen.dart to Flutter (parity with RN)
-- [ ] Wire all new Flutter screens into app_router.dart
+- [x] Add ai_assistant_screen.dart to Flutter
+- [x] Add duty_drawback_screen.dart to Flutter
+- [x] Add finance_screen.dart to Flutter
+- [x] Add post_clearance_audit_screen.dart to Flutter
+- [x] Add notification_preferences_screen.dart to Flutter
+- [x] Add onboarding_progress_screen.dart to Flutter
+- [x] Add my_certificates_screen.dart to Flutter
+- [x] Add rules_of_origin_screen.dart to Flutter
+- [x] Add mojaloop_payments_screen.dart to Flutter
+- [x] Add aeo_self_assessment_screen.dart to Flutter
+- [x] Add payment_detail_screen.dart to Flutter (parity with RN)
+- [x] Wire all new Flutter screens into app_router.dart
 
 ## v33 Completed (Apr 24, 2026)
 - [x] Fix PilotDashboard "Details" button — onClick navigation to declaration detail
@@ -127,55 +127,55 @@
 ## v37 Sprint — Orphan/Scaffolded/Generic Feature Implementation
 
 ### Server Routers — Replace In-Memory/Mock Data with DB
-- [ ] cargoTracking.ts — replace BASE_VESSELS in-memory array with vesselTrackingEvents DB; add insert/update mutations
-- [ ] portCongestion.ts — replace PORT_PROFILES in-memory with portLocations+portCongestionEvents DB; add record mutation
-- [ ] bondedWarehouse.ts — replace _warehouses/_inventory/_permits in-memory with new DB tables
-- [ ] cep.ts — replace MOCK_PATTERNS/MOCK_ALERTS with DB-backed cep_patterns+cep_alerts tables
-- [ ] cost.ts — replace MOCK_TENANT_COSTS/MOCK_COST_TREND with DB-backed cost_records table
-- [ ] devPortal.ts — replace Math.random() IDs with DB sequences; wire real apiUsageLogs queries
+- [x] cargoTracking.ts — replace BASE_VESSELS in-memory array with vesselTrackingEvents DB; add insert/update mutations
+- [x] portCongestion.ts — replace PORT_PROFILES in-memory with portLocations+portCongestionEvents DB; add record mutation
+- [x] bondedWarehouse.ts — replace _warehouses/_inventory/_permits in-memory with new DB tables
+- [x] cep.ts — replace MOCK_PATTERNS/MOCK_ALERTS with DB-backed cep_patterns+cep_alerts tables
+- [x] cost.ts — replace MOCK_TENANT_COSTS/MOCK_COST_TREND with DB-backed cost_records table
+- [x] devPortal.ts — replace Math.random() IDs with DB sequences; wire real apiUsageLogs queries
 
 ### DB Schema — New Tables
-- [ ] Add bonded_warehouses, bonded_inventory, ex_bond_permits tables
-- [ ] Add cep_patterns, cep_alerts tables
-- [ ] Add cost_records table
-- [ ] Run pnpm db:push
+- [x] Add bonded_warehouses, bonded_inventory, ex_bond_permits tables
+- [x] Add cep_patterns, cep_alerts tables
+- [x] Add cost_records table
+- [x] Run pnpm db:push
 
 ### Server Routers — Add Missing Domain Business Logic
-- [ ] traderScorecard.ts — add updateScorecard mutation + trend calculation
-- [ ] officerWorkload.ts — add assignDeclaration mutation + workload rebalancing
-- [ ] executiveDashboard.ts — add exportReport + KPI target mutations
-- [ ] pilot.ts — replace Math.random() simulation with real DB queries
+- [x] traderScorecard.ts — add updateScorecard mutation + trend calculation
+- [x] officerWorkload.ts — add assignDeclaration mutation + workload rebalancing
+- [x] executiveDashboard.ts — add exportReport + KPI target mutations
+- [x] pilot.ts — replace Math.random() simulation with real DB queries
 
 ### PWA Pages — Wire Missing tRPC Calls
-- [ ] FreeZoneOps.tsx — add live tRPC queries for freeZone router
-- [ ] Create PortCongestion.tsx wired to portCongestion router
-- [ ] AdminDeclarations.tsx — add bulk approve/assign mutations
-- [ ] TraderDeclarations.tsx — add declaration submission workflow
-- [ ] OfficerWorkload.tsx — add assignment mutation UI
-- [ ] ExecutiveDashboard.tsx — add export and KPI target UI
+- [x] FreeZoneOps.tsx — add live tRPC queries for freeZone router
+- [x] Create PortCongestion.tsx wired to portCongestion router
+- [x] AdminDeclarations.tsx — add bulk approve/assign mutations
+- [x] TraderDeclarations.tsx — add declaration submission workflow
+- [x] OfficerWorkload.tsx — add assignment mutation UI
+- [x] ExecutiveDashboard.tsx — add export and KPI target UI
 
 ### Flutter Screens — Implement 16 TODO Stubs
-- [ ] declarations_screen.dart — wire ApiService().listDeclarations()
-- [ ] declaration_detail_screen.dart — wire ApiService().getDeclaration()
-- [ ] new_declaration_screen.dart — wire ApiService().createDeclaration()
-- [ ] payments_screen.dart — wire ApiService().listPayments()
-- [ ] notifications_screen.dart — wire ApiService().listNotifications()
-- [ ] kyc_screen.dart — wire ApiService().getKYCStatus()
-- [ ] dashboard_screen.dart — wire ApiService().getMe() + stats
-- [ ] profile_screen.dart — wire ApiService().getMyProfile() + update
-- [ ] cargo_tracking_screen.dart — wire ApiService().listCargoTracking()
-- [ ] document_vault_screen.dart — wire ApiService().listDocuments()
-- [ ] hs_code_lookup_screen.dart — wire ApiService().searchHsCode()
-- [ ] oga_status_screen.dart — add + wire ApiService().getOgaStatus()
-- [ ] system_status_screen.dart — wire ApiService().getSystemStatus()
-- [ ] trader_scorecard_screen.dart — wire ApiService().getTraderScorecard()
-- [ ] aeo_screen.dart — add + wire ApiService().getAeoApplications()
-- [ ] scan_document_screen.dart — wire document upload flow
+- [x] declarations_screen.dart — wire ApiService().listDeclarations()
+- [x] declaration_detail_screen.dart — wire ApiService().getDeclaration()
+- [x] new_declaration_screen.dart — wire ApiService().createDeclaration()
+- [x] payments_screen.dart — wire ApiService().listPayments()
+- [x] notifications_screen.dart — wire ApiService().listNotifications()
+- [x] kyc_screen.dart — wire ApiService().getKYCStatus()
+- [x] dashboard_screen.dart — wire ApiService().getMe() + stats
+- [x] profile_screen.dart — wire ApiService().getMyProfile() + update
+- [x] cargo_tracking_screen.dart — wire ApiService().listCargoTracking()
+- [x] document_vault_screen.dart — wire ApiService().listDocuments()
+- [x] hs_code_lookup_screen.dart — wire ApiService().searchHsCode()
+- [x] oga_status_screen.dart — add + wire ApiService().getOgaStatus()
+- [x] system_status_screen.dart — wire ApiService().getSystemStatus()
+- [x] trader_scorecard_screen.dart — wire ApiService().getTraderScorecard()
+- [x] aeo_screen.dart — add + wire ApiService().getAeoApplications()
+- [x] scan_document_screen.dart — wire document upload flow
 
 ### Flutter ApiService — Add Missing Methods
-- [ ] Add getOgaStatus() to api_service.dart
-- [ ] Add getAeoApplications() + submitAeoApplication() to api_service.dart
-- [ ] Add uploadDocument() to api_service.dart
+- [x] Add getOgaStatus() to api_service.dart
+- [x] Add getAeoApplications() + submitAeoApplication() to api_service.dart
+- [x] Add uploadDocument() to api_service.dart
 
 ## v37 Sprint — Orphan/Scaffold Elimination (COMPLETED)
 - [x] Deep scan: identified 5 in-memory routers, 17 Flutter stub screens, 2 missing utility exports
@@ -191,12 +191,12 @@
 - [x] All 1766 tests passing (61 test files)
 
 ## v38 Sprint — Seed Data + Finance Screen Wiring
-- [ ] Seed bonded_warehouses with 6 realistic demo warehouses
-- [ ] Seed bonded_inventory with 20+ realistic goods-in-bond records
-- [ ] Seed ex_bond_permits with 10 permit records
-- [ ] Pre-populate cep_patterns with 5 WCO standard fraud patterns
-- [ ] Pre-populate cep_alerts with 15 sample alerts linked to patterns
-- [ ] Seed cost_records with realistic FinOps data
+- [x] Seed bonded_warehouses with 6 realistic demo warehouses
+- [x] Seed bonded_inventory with 20+ realistic goods-in-bond records
+- [x] Seed ex_bond_permits with 10 permit records
+- [x] Pre-populate cep_patterns with 5 WCO standard fraud patterns
+- [x] Pre-populate cep_alerts with 15 sample alerts linked to patterns
+- [x] Seed cost_records with realistic FinOps data
 - [x] Wire Flutter finance_screen.dart to trpc.cost.getClusterSummary
 
 ## v39 Sprint — Next Steps Implementation
@@ -210,14 +210,14 @@
 - [x] Storage cost line in Flutter FinOps trend chart
 
 ## v41 Sprint — Next Steps Implementation
-- [ ] Bulk resolve action for CEP alerts table (checkbox + toolbar)
-- [ ] Merge runExpiryCheck results into Expiry Alerts banner in BondedWarehouseManagement
-- [ ] Network cost line (teal) in Flutter FinOps trend chart
+- [x] Bulk resolve action for CEP alerts table (checkbox + toolbar)
+- [x] Merge runExpiryCheck results into Expiry Alerts banner in BondedWarehouseManagement
+- [x] Network cost line (teal) in Flutter FinOps trend chart
 
 ## v42 Sprint — CEP Toggle, CSV Export, Flutter Notifications
-- [ ] CEP pattern enable/disable toggle (adminProcedure + Switch in FlinkCepAlerts.tsx)
-- [ ] Bonded warehouse expiry CSV export button (URL.createObjectURL)
-- [ ] Flutter in-app bond expiry notifications (notifications table + polling in notifications_screen.dart)
+- [x] CEP pattern enable/disable toggle (adminProcedure + Switch in FlinkCepAlerts.tsx)
+- [x] Bonded warehouse expiry CSV export button (URL.createObjectURL)
+- [x] Flutter in-app bond expiry notifications (notifications table + polling in notifications_screen.dart)
 
 ## v42 Sprint — CEP Toggle, CSV Export, Flutter Bond Expiry Notifications
 - [x] CEP pattern enable/disable toggle (adminProcedure + toggle switch in PWA pattern cards)

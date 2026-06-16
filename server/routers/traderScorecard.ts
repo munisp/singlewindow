@@ -6,7 +6,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { declarations, dutyDrawbackClaims } from "../../drizzle/schema";
+import { declarations, dutyDrawbackClaims, users, stakeholderProfiles } from "../../drizzle/schema";
 import { eq, and, desc, sql, count, gte, lt } from "drizzle-orm";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -286,5 +286,66 @@ export const traderScorecardRouter = router({
           rejectionRate: platformTotal > 0 ? Math.round((Number(platformStats?.rejected ?? 0) / platformTotal) * 10000) / 100 : 0,
         },
       };
+    }),
+
+  /**
+   * updateScorecard — admin/customs officer can manually adjust a trader's AEO tier.
+   */
+  updateScorecard: protectedProcedure
+    .input(z.object({
+      traderId: z.number().int().positive(),
+      aeoTier: z.enum(["standard", "silver", "gold"]).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!(["admin", "customs_officer"] as string[]).includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.aeoTier) updates.aeoTier = input.aeoTier;
+      // aeoTier lives in stakeholder_profiles, not users
+      const [updated] = await db
+        .update(stakeholderProfiles)
+        .set(updates as any)
+        .where(eq(stakeholderProfiles.userId, input.traderId))
+        .returning({ id: stakeholderProfiles.id, aeoTier: stakeholderProfiles.aeoTier });
+      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "Trader profile not found" });
+      return { success: true, traderId: input.traderId, aeoTier: updated.aeoTier };
+    }),
+
+  /**
+   * getComplianceTrend — 12-month compliance score trend for a trader.
+   */
+  getComplianceTrend: protectedProcedure
+    .input(z.object({ traderId: z.number().int().positive().optional() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return { trend: [] };
+      const targetId = input.traderId ?? ctx.user.id;
+      const twelveMonthsAgo = new Date();
+      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+      const traderDecls = await db.select({
+        status: declarations.status,
+        submittedAt: declarations.submittedAt,
+      }).from(declarations).where(and(
+        eq(declarations.traderId, targetId),
+        gte(declarations.submittedAt, twelveMonthsAgo),
+      ));
+      const months = getLast12Months();
+      const trend = months.map((month) => {
+        const [year, mon] = month.split("-").map(Number);
+        const monthDecls = traderDecls.filter((d) => {
+          if (!d.submittedAt) return false;
+          const dt = new Date(d.submittedAt);
+          return dt.getFullYear() === year && dt.getMonth() + 1 === mon;
+        });
+        const total = monthDecls.length;
+        const cleared = monthDecls.filter((d) => d.status === "cleared").length;
+        const rejected = monthDecls.filter((d) => d.status === "rejected").length;
+        const score = total > 0 ? Math.round((cleared / total) * 100) : null;
+        return { month, total, cleared, rejected, score };
+      });
+      return { trend };
     }),
 });

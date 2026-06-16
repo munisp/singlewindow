@@ -41,6 +41,8 @@ import "../screens/app/finance_screen.dart";
 import "../screens/app/my_certificates_screen.dart";
 import "../screens/app/notification_preferences_screen.dart";
 import "../screens/app/onboarding_progress_screen.dart";
+// v37 screens — payment detail parity with React Native
+import "../screens/app/payment_detail_screen.dart";
 import "../widgets/scaffold_with_nav.dart";
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -66,6 +68,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: "/declarations/new", builder: (_, __) => const NewDeclarationScreen()),
           GoRoute(path: "/declarations/:id", builder: (_, state) => DeclarationDetailScreen(id: int.parse(state.pathParameters["id"]!))),
           GoRoute(path: "/payments", builder: (_, __) => const PaymentsScreen()),
+          GoRoute(path: "/payments/:id", builder: (_, state) => PaymentDetailScreen(paymentId: state.pathParameters["id"]!)),
           GoRoute(path: "/cargo", builder: (_, __) => const CargoTrackingScreen()),
           GoRoute(path: "/documents", builder: (_, __) => const DocumentVaultScreen()),
           GoRoute(path: "/profile", builder: (_, __) => const ProfileScreen()),
