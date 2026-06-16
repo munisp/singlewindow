@@ -197,6 +197,14 @@ export default function FlinkCepAlerts() {
     onError: (err) => toast.error(err.message),
   });
 
+  // Suppression History state
+  const [showSuppressionHistory, setShowSuppressionHistory] = useState(false);
+  const [suppLogPage, setSuppLogPage] = useState(1);
+  const suppressionLogQuery = trpc.cep.getSuppressionLog.useQuery(
+    { page: suppLogPage, pageSize: 20 },
+    { enabled: showSuppressionHistory && user?.role === "admin" }
+  );
+
   const [createPatternDialog, setCreatePatternDialog] = useState(false);
   const [newPatternName, setNewPatternName] = useState("");
   const [newPatternDesc, setNewPatternDesc] = useState("");
@@ -681,6 +689,85 @@ export default function FlinkCepAlerts() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Suppression History — admin-only collapsible section */}
+      {user?.role === "admin" && (
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+                Suppression History
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => { setShowSuppressionHistory(!showSuppressionHistory); setSuppLogPage(1); }}
+              >
+                {showSuppressionHistory ? "Hide" : "Show Audit Log"}
+              </Button>
+            </div>
+          </CardHeader>
+          {showSuppressionHistory && (
+            <CardContent>
+              {suppressionLogQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
+              ) : (suppressionLogQuery.data?.rows ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No suppression actions recorded yet.</p>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Alert ID</TableHead>
+                        <TableHead className="text-xs">Pattern</TableHead>
+                        <TableHead className="text-xs">Suppressed By</TableHead>
+                        <TableHead className="text-xs">Duration</TableHead>
+                        <TableHead className="text-xs">Suppressed Until</TableHead>
+                        <TableHead className="text-xs">Logged At</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(suppressionLogQuery.data?.rows ?? []).map((row: any) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="text-xs font-mono">{row.alert_id.slice(0, 12)}…</TableCell>
+                          <TableCell className="text-xs">{row.pattern_name}</TableCell>
+                          <TableCell className="text-xs">{row.suppressed_by_name ?? "—"}</TableCell>
+                          <TableCell className="text-xs">{row.hours}h</TableCell>
+                          <TableCell className="text-xs">{new Date(row.suppressed_until).toLocaleString()}</TableCell>
+                          <TableCell className="text-xs">{new Date(row.created_at).toLocaleString()}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {/* Pagination */}
+                  {(suppressionLogQuery.data?.total ?? 0) > 20 && (
+                    <div className="flex items-center justify-between mt-3">
+                      <span className="text-xs text-muted-foreground">
+                        {suppressionLogQuery.data?.total} total entries
+                      </span>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline" size="sm" className="h-7 text-xs"
+                          disabled={suppLogPage <= 1}
+                          onClick={() => setSuppLogPage(p => p - 1)}
+                        >Prev</Button>
+                        <span className="text-xs self-center">Page {suppLogPage}</span>
+                        <Button
+                          variant="outline" size="sm" className="h-7 text-xs"
+                          disabled={(suppLogPage * 20) >= (suppressionLogQuery.data?.total ?? 0)}
+                          onClick={() => setSuppLogPage(p => p + 1)}
+                        >Next</Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {/* Create Pattern Dialog */}
       <Dialog open={createPatternDialog} onOpenChange={(open) => { if (!open) { setCreatePatternDialog(false); setNewPatternName(""); setNewPatternDesc(""); } }}>

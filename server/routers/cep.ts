@@ -337,13 +337,74 @@ export const cepRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const suppressedUntil = new Date(Date.now() + input.hours * 60 * 60 * 1000);
+      // Update the alert
       await pgQuery(
         `UPDATE cep_alerts
          SET suppressed_until = $1, suppressed_by = $2
          WHERE alert_id = $3`,
         [suppressedUntil.toISOString(), ctx.user.id, input.alertId]
       );
+      // Fetch alert details for the log
+      const [alert] = await pgQuery<{ pattern_id: string; pattern_name: string }>(
+        `SELECT pattern_id, pattern_name FROM cep_alerts WHERE alert_id = $1`,
+        [input.alertId]
+      );
+      if (alert) {
+        await pgQuery(
+          `INSERT INTO cep_suppression_log
+             (alert_id, pattern_id, pattern_name, suppressed_by, suppressed_by_name, suppressed_until, hours)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            input.alertId,
+            alert.pattern_id,
+            alert.pattern_name,
+            ctx.user.id,
+            ctx.user.name ?? ctx.user.email ?? `User ${ctx.user.id}`,
+            suppressedUntil.toISOString(),
+            input.hours,
+          ]
+        );
+      }
       return { alertId: input.alertId, suppressedUntil };
+    }),
+
+  /**
+   * getSuppressionLog — paginated audit log of all suppression actions (admin-only).
+   */
+  getSuppressionLog: adminProcedure
+    .input(z.object({
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(20),
+      patternId: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const offset = (input.page - 1) * input.pageSize;
+      const where = input.patternId ? `WHERE sl.pattern_id = $3` : ``;
+      const params: unknown[] = [input.pageSize, offset];
+      if (input.patternId) params.push(input.patternId);
+      const rows = await pgQuery<{
+        id: number;
+        alert_id: string;
+        pattern_id: string;
+        pattern_name: string;
+        suppressed_by_name: string | null;
+        suppressed_until: string;
+        hours: number;
+        created_at: string;
+      }>(
+        `SELECT sl.id, sl.alert_id, sl.pattern_id, sl.pattern_name,
+                sl.suppressed_by_name, sl.suppressed_until, sl.hours, sl.created_at
+           FROM cep_suppression_log sl
+           ${where}
+           ORDER BY sl.created_at DESC
+           LIMIT $1 OFFSET $2`,
+        params
+      );
+      const [{ count }] = await pgQuery<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM cep_suppression_log sl ${where}`,
+        input.patternId ? [input.patternId] : []
+      );
+      return { rows, total: parseInt(count, 10), page: input.page, pageSize: input.pageSize };
     }),
 
   /**

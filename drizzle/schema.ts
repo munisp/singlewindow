@@ -1652,6 +1652,24 @@ export const cepAlerts = pgTable("cep_alerts", {
 ]);
 export type CepAlertRow = typeof cepAlerts.$inferSelect;
 
+// ─── CEP Suppression Log ─────────────────────────────────────────────────────
+export const cepSuppressionLog = pgTable("cep_suppression_log", {
+  id: serial("id").primaryKey(),
+  alertId: varchar("alert_id", { length: 100 }).notNull(),
+  patternId: varchar("pattern_id", { length: 100 }).notNull(),
+  patternName: varchar("pattern_name", { length: 200 }).notNull(),
+  suppressedBy: integer("suppressed_by").references(() => users.id),
+  suppressedByName: varchar("suppressed_by_name", { length: 200 }),
+  suppressedUntil: timestamp("suppressed_until").notNull(),
+  hours: integer("hours").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cep_supp_log_alert").on(t.alertId),
+  index("idx_cep_supp_log_pattern").on(t.patternId),
+  index("idx_cep_supp_log_created").on(t.createdAt),
+]);
+export type CepSuppressionLogRow = typeof cepSuppressionLog.$inferSelect;
+
 // ─── Cost Records (Kubecost / FinOps) ────────────────────────────────────────
 export const costCategoryEnum = pgEnum("cost_category", [
   "compute", "storage", "network", "database", "monitoring", "security", "other",

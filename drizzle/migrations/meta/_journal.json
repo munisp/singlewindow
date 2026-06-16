@@ -218,6 +218,13 @@
       "when": 1781652276896,
       "tag": "0030_giant_tombstone",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781653262085,
+      "tag": "0031_striped_shadowcat",
+      "breakpoints": true
     }
   ]
 }

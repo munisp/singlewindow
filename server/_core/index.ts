@@ -1278,6 +1278,47 @@ async function startServer() {
     import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
     // Seed demo data (bonded warehouses, CEP patterns, cost records) — idempotent
     import("../seedDemoData").then(({ seedAllDemoData }) => seedAllDemoData()).catch(() => {});
+
+    // v52: Check CEP pattern threshold breaches every 30 minutes and notify owner
+    const checkThresholdBreaches = async () => {
+      try {
+        const { getPool, getDb } = await import("../db");
+        await getDb();
+        const pool = getPool();
+        if (!pool) return;
+        // Find patterns with a threshold set
+        const { rows: patterns } = await pool.query<{
+          pattern_id: string;
+          pattern_name: string;
+          daily_alert_threshold: number;
+        }>(`SELECT pattern_id, pattern_name, daily_alert_threshold
+            FROM cep_patterns
+            WHERE daily_alert_threshold IS NOT NULL AND is_active = true`);
+        if (patterns.length === 0) return;
+        const { notifyOwner } = await import("./notification");
+        for (const pattern of patterns) {
+          const { rows: [{ count }] } = await pool.query<{ count: string }>(
+            `SELECT COUNT(*) AS count FROM cep_alerts
+             WHERE pattern_id = $1
+               AND status NOT IN ('resolved', 'dismissed')
+               AND detected_at >= NOW() - INTERVAL '24 hours'`,
+            [pattern.pattern_id]
+          );
+          const dailyCount = parseInt(count, 10);
+          if (dailyCount > pattern.daily_alert_threshold) {
+            await notifyOwner({
+              title: `⚠ CEP Threshold Breach: ${pattern.pattern_name}`,
+              content: `Pattern "${pattern.pattern_name}" fired ${dailyCount} alerts in the last 24 hours, exceeding the configured threshold of ${pattern.daily_alert_threshold}. Review the CEP Alerts dashboard immediately.`,
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // Non-critical — swallow errors silently
+      }
+    };
+    // Run once at startup, then every 30 minutes
+    checkThresholdBreaches();
+    setInterval(checkThresholdBreaches, 30 * 60 * 1000);
   });
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   const gracefulShutdown = async (signal: string) => {

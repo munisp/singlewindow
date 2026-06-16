@@ -3,7 +3,8 @@
  * Clearance time percentile, rejection rate trend, AEO tier status,
  * 12-month compliance history, compliance score trend, admin AEO tier adjustment.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
@@ -106,8 +107,42 @@ export default function TraderScorecard() {
   const isAdminOrOfficer = user?.role === "admin" || user?.role === "customs_officer";
 
   // Drill-down state: clicking a month on the compliance trend opens a declarations list
-  const [drillMonth, setDrillMonth] = useState<{ year: number; month: number; label: string } | null>(null);
-  const [drillStatus, setDrillStatus] = useState<string>("all");
+  // Initialise from URL query string so officers can bookmark/share a specific month view
+  const [, setLocation] = useLocation();
+  const initFromUrl = () => {
+    const params = new URLSearchParams(window.location.search);
+    const y = parseInt(params.get("dy") ?? "", 10);
+    const m = parseInt(params.get("dm") ?? "", 10);
+    if (y > 0 && m >= 1 && m <= 12) {
+      return { year: y, month: m, label: `${String(m).padStart(2, "0")}` };
+    }
+    return null;
+  };
+  const [drillMonth, setDrillMonth] = useState<{ year: number; month: number; label: string } | null>(() => initFromUrl());
+  const [drillStatus, setDrillStatus] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("ds") ?? "all";
+  });
+
+  // Sync drill state to URL whenever it changes
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (drillMonth) {
+      params.set("dy", String(drillMonth.year));
+      params.set("dm", String(drillMonth.month));
+    } else {
+      params.delete("dy");
+      params.delete("dm");
+    }
+    if (drillStatus && drillStatus !== "all") {
+      params.set("ds", drillStatus);
+    } else {
+      params.delete("ds");
+    }
+    const newSearch = params.toString();
+    const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : "");
+    window.history.replaceState(null, "", newUrl);
+  }, [drillMonth, drillStatus]);
   const { data: drillData, isLoading: drillLoading } = trpc.traderScorecard.getDeclarationsForMonth.useQuery(
     { year: drillMonth?.year ?? 2024, month: drillMonth?.month ?? 1, status: drillStatus as "all" | "draft" | "submitted" | "under_assessment" | "docs_required" | "payment_pending" | "payment_confirmed" | "under_examination" | "examination_complete" | "cleared" | "rejected" | "cancelled" },
     { enabled: drillMonth !== null }

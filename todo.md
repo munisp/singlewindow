@@ -321,3 +321,15 @@
 - [x] FlinkCepAlerts.tsx — admin threshold config input on pattern card
 - [x] FlinkCepAlerts.tsx — highlight sparkline bar red when daily count exceeds threshold
 - [x] Push v51 codebase to GitHub munisp/singlewindow
+
+## v52 Sprint — Suppression Audit Log, Threshold Breach Notification, URL Persistence
+
+- [x] drizzle/schema.ts — add cep_suppression_log table (id, alert_id, pattern_id, suppressed_by, suppressed_until, hours, created_at)
+- [x] cep.ts — write to cep_suppression_log inside suppressAlert mutation
+- [x] cep.ts — add getSuppressionLog procedure (admin-only, paginated, joinable with cep_alerts + users)
+- [x] FlinkCepAlerts.tsx — add "Suppression History" read-only tab showing log table (who, pattern, duration, timestamp)
+- [x] cep.ts — add checkThresholdBreaches() helper: query patterns with threshold set, count today's alerts, call notifyOwner for each breach
+- [x] server/_core/index.ts — schedule checkThresholdBreaches() every 30 minutes via setInterval on server startup
+- [x] TraderScorecard.tsx — persist selectedMonth (year+month) and drillStatus in URL query string (?month=2026-01&status=green)
+- [x] TraderScorecard.tsx — read initial state from URL on mount so bookmarked/shared links restore the correct filter view
+- [x] Push v52 codebase to GitHub munisp/singlewindow
