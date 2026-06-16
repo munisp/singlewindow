@@ -684,3 +684,124 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # ─── Polyglot Services (Sprint R) ────────────────────────────────────────────
+
+  # ── AI Risk Scorer (Python / FastAPI + XGBoost) ──────────────────────────────
+  ai-risk-scorer:
+    build:
+      context: ./services/ai-risk-scorer
+      dockerfile: Dockerfile
+    container_name: tg-ai-risk-scorer
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: "8001"
+      WORKERS: "4"
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+      MODEL_PATH: /app/models/risk_model.pkl
+    volumes:
+      - ./services/ai-risk-scorer/models:/app/models:ro
+    ports:
+      - "8001:8001"
+      - "9096:9096"   # Prometheus metrics
+    networks:
+      - tradegateway-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── OpenSearch Indexer (Python / Kafka consumer) ──────────────────────────────
+  opensearch-indexer:
+    build:
+      context: ./services/opensearch-indexer
+      dockerfile: Dockerfile
+    container_name: tg-opensearch-indexer
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_GROUP_ID: opensearch-indexer
+      OPENSEARCH_HOST: opensearch
+      OPENSEARCH_PORT: "9200"
+      OPENSEARCH_USER: admin
+      OPENSEARCH_PASS: ${OPENSEARCH_PASSWORD:-TradeGateway@2026!}
+      BULK_BATCH_SIZE: "100"
+      BULK_FLUSH_INTERVAL_SECONDS: "5"
+    networks:
+      - tradegateway-net
+
+  # ── Kafka Consumer (Rust / domain event processor) ───────────────────────────
+  kafka-consumer-rust:
+    build:
+      context: ./services/kafka-consumer
+      dockerfile: Dockerfile
+    container_name: tg-kafka-consumer-rust
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      KAFKA_GROUP_ID: tradegateway-rust-consumer
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      OPENSEARCH_URL: https://opensearch:9200
+      OPENSEARCH_USER: admin
+      OPENSEARCH_PASS: ${OPENSEARCH_PASSWORD:-TradeGateway@2026!}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
+    networks:
+      - tradegateway-net
+
+  # ── TigerBeetle Bridge (Rust / gRPC ledger service) ──────────────────────────
+  tigerbeetle-bridge:
+    build:
+      context: ./services/tigerbeetle-bridge
+      dockerfile: Dockerfile
+    container_name: tg-tigerbeetle-bridge
+    restart: unless-stopped
+    environment:
+      GRPC_PORT: "50055"
+      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-tigerbeetle:3000}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      GRPC_TLS_CERT_PATH: /certs/server.crt
+      GRPC_TLS_KEY_PATH: /certs/server.key
+      GRPC_TLS_CA_PATH: /certs/ca.crt
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "50055:50055"
+    networks:
+      - tradegateway-net
+
+  # ── Flink Lakehouse Pipeline (Python) ────────────────────────────────────────
+  flink-pipeline:
+    build:
+      context: ./infra/lakehouse
+      dockerfile: Dockerfile.flink
+    container_name: tg-flink-pipeline
+    restart: unless-stopped
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+      DELTA_LAKE_PATH: /data/delta
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      OPENSEARCH_URL: https://opensearch:9200
+      OPENSEARCH_USER: admin
+      OPENSEARCH_PASS: ${OPENSEARCH_PASSWORD:-TradeGateway@2026!}
+      PIPELINE_MODE: ${PIPELINE_MODE:-batch}
+    volumes:
+      - ./data/delta:/data/delta
+    networks:
+      - tradegateway-net

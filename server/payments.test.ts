@@ -6,6 +6,19 @@ import { describe, it, expect, vi } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
+// ─── Mock payment account provisioner to avoid real DB FK violations ────────
+vi.mock("./_core/paymentAccountProvisioner", () => ({
+  getOrProvisionTraderAccount: vi.fn().mockResolvedValue("trader-9702"),
+  provisionTraderAccount: vi.fn().mockResolvedValue({ accountId: "trader-9702", isNew: false, ledger: 1 }),
+  provisionSystemAccounts: vi.fn().mockResolvedValue(undefined),
+  SYSTEM_ACCOUNTS: {
+    NCS_REVENUE: "ncs-revenue-account",
+    BOND_COLLATERAL: "ncs-bond-collateral",
+    DRAWBACK_RESERVE: "ncs-drawback-reserve",
+    CUSTOMS_FEE: "ncs-customs-fee",
+  },
+}));
+
 // ─── Mock DB helpers ──────────────────────────────────────────────────────────
 vi.mock("./db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./db")>();
@@ -68,6 +81,8 @@ function createContext(role: "user" | "admin" | "finance" = "user", userId = 970
       updatedAt: new Date(),
       lastSignedIn: new Date(),
     },
+    req: { method: "POST", headers: {}, cookies: {} } as TrpcContext["req"],
+    res: { clearCookie: vi.fn(), cookie: vi.fn() } as unknown as TrpcContext["res"],
   };
 }
 

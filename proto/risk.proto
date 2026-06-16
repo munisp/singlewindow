@@ -1,0 +1,104 @@
+syntax = "proto3";
+package tradegateway.risk.v1;
+option go_package = "github.com/tradegateway/ngswtp/proto/risk/v1;riskv1";
+
+// ─── Risk Engine gRPC Service ─────────────────────────────────────────────────
+// Implements AI-assisted risk scoring, HS code validation, and lane assignment.
+// Go service proxies to Python ai-risk-scorer for ML inference.
+
+service RiskService {
+  rpc ScoreDeclaration(ScoreRequest) returns (ScoreResponse);
+  rpc ValidateHsCode(ValidateHsCodeRequest) returns (ValidateHsCodeResponse);
+  rpc GetRiskProfile(GetRiskProfileRequest) returns (RiskProfileResponse);
+  rpc UpdateRiskProfile(UpdateRiskProfileRequest) returns (RiskProfileResponse);
+  rpc GetRiskStats(RiskStatsRequest) returns (RiskStatsResponse);
+  rpc BatchScore(BatchScoreRequest) returns (BatchScoreResponse);
+}
+
+message ScoreRequest {
+  string declaration_id = 1;
+  string trader_id = 2;
+  string hs_code = 3;
+  string country_of_origin = 4;
+  double invoice_value = 5;
+  string invoice_currency = 6;
+  double gross_weight = 7;
+  int32 number_of_packages = 8;
+  string goods_description = 9;
+  string port_of_entry = 10;
+  bool is_amendment_rescore = 11;
+  repeated string changed_fields = 12;
+}
+
+message ScoreResponse {
+  string declaration_id = 1;
+  int32 risk_score = 2;           // 0-100
+  string risk_lane = 3;           // GREEN | YELLOW | RED
+  string ai_explanation = 4;
+  repeated string risk_factors = 5;
+  double confidence = 6;
+  bool requires_physical_inspection = 7;
+  bool requires_doc_review = 8;
+  int64 scored_at_ms = 9;
+}
+
+message ValidateHsCodeRequest {
+  string hs_code = 1;
+  string goods_description = 2;
+  string country_of_origin = 3;
+}
+
+message ValidateHsCodeResponse {
+  bool is_valid = 1;
+  string canonical_hs_code = 2;
+  string description = 3;
+  double confidence = 4;
+  repeated string suggested_codes = 5;
+  bool is_prohibited = 6;
+  bool is_restricted = 7;
+  repeated string required_permits = 8;
+}
+
+message GetRiskProfileRequest {
+  string trader_id = 1;
+}
+
+message UpdateRiskProfileRequest {
+  string trader_id = 1;
+  int32 total_declarations = 2;
+  int32 violations = 3;
+  int32 compliant = 4;
+  double avg_risk_score = 5;
+}
+
+message RiskProfileResponse {
+  string trader_id = 1;
+  double compliance_score = 2;
+  int32 total_declarations = 3;
+  int32 violations = 4;
+  int32 compliant = 5;
+  double avg_risk_score = 6;
+  string risk_tier = 7;           // LOW | MEDIUM | HIGH | CRITICAL
+  bool is_aeo = 8;
+}
+
+message RiskStatsRequest {
+  string period = 1;              // daily | weekly | monthly
+}
+
+message RiskStatsResponse {
+  int32 total_scored = 1;
+  int32 green_count = 2;
+  int32 yellow_count = 3;
+  int32 red_count = 4;
+  double avg_score = 5;
+  double false_positive_rate = 6;
+}
+
+message BatchScoreRequest {
+  repeated ScoreRequest requests = 1;
+}
+
+message BatchScoreResponse {
+  repeated ScoreResponse responses = 1;
+}

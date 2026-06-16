@@ -111,6 +111,8 @@ function createContext(): TrpcContext {
       updatedAt: new Date(),
       lastSignedIn: new Date(),
     },
+    req: { method: "POST", headers: {}, cookies: {} } as TrpcContext["req"],
+    res: { clearCookie: () => {}, cookie: () => {} } as unknown as TrpcContext["res"],
   };
 }
 

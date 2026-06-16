@@ -1,0 +1,109 @@
+syntax = "proto3";
+package tradegateway.cargo.v1;
+option go_package = "github.com/tradegateway/ngswtp/proto/cargo/v1;cargov1";
+
+import "google/protobuf/timestamp.proto";
+
+// ─── Cargo Tracking gRPC Service ─────────────────────────────────────────────
+// Tracks cargo lifecycle from arrival to release. Publishes real-time events
+// to Fluvio. Implements UCR (Unique Consignment Reference) lifecycle.
+
+service CargoService {
+  rpc RegisterCargo(RegisterCargoRequest) returns (CargoResponse);
+  rpc UpdateCargoStatus(UpdateCargoStatusRequest) returns (CargoResponse);
+  rpc GetCargo(GetCargoRequest) returns (CargoResponse);
+  rpc GetCargoByUCR(GetCargoByUCRRequest) returns (CargoResponse);
+  rpc ListCargoEvents(ListCargoEventsRequest) returns (ListCargoEventsResponse);
+  rpc GetPortCongestion(PortCongestionRequest) returns (PortCongestionResponse);
+  rpc TrackShipment(TrackShipmentRequest) returns (stream CargoEvent);
+}
+
+message RegisterCargoRequest {
+  string declaration_id = 1;
+  string ucr = 2;
+  string vessel_name = 3;
+  string voyage_number = 4;
+  string bill_of_lading = 5;
+  string port_of_entry = 6;
+  string container_numbers = 7;
+  double gross_weight = 8;
+  int32 number_of_packages = 9;
+  google.protobuf.Timestamp eta = 10;
+}
+
+message UpdateCargoStatusRequest {
+  string cargo_id = 1;
+  string ucr = 2;
+  string new_status = 3;          // ARRIVED | UNDER_INSPECTION | RELEASED | HELD | SEIZED
+  string location = 4;
+  string officer_id = 5;
+  string notes = 6;
+  double latitude = 7;
+  double longitude = 8;
+}
+
+message GetCargoRequest {
+  string cargo_id = 1;
+}
+
+message GetCargoByUCRRequest {
+  string ucr = 1;
+}
+
+message ListCargoEventsRequest {
+  string cargo_id = 1;
+  string ucr = 2;
+  int32 limit = 3;
+}
+
+message PortCongestionRequest {
+  string port_code = 1;
+}
+
+message TrackShipmentRequest {
+  string ucr = 1;
+}
+
+message CargoResponse {
+  string id = 1;
+  string declaration_id = 2;
+  string ucr = 3;
+  string status = 4;
+  string vessel_name = 5;
+  string voyage_number = 6;
+  string bill_of_lading = 7;
+  string port_of_entry = 8;
+  string container_numbers = 9;
+  double gross_weight = 10;
+  int32 number_of_packages = 11;
+  google.protobuf.Timestamp eta = 12;
+  google.protobuf.Timestamp actual_arrival = 13;
+  google.protobuf.Timestamp released_at = 14;
+  google.protobuf.Timestamp created_at = 15;
+}
+
+message CargoEvent {
+  string cargo_id = 1;
+  string ucr = 2;
+  string event_type = 3;
+  string status = 4;
+  string location = 5;
+  string officer_id = 6;
+  string notes = 7;
+  double latitude = 8;
+  double longitude = 9;
+  google.protobuf.Timestamp occurred_at = 10;
+}
+
+message ListCargoEventsResponse {
+  repeated CargoEvent events = 1;
+}
+
+message PortCongestionResponse {
+  string port_code = 1;
+  int32 vessels_at_berth = 2;
+  int32 vessels_at_anchor = 3;
+  int32 avg_dwell_hours = 4;
+  string congestion_level = 5;    // LOW | MEDIUM | HIGH | CRITICAL
+  int32 containers_awaiting_clearance = 4;
+}

@@ -8,6 +8,7 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { AdminGuard, CustomsGuard, OGAGuard, FinanceGuard, SecurityGuard, ExecutiveGuard } from "./components/RoleGuard";
 import Home from "./pages/Home";
 import TraderDashboard from "./pages/app/TraderDashboard";
 import NewDeclaration from "./pages/app/NewDeclaration";
@@ -160,16 +161,16 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><AeoSelfAssessment /></Suspense>
       </Route>
 
-      {/* Customs Officer Portal */}
-      <Route path="/app/customs" component={CustomsDashboard} />
-      <Route path="/app/customs/queue" component={CustomsDashboard} />
-      <Route path="/app/customs/declarations/:id" component={DeclarationDetail} />
-      <Route path="/app/customs/vision" component={VisionAnalysis} />
+      {/* Customs Officer Portal — B9: CustomsGuard wraps all /app/customs routes */}
+      <Route path="/app/customs"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
+      <Route path="/app/customs/queue"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
+      <Route path="/app/customs/declarations/:id"><CustomsGuard><DeclarationDetail /></CustomsGuard></Route>
+      <Route path="/app/customs/vision"><CustomsGuard><VisionAnalysis /></CustomsGuard></Route>
       <Route path="/app/customs/risk">
-        <Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense>
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense></CustomsGuard>
       </Route>
       <Route path="/app/customs/payments">
-        <Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense>
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense></CustomsGuard>
       </Route>
       <Route path="/app/trader/payments">
         <Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense>
@@ -183,26 +184,26 @@ function Router() {
       <Route path="/app/nl-query">{() => <Suspense fallback={<LazyFallback />}><NLFinancialQuery /></Suspense>}</Route>
       <Route path="/app/oga/expiry-calendar" component={OGAExpiryCalendar} />
 
-      {/* Admin Console */}
-      <Route path="/app/admin" component={AdminConsole} />
-      <Route path="/app/admin/kyc-review" component={AdminKYCReview} />
+      {/* Admin Console — B9: AdminGuard wraps all /app/admin routes */}
+      <Route path="/app/admin"><AdminGuard><AdminConsole /></AdminGuard></Route>
+      <Route path="/app/admin/kyc-review"><AdminGuard><AdminKYCReview /></AdminGuard></Route>
       <Route path="/app/admin/users">
-        <Suspense fallback={<LazyFallback />}><AdminUsers /></Suspense>
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminUsers /></Suspense></AdminGuard>
       </Route>
       <Route path="/app/admin/declarations">
-        <Suspense fallback={<LazyFallback />}><AdminDeclarations /></Suspense>
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminDeclarations /></Suspense></AdminGuard>
       </Route>
       <Route path="/app/admin/aeo">
-        <Suspense fallback={<LazyFallback />}><AdminAEO /></Suspense>
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminAEO /></Suspense></AdminGuard>
       </Route>
       <Route path="/app/admin/analytics">
-        <Suspense fallback={<LazyFallback />}><AdminAnalytics /></Suspense>
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminAnalytics /></Suspense></AdminGuard>
       </Route>
 
-      {/* Security Operations Center */}
-      <Route path="/app/security" component={SecurityOps} />
+      {/* Security Operations Center — B9: SecurityGuard wraps all /app/security routes */}
+      <Route path="/app/security"><SecurityGuard><SecurityOps /></SecurityGuard></Route>
       <Route path="/app/security/sanctions">
-        <Suspense fallback={<LazyFallback />}><SanctionsScreening /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><SanctionsScreening /></Suspense></SecurityGuard>
       </Route>
 
       {/* Geospatial */}
@@ -217,9 +218,9 @@ function Router() {
         <Redirect to="/app/notification-centre" />
       </Route>
 
-      {/* Finance Dashboard */}
+      {/* Finance Dashboard — B9: FinanceGuard wraps all /app/finance routes */}
       <Route path="/app/finance">
-        <Suspense fallback={<LazyFallback />}><Finance /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><Finance /></Suspense></FinanceGuard>
       </Route>
       {/* Post-Clearance Audit */}
       <Route path="/app/customs/audit">
@@ -323,7 +324,7 @@ function Router() {
 
       {/* Sprint 39 — WCO CEN Alerts */}
       <Route path="/app/security/cen-alerts">
-        <Suspense fallback={<LazyFallback />}><WcoCenAlerts /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><WcoCenAlerts /></Suspense></SecurityGuard>
       </Route>
 
       {/* Sprint 40 — Free Zone Operations */}
@@ -336,13 +337,13 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><DeveloperPortal /></Suspense>
       </Route>
       <Route path="/app/security/threat-intel">
-        <Suspense fallback={<LazyFallback />}><ThreatIntelligence /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><ThreatIntelligence /></Suspense></SecurityGuard>
       </Route>
       <Route path="/app/security/wazuh">
-        <Suspense fallback={<LazyFallback />}><WazuhSecurityEvents /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><WazuhSecurityEvents /></Suspense></SecurityGuard>
       </Route>
       <Route path="/app/admin/risk-model">
-        <Suspense fallback={<LazyFallback />}><RiskModelDashboard /></Suspense>
+        <AdminGuard><Suspense fallback={<LazyFallback />}><RiskModelDashboard /></Suspense></AdminGuard>
       </Route>
       <Route path="/app/analytics">
         <Suspense fallback={<LazyFallback />}><TradeAnalytics /></Suspense>
@@ -353,7 +354,7 @@ function Router() {
 
       {/* Sprint 48 — Flink CEP Trade Pattern Alerts */}
       <Route path="/app/security/cep-alerts">
-        <Suspense fallback={<LazyFallback />}><FlinkCepAlerts /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><FlinkCepAlerts /></Suspense></SecurityGuard>
       </Route>
 
       {/* Sprint 49 — Kubecost Cost Management */}
@@ -363,12 +364,12 @@ function Router() {
 
       {/* Sprint 54 — Wazuh SOC Dashboard */}
       <Route path="/app/security/soc">
-        <Suspense fallback={<LazyFallback />}><SecurityOperationsCentre /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><SecurityOperationsCentre /></Suspense></SecurityGuard>
       </Route>
 
       {/* Sprint 55 — Audit Engine Dashboard */}
       <Route path="/app/admin/audit-engine">
-        <Suspense fallback={<LazyFallback />}><AuditEngineDashboard /></Suspense>
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AuditEngineDashboard /></Suspense></AdminGuard>
       </Route>
 
       {/* Sprint 56 — Bonded Warehouse Management */}
@@ -415,7 +416,7 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><PilotDashboard /></Suspense>
       </Route>
       <Route path="/app/executive/dashboard">
-        <Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense>
+        <ExecutiveGuard><Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense></ExecutiveGuard>
       </Route>
       <Route path="/app/executive-dashboard">
         <Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense>
@@ -461,7 +462,7 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><WebhookLogs /></Suspense>
       </Route>
       <Route path="/app/security/alerts">
-        <Suspense fallback={<LazyFallback />}><SecurityAlerts /></Suspense>
+        <SecurityGuard><Suspense fallback={<LazyFallback />}><SecurityAlerts /></Suspense></SecurityGuard>
       </Route>
       <Route path="/app/admin/tenants-mgmt">
         <Suspense fallback={<LazyFallback />}><TenantManagement /></Suspense>

@@ -1,7 +1,8 @@
-// TradeGateway NGSWTP — Service Worker
-// Provides offline capability and asset caching for PWA
+// TradeGateway NGSWTP — Service Worker v2
+// R4 FIX: Background Sync offline action queue + push notifications
 
-const CACHE_NAME = 'tradegateway-v1';
+const CACHE_NAME = 'tradegateway-v2';
+const OFFLINE_QUEUE_NAME = 'tradegateway-offline-queue';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -26,24 +27,55 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch: network-first for API, cache-first for assets
+// ─── FETCH ───────────────────────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET and cross-origin requests
-  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Skip cross-origin requests
+  if (url.origin !== self.location.origin) return;
 
-  // Network-first for HTML navigation
-  if (request.mode === 'navigate') {
+  // ── Offline queue for tRPC mutations (POST to /api/trpc) ─────────────────
+  if (request.method === 'POST' && url.pathname.startsWith('/api/trpc')) {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
+      fetch(request.clone()).catch(async () => {
+        const body = await request.clone().text();
+        const queuedRequest = {
+          url: request.url,
+          method: request.method,
+          headers: Object.fromEntries(request.headers.entries()),
+          body,
+          queuedAt: Date.now(),
+        };
+        const cache = await caches.open(OFFLINE_QUEUE_NAME);
+        const key = `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        await cache.put(
+          new Request(key),
+          new Response(JSON.stringify(queuedRequest), { headers: { 'Content-Type': 'application/json' } })
+        );
+        if ('sync' in self.registration) {
+          await self.registration.sync.register('trpc-offline-queue');
+        }
+        return new Response(
+          JSON.stringify({ error: { message: 'OFFLINE_QUEUED', code: 'OFFLINE' } }),
+          { status: 503, headers: { 'Content-Type': 'application/json', 'X-Offline-Queued': 'true' } }
+        );
+      })
     );
     return;
   }
 
-  // Cache-first for static assets (JS, CSS, fonts, images)
-  if (url.pathname.match(/\.(js|css|woff2?|png|svg|ico)$/)) {
+  // Skip non-GET requests from here
+  if (request.method !== 'GET') return;
+
+  // ── HTML navigation: network-first, fallback to shell ────────────────────
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+    return;
+  }
+
+  // ── Static assets: cache-first ────────────────────────────────────────────
+  if (url.pathname.match(/\.(js|css|woff2?|png|svg|ico|webp|json)$/)) {
     event.respondWith(
       caches.match(request).then((cached) => {
         if (cached) return cached;
@@ -59,8 +91,65 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for everything else
-  event.respondWith(
-    fetch(request).catch(() => caches.match(request))
+  // ── Everything else: network-first ────────────────────────────────────────
+  event.respondWith(fetch(request).catch(() => caches.match(request)));
+});
+
+// ─── BACKGROUND SYNC ─────────────────────────────────────────────────────────
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'trpc-offline-queue') {
+    event.waitUntil(replayOfflineQueue());
+  }
+});
+
+async function replayOfflineQueue() {
+  const cache = await caches.open(OFFLINE_QUEUE_NAME);
+  const keys = await cache.keys();
+  let replayed = 0, failed = 0;
+  for (const key of keys) {
+    const response = await cache.match(key);
+    if (!response) continue;
+    let queued;
+    try { queued = await response.json(); } catch { await cache.delete(key); continue; }
+    if (Date.now() - queued.queuedAt > 24 * 60 * 60 * 1000) { await cache.delete(key); continue; }
+    try {
+      const r = await fetch(queued.url, {
+        method: queued.method,
+        headers: { ...queued.headers, 'X-Offline-Replay': 'true' },
+        body: queued.body,
+        credentials: 'include',
+      });
+      if (r.ok || r.status < 500) { await cache.delete(key); replayed++; } else { failed++; }
+    } catch { failed++; }
+  }
+  const clients = await self.clients.matchAll({ type: 'window' });
+  for (const client of clients) client.postMessage({ type: 'OFFLINE_QUEUE_REPLAYED', replayed, failed });
+}
+
+// ─── PUSH NOTIFICATIONS ───────────────────────────────────────────────────────
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let data;
+  try { data = event.data.json(); } catch { data = { title: 'TradeGateway', body: event.data.text() }; }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'TradeGateway', {
+      body: data.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: data.tag || 'tradegateway-notification',
+      data: data.url ? { url: data.url } : undefined,
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then((clients) => {
+      const existing = clients.find((c) => c.url === url);
+      if (existing) return existing.focus();
+      return self.clients.openWindow(url);
+    })
   );
 });

@@ -19,10 +19,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { ENV } from "../_core/env";
 
-const TEMPORAL_URL = process.env.TEMPORAL_URL || "http://localhost:7233";
-const TEMPORAL_UI_URL = process.env.TEMPORAL_UI_URL || "http://localhost:8080";
-const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || "tradegate";
+// R3 FIX: Use ENV for all Temporal config to ensure namespace consistency across the codebase.
+// ENV.temporalNamespace defaults to 'tradegateway' (not 'tradegate') — see env.ts line 45.
+const TEMPORAL_URL = ENV.temporalAddress ?? process.env.TEMPORAL_URL ?? "http://localhost:7233";
+const TEMPORAL_UI_URL = process.env.TEMPORAL_UI_URL ?? "http://localhost:8080";
+const TEMPORAL_NAMESPACE = ENV.temporalNamespace ?? process.env.TEMPORAL_NAMESPACE ?? "tradegateway";
 
 // ─── Temporal service client ───────────────────────────────────────────────
 

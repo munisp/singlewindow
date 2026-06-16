@@ -3,6 +3,77 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { redisRateLimit } from './redis';
+import crypto from 'crypto';
+
+// ─── CSRF Token Utilities (B3 FIX) ────────────────────────────────────────────
+// Implements the Double Submit Cookie pattern:
+//   1. On first request (or when cookie absent), server sets a random CSRF token
+//      in a readable (non-httpOnly) cookie named 'csrf-token'.
+//   2. Client reads the cookie and sends it in the 'X-CSRF-Token' request header.
+//   3. Server middleware compares header vs cookie. Mismatch → 403.
+//
+// This stops CSRF because cross-origin requests cannot read cookies to echo them.
+
+const CSRF_COOKIE_NAME = 'csrf-token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+const CSRF_TOKEN_BYTES = 32;
+
+/**
+ * Generates and sets a CSRF token cookie if not already present.
+ * Called during OAuth callback and on the first authenticated request.
+ */
+export function ensureCsrfCookie(req: any, res: any): string {
+  const existing = req.cookies?.[CSRF_COOKIE_NAME];
+  if (existing && existing.length >= CSRF_TOKEN_BYTES * 2) return existing;
+
+  const token = crypto.randomBytes(CSRF_TOKEN_BYTES).toString('hex');
+  // Guard: res.cookie may not exist in test contexts or non-Express environments
+  if (typeof res?.cookie !== 'function') return token;
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  res.cookie(CSRF_COOKIE_NAME, token, {
+    httpOnly: false,   // MUST be readable by JS so the client can echo it
+    secure: isProduction,
+    sameSite: 'none' as const,
+    path: '/',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  });
+  return token;
+}
+
+/**
+ * Validates that the CSRF token in the request header matches the cookie.
+ * Skips validation for GET/HEAD/OPTIONS (safe methods).
+ * Skips in development unless CSRF_ENFORCE_DEV=1 is set.
+ */
+function validateCsrf(ctx: TrpcContext): void {
+  const method = ctx.req.method?.toUpperCase();
+  // Safe HTTP methods do not need CSRF protection
+  if (!method || ['GET', 'HEAD', 'OPTIONS'].includes(method)) return;
+
+  // In development, only enforce if explicitly opted in
+  if (process.env.NODE_ENV !== 'production' && process.env.CSRF_ENFORCE_DEV !== '1') return;
+
+  const cookieToken = ctx.req.cookies?.[CSRF_COOKIE_NAME];
+  const headerToken = ctx.req.headers?.[CSRF_HEADER_NAME] as string | undefined;
+
+  if (!cookieToken || !headerToken) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'CSRF token missing. Ensure X-CSRF-Token header is set from the csrf-token cookie.',
+    });
+  }
+
+  // Constant-time comparison to prevent timing attacks
+  const cookieBuf = Buffer.from(cookieToken, 'utf8');
+  const headerBuf = Buffer.from(headerToken, 'utf8');
+  if (cookieBuf.length !== headerBuf.length || !crypto.timingSafeEqual(cookieBuf, headerBuf)) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'CSRF token mismatch. Request rejected.',
+    });
+  }
+}
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -17,6 +88,12 @@ const requireUser = t.middleware(async opts => {
   if (!ctx.user) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
+
+  // B3 FIX: Validate CSRF token on all authenticated mutations
+  validateCsrf(ctx);
+
+  // Ensure CSRF cookie is set/refreshed for the current session
+  if (ctx.res) ensureCsrfCookie(ctx.req, ctx.res);
 
   return next({
     ctx: {
@@ -35,6 +112,9 @@ export const adminProcedure = t.procedure.use(
     if (!ctx.user || ctx.user.role !== 'admin') {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
+
+    // B3 FIX: Validate CSRF token on all admin mutations
+    validateCsrf(ctx);
 
     return next({
       ctx: {

@@ -187,11 +187,14 @@ class SDKServer {
     const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
+    // R3 FIX: Include a JTI (JWT ID) so individual sessions can be revoked via Redis.
+    const jti = crypto.randomUUID();
 
     return new SignJWT({
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      jti,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -200,7 +203,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; jti?: string } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -211,7 +214,7 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, jti } = payload as Record<string, unknown>;
 
       if (
         !isNonEmptyString(openId) ||
@@ -222,10 +225,25 @@ class SDKServer {
         return null;
       }
 
+      // R3 FIX: Check Redis revocation blacklist if a JTI is present
+      if (typeof jti === 'string' && jti) {
+        try {
+          const { isSessionRevoked } = await import('./redisRateLimiter');
+          const revoked = await isSessionRevoked(jti);
+          if (revoked) {
+            console.warn('[Auth] Session revoked (JTI blacklisted):', jti);
+            return null;
+          }
+        } catch {
+          // Redis unavailable — fail-open, allow session
+        }
+      }
+
       return {
         openId,
         appId,
         name,
+        jti: typeof jti === 'string' ? jti : undefined,
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));

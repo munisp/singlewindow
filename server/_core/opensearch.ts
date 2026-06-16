@@ -1,0 +1,279 @@
+/**
+ * OpenSearch Client — R5 FIX
+ *
+ * Provides a singleton OpenSearch client with:
+ *  - Declaration full-text search (HS code, goods description, UCR)
+ *  - Audit log indexing for SIEM/compliance queries
+ *  - Security alert indexing (Wazuh event forwarding)
+ *  - Graceful degradation when OPENSEARCH_URL is not set
+ */
+
+import { Client } from "@opensearch-project/opensearch";
+
+let _client: Client | null = null;
+
+export function getOpenSearchClient(): Client | null {
+  if (_client) return _client;
+  const url = process.env.OPENSEARCH_URL;
+  if (!url) {
+    // Graceful degradation — OpenSearch is optional in dev
+    return null;
+  }
+  _client = new Client({
+    node: url,
+    auth: process.env.OPENSEARCH_USERNAME
+      ? {
+          username: process.env.OPENSEARCH_USERNAME,
+          password: process.env.OPENSEARCH_PASSWORD ?? "",
+        }
+      : undefined,
+    ssl: {
+      rejectUnauthorized: process.env.NODE_ENV === "production",
+    },
+  });
+  return _client;
+}
+
+// ─── INDEX NAMES ─────────────────────────────────────────────────────────────
+export const INDICES = {
+  DECLARATIONS: "tradegateway-declarations",
+  AUDIT_EVENTS: "tradegateway-audit-events",
+  SECURITY_ALERTS: "tradegateway-security-alerts",
+  PAYMENTS: "tradegateway-payments",
+} as const;
+
+// ─── INDEX DECLARATIONS ───────────────────────────────────────────────────────
+export interface DeclarationDocument {
+  id: number;
+  declarationNumber: string;
+  ucr?: string | null;
+  traderId: number;
+  declarationType: string;
+  status: string;
+  riskLane?: string | null;
+  riskScore?: string | null;
+  hsCode?: string | null;
+  goodsDescription?: string | null;
+  countryOfOrigin?: string | null;
+  countryOfDestination?: string | null;
+  portOfEntry?: string | null;
+  invoiceValue?: string | null;
+  invoiceCurrency?: string | null;
+  submittedAt?: Date | null;
+  clearedAt?: Date | null;
+  createdAt: Date;
+}
+
+export async function indexDeclaration(doc: DeclarationDocument): Promise<void> {
+  const client = getOpenSearchClient();
+  if (!client) return;
+  try {
+    await client.index({
+      index: INDICES.DECLARATIONS,
+      id: String(doc.id),
+      body: {
+        ...doc,
+        submittedAt: doc.submittedAt?.toISOString(),
+        clearedAt: doc.clearedAt?.toISOString(),
+        createdAt: doc.createdAt.toISOString(),
+        "@timestamp": new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error("[OpenSearch] Failed to index declaration:", err);
+  }
+}
+
+export async function searchDeclarations(query: string, traderId?: number, limit = 20) {
+  const client = getOpenSearchClient();
+  if (!client) return { hits: [], total: 0 };
+  try {
+    const must: object[] = [
+      {
+        multi_match: {
+          query,
+          fields: [
+            "declarationNumber^3",
+            "ucr^3",
+            "hsCode^2",
+            "goodsDescription",
+            "countryOfOrigin",
+            "countryOfDestination",
+            "portOfEntry",
+          ],
+          type: "best_fields",
+          fuzziness: "AUTO",
+        },
+      },
+    ];
+    if (traderId !== undefined) {
+      must.push({ term: { traderId } });
+    }
+    const response = await client.search({
+      index: INDICES.DECLARATIONS,
+      body: {
+        query: { bool: { must } },
+        size: limit,
+        sort: [{ "_score": "desc" }, { "createdAt": "desc" }],
+        highlight: {
+          fields: {
+            goodsDescription: {},
+            declarationNumber: {},
+            ucr: {},
+          },
+        },
+      },
+    });
+    const hits = (response.body.hits?.hits ?? []).map((h: any) => ({
+      ...h._source,
+      _score: h._score,
+      _highlight: h.highlight,
+    }));
+      const total = response.body.hits?.total;
+      const totalCount = typeof total === 'number' ? total : (total as any)?.value ?? 0;
+      return { hits, total: totalCount };
+  } catch (err) {
+    console.error("[OpenSearch] Search failed:", err);
+    return { hits: [], total: 0 };
+  }
+}
+
+// ─── INDEX AUDIT EVENTS ───────────────────────────────────────────────────────
+export interface AuditEventDocument {
+  id: number;
+  entityType: string;
+  entityId: number;
+  action: string;
+  actorId?: number | null;
+  actorType?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  entryHash?: string | null;
+  prevHash?: string | null;
+  createdAt: Date;
+}
+
+export async function indexAuditEvent(doc: AuditEventDocument): Promise<void> {
+  const client = getOpenSearchClient();
+  if (!client) return;
+  try {
+    await client.index({
+      index: INDICES.AUDIT_EVENTS,
+      id: String(doc.id),
+      body: {
+        ...doc,
+        createdAt: doc.createdAt.toISOString(),
+        "@timestamp": doc.createdAt.toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error("[OpenSearch] Failed to index audit event:", err);
+  }
+}
+
+// ─── INDEX SECURITY ALERTS ────────────────────────────────────────────────────
+export interface SecurityAlertDocument {
+  alertId: string;
+  severity: string;
+  category: string;
+  title: string;
+  description?: string | null;
+  sourceIp?: string | null;
+  targetService?: string | null;
+  ruleId?: string | null;
+  createdAt: Date;
+}
+
+export async function indexSecurityAlert(doc: SecurityAlertDocument): Promise<void> {
+  const client = getOpenSearchClient();
+  if (!client) return;
+  try {
+    await client.index({
+      index: INDICES.SECURITY_ALERTS,
+      id: doc.alertId,
+      body: {
+        ...doc,
+        createdAt: doc.createdAt.toISOString(),
+        "@timestamp": doc.createdAt.toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error("[OpenSearch] Failed to index security alert:", err);
+  }
+}
+
+// ─── ENSURE INDICES EXIST ─────────────────────────────────────────────────────
+export async function ensureOpenSearchIndices(): Promise<void> {
+  const client = getOpenSearchClient();
+  if (!client) return;
+
+  const indexConfigs: Record<string, object> = {
+    [INDICES.DECLARATIONS]: {
+      mappings: {
+        properties: {
+          declarationNumber: { type: "keyword" },
+          ucr: { type: "keyword" },
+          traderId: { type: "integer" },
+          declarationType: { type: "keyword" },
+          status: { type: "keyword" },
+          riskLane: { type: "keyword" },
+          riskScore: { type: "float" },
+          hsCode: { type: "keyword" },
+          goodsDescription: { type: "text", analyzer: "standard" },
+          countryOfOrigin: { type: "keyword" },
+          countryOfDestination: { type: "keyword" },
+          portOfEntry: { type: "keyword" },
+          invoiceValue: { type: "float" },
+          invoiceCurrency: { type: "keyword" },
+          submittedAt: { type: "date" },
+          clearedAt: { type: "date" },
+          createdAt: { type: "date" },
+          "@timestamp": { type: "date" },
+        },
+      },
+    },
+    [INDICES.AUDIT_EVENTS]: {
+      mappings: {
+        properties: {
+          entityType: { type: "keyword" },
+          entityId: { type: "integer" },
+          action: { type: "keyword" },
+          actorId: { type: "integer" },
+          actorType: { type: "keyword" },
+          ipAddress: { type: "ip" },
+          entryHash: { type: "keyword" },
+          prevHash: { type: "keyword" },
+          createdAt: { type: "date" },
+          "@timestamp": { type: "date" },
+        },
+      },
+    },
+    [INDICES.SECURITY_ALERTS]: {
+      mappings: {
+        properties: {
+          alertId: { type: "keyword" },
+          severity: { type: "keyword" },
+          category: { type: "keyword" },
+          title: { type: "text" },
+          sourceIp: { type: "ip" },
+          targetService: { type: "keyword" },
+          ruleId: { type: "keyword" },
+          createdAt: { type: "date" },
+          "@timestamp": { type: "date" },
+        },
+      },
+    },
+  };
+
+  for (const [index, body] of Object.entries(indexConfigs)) {
+    try {
+      const exists = await client.indices.exists({ index });
+      if (!exists.body) {
+        await client.indices.create({ index, body });
+        console.log(`[OpenSearch] Created index: ${index}`);
+      }
+    } catch (err) {
+      console.error(`[OpenSearch] Failed to ensure index ${index}:`, err);
+    }
+  }
+}

@@ -1,0 +1,27 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    openjdk-17-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python Flink + Delta Lake dependencies
+RUN pip install --no-cache-dir \
+    apache-flink==1.19.0 \
+    delta-spark==3.2.0 \
+    confluent-kafka==2.6.1 \
+    opensearch-py==2.7.1 \
+    psycopg2-binary==2.9.9 \
+    structlog==24.4.0 \
+    tenacity==9.0.0
+
+COPY flink-kafka-delta-pipeline.py .
+COPY run_pipeline.py .
+
+RUN useradd -r -u 1001 appuser && chown -R appuser:appuser /app
+USER appuser
+
+CMD ["python", "run_pipeline.py"]

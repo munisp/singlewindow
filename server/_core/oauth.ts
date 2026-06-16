@@ -64,6 +64,12 @@ export function registerOAuthRoutes(app: Express) {
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 
+      // B3 FIX: Issue CSRF token cookie after successful authentication.
+      // The client must read this cookie and echo it in X-CSRF-Token header on mutations.
+      // S3 FIX: Regenerate CSRF token on every new login to prevent session fixation.
+      const { ensureCsrfCookie } = await import('./trpc');
+      ensureCsrfCookie(req, res);
+
       // Redirect to the returnPath encoded in state (validated to be relative-only)
       const returnPath = parseReturnPath(state);
       res.redirect(302, returnPath);

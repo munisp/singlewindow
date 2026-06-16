@@ -1,0 +1,946 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# TradeGateway NGSWTP — Polyglot Service Kubernetes Manifests
+# Services: Go (×4), Rust (×2), Python (×2)
+# All services use:
+#   - Non-root UID 1001
+#   - Read-only root filesystem
+#   - Resource limits
+#   - Liveness + readiness probes
+#   - Dapr sidecar annotations
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Go — Declaration Engine
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: declaration-engine
+  namespace: tradegateway
+  labels:
+    app: declaration-engine
+    language: go
+    tier: core
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: declaration-engine
+  template:
+    metadata:
+      labels:
+        app: declaration-engine
+        language: go
+        tier: core
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "declaration-engine"
+        dapr.io/app-port: "8080"
+        dapr.io/config: "tradegateway-config"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: declaration-engine
+          image: tradegateway/declaration-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+              name: grpc
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: REDIS_URL
+            - name: GRPC_TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: GRPC_TLS_KEY_FILE
+              value: /etc/tls/tls.key
+            - name: GRPC_TLS_CA_FILE
+              value: /etc/tls/ca.crt
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tradegateway-tls
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: declaration-engine
+  namespace: tradegateway
+spec:
+  selector:
+    app: declaration-engine
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. Go — Risk Engine
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-engine-go
+  namespace: tradegateway
+  labels:
+    app: risk-engine-go
+    language: go
+    tier: core
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: risk-engine-go
+  template:
+    metadata:
+      labels:
+        app: risk-engine-go
+        language: go
+        tier: core
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "risk-engine-go"
+        dapr.io/app-port: "8080"
+        dapr.io/config: "tradegateway-config"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: risk-engine-go
+          image: tradegateway/risk-engine:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50052
+              name: grpc
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+            - name: AI_RISK_SCORER_URL
+              value: "http://ai-risk-scorer:8001"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1Gi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tradegateway-tls
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: risk-engine-go
+  namespace: tradegateway
+spec:
+  selector:
+    app: risk-engine-go
+  ports:
+    - name: grpc
+      port: 50052
+      targetPort: 50052
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Go — OGA Hub
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oga-hub
+  namespace: tradegateway
+  labels:
+    app: oga-hub
+    language: go
+    tier: core
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: oga-hub
+  template:
+    metadata:
+      labels:
+        app: oga-hub
+        language: go
+        tier: core
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "oga-hub"
+        dapr.io/app-port: "8080"
+        dapr.io/config: "tradegateway-config"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: oga-hub
+          image: tradegateway/oga-hub:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50053
+              name: grpc
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tradegateway-tls
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oga-hub
+  namespace: tradegateway
+spec:
+  selector:
+    app: oga-hub
+  ports:
+    - name: grpc
+      port: 50053
+      targetPort: 50053
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Go — Cargo Tracking
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cargo-tracking-go
+  namespace: tradegateway
+  labels:
+    app: cargo-tracking-go
+    language: go
+    tier: core
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cargo-tracking-go
+  template:
+    metadata:
+      labels:
+        app: cargo-tracking-go
+        language: go
+        tier: core
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "cargo-tracking-go"
+        dapr.io/app-port: "8080"
+        dapr.io/config: "tradegateway-config"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: cargo-tracking-go
+          image: tradegateway/cargo-tracking:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50054
+              name: grpc
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tradegateway-tls
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cargo-tracking-go
+  namespace: tradegateway
+spec:
+  selector:
+    app: cargo-tracking-go
+  ports:
+    - name: grpc
+      port: 50054
+      targetPort: 50054
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. Rust — TigerBeetle Bridge
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tigerbeetle-bridge-rust
+  namespace: tradegateway
+  labels:
+    app: tigerbeetle-bridge-rust
+    language: rust
+    tier: ledger
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tigerbeetle-bridge-rust
+  template:
+    metadata:
+      labels:
+        app: tigerbeetle-bridge-rust
+        language: rust
+        tier: ledger
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: tigerbeetle-bridge-rust
+          image: tradegateway/tigerbeetle-bridge:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50055
+              name: grpc
+            - containerPort: 9090
+              name: metrics
+          env:
+            - name: TIGERBEETLE_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: TIGERBEETLE_ADDRESS
+            - name: GRPC_TLS_CERT_FILE
+              value: /etc/tls/tls.crt
+            - name: GRPC_TLS_KEY_FILE
+              value: /etc/tls/tls.key
+            - name: GRPC_TLS_CA_FILE
+              value: /etc/tls/ca.crt
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2000m"
+              memory: "512Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/tigerbeetle-bridge", "--health-check"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/tigerbeetle-bridge", "--health-check"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tradegateway-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle-bridge-rust
+  namespace: tradegateway
+spec:
+  selector:
+    app: tigerbeetle-bridge-rust
+  ports:
+    - name: grpc
+      port: 50055
+      targetPort: 50055
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Rust — Kafka Consumer (Domain Event Processor)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer-rust
+  namespace: tradegateway
+  labels:
+    app: kafka-consumer-rust
+    language: rust
+    tier: events
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka-consumer-rust
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer-rust
+        language: rust
+        tier: events
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: kafka-consumer-rust
+          image: tradegateway/kafka-consumer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9090
+              name: metrics
+          env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+            - name: KAFKA_GROUP_ID
+              value: "tradegateway-rust-consumer"
+            - name: OPENSEARCH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: OPENSEARCH_URL
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "128Mi"
+            limits:
+              cpu: "1000m"
+              memory: "256Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-consumer-rust
+  namespace: tradegateway
+spec:
+  selector:
+    app: kafka-consumer-rust
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Python — AI Risk Scorer (FastAPI + XGBoost + Isolation Forest)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-risk-scorer
+  namespace: tradegateway
+  labels:
+    app: ai-risk-scorer
+    language: python
+    tier: ml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-risk-scorer
+  template:
+    metadata:
+      labels:
+        app: ai-risk-scorer
+        language: python
+        tier: ml
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9096"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: ai-risk-scorer
+          image: tradegateway/ai-risk-scorer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+              name: http
+            - containerPort: 9096
+              name: metrics
+          env:
+            - name: MODEL_PATH
+              value: "/app/models"
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+            - name: KAFKA_GROUP_ID
+              value: "ai-risk-scorer"
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: DATABASE_URL
+            - name: RETRAIN_SCHEDULE
+              value: "0 2 * * 0"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "4000m"
+              memory: "4Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: ai-risk-scorer-models-pvc
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-risk-scorer
+  namespace: tradegateway
+spec:
+  selector:
+    app: ai-risk-scorer
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+    - name: metrics
+      port: 9096
+      targetPort: 9096
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ai-risk-scorer-models-pvc
+  namespace: tradegateway
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Python — OpenSearch Indexer
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensearch-indexer
+  namespace: tradegateway
+  labels:
+    app: opensearch-indexer
+    language: python
+    tier: analytics
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: opensearch-indexer
+  template:
+    metadata:
+      labels:
+        app: opensearch-indexer
+        language: python
+        tier: analytics
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: opensearch-indexer
+          image: tradegateway/opensearch-indexer:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_BROKERS
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: KAFKA_BROKERS
+            - name: OPENSEARCH_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: OPENSEARCH_URL
+            - name: OPENSEARCH_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: OPENSEARCH_USER
+            - name: OPENSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: OPENSEARCH_PASSWORD
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch-indexer
+  namespace: tradegateway
+spec:
+  selector:
+    app: opensearch-indexer
+  ports:
+    - name: http
+      port: 8002
+      targetPort: 8002
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# HorizontalPodAutoscalers for all polyglot services
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: declaration-engine-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: declaration-engine
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-engine-go-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-engine-go
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-risk-scorer-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-risk-scorer
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap for polyglot service configuration
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tradegateway-config
+  namespace: tradegateway
+data:
+  KAFKA_BROKERS: "kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092"
+  TIGERBEETLE_ADDRESS: "tigerbeetle-0.tigerbeetle-headless:3000"
+  OPENSEARCH_URL: "https://opensearch-cluster-master:9200"
+  TEMPORAL_ADDRESS: "temporal-frontend:7233"
+  TEMPORAL_NAMESPACE: "tradegateway"
+  AI_RISK_SCORER_URL: "http://ai-risk-scorer:8001"
+  DECLARATION_ENGINE_URL: "http://declaration-engine:8080"
+  RISK_ENGINE_GO_URL: "http://risk-engine-go:8080"
+  OGA_HUB_URL: "http://oga-hub:8080"
+  CARGO_TRACKING_GO_URL: "http://cargo-tracking-go:8080"
+  TIGERBEETLE_BRIDGE_RUST_URL: "http://tigerbeetle-bridge-rust:50055"
+  KAFKA_CONSUMER_METRICS_URL: "http://kafka-consumer-rust:9090"
+  OPENSEARCH_INDEXER_URL: "http://opensearch-indexer:8002"

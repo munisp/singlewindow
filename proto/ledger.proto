@@ -1,0 +1,115 @@
+syntax = "proto3";
+package tradegateway.ledger.v1;
+option go_package = "github.com/tradegateway/ngswtp/proto/ledger/v1;ledgerv1";
+
+// ─── Ledger (TigerBeetle Bridge) gRPC Service ────────────────────────────────
+// Rust service wrapping TigerBeetle for double-entry financial ledger.
+// Provides account provisioning, transfer execution, and balance queries.
+
+service LedgerService {
+  rpc CreateAccount(CreateAccountRequest) returns (AccountResponse);
+  rpc GetAccount(GetAccountRequest) returns (AccountResponse);
+  rpc GetBalance(GetBalanceRequest) returns (BalanceResponse);
+  rpc CreateTransfer(CreateTransferRequest) returns (TransferResponse);
+  rpc GetTransfer(GetTransferRequest) returns (TransferResponse);
+  rpc ListTransfers(ListTransfersRequest) returns (ListTransfersResponse);
+  rpc VoidTransfer(VoidTransferRequest) returns (TransferResponse);
+  rpc GetLedgerStats(LedgerStatsRequest) returns (LedgerStatsResponse);
+}
+
+message CreateAccountRequest {
+  string account_id = 1;          // deterministic string ID (hashed to uint128)
+  string owner_id = 2;            // trader ID or "system"
+  string account_type = 3;        // trader | customs_duty | vat | levy | bond | suspense
+  string currency = 4;            // ISO 4217
+  int32 ledger = 5;               // 1 = primary, 2 = bond, 3 = drawback
+  int32 code = 6;                 // account code (1=debit, 2=credit)
+}
+
+message GetAccountRequest {
+  string account_id = 1;
+}
+
+message GetBalanceRequest {
+  string account_id = 1;
+}
+
+message CreateTransferRequest {
+  string transfer_id = 1;         // idempotency key
+  string debit_account_id = 2;
+  string credit_account_id = 3;
+  int64 amount = 4;               // in smallest currency unit (cents)
+  string currency = 5;
+  int32 ledger = 6;
+  int32 code = 7;                 // transfer type code
+  string user_data = 8;           // JSON metadata (declaration_id, payment_ref)
+  bool pending = 9;               // two-phase transfer: create as pending first
+  string pending_id = 10;         // ID of pending transfer to post/void
+}
+
+message GetTransferRequest {
+  string transfer_id = 1;
+}
+
+message ListTransfersRequest {
+  string account_id = 1;
+  int32 limit = 2;
+  int64 before_ms = 3;
+}
+
+message VoidTransferRequest {
+  string pending_id = 1;
+  string transfer_id = 2;         // new ID for the void transfer
+}
+
+message LedgerStatsRequest {
+  string period = 1;
+}
+
+message AccountResponse {
+  string account_id = 1;
+  string owner_id = 2;
+  string account_type = 3;
+  string currency = 4;
+  int64 debits_posted = 5;
+  int64 credits_posted = 6;
+  int64 debits_pending = 7;
+  int64 credits_pending = 8;
+  int64 balance = 9;              // credits_posted - debits_posted
+  int64 created_at_ns = 10;
+}
+
+message BalanceResponse {
+  string account_id = 1;
+  int64 balance = 2;
+  int64 debits_posted = 3;
+  int64 credits_posted = 4;
+  int64 debits_pending = 5;
+  int64 credits_pending = 6;
+  string currency = 7;
+}
+
+message TransferResponse {
+  string transfer_id = 1;
+  string debit_account_id = 2;
+  string credit_account_id = 3;
+  int64 amount = 4;
+  string currency = 5;
+  int32 code = 6;
+  string user_data = 7;
+  bool is_pending = 8;
+  bool is_voided = 9;
+  int64 created_at_ns = 10;
+}
+
+message ListTransfersResponse {
+  repeated TransferResponse transfers = 1;
+}
+
+message LedgerStatsResponse {
+  int64 total_transfers = 1;
+  int64 total_volume = 2;
+  int64 pending_transfers = 3;
+  int64 voided_transfers = 4;
+  double avg_transfer_ms = 5;
+}

@@ -1,0 +1,122 @@
+syntax = "proto3";
+package tradegateway.declaration.v1;
+option go_package = "github.com/tradegateway/ngswtp/proto/declaration/v1;declarationv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ─── Declaration Engine gRPC Service ─────────────────────────────────────────
+// Handles declaration lifecycle: create, submit, assess, clear, reject.
+// Implemented in Go. Called by the TypeScript BFF via gRPC.
+
+service DeclarationService {
+  rpc CreateDeclaration(CreateDeclarationRequest) returns (DeclarationResponse);
+  rpc SubmitDeclaration(SubmitDeclarationRequest) returns (DeclarationResponse);
+  rpc GetDeclaration(GetDeclarationRequest) returns (DeclarationResponse);
+  rpc ListDeclarations(ListDeclarationsRequest) returns (ListDeclarationsResponse);
+  rpc UpdateDeclarationStatus(UpdateStatusRequest) returns (DeclarationResponse);
+  rpc AssessDeclaration(AssessDeclarationRequest) returns (AssessmentResponse);
+  rpc ClearDeclaration(ClearDeclarationRequest) returns (DeclarationResponse);
+  rpc GetDeclarationStats(GetStatsRequest) returns (DeclarationStatsResponse);
+}
+
+message CreateDeclarationRequest {
+  string trader_id = 1;
+  string hs_code = 2;
+  string goods_description = 3;
+  string country_of_origin = 4;
+  string port_of_entry = 5;
+  double gross_weight = 6;
+  double net_weight = 7;
+  int32 number_of_packages = 8;
+  double invoice_value = 9;
+  string invoice_currency = 10;
+  string declaration_type = 11; // import | export | transit
+}
+
+message SubmitDeclarationRequest {
+  string declaration_id = 1;
+  string trader_id = 2;
+}
+
+message GetDeclarationRequest {
+  string declaration_id = 1;
+  string requester_id = 2;
+  string requester_role = 3;
+}
+
+message ListDeclarationsRequest {
+  string trader_id = 1;       // empty = all (admin only)
+  string status_filter = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message UpdateStatusRequest {
+  string declaration_id = 1;
+  string new_status = 2;
+  string officer_id = 3;
+  string reason = 4;
+}
+
+message AssessDeclarationRequest {
+  string declaration_id = 1;
+  int32 risk_score = 2;
+  string risk_lane = 3;       // GREEN | YELLOW | RED
+  string ai_explanation = 4;
+  repeated string risk_factors = 5;
+}
+
+message ClearDeclarationRequest {
+  string declaration_id = 1;
+  string officer_id = 2;
+  string clearance_code = 3;
+}
+
+message GetStatsRequest {
+  string trader_id = 1;       // empty = global stats (admin)
+  string period = 2;          // daily | weekly | monthly
+}
+
+message DeclarationResponse {
+  string id = 1;
+  string declaration_number = 2;
+  string ucr = 3;
+  string trader_id = 4;
+  string status = 5;
+  string hs_code = 6;
+  string goods_description = 7;
+  string country_of_origin = 8;
+  string port_of_entry = 9;
+  double invoice_value = 10;
+  string invoice_currency = 11;
+  string declaration_type = 12;
+  int32 risk_score = 13;
+  string risk_lane = 14;
+  string ai_explanation = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
+}
+
+message ListDeclarationsResponse {
+  repeated DeclarationResponse declarations = 1;
+  int32 total = 2;
+}
+
+message AssessmentResponse {
+  string declaration_id = 1;
+  int32 risk_score = 2;
+  string risk_lane = 3;
+  string ai_explanation = 4;
+  repeated string risk_factors = 5;
+  bool workflow_triggered = 6;
+}
+
+message DeclarationStatsResponse {
+  int32 total = 1;
+  int32 green = 2;
+  int32 yellow = 3;
+  int32 red = 4;
+  int32 cleared = 5;
+  int32 rejected = 6;
+  int32 pending = 7;
+}

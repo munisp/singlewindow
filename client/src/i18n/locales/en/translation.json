@@ -99,5 +99,82 @@
     "fr": "Français",
     "ar": "العربية",
     "select": "Select Language"
+  },
+  "kyc": {
+    "title": "Identity Verification",
+    "subtitle": "Complete KYC/KYB verification to access all platform features",
+    "status": {
+      "not_started": "Not Started",
+      "pending_review": "Pending Review",
+      "approved": "Verified",
+      "rejected": "Rejected",
+      "requires_resubmission": "Resubmission Required"
+    },
+    "individual": "Individual (KYC)",
+    "business": "Business (KYB)",
+    "uploadDocument": "Upload Document",
+    "analysing": "Analysing document...",
+    "approved_message": "Your identity has been verified. You can now submit declarations.",
+    "rejected_message": "Verification rejected. Please resubmit with valid documents."
+  },
+  "payments": {
+    "title": "Payments",
+    "initiate": "Pay Duties",
+    "history": "Payment History",
+    "amount": "Amount",
+    "currency": "Currency",
+    "method": "Payment Method",
+    "status": {
+      "pending": "Pending",
+      "processing": "Processing",
+      "completed": "Completed",
+      "failed": "Failed",
+      "refunded": "Refunded"
+    },
+    "reference": "Payment Reference",
+    "receipt": "Download Receipt",
+    "payNow": "Pay Now"
+  },
+  "cargo": {
+    "title": "Cargo Tracking",
+    "trackingNumber": "Tracking Number",
+    "vessel": "Vessel",
+    "eta": "Estimated Arrival",
+    "location": "Current Location",
+    "events": "Tracking Events"
+  },
+  "bondedWarehouse": {
+    "title": "Bonded Warehouse",
+    "inventory": "Inventory",
+    "deposit": "Deposit Goods",
+    "withdraw": "Withdraw Goods",
+    "exBond": "Ex-Bond Permit",
+    "dutyDeferred": "Duty Deferred"
+  },
+  "drawback": {
+    "title": "Duty Drawback",
+    "apply": "Apply for Drawback",
+    "claimAmount": "Claim Amount",
+    "timeLimit": "Claims must be submitted within 3 years of original import"
+  },
+  "compliance": {
+    "title": "Compliance",
+    "sanctions": "Sanctions Screening",
+    "postClearanceAudit": "Post-Clearance Audit",
+    "complianceScore": "Compliance Score",
+    "alerts": "Compliance Alerts"
+  },
+  "errors": {
+    "kycRequired": "KYC verification is required before you can submit declarations.",
+    "forbidden": "You do not have permission to perform this action.",
+    "notFound": "The requested resource was not found.",
+    "serverError": "A server error occurred. Please try again.",
+    "networkError": "Network error. Please check your connection.",
+    "sessionExpired": "Your session has expired. Please log in again.",
+    "paymentFailed": "Payment failed. Please try again or contact support."
+  },
+  "offline": {
+    "banner": "You are offline. Changes will be synced when connectivity is restored.",
+    "queued": "Action queued for when you are back online."
   }
 }

@@ -74,12 +74,14 @@ function mockFetch(routes: MockFetchMap) {
 
 const ADMIN_CTX: TrpcContext = {
   user: { id: 1, openId: "admin-open-id", name: "Admin", email: "admin@example.com", role: "admin", createdAt: new Date() },
-  db: null,
+  req: { method: "POST", headers: {}, cookies: {} } as TrpcContext["req"],
+  res: { clearCookie: () => {}, cookie: () => {} } as unknown as TrpcContext["res"],
 };
 
 const USER_CTX: TrpcContext = {
   user: { id: 2, openId: "user-open-id", name: "User", email: "user@example.com", role: "user", createdAt: new Date() },
-  db: null,
+  req: { method: "POST", headers: {}, cookies: {} } as TrpcContext["req"],
+  res: { clearCookie: () => {}, cookie: () => {} } as unknown as TrpcContext["res"],
 };
 
 const SAMPLE_BRIDGE_RESPONSE = {

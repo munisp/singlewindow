@@ -1,0 +1,124 @@
+syntax = "proto3";
+package tradegateway.oga.v1;
+option go_package = "github.com/tradegateway/ngswtp/proto/oga/v1;ogav1";
+
+import "google/protobuf/timestamp.proto";
+
+// ─── OGA Hub gRPC Service ─────────────────────────────────────────────────────
+// Multi-agency workflow orchestration. Routes permit requests to 37+ OGAs,
+// manages joint inspection model, and tracks SLA compliance.
+
+service OGAService {
+  rpc SubmitPermitRequest(PermitRequest) returns (PermitResponse);
+  rpc GetPermitStatus(GetPermitStatusRequest) returns (PermitResponse);
+  rpc ApprovePermit(ApprovePermitRequest) returns (PermitResponse);
+  rpc RejectPermit(RejectPermitRequest) returns (PermitResponse);
+  rpc ListAgencies(ListAgenciesRequest) returns (ListAgenciesResponse);
+  rpc GetJointInspectionStatus(JointInspectionRequest) returns (JointInspectionResponse);
+  rpc TriggerJointInspection(TriggerJointInspectionRequest) returns (JointInspectionResponse);
+  rpc GetSLAReport(SLAReportRequest) returns (SLAReportResponse);
+}
+
+message PermitRequest {
+  string declaration_id = 1;
+  string trader_id = 2;
+  string agency_code = 3;         // e.g., "FDA", "EPA", "NAFDAC"
+  string permit_type = 4;         // LPCO | PHYTO | HEALTH | EXPORT_LICENSE
+  map<string, string> metadata = 5;
+  repeated string document_urls = 6;
+}
+
+message GetPermitStatusRequest {
+  string permit_id = 1;
+  string declaration_id = 2;
+}
+
+message ApprovePermitRequest {
+  string permit_id = 1;
+  string officer_id = 2;
+  string agency_code = 3;
+  string permit_number = 4;
+  google.protobuf.Timestamp valid_until = 5;
+  string notes = 6;
+}
+
+message RejectPermitRequest {
+  string permit_id = 1;
+  string officer_id = 2;
+  string agency_code = 3;
+  string reason = 4;
+}
+
+message ListAgenciesRequest {
+  bool active_only = 1;
+}
+
+message JointInspectionRequest {
+  string declaration_id = 1;
+}
+
+message TriggerJointInspectionRequest {
+  string declaration_id = 1;
+  string triggered_by = 2;
+  string reason = 3;
+  repeated string agency_codes = 4;
+}
+
+message SLAReportRequest {
+  string agency_code = 1;         // empty = all agencies
+  string period = 2;
+}
+
+message PermitResponse {
+  string id = 1;
+  string declaration_id = 2;
+  string agency_code = 3;
+  string agency_name = 4;
+  string permit_type = 5;
+  string status = 6;              // PENDING | APPROVED | REJECTED | EXPIRED
+  string permit_number = 7;
+  google.protobuf.Timestamp valid_until = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+  int64 sla_deadline_ms = 11;
+  bool sla_breached = 12;
+}
+
+message Agency {
+  string code = 1;
+  string name = 2;
+  string category = 3;
+  bool is_active = 4;
+  int32 sla_hours = 5;
+  string contact_email = 6;
+  string api_endpoint = 7;
+}
+
+message ListAgenciesResponse {
+  repeated Agency agencies = 1;
+}
+
+message JointInspectionStatus {
+  string agency_code = 1;
+  string status = 2;
+  string officer_id = 3;
+  google.protobuf.Timestamp completed_at = 4;
+}
+
+message JointInspectionResponse {
+  string declaration_id = 1;
+  bool all_agencies_cleared = 2;
+  repeated JointInspectionStatus agency_statuses = 3;
+  int32 pending_count = 4;
+  int32 approved_count = 5;
+  int32 rejected_count = 6;
+}
+
+message SLAReportResponse {
+  string agency_code = 1;
+  int32 total_permits = 2;
+  int32 within_sla = 3;
+  int32 breached_sla = 4;
+  double compliance_rate = 5;
+  double avg_processing_hours = 6;
+}

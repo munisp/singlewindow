@@ -23,11 +23,64 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import path from "path";
+import fs from "fs";
 
 // Resolve proto directory relative to the project root (process.cwd()).
 // Using process.cwd() instead of import.meta.url avoids the Vite 8 SSR
 // transform injecting __vite_ssr_exportName__ which breaks vitest 2.x.
 const PROTO_DIR = path.resolve(process.cwd(), "services/proto");
+
+// ─── B4 FIX: Shared gRPC Credentials Factory ─────────────────────────────────────────
+//
+// When GRPC_TLS_CERT_PATH, GRPC_TLS_KEY_PATH, and GRPC_TLS_CA_PATH are set,
+// all gRPC clients use mutual TLS (mTLS) for encrypted, authenticated inter-service
+// communication. This is required in production Kubernetes environments.
+//
+// In development (certs not set), falls back to insecure credentials with a warning.
+// In production (NODE_ENV=production), throws if certs are not configured.
+
+let _cachedCredentials: grpc.ChannelCredentials | null = null;
+
+/**
+ * Returns gRPC channel credentials.
+ * Uses mTLS when cert paths are configured, insecure otherwise.
+ * Credentials are cached after first load.
+ */
+export function getGrpcCredentials(): grpc.ChannelCredentials {
+  if (_cachedCredentials) return _cachedCredentials;
+
+  const certPath = process.env.GRPC_TLS_CERT_PATH;
+  const keyPath  = process.env.GRPC_TLS_KEY_PATH;
+  const caPath   = process.env.GRPC_TLS_CA_PATH;
+
+  if (certPath && keyPath && caPath) {
+    try {
+      const cert = fs.readFileSync(certPath);
+      const key  = fs.readFileSync(keyPath);
+      const ca   = fs.readFileSync(caPath);
+      _cachedCredentials = grpc.credentials.createSsl(ca, key, cert);
+      console.info('[gRPC] mTLS credentials loaded from cert files.');
+      return _cachedCredentials;
+    } catch (err) {
+      const msg = `[gRPC] Failed to load mTLS cert files: ${err}. Falling back to insecure.`;
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`[gRPC] FATAL: ${msg} Cannot start in production without mTLS.`);
+      }
+      console.error(msg);
+    }
+  } else {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        '[gRPC] FATAL: GRPC_TLS_CERT_PATH, GRPC_TLS_KEY_PATH, and GRPC_TLS_CA_PATH must be set in production. ' +
+        'Inter-service gRPC traffic must use mTLS.'
+      );
+    }
+    console.warn('[gRPC] mTLS cert paths not configured. Using insecure credentials (development only).');
+  }
+
+  _cachedCredentials = getGrpcCredentials();
+  return _cachedCredentials;
+}
 
 // ─── SERVICE ADDRESSES ────────────────────────────────────────────────────────
 
@@ -90,7 +143,7 @@ export async function checkGRPCHealth(addr: string): Promise<boolean> {
       resolve(v);
     };
 
-    const channel = new grpc.Channel(addr, grpc.credentials.createInsecure(), {});
+    const channel = new grpc.Channel(addr, getGrpcCredentials(), {});
     const deadline = new Date();
     deadline.setSeconds(deadline.getSeconds() + 2);
     channel.watchConnectivityState(
@@ -147,7 +200,7 @@ export function getDeclarationGRPCClient(): grpc.Client | null {
     const pkg = _declarationPkg as Record<string, Record<string, Record<string, Record<string, grpc.ServiceClientConstructor>>>>;
     const ServiceCtor = pkg?.ngswtp?.declarations?.v1?.DeclarationService;
     if (!ServiceCtor) return null;
-    return new ServiceCtor(DECLARATION_GRPC, grpc.credentials.createInsecure());
+    return new ServiceCtor(DECLARATION_GRPC, getGrpcCredentials());
   } catch (e) {
     console.warn("[gRPC/declaration] Client init failed:", e);
     return null;
@@ -167,7 +220,7 @@ export function getPaymentGRPCClient(): grpc.Client | null {
     const pkg = _paymentPkg as Record<string, Record<string, Record<string, Record<string, grpc.ServiceClientConstructor>>>>;
     const ServiceCtor = pkg?.ngswtp?.payments?.v1?.PaymentService;
     if (!ServiceCtor) return null;
-    return new ServiceCtor(PAYMENT_GRPC, grpc.credentials.createInsecure());
+    return new ServiceCtor(PAYMENT_GRPC, getGrpcCredentials());
   } catch (e) {
     console.warn("[gRPC/payment] Client init failed:", e);
     return null;
@@ -187,7 +240,7 @@ export function getOGAGRPCClient(): grpc.Client | null {
     const pkg = _ogaPkg as Record<string, Record<string, Record<string, Record<string, grpc.ServiceClientConstructor>>>>;
     const ServiceCtor = pkg?.ngswtp?.declarations?.v1?.OGAService;
     if (!ServiceCtor) return null;
-    return new ServiceCtor(OGA_GRPC, grpc.credentials.createInsecure());
+    return new ServiceCtor(OGA_GRPC, getGrpcCredentials());
   } catch (e) {
     console.warn("[gRPC/oga] Client init failed:", e);
     return null;

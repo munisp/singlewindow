@@ -99,5 +99,82 @@
     "fr": "Français",
     "ar": "العربية",
     "select": "Choisir la langue"
+  },
+  "kyc": {
+    "title": "Vérification d'identité",
+    "subtitle": "Complétez la vérification KYC/KYB pour accéder à toutes les fonctionnalités",
+    "status": {
+      "not_started": "Non commencé",
+      "pending_review": "En attente d'examen",
+      "approved": "Vérifié",
+      "rejected": "Rejeté",
+      "requires_resubmission": "Nouvelle soumission requise"
+    },
+    "individual": "Individuel (KYC)",
+    "business": "Entreprise (KYB)",
+    "uploadDocument": "Téléverser un document",
+    "analysing": "Analyse du document...",
+    "approved_message": "Votre identité a été vérifiée. Vous pouvez maintenant soumettre des déclarations.",
+    "rejected_message": "Vérification rejetée. Veuillez soumettre à nouveau avec des documents valides."
+  },
+  "payments": {
+    "title": "Paiements",
+    "initiate": "Payer les droits",
+    "history": "Historique des paiements",
+    "amount": "Montant",
+    "currency": "Devise",
+    "method": "Mode de paiement",
+    "status": {
+      "pending": "En attente",
+      "processing": "En cours",
+      "completed": "Terminé",
+      "failed": "Échoué",
+      "refunded": "Remboursé"
+    },
+    "reference": "Référence de paiement",
+    "receipt": "Télécharger le reçu",
+    "payNow": "Payer maintenant"
+  },
+  "cargo": {
+    "title": "Suivi de cargaison",
+    "trackingNumber": "Numéro de suivi",
+    "vessel": "Navire",
+    "eta": "Arrivée prévue",
+    "location": "Emplacement actuel",
+    "events": "Événements de suivi"
+  },
+  "bondedWarehouse": {
+    "title": "Entrepôt sous douane",
+    "inventory": "Inventaire",
+    "deposit": "Déposer des marchandises",
+    "withdraw": "Retirer des marchandises",
+    "exBond": "Permis ex-bond",
+    "dutyDeferred": "Droits différés"
+  },
+  "drawback": {
+    "title": "Remboursement des droits",
+    "apply": "Demander un remboursement",
+    "claimAmount": "Montant de la demande",
+    "timeLimit": "Les demandes doivent être soumises dans les 3 ans suivant l'importation"
+  },
+  "compliance": {
+    "title": "Conformité",
+    "sanctions": "Criblage des sanctions",
+    "postClearanceAudit": "Audit post-dédouanement",
+    "complianceScore": "Score de conformité",
+    "alerts": "Alertes de conformité"
+  },
+  "errors": {
+    "kycRequired": "La vérification KYC est requise avant de soumettre des déclarations.",
+    "forbidden": "Vous n'avez pas la permission d'effectuer cette action.",
+    "notFound": "La ressource demandée est introuvable.",
+    "serverError": "Une erreur serveur s'est produite. Veuillez réessayer.",
+    "networkError": "Erreur réseau. Vérifiez votre connexion.",
+    "sessionExpired": "Votre session a expiré. Veuillez vous reconnecter.",
+    "paymentFailed": "Paiement échoué. Veuillez réessayer ou contacter le support."
+  },
+  "offline": {
+    "banner": "Vous êtes hors ligne. Les modifications seront synchronisées à la reconnexion.",
+    "queued": "Action mise en file d'attente pour la reconnexion."
   }
 }

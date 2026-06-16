@@ -17,6 +17,8 @@ import { eq, desc, and, gte, lte, count, sql, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { assertCan, setOwner } from "../_core/permify";
 import { getDb } from "../db";
+import { emitPaymentInitiated, emitPaymentCompleted } from "../_core/kafkaEventPublisher";
+import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
 
 export const paymentsRouter = router({
   // ── INITIATE PAYMENT ─────────────────────────────────────────────────────────
@@ -36,6 +38,9 @@ export const paymentsRouter = router({
       if (!["under_assessment", "payment_pending"].includes(decl.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Declaration is not ready for payment." });
       }
+
+      // R4 FIX: Ensure per-trader payment account exists before enqueuing
+      const traderAccountId = await getOrProvisionTraderAccount(ctx.user.id, decl.invoiceCurrency ?? 'USD');
 
       const reference = `PAY-${nanoid(12).toUpperCase()}`;
       const payment = await createPayment({
@@ -60,8 +65,8 @@ export const paymentsRouter = router({
         if (db) {
           const { paymentQueue, paymentIdempotencyKeys } = await import("../../drizzle/schema");
           const amountMinorUnits = BigInt(Math.round(parseFloat(decl.totalDue ?? "0") * 100));
-          const debitAccountId = input.debitAccountId ?? `trader-${ctx.user.id}`;
-          const creditAccountId = input.creditAccountId ?? "ncs-revenue-account";
+          const debitAccountId = input.debitAccountId ?? traderAccountId;
+          const creditAccountId = input.creditAccountId ?? SYSTEM_ACCOUNTS.NCS_REVENUE;
           const transferId = `tg-${reference}`;
 
           // Idempotency check — inline sha256 to avoid circular import
@@ -113,6 +118,17 @@ export const paymentsRouter = router({
         actorType: "trader",
         newState: { status: "pending", reference, paymentMethod: input.paymentMethod },
       });
+      // R3: Kafka event
+      if (payment) {
+        await emitPaymentInitiated({
+          paymentId: payment.id,
+          declarationId: input.declarationId,
+          traderId: ctx.user.id,
+          amount: parseFloat(decl.totalDue ?? '0'),
+          currency: decl.invoiceCurrency ?? 'USD',
+          idempotencyKey: reference,
+        }).catch(() => {});
+      }
 
       return { ...payment, queuedForProcessing: true };
     }),
@@ -168,6 +184,15 @@ export const paymentsRouter = router({
         body: `Your payment of ${updated.amount} ${updated.currency} (Ref: ${updated.reference}) has been confirmed. Your declaration is now queued for examination.`,
         declarationId: updated.declarationId,
       }).catch(() => { /* non-blocking */ });
+      // R3: Kafka event
+      await emitPaymentCompleted({
+        paymentId: input.paymentId,
+        declarationId: updated.declarationId,
+        traderId: updated.traderId,
+        amount: parseFloat(updated.amount ?? '0'),
+        currency: updated.currency ?? 'USD',
+        mojalooopTransferId: updated.mojalooopTransferId ?? undefined,
+      }).catch(() => {});
 
       return updated;
     }),

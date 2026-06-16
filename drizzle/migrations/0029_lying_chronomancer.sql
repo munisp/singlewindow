@@ -1,0 +1,1 @@
+ALTER TABLE "cost_records" ALTER COLUMN "tenant_id" SET DATA TYPE uuid;

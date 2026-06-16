@@ -1077,6 +1077,14 @@ async function startServer() {
   const server = createServer(app);
   // Permify schema seed on startup (non-blocking, only when PERMIFY_HOST is set)
   runPermifySeedOnStartup().catch(() => {});
+  // R4 FIX: Provision system payment accounts (NCS Revenue, Bond Collateral, etc.) at startup
+  import('../_core/paymentAccountProvisioner').then(({ provisionSystemAccounts }) => {
+    provisionSystemAccounts().catch((err) => console.warn('[Startup] System account provisioning failed:', err.message));
+  }).catch(() => {});
+  // R5 FIX: Ensure OpenSearch indices exist at startup
+  import('../_core/opensearch').then(({ ensureOpenSearchIndices }) => {
+    ensureOpenSearchIndices().catch((err) => console.warn('[Startup] OpenSearch index init failed:', err.message));
+  }).catch(() => {});
   // Sprint 63: WebSocket server for real-time notifications
   setupWebSocketServer(server);
 

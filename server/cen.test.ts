@@ -32,7 +32,11 @@ function makeCtx(overrides: Partial<AuthenticatedUser> = {}): TrpcContext {
     role: "user",
     ...overrides,
   };
-  return { user, db: null as any };
+  return {
+    user,
+    req: { method: "POST", headers: {}, cookies: {} } as TrpcContext["req"],
+    res: { clearCookie: () => {}, cookie: () => {} } as unknown as TrpcContext["res"],
+  };
 }
 
 // ─── getPartners ──────────────────────────────────────────────────────────────

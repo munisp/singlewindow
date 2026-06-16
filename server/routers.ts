@@ -4,6 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getAllUsers, getUserById, logAuditEvent } from "./db";
+import { sdk } from "./_core/sdk";
 import { documentVaultRouter } from "./routers/documentVault";
 import { z } from "zod";
 import { declarationsRouter } from "./routers/declarations";
@@ -97,9 +98,31 @@ export const appRouter = router({
         return { ...user, hasCompletedOnboarding: false };
       }
     }),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
+
+      // R3 FIX: Revoke the session JTI in Redis so the JWT is immediately invalidated
+      // even if the client retains the cookie (e.g. stolen token scenario).
+      try {
+        const cookies = ctx.req.headers.cookie ?? '';
+        const sessionCookie = cookies.split(';')
+          .map((c: string) => c.trim())
+          .find((c: string) => c.startsWith(`${COOKIE_NAME}=`));
+        if (sessionCookie) {
+          const token = sessionCookie.split('=').slice(1).join('=');
+          const session = await sdk.verifySession(token);
+          if (session?.jti) {
+            const { revokeSession } = await import('./_core/redisRateLimiter');
+            await revokeSession(session.jti);
+          }
+        }
+      } catch {
+        // Non-blocking: cookie cleared regardless
+      }
+
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      // Also clear the CSRF double-submit cookie
+      ctx.res.clearCookie('csrf_token', { ...cookieOptions, httpOnly: false, maxAge: -1 });
       return {
         success: true,
       } as const;

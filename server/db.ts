@@ -380,10 +380,55 @@ export async function getPaymentsByDeclaration(declarationId: number) {
 
 // ─── AUDIT QUERIES ───────────────────────────────────────────────────────────
 
+/**
+ * logAuditEvent — R4 FIX: Tamper-evident hash chain
+ *
+ * Each audit entry stores:
+ *   prevHash  — the entryHash of the most recent existing entry for this entity
+ *   entryHash — SHA-256(entityType|entityId|action|actorId|createdAt|prevHash|JSON(newState))
+ *
+ * To verify integrity: re-compute entryHash for each row and confirm it matches the stored value,
+ * and that prevHash matches the entryHash of the preceding row.
+ */
 export async function logAuditEvent(data: typeof auditEvents.$inferInsert) {
   const db = await getDb();
   if (!db) return;
-  await db.insert(auditEvents).values(data);
+
+  const { createHash } = await import('crypto');
+
+  // Fetch the most recent entry for this entity to get prevHash
+  const [lastEntry] = await db
+    .select({ entryHash: auditEvents.entryHash })
+    .from(auditEvents)
+    .where(and(
+      eq(auditEvents.entityType, data.entityType as any),
+      eq(auditEvents.entityId, data.entityId!)
+    ))
+    .orderBy(desc(auditEvents.createdAt))
+    .limit(1);
+
+  const prevHash = lastEntry?.entryHash ?? null;
+  const createdAt = data.createdAt ?? new Date();
+
+  // Compute this entry's hash
+  const hashInput = [
+    data.entityType,
+    String(data.entityId),
+    data.action,
+    String(data.actorId ?? ''),
+    createdAt.toISOString(),
+    prevHash ?? '',
+    JSON.stringify(data.newState ?? null),
+  ].join('|');
+
+  const entryHash = createHash('sha256').update(hashInput).digest('hex');
+
+  await db.insert(auditEvents).values({
+    ...data,
+    createdAt,
+    prevHash,
+    entryHash,
+  });
 }
 
 export async function getAuditTrail(entityType: string, entityId: number) {

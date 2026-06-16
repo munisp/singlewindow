@@ -6,6 +6,43 @@ import { declarationAmendments, declarations } from "../../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { logAuditEvent } from "../db";
 import { createNotification } from "../db";
+import { publishEvent, TOPICS } from "../_core/kafka";
+
+/**
+ * B1 FIX: Allowlist of fields that traders may request to amend on a cleared declaration.
+ * This prevents field-injection attacks where a malicious actor sets fieldName to
+ * 'traderId', 'status', 'riskLane', or other system-controlled fields.
+ */
+const AMENDMENT_ALLOWED_FIELDS = new Set([
+  "hsCode",
+  "declaredValue",
+  "originCountry",
+  "goodsDescription",
+  "quantity",
+  "weight",
+  "incoterms",
+  "portOfEntry",
+  "exporterName",
+  "exporterAddress",
+  "importerName",
+  "importerAddress",
+  "invoiceNumber",
+  "billOfLadingNumber",
+  "packageCount",
+  "grossWeight",
+  "netWeight",
+  "containerNumber",
+  "vesselName",
+  "voyageNumber",
+  "countryOfDestination",
+  "modeOfTransport",
+]);
+
+/**
+ * Risk-sensitive fields that require automatic risk re-scoring when amended.
+ * P1 FIX: Ensures risk score is re-computed when material declaration data changes.
+ */
+const RISK_SENSITIVE_FIELDS = new Set(["hsCode", "declaredValue", "originCountry"]);
 
 export const declarationAmendmentsRouter = router({
   // Trader: request an amendment on a cleared declaration
@@ -37,6 +74,14 @@ export const declarationAmendmentsRouter = router({
       // Only cleared declarations can be amended
       if (!isAdmin && decl.status !== "cleared") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only cleared declarations can be amended" });
+      }
+
+      // B1 FIX: Validate fieldName against allowlist before proceeding
+      if (!AMENDMENT_ALLOWED_FIELDS.has(input.fieldName)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Field '${input.fieldName}' is not amendable. Allowed fields: ${Array.from(AMENDMENT_ALLOWED_FIELDS).join(", ")}.`,
+        });
       }
 
       // Get current field value for audit trail
@@ -159,10 +204,40 @@ export const declarationAmendmentsRouter = router({
 
       // If approved, apply the change to the declaration
       if (input.decision === "approved") {
+        // B1 FIX: Re-validate fieldName allowlist at approval time (defence-in-depth)
+        if (!AMENDMENT_ALLOWED_FIELDS.has(amendment.fieldName)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Amendment references non-amendable field '${amendment.fieldName}'. Rejecting approval.`,
+          });
+        }
+
         await db
           .update(declarations)
           .set({ [amendment.fieldName]: amendment.newValue, updatedAt: new Date() } as any)
           .where(eq(declarations.id, amendment.declarationId));
+
+        // P1 FIX: Trigger risk re-scoring when risk-sensitive fields are amended.
+        // Publishes a Kafka event that the risk-engine microservice consumes.
+        if (RISK_SENSITIVE_FIELDS.has(amendment.fieldName)) {
+          try {
+            await publishEvent(TOPICS.DECLARATION_SUBMITTED, {
+              eventType: "declaration.risk_rescore_required",
+              aggregateId: String(amendment.declarationId),
+              payload: {
+                declarationId: amendment.declarationId,
+                reason: `Amendment approved: ${amendment.fieldName} changed`,
+                changedField: amendment.fieldName,
+                newValue: amendment.newValue,
+                amendmentId: amendment.id,
+                reviewedBy: ctx.user.id,
+              },
+            });
+          } catch (kafkaErr) {
+            // Non-fatal: log but do not block approval
+            console.error("[Amendment] Failed to publish risk rescore event:", kafkaErr);
+          }
+        }
       }
 
       await logAuditEvent({

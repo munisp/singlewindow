@@ -2,6 +2,7 @@ import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
   integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid, date
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // ─── ENUMS ───────────────────────────────────────────────────────────────────
 
@@ -256,7 +257,13 @@ export const auditEvents = pgTable("audit_events", {
   userAgent: text("user_agent"),
   metadata: json("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("idx_ae_entity").on(t.entityType, t.entityId)]);
+  // R4 FIX: Tamper-evident hash chain — each entry hashes its own content + prevHash
+  entryHash: varchar("entry_hash", { length: 64 }),  // SHA-256 hex of this row's content
+  prevHash: varchar("prev_hash", { length: 64 }),    // entryHash of the previous row for this entity
+}, (t) => [
+  index("idx_ae_entity").on(t.entityType, t.entityId),
+  index("idx_ae_entry_hash").on(t.entryHash),
+]);
 
 // ─── SECURITY ALERTS ─────────────────────────────────────────────────────────
 
@@ -1464,10 +1471,10 @@ export const paymentAccounts = pgTable("payment_accounts", {
   currency: varchar("currency", { length: 8 }).notNull().default("GHS"),
   ledger: integer("ledger").notNull().default(1),
   shardKey: integer("shard_key").notNull().default(0),
-  debitsPosted: bigint("debits_posted", { mode: "bigint" }).notNull().default(BigInt(0)),
-  creditsPosted: bigint("credits_posted", { mode: "bigint" }).notNull().default(BigInt(0)),
-  debitsPending: bigint("debits_pending", { mode: "bigint" }).notNull().default(BigInt(0)),
-  creditsPending: bigint("credits_pending", { mode: "bigint" }).notNull().default(BigInt(0)),
+  debitsPosted: bigint("debits_posted", { mode: "bigint" }).notNull().default(sql`0`),
+  creditsPosted: bigint("credits_posted", { mode: "bigint" }).notNull().default(sql`0`),
+  debitsPending: bigint("debits_pending", { mode: "bigint" }).notNull().default(sql`0`),
+  creditsPending: bigint("credits_pending", { mode: "bigint" }).notNull().default(sql`0`),
   lastSyncAt: timestamp("last_sync_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
@@ -1499,7 +1506,7 @@ export const paymentArchivalJobs = pgTable("payment_archival_jobs", {
   periodStart: timestamp("period_start").notNull(),
   periodEnd: timestamp("period_end").notNull(),
   transfersArchived: integer("transfers_archived").notNull().default(0),
-  bytesWritten: bigint("bytes_written", { mode: "bigint" }).notNull().default(BigInt(0)),
+  bytesWritten: bigint("bytes_written", { mode: "bigint" }).notNull().default(sql`0`),
   storageUri: text("storage_uri"),
   status: paymentArchivalJobStatusEnum("status").notNull().default("pending"),
   errorMessage: text("error_message"),
@@ -1649,7 +1656,7 @@ export const costCategoryEnum = pgEnum("cost_category", [
 
 export const costRecords = pgTable("cost_records", {
   id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id").references(() => tenants.id),
+  tenantId: uuid("tenant_id").references(() => tenants.id),
   tenantName: varchar("tenant_name", { length: 200 }),
   namespace: varchar("namespace", { length: 100 }),
   service: varchar("service", { length: 100 }),

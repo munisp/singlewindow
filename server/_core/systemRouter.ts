@@ -340,6 +340,15 @@ export const systemRouter = router({
         { name: "temporal-worker",     url: ENV.temporalWorkerUrl,     category: "Workflow" },
         { name: "vision-ocr",          url: ENV.visionSvcUrl,          category: "AI/ML" },
         { name: "nlp-service",         url: ENV.visionServiceUrl,      category: "AI/ML" },
+        // ── Polyglot services (Go / Rust / Python) ────────────────────────────
+        { name: "ai-risk-scorer (Python)",       url: process.env.AI_RISK_SCORER_URL ?? "http://ai-risk-scorer:8001",        category: "Python/ML" },
+        { name: "opensearch-indexer (Python)",   url: process.env.OPENSEARCH_INDEXER_URL ?? "http://opensearch-indexer:8002", category: "Python/Analytics" },
+        { name: "kafka-consumer (Rust)",         url: process.env.KAFKA_CONSUMER_METRICS_URL ?? "http://kafka-consumer:9090", category: "Rust/Events" },
+        { name: "tigerbeetle-bridge (Rust)",     url: process.env.TIGERBEETLE_BRIDGE_RUST_URL ?? "http://tigerbeetle-bridge:50055", category: "Rust/Ledger" },
+        { name: "declaration-engine (Go)",       url: process.env.DECLARATION_ENGINE_URL ?? "http://declaration-engine:8080",  category: "Go/Core" },
+        { name: "risk-engine-go (Go)",           url: process.env.RISK_ENGINE_GO_URL ?? "http://risk-engine-go:8080",          category: "Go/Core" },
+        { name: "oga-hub (Go)",                  url: process.env.OGA_HUB_URL ?? "http://oga-hub:8080",                        category: "Go/Core" },
+        { name: "cargo-tracking-go (Go)",        url: process.env.CARGO_TRACKING_GO_URL ?? "http://cargo-tracking-go:8080",    category: "Go/Core" },
       ];
       let services: Array<{ name: string; category: string; url: string; healthy: boolean; checkedAt: number; mock?: boolean }>;
 

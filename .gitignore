@@ -132,3 +132,4 @@ services/go-graph-bridge/*.exe
 e2e/.auth/
 playwright-report/
 test-results/
+.project-config.json

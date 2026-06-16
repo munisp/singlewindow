@@ -35,9 +35,11 @@ import {
   logAuditEvent,
   withRlsContext,
 } from "../db";
+import { emitKycSubmitted, emitKycApproved, emitKycRejected } from "../_core/kafkaEventPublisher";
 import { storagePut } from "../storage";
 import { kycVerifications, kycDocuments } from "../../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
+import { encryptPii } from "../_core/piiEncryption";
 
 const KYC_SERVICE_URL = process.env.KYC_SERVICE_URL || "http://localhost:8091";
 
@@ -295,6 +297,13 @@ export const kycRouter = router({
         actorType: "trader",
         newState: { status: "PENDING_REVIEW", verificationType: "INDIVIDUAL" },
       });
+      // R3: Kafka event
+      await emitKycSubmitted({
+        verificationId: verification.id,
+        userId: ctx.user.id,
+        verificationType: "INDIVIDUAL",
+        documentCount: [input.primaryDocumentId, input.secondaryDocumentId, input.selfieDocumentId].filter(Boolean).length,
+      }).catch(() => {});
       return {
         verificationId: verification.id,
         status: "PENDING_REVIEW",
@@ -334,8 +343,9 @@ export const kycRouter = router({
         submittedAt: new Date(),
         metadata: {
           businessName: input.businessName,
-          registrationNumber: input.registrationNumber,
-          taxIdentificationNumber: input.taxIdentificationNumber,
+          // R5 FIX: Encrypt PII fields at rest
+          registrationNumber: encryptPii(input.registrationNumber),
+          taxIdentificationNumber: encryptPii(input.taxIdentificationNumber),
           incorporationCertDocId: input.incorporationCertDocId,
           memorandumDocId: input.memorandumDocId,
         },
@@ -349,6 +359,13 @@ export const kycRouter = router({
         actorType: "trader",
         newState: { status: "PENDING_REVIEW", verificationType: "BUSINESS" },
       });
+      // R3: Kafka event
+      await emitKycSubmitted({
+        verificationId: verification.id,
+        userId: ctx.user.id,
+        verificationType: "BUSINESS",
+        documentCount: [input.businessRegistrationDocId, input.taxCertificateDocId, input.directorIdDocId].length,
+      }).catch(() => {});
       return {
         verificationId: verification.id,
         status: "PENDING_REVIEW",
@@ -480,6 +497,22 @@ export const kycRouter = router({
         previousState: { status: "PENDING_REVIEW" },
         newState: { status: input.decision, notes: input.notes, rejectionReason: input.rejectionReason },
       });
+      // R3: Kafka events for approved/rejected decisions
+      if (input.decision === 'APPROVED' && verification?.userId) {
+        await emitKycApproved({
+          verificationId: input.verificationId,
+          userId: verification.userId,
+          reviewerId: ctx.user.id,
+          approvedAt: new Date().toISOString(),
+        }).catch(() => {});
+      } else if (input.decision === 'REJECTED' && verification?.userId) {
+        await emitKycRejected({
+          verificationId: input.verificationId,
+          userId: verification.userId,
+          reviewerId: ctx.user.id,
+          reason: input.rejectionReason ?? 'No reason provided',
+        }).catch(() => {});
+      }
       return {
         verificationId: input.verificationId,
         status: input.decision,

@@ -53,6 +53,15 @@ vi.mock("./db", () => ({
   getSecurityAlerts: vi.fn().mockResolvedValue([]),
   createSanctionsCheck: vi.fn().mockResolvedValue(undefined),
   getSanctionsChecksByDeclaration: vi.fn().mockResolvedValue([]),
+  // B5 FIX: Return an approved KYC record so the KYC gate passes in tests
+  getLatestKYCVerification: vi.fn().mockResolvedValue({
+    id: 1,
+    userId: 1,
+    status: 'APPROVED',
+    verificationType: 'individual',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }),
   // Return an approved profile so create() doesn't throw FORBIDDEN
   getProfileByUserId: vi.fn().mockResolvedValue({
     id: 1,

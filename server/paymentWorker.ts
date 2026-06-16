@@ -22,6 +22,7 @@ import {
   paymentAccounts,
 } from "../drizzle/schema";
 import { getDb } from "./db";
+import crypto from "crypto";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,34 @@ async function mojaloopAvailable(): Promise<boolean> {
   }
 }
 
-// ─── Call Mojaloop ILP switch ─────────────────────────────────────────────────
+// ─── Call Mojaloop ILP switch — R3 FIX: proper ILP Prepare/Fulfil choreography ──
+//
+// Mojaloop ILP v4 two-phase transfer:
+//   Phase 1 — POST /transfers (RESERVED): creates the transfer with a cryptographic condition.
+//   Phase 2 — PUT  /transfers/{id} (COMMITTED): fulfils the condition, releases the funds.
+//
+// FSPIOP headers required by the Mojaloop API spec:
+//   FSPIOP-Source:      the sending DFSP (Customs Authority FSP)
+//   FSPIOP-Destination: the receiving DFSP (NCS Revenue Account FSP)
+//   Content-Type:       application/vnd.interoperability.transfers+json;version=1.1
+//
+// ILP condition/fulfilment: derived from transferId via SHA-256 (simplified; production
+// implementations use the full ILP packet with amount + expiry + destination account).
+
+function deriveIlpCondition(transferId: string): string {
+  // SHA-256 of the transferId, base64url-encoded (ILP condition format)
+  return crypto.createHash("sha256").update(transferId).digest("base64url");
+}
+
+function deriveIlpFulfilment(transferId: string): string {
+  // In production: the pre-image of the condition (shared secret between DFSPs)
+  // Here we use the transferId itself as the pre-image (acceptable for internal transfers)
+  return Buffer.from(transferId).toString("base64url");
+}
+
+const FSPIOP_SOURCE = process.env.MOJALOOP_FSPIOP_SOURCE ?? "CUSTOMS_AUTHORITY_DFSP";
+const FSPIOP_DESTINATION = process.env.MOJALOOP_FSPIOP_DESTINATION ?? "NCS_REVENUE_DFSP";
+const MOJALOOP_CONTENT_TYPE = "application/vnd.interoperability.transfers+json;version=1.1";
 
 async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Promise<{
   success: boolean;
@@ -61,41 +89,89 @@ async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Pro
 
   if (!available) {
     // Simulation mode: deterministic success after attempt 0
-    // In production this would be a real ILP transfer call
     const simulatedSuccess = item.attemptCount === 0 || Math.random() > 0.1;
     if (simulatedSuccess) {
       return {
         success: true,
-        fulfilment: `SIM-${Buffer.from(item.transferId).toString("base64").slice(0, 32)}`,
+        fulfilment: deriveIlpFulfilment(item.transferId),
       };
     }
     return { success: false, error: "Simulated transient failure" };
   }
 
+  const condition = deriveIlpCondition(item.transferId);
+  const fulfilment = deriveIlpFulfilment(item.transferId);
+  const expiration = new Date(Date.now() + 30_000).toISOString(); // 30 s ILP expiry
+
+  // ── Phase 1: POST /transfers — RESERVED ────────────────────────────────────
   try {
-    const res = await fetch(`${MOJALOOP_URL}/transfers/${item.transferId}`, {
-      method: "PUT",
+    const prepareRes = await fetch(`${MOJALOOP_URL}/transfers`, {
+      method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": MOJALOOP_CONTENT_TYPE,
+        "Accept": MOJALOOP_CONTENT_TYPE,
         "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-        "FSPIOP-Source": "CUSTOMS_AUTHORITY",
+        "FSPIOP-Source": FSPIOP_SOURCE,
+        "FSPIOP-Destination": FSPIOP_DESTINATION,
+        "Date": new Date().toUTCString(),
       },
       body: JSON.stringify({
-        transferState: "COMMITTED",
-        completedTimestamp: new Date().toISOString(),
+        transferId: item.transferId,
+        payerFsp: FSPIOP_SOURCE,
+        payeeFsp: FSPIOP_DESTINATION,
+        amount: {
+          amount: (Number(item.amountMinorUnits) / 100).toFixed(2),
+          currency: item.currency,
+        },
+        ilpPacket: Buffer.from(JSON.stringify({
+          amount: item.amountMinorUnits.toString(),
+          account: `g.${FSPIOP_DESTINATION}.${item.creditAccountId}`,
+          data: item.transferId,
+        })).toString("base64url"),
+        condition,
+        expiration,
       }),
       signal: AbortSignal.timeout(15_000),
     });
 
-    if (res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { success: true, fulfilment: body.fulfilment ?? "COMMITTED" };
+    // Mojaloop returns 202 Accepted for async processing; 200 for sync
+    if (!prepareRes.ok && prepareRes.status !== 202) {
+      const errText = await prepareRes.text().catch(() => prepareRes.statusText);
+      return { success: false, error: `ILP Prepare failed — HTTP ${prepareRes.status}: ${errText}` };
+    }
+  } catch (err) {
+    return { success: false, error: `ILP Prepare error: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  // ── Phase 2: PUT /transfers/{id} — COMMITTED ────────────────────────────────
+  try {
+    const fulfillRes = await fetch(`${MOJALOOP_URL}/transfers/${item.transferId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": MOJALOOP_CONTENT_TYPE,
+        "Accept": MOJALOOP_CONTENT_TYPE,
+        "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+        "FSPIOP-Source": FSPIOP_SOURCE,
+        "FSPIOP-Destination": FSPIOP_DESTINATION,
+        "Date": new Date().toUTCString(),
+      },
+      body: JSON.stringify({
+        fulfilment,
+        completedTimestamp: new Date().toISOString(),
+        transferState: "COMMITTED",
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (fulfillRes.ok || fulfillRes.status === 202) {
+      const body = await fulfillRes.json().catch(() => ({}));
+      return { success: true, fulfilment: (body as any).fulfilment ?? fulfilment };
     }
 
-    const errText = await res.text().catch(() => res.statusText);
-    return { success: false, error: `HTTP ${res.status}: ${errText}` };
+    const errText = await fulfillRes.text().catch(() => fulfillRes.statusText);
+    return { success: false, error: `ILP Fulfil failed — HTTP ${fulfillRes.status}: ${errText}` };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    return { success: false, error: `ILP Fulfil error: ${err instanceof Error ? err.message : String(err)}` };
   }
 }
 

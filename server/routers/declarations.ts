@@ -5,7 +5,7 @@ import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
-  withRlsContext, getDb
+  getLatestKYCVerification, withRlsContext, getDb
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
@@ -15,6 +15,8 @@ import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } 
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
 import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
+import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
+import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -28,14 +30,60 @@ function generateUCR(): string {
   return `UCR${Date.now()}${nanoid(6).toUpperCase()}`;
 }
 
-// Real AI risk scoring via LLM
-async function computeRiskScore(data: {
-  hsCode: string;
-  countryOfOrigin: string;
-  invoiceValue: number;
-  goodsDescription: string;
-  declarationType: string;
-}): Promise<{ score: number; lane: string; explanation: Record<string, unknown> }> {
+// Real AI risk scoring — Python ML scorer (primary) with LLM fallback
+async function computeRiskScore(
+  data: {
+    hsCode: string;
+    countryOfOrigin: string;
+    invoiceValue: number;
+    goodsDescription: string;
+    declarationType: string;
+  },
+  opts?: {
+    declarationId?: string;
+    traderId?: string;
+    traderHistory?: { totalDeclarations: number; rejectionRate: number; amendmentRate: number; isAEO: boolean; monthsActive: number };
+  }
+): Promise<{ score: number; lane: string; explanation: Record<string, unknown> }> {
+  // ── 1. Python ML risk scorer (primary) ──────────────────────────────────────
+  if (opts?.declarationId && opts?.traderId) {
+    try {
+      const mlResult = await scoreDeclarationRisk({
+        declarationId: opts.declarationId,
+        traderId: opts.traderId,
+        declarationType: data.declarationType,
+        countryOfOrigin: data.countryOfOrigin,
+        countryOfDestination: "",
+        totalValue: data.invoiceValue,
+        totalWeight: 0,
+        totalDuty: 0,
+        numberOfPackages: 1,
+        items: [{ hsCode: data.hsCode, description: data.goodsDescription, quantity: 1, unitValue: data.invoiceValue }],
+        documents: [],
+        traderHistory: opts.traderHistory ?? { totalDeclarations: 0, rejectionRate: 0, amendmentRate: 0, isAEO: false, monthsActive: 0 },
+      });
+      if (mlResult) {
+        return {
+          score: mlResult.riskScore,
+          lane: mlResult.lane.toLowerCase(),
+          explanation: {
+            source: "python-ml",
+            mlScore: mlResult.mlScore,
+            ruleScore: mlResult.ruleScore,
+            anomalyScore: mlResult.anomalyScore,
+            triggeredRules: mlResult.triggeredRules,
+            shapExplanation: mlResult.shapExplanation,
+            modelVersion: mlResult.modelVersion,
+            processingMs: mlResult.processingMs,
+          },
+        };
+      }
+    } catch (mlErr) {
+      console.warn("[risk-scorer] Python ML service unavailable, falling back to LLM:", mlErr);
+    }
+  }
+
+  // ── 2. LLM-based risk scoring (fallback) ────────────────────────────────────
   try {
     const response = await invokeLLM({
       messages: [
@@ -178,14 +226,31 @@ export const declarationsRouter = router({
       if (decl.traderId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
       if (decl.status !== "draft") throw new TRPCError({ code: "BAD_REQUEST", message: "Only draft declarations can be submitted." });
 
-      // Run AI risk scoring
-      const risk = await computeRiskScore({
-        hsCode: decl.hsCode ?? "",
-        countryOfOrigin: decl.countryOfOrigin ?? "",
-        invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
-        goodsDescription: decl.goodsDescription ?? "",
-        declarationType: decl.declarationType,
-      });
+      // B5 FIX: KYC gate — trader must have an approved KYC verification before submitting.
+      // This prevents unverified traders from injecting declarations into the customs workflow.
+      const kycRecord = await getLatestKYCVerification(ctx.user.id);
+      if (!kycRecord || kycRecord.status !== 'APPROVED') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'KYC verification required. Please complete identity verification before submitting declarations. ' +
+            `Current KYC status: ${kycRecord?.status ?? 'not started'}.`,
+        });
+      }
+
+      // Run AI risk scoring — Python ML scorer (primary) with LLM fallback
+      const risk = await computeRiskScore(
+        {
+          hsCode: decl.hsCode ?? "",
+          countryOfOrigin: decl.countryOfOrigin ?? "",
+          invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
+          goodsDescription: decl.goodsDescription ?? "",
+          declarationType: decl.declarationType,
+        },
+        {
+          declarationId: String(input.id),
+          traderId: String(ctx.user.id),
+        }
+      );
 
       // Compute duties (simplified: 10% duty + 15% VAT on CIF value)
       const cif = parseFloat(decl.invoiceValue ?? "0");
@@ -252,11 +317,39 @@ export const declarationsRouter = router({
           submittedAt: new Date().toISOString(),
         },
         metadata: { userId: String(ctx.user.id) },
-      }).catch(() => { /* non-blocking — Kafka unavailable in demo mode */ });
-
+            }).catch(() => { /* non-blocking — Kafka unavailable in demo mode */ });
+      // R5 FIX: Index in OpenSearch for full-text search (non-blocking)
+      indexDeclaration({
+        id: input.id,
+        declarationNumber: decl.declarationNumber,
+        ucr: decl.ucr,
+        traderId: ctx.user.id,
+        declarationType: decl.declarationType,
+        status: 'under_assessment',
+        riskLane: risk.lane,
+        riskScore: String(risk.score),
+        hsCode: decl.hsCode,
+        goodsDescription: decl.goodsDescription,
+        countryOfOrigin: decl.countryOfOrigin,
+        countryOfDestination: decl.countryOfDestination,
+        portOfEntry: decl.portOfEntry,
+        invoiceValue: decl.invoiceValue,
+        invoiceCurrency: decl.invoiceCurrency,
+        submittedAt: new Date(),
+        createdAt: decl.createdAt,
+      }).catch(() => {});
       return updated;
     }),
-
+  // R5 FIX: Full-text search across declarations using OpenSearch
+  fullTextSearch: protectedProcedure
+    .input(z.object({
+      query: z.string().min(2).max(200),
+      limit: z.number().min(1).max(50).default(20),
+    }))
+    .query(async ({ ctx, input }) => {
+      const traderId = ctx.user.role === 'admin' || ctx.user.role === 'customs_officer' ? undefined : ctx.user.id;
+      return searchDeclarations(input.query, traderId, input.limit);
+    }),
   // Get trader's own declarations — RLS-enforced at the database level
   myDeclarations: protectedProcedure
     .input(z.object({
