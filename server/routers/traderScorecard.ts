@@ -348,4 +348,46 @@ export const traderScorecardRouter = router({
       });
       return { trend };
     }),
+
+  /**
+   * getDeclarationsForMonth — drill-down: list declarations for a specific month.
+   */
+  getDeclarationsForMonth: protectedProcedure
+    .input(z.object({
+      traderId: z.string().optional(),
+      year: z.number().int().min(2020).max(2100),
+      month: z.number().int().min(1).max(12),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      const rawTargetId = (isAdmin && input.traderId) ? input.traderId : ctx.user.id;
+      const targetId = parseInt(String(rawTargetId), 10);
+      const start = new Date(input.year, input.month - 1, 1);
+      const end = new Date(input.year, input.month, 1);
+      const rows = await db.select({
+        id: declarations.id,
+        ucr: declarations.ucr,
+        status: declarations.status,
+        hsCode: declarations.hsCode,
+        submittedAt: declarations.submittedAt,
+        clearedAt: declarations.clearedAt,
+        declaredValue: declarations.invoiceValue,
+        currency: declarations.invoiceCurrency,
+      }).from(declarations)
+        .where(and(
+          eq(declarations.traderId, isNaN(targetId) ? 0 : targetId),
+          gte(declarations.submittedAt, start),
+          lt(declarations.submittedAt, end),
+        ))
+        .orderBy(desc(declarations.submittedAt))
+        .limit(100);
+      return {
+        year: input.year,
+        month: input.month,
+        total: rows.length,
+        declarations: rows,
+      };
+    }),
 });

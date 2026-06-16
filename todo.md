@@ -299,3 +299,12 @@
 - [x] FlinkCepAlerts.tsx — add per-pattern alert-count sparkline to Patterns tab cards
 - [x] PilotDashboard.tsx — wire pilot.loadDemoData admin button to refresh demo data from UI (confirmed already implemented)
 - [x] Push entire codebase to GitHub munisp/singlewindow
+
+## v50 Sprint — Drill-Down, CEP History Chart, GitHub Actions
+
+- [x] TraderScorecard.tsx — clicking a month on the compliance trend chart opens a filtered declarations list for that month
+- [x] traderScorecard.ts — add getDeclarationsForMonth(traderId, year, month) procedure returning declarations in that period
+- [x] cep.ts — add getPatternAlertHistory(patternId, days) procedure returning daily alert counts for last N days
+- [x] FlinkCepAlerts.tsx — replace 3-bar sparkline with real 7-day rolling chart from getPatternAlertHistory
+- [x] Push workflow files (.github/workflows/*.yml) — blocked by missing `workflows` scope on GitHub App token; files present locally, manual upload required
+- [x] Push full codebase to GitHub munisp/singlewindow

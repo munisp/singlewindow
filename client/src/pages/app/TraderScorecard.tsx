@@ -19,7 +19,9 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
-import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X } from "lucide-react";
 
 const TIER_COLORS: Record<string, string> = {
   gold: "#D4A017",
@@ -102,6 +104,22 @@ export default function TraderScorecard() {
   })) ?? [];
 
   const isAdminOrOfficer = user?.role === "admin" || user?.role === "customs_officer";
+
+  // Drill-down state: clicking a month on the compliance trend opens a declarations list
+  const [drillMonth, setDrillMonth] = useState<{ year: number; month: number; label: string } | null>(null);
+  const { data: drillData, isLoading: drillLoading } = trpc.traderScorecard.getDeclarationsForMonth.useQuery(
+    { year: drillMonth?.year ?? 2024, month: drillMonth?.month ?? 1 },
+    { enabled: drillMonth !== null }
+  );
+
+  const STATUS_COLORS: Record<string, string> = {
+    cleared: "bg-green-500/20 text-green-400",
+    rejected: "bg-red-500/20 text-red-400",
+    submitted: "bg-blue-500/20 text-blue-400",
+    under_examination: "bg-yellow-500/20 text-yellow-400",
+    payment_pending: "bg-orange-500/20 text-orange-400",
+    under_assessment: "bg-purple-500/20 text-purple-400",
+  };
 
   return (
     <DashboardLayout>
@@ -342,7 +360,26 @@ export default function TraderScorecard() {
                         dataKey="score"
                         stroke="#10B981"
                         strokeWidth={2.5}
-                        dot={{ fill: "#10B981", r: 4 }}
+                        dot={{ fill: "#10B981", r: 5, cursor: "pointer" }}
+                        activeDot={{
+                          r: 7,
+                          cursor: "pointer",
+                          onClick: (_: unknown, payload: unknown) => {
+                            const p = payload as { payload?: { month?: string; fullMonth?: string } };
+                            const raw = p?.payload?.fullMonth ?? p?.payload?.month ?? "";
+                            const parts = raw.split("-");
+                            if (parts.length === 2) {
+                              setDrillMonth({ year: parseInt(parts[0]), month: parseInt(parts[1]), label: raw });
+                            } else if (parts.length === 1 && complianceTrendData) {
+                              // month is "MM" — find full month from complianceTrendData
+                              const found = complianceTrend?.trend?.find((t) => t.month.slice(5) === raw);
+                              if (found) {
+                                const fp = found.month.split("-");
+                                setDrillMonth({ year: parseInt(fp[0]), month: parseInt(fp[1]), label: found.month });
+                              }
+                            }
+                          },
+                        }}
                         connectNulls={false}
                       />
                     </LineChart>
@@ -465,6 +502,63 @@ export default function TraderScorecard() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Month Drill-Down Sheet */}
+      <Sheet open={drillMonth !== null} onOpenChange={(open) => { if (!open) setDrillMonth(null); }}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center justify-between">
+              <span>Declarations — {drillMonth?.label ?? ""}</span>
+              <Button variant="ghost" size="icon" onClick={() => setDrillMonth(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </SheetTitle>
+          </SheetHeader>
+          {drillLoading ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground">Loading…</div>
+          ) : !drillData || drillData.declarations.length === 0 ? (
+            <div className="flex items-center justify-center h-40 text-muted-foreground">
+              No declarations found for this month.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {drillData.total} declaration{drillData.total !== 1 ? "s" : ""} submitted in {drillMonth?.label}
+              </p>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>UCR</TableHead>
+                    <TableHead>HS Code</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead>Submitted</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {drillData.declarations.map((d) => (
+                    <TableRow key={d.id}>
+                      <TableCell className="font-mono text-xs">{d.ucr ?? `#${d.id}`}</TableCell>
+                      <TableCell className="text-xs">{d.hsCode ?? "—"}</TableCell>
+                      <TableCell>
+                        <Badge className={`text-xs ${STATUS_COLORS[d.status ?? ""] ?? "bg-muted text-muted-foreground"}`}>
+                          {(d.status ?? "unknown").replace(/_/g, " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {d.declaredValue ? `${d.currency ?? "USD"} ${Number(d.declaredValue).toLocaleString()}` : "—"}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {d.submittedAt ? new Date(d.submittedAt).toLocaleDateString() : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </DashboardLayout>
   );
 }

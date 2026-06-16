@@ -68,6 +68,43 @@ const PATTERN_ICONS: Record<string, React.ReactNode> = {
   SUSPICIOUS_ROUTING: <Route className="h-4 w-4" />,
 };
 
+/** PatternSparkline — fetches real 7-day daily alert counts for a single pattern */
+function PatternSparkline({ patternId }: { patternId: string }) {
+  const { data, isLoading } = trpc.cep.getPatternAlertHistory.useQuery(
+    { patternId, days: 7 },
+    { staleTime: 60_000 }
+  );
+  if (isLoading) {
+    return <div className="mt-2 h-8 w-24 rounded bg-muted/30 animate-pulse" />;
+  }
+  const chartData = data?.days ?? [];
+  const maxCount = Math.max(...chartData.map((d) => d.count), 1);
+  const totalCount = chartData.reduce((s, d) => s + d.count, 0);
+  const barColor = totalCount > 5 ? "#EF4444" : totalCount > 2 ? "#F59E0B" : "#10B981";
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <div style={{ height: 36, width: 100 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+            <Bar dataKey="count" fill={barColor} radius={[2, 2, 0, 0]} maxBarSize={12} />
+            <RechartsTooltip
+              contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "6px", fontSize: "11px" }}
+              formatter={(v: number) => [v, "Alerts"]}
+              labelFormatter={(label: string) => label.slice(5)}
+              cursor={false}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <span className="text-xs text-muted-foreground">
+        <span style={{ color: barColor }} className="font-semibold">{totalCount}</span>{" "}
+        alert{totalCount !== 1 ? "s" : ""} / 7d
+        {maxCount > 0 && <span className="ml-1 text-muted-foreground/60">(peak {maxCount})</span>}
+      </span>
+    </div>
+  );
+}
+
 export default function FlinkCepAlerts() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"open" | "resolved">("open");
@@ -575,36 +612,8 @@ export default function FlinkCepAlerts() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">{p.description}</p>
-                  {/* Alert-count sparkline */}
-                  {(() => {
-                    const alertCount = statsQuery.data?.by_pattern?.[p.pattern_id] ?? 0;
-                    const sparkData = [
-                      { v: Math.max(0, alertCount - 3) },
-                      { v: Math.max(0, alertCount - 1) },
-                      { v: alertCount },
-                    ];
-                    const barColor = alertCount > 5 ? "#EF4444" : alertCount > 2 ? "#F59E0B" : "#10B981";
-                    return (
-                      <div className="mt-2 flex items-center gap-3">
-                        <div style={{ height: 32, width: 80 }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={sparkData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                              <Bar dataKey="v" fill={barColor} radius={[2, 2, 0, 0]} />
-                              <RechartsTooltip
-                                contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "6px", fontSize: "11px" }}
-                                formatter={(v: number) => [v, "Alerts"]}
-                                cursor={false}
-                              />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          <span style={{ color: barColor }} className="font-semibold">{alertCount}</span>{" "}
-                          alert{alertCount !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                  {/* Real 7-day alert history sparkline */}
+                  <PatternSparkline patternId={p.pattern_id} />
                   {user?.role === "admin" && (
                     <div className="mt-2">
                       <Button

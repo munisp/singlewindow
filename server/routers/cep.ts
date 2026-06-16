@@ -292,4 +292,39 @@ export const cepRouter = router({
       return { succeeded, failed, results };
     }),
 
+  /**
+   * getPatternAlertHistory — daily alert counts for a specific pattern over the last N days.
+   * Drives the 7-day rolling sparkline chart on each pattern card in FlinkCepAlerts.
+   */
+  getPatternAlertHistory: protectedProcedure
+    .input(z.object({
+      patternId: z.string().min(1).max(100),
+      days: z.number().int().min(1).max(90).default(7),
+    }))
+    .query(async ({ input }) => {
+      const rows = await pgQuery<{ day: string; count: string }>(
+        `SELECT
+           to_char(gs.day::date, 'YYYY-MM-DD') AS day,
+           COALESCE(cnt.c, 0)::text AS count
+         FROM generate_series(
+           (NOW() - ($1 || ' days')::interval)::date,
+           NOW()::date,
+           '1 day'::interval
+         ) AS gs(day)
+         LEFT JOIN (
+           SELECT DATE(detected_at) AS d, COUNT(*)::int AS c
+           FROM cep_alerts
+           WHERE pattern_id = $2
+             AND detected_at >= NOW() - ($1 || ' days')::interval
+           GROUP BY DATE(detected_at)
+         ) cnt ON cnt.d = gs.day::date
+         ORDER BY gs.day`,
+        [String(input.days), input.patternId]
+      );
+      return {
+        patternId: input.patternId,
+        days: rows.map((r) => ({ day: r.day, count: parseInt(r.count, 10) })),
+      };
+    }),
+
 });
