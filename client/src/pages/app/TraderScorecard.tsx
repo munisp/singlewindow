@@ -1,20 +1,25 @@
 /**
- * Sprint 61 — Trader Performance Scorecard
- * Clearance time percentile, rejection rate trend, AEO tier status, 12-month compliance history.
+ * Sprint 61 / v49 — Trader Performance Scorecard
+ * Clearance time percentile, rejection rate trend, AEO tier status,
+ * 12-month compliance history, compliance score trend, admin AEO tier adjustment.
  */
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell, ReferenceLine,
+  ResponsiveContainer, ReferenceLine,
 } from "recharts";
-import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target } from "lucide-react";
+import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings } from "lucide-react";
 
 const TIER_COLORS: Record<string, string> = {
   gold: "#D4A017",
@@ -54,14 +59,27 @@ function StatCard({ title, value, sub, icon: Icon, color }: {
 
 export default function TraderScorecard() {
   const { user } = useAuth();
-  const { data: scorecard, isLoading: loadingScorecard, isError} = trpc.traderScorecard.getScorecard.useQuery();
+  const { data: scorecard, isLoading: loadingScorecard, isError } = trpc.traderScorecard.getScorecard.useQuery();
   const { data: percentile } = trpc.traderScorecard.getClearancePercentile.useQuery({});
   const { data: trendData } = trpc.traderScorecard.getRejectionTrend.useQuery();
   const { data: benchmark } = trpc.traderScorecard.getBenchmark.useQuery();
+  const { data: complianceTrend } = trpc.traderScorecard.getComplianceTrend.useQuery({});
+
+  // AEO tier adjustment dialog state (admin / customs_officer only)
+  const [aeoDialogOpen, setAeoDialogOpen] = useState(false);
+  const [aeoTierInput, setAeoTierInput] = useState<"standard" | "silver" | "gold">("standard");
+
+  const updateScorecardMutation = trpc.traderScorecard.updateScorecard.useMutation({
+    onSuccess: () => {
+      toast.success("AEO tier updated successfully");
+      setAeoDialogOpen(false);
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   const summary = scorecard?.summary;
   const tier = summary?.aeoTier ?? "none";
-  const tierColor = TIER_COLORS[tier];
+  const tierColor = TIER_COLORS[tier] ?? TIER_COLORS.none;
 
   const historyChartData = scorecard?.complianceHistory?.map((h) => ({
     month: h.month.slice(5), // "MM"
@@ -75,6 +93,15 @@ export default function TraderScorecard() {
     rate: t.rate,
     delta: t.delta,
   })) ?? [];
+
+  const complianceTrendData = complianceTrend?.trend?.map((t) => ({
+    month: t.month.slice(5),
+    score: t.score,
+    cleared: t.cleared,
+    total: t.total,
+  })) ?? [];
+
+  const isAdminOrOfficer = user?.role === "admin" || user?.role === "customs_officer";
 
   return (
     <DashboardLayout>
@@ -92,14 +119,65 @@ export default function TraderScorecard() {
               Your trade compliance metrics for the last 12 months
             </p>
           </div>
-          <Badge
-            className="px-4 py-2 text-base font-semibold"
-            style={{ backgroundColor: tierColor, color: "#fff" }}
-          >
-            <Award className="w-4 h-4 mr-2 inline" />
-            {TIER_LABELS[tier]}
-          </Badge>
+          <div className="flex items-center gap-3">
+            <Badge
+              className="px-4 py-2 text-base font-semibold"
+              style={{ backgroundColor: tierColor, color: "#fff" }}
+            >
+              <Award className="w-4 h-4 mr-2 inline" />
+              {TIER_LABELS[tier] ?? "Unknown"}
+            </Badge>
+            {isAdminOrOfficer && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setAeoTierInput((tier === "none" ? "standard" : tier) as "standard" | "silver" | "gold");
+                  setAeoDialogOpen(true);
+                }}
+              >
+                <Settings className="w-3.5 h-3.5 mr-1" />
+                Adjust AEO Tier
+              </Button>
+            )}
+          </div>
         </div>
+
+        {/* AEO Tier Adjust Dialog */}
+        <Dialog open={aeoDialogOpen} onOpenChange={setAeoDialogOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Adjust AEO Tier</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Select a new AEO tier for this trader. Changes take effect immediately and are recorded in the audit log.
+              </p>
+              <Select value={aeoTierInput} onValueChange={(v) => setAeoTierInput(v as "standard" | "silver" | "gold")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select tier" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="standard">Standard AEO</SelectItem>
+                  <SelectItem value="silver">Silver AEO</SelectItem>
+                  <SelectItem value="gold">Gold AEO</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAeoDialogOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  if (!user?.id) return;
+                  updateScorecardMutation.mutate({ traderId: user.id, aeoTier: aeoTierInput });
+                }}
+                disabled={updateScorecardMutation.isPending}
+              >
+                {updateScorecardMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Compliance Score */}
         {summary && (
@@ -196,6 +274,7 @@ export default function TraderScorecard() {
         <Tabs defaultValue="history">
           <TabsList>
             <TabsTrigger value="history">12-Month History</TabsTrigger>
+            <TabsTrigger value="compliance">Compliance Score Trend</TabsTrigger>
             <TabsTrigger value="rejection">Rejection Trend</TabsTrigger>
             <TabsTrigger value="benchmark">Platform Benchmark</TabsTrigger>
           </TabsList>
@@ -231,6 +310,48 @@ export default function TraderScorecard() {
             </Card>
           </TabsContent>
 
+          {/* Compliance Score Trend */}
+          <TabsContent value="compliance">
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Compliance Score (% Cleared)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {complianceTrendData.length === 0 || complianceTrendData.every((d) => d.score === null) ? (
+                  <div className="h-48 flex items-center justify-center text-muted-foreground">
+                    No compliance data available for the last 12 months.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={complianceTrendData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="month" tick={{ fill: "#9CA3AF", fontSize: 12 }} />
+                      <YAxis tick={{ fill: "#9CA3AF", fontSize: 12 }} unit="%" domain={[0, 100]} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "8px" }}
+                        formatter={(v: unknown) => [typeof v === "number" ? `${v}%` : "No data", "Compliance Score"]}
+                      />
+                      <ReferenceLine y={90} stroke="#D4A017" strokeDasharray="4 4"
+                        label={{ value: "Gold (90%)", fill: "#D4A017", fontSize: 10 }} />
+                      <ReferenceLine y={75} stroke="#9CA3AF" strokeDasharray="4 4"
+                        label={{ value: "Silver (75%)", fill: "#9CA3AF", fontSize: 10 }} />
+                      <ReferenceLine y={60} stroke="#3B82F6" strokeDasharray="4 4"
+                        label={{ value: "Standard (60%)", fill: "#3B82F6", fontSize: 10 }} />
+                      <Line
+                        type="monotone"
+                        dataKey="score"
+                        stroke="#10B981"
+                        strokeWidth={2.5}
+                        dot={{ fill: "#10B981", r: 4 }}
+                        connectNulls={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* Rejection Rate Trend */}
           <TabsContent value="rejection">
             <Card>
@@ -252,7 +373,8 @@ export default function TraderScorecard() {
                         contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "8px" }}
                         formatter={(v: number) => [`${v}%`, "Rejection Rate"]}
                       />
-                      <ReferenceLine y={10} stroke="#EF4444" strokeDasharray="4 4" label={{ value: "10% threshold", fill: "#EF4444", fontSize: 11 }} />
+                      <ReferenceLine y={10} stroke="#EF4444" strokeDasharray="4 4"
+                        label={{ value: "10% threshold", fill: "#EF4444", fontSize: 11 }} />
                       <Line type="monotone" dataKey="rate" stroke="#F59E0B" strokeWidth={2} dot={{ fill: "#F59E0B", r: 4 }} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -292,7 +414,6 @@ export default function TraderScorecard() {
                         </div>
                       </div>
                     </div>
-
                     {/* Rejection Rate */}
                     <div className="space-y-3">
                       <h4 className="font-medium">Rejection Rate</h4>
@@ -315,7 +436,6 @@ export default function TraderScorecard() {
                         </div>
                       </div>
                     </div>
-
                     {/* Summary */}
                     <div className="md:col-span-2 p-4 rounded-lg bg-muted/30 border">
                       <div className="flex items-start gap-3">

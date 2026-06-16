@@ -291,3 +291,11 @@
 - [x] v54: avgClearanceHours added to getKpiSummary in executiveDashboard router
 - [x] v54: clearance_time_hours KPI target now shows real actual value in ExecutiveDashboard
 - [x] v54: trader_satisfaction KPI target wired to ratingStats.avgRating in ExecutiveDashboard
+
+## v49 Sprint — Suggested Next Steps Implementation
+
+- [x] TraderScorecard.tsx — add 12-month compliance trend line chart (getComplianceTrend)
+- [x] TraderScorecard.tsx — add admin "Adjust AEO Tier" button calling updateScorecard mutation
+- [x] FlinkCepAlerts.tsx — add per-pattern alert-count sparkline to Patterns tab cards
+- [x] PilotDashboard.tsx — wire pilot.loadDemoData admin button to refresh demo data from UI (confirmed already implemented)
+- [x] Push entire codebase to GitHub munisp/singlewindow

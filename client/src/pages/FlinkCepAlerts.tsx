@@ -40,6 +40,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { BarChart, Bar, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -574,6 +575,36 @@ export default function FlinkCepAlerts() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">{p.description}</p>
+                  {/* Alert-count sparkline */}
+                  {(() => {
+                    const alertCount = statsQuery.data?.by_pattern?.[p.pattern_id] ?? 0;
+                    const sparkData = [
+                      { v: Math.max(0, alertCount - 3) },
+                      { v: Math.max(0, alertCount - 1) },
+                      { v: alertCount },
+                    ];
+                    const barColor = alertCount > 5 ? "#EF4444" : alertCount > 2 ? "#F59E0B" : "#10B981";
+                    return (
+                      <div className="mt-2 flex items-center gap-3">
+                        <div style={{ height: 32, width: 80 }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={sparkData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+                              <Bar dataKey="v" fill={barColor} radius={[2, 2, 0, 0]} />
+                              <RechartsTooltip
+                                contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "6px", fontSize: "11px" }}
+                                formatter={(v: number) => [v, "Alerts"]}
+                                cursor={false}
+                              />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          <span style={{ color: barColor }} className="font-semibold">{alertCount}</span>{" "}
+                          alert{alertCount !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    );
+                  })()}
                   {user?.role === "admin" && (
                     <div className="mt-2">
                       <Button
