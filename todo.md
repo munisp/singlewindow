@@ -308,3 +308,16 @@
 - [x] FlinkCepAlerts.tsx — replace 3-bar sparkline with real 7-day rolling chart from getPatternAlertHistory
 - [x] Push workflow files (.github/workflows/*.yml) — blocked by missing `workflows` scope on GitHub App token; files present locally, manual upload required
 - [x] Push full codebase to GitHub munisp/singlewindow
+
+## v51 Sprint — Scorecard Filter, CEP Suppression, Pattern Threshold
+
+- [x] TraderScorecard.tsx — add status filter dropdown (All/Green/Yellow/Red) inside month drill-down Sheet
+- [x] traderScorecard.ts — extend getDeclarationsForMonth to accept optional status filter param
+- [x] cep.ts — add suppressAlert(alertId, hours) mutation setting suppressed_until timestamp
+- [x] drizzle/schema.ts — add suppressed_until column to cep_alerts table
+- [x] FlinkCepAlerts.tsx — add "Suppress for N hours" action in alert detail drawer
+- [x] drizzle/schema.ts — add daily_alert_threshold column to cep_patterns table
+- [x] cep.ts — add updatePatternThreshold mutation
+- [x] FlinkCepAlerts.tsx — admin threshold config input on pattern card
+- [x] FlinkCepAlerts.tsx — highlight sparkline bar red when daily count exceeds threshold
+- [x] Push v51 codebase to GitHub munisp/singlewindow

@@ -321,10 +321,46 @@ export const cepRouter = router({
          ORDER BY gs.day`,
         [String(input.days), input.patternId]
       );
-      return {
+            return {
         patternId: input.patternId,
         days: rows.map((r) => ({ day: r.day, count: parseInt(r.count, 10) })),
       };
     }),
 
+  /**
+   * suppressAlert — set suppressed_until on an alert so it is hidden from active list.
+   */
+  suppressAlert: protectedProcedure
+    .input(z.object({
+      alertId: z.string(),
+      hours: z.number().int().min(1).max(720),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const suppressedUntil = new Date(Date.now() + input.hours * 60 * 60 * 1000);
+      await pgQuery(
+        `UPDATE cep_alerts
+         SET suppressed_until = $1, suppressed_by = $2
+         WHERE alert_id = $3`,
+        [suppressedUntil.toISOString(), ctx.user.id, input.alertId]
+      );
+      return { alertId: input.alertId, suppressedUntil };
+    }),
+
+  /**
+   * updatePatternThreshold — set or clear the daily_alert_threshold on a pattern.
+   */
+  updatePatternThreshold: adminProcedure
+    .input(z.object({
+      patternId: z.string(),
+      threshold: z.number().int().min(1).nullable(),
+    }))
+    .mutation(async ({ input }) => {
+      await pgQuery(
+        `UPDATE cep_patterns
+         SET daily_alert_threshold = $1, updated_at = NOW()
+         WHERE pattern_id = $2`,
+        [input.threshold, input.patternId]
+      );
+      return { patternId: input.patternId, threshold: input.threshold };
+    }),
 });

@@ -107,8 +107,9 @@ export default function TraderScorecard() {
 
   // Drill-down state: clicking a month on the compliance trend opens a declarations list
   const [drillMonth, setDrillMonth] = useState<{ year: number; month: number; label: string } | null>(null);
+  const [drillStatus, setDrillStatus] = useState<string>("all");
   const { data: drillData, isLoading: drillLoading } = trpc.traderScorecard.getDeclarationsForMonth.useQuery(
-    { year: drillMonth?.year ?? 2024, month: drillMonth?.month ?? 1 },
+    { year: drillMonth?.year ?? 2024, month: drillMonth?.month ?? 1, status: drillStatus as "all" | "draft" | "submitted" | "under_assessment" | "docs_required" | "payment_pending" | "payment_confirmed" | "under_examination" | "examination_complete" | "cleared" | "rejected" | "cancelled" },
     { enabled: drillMonth !== null }
   );
 
@@ -504,26 +505,49 @@ export default function TraderScorecard() {
       </div>
 
       {/* Month Drill-Down Sheet */}
-      <Sheet open={drillMonth !== null} onOpenChange={(open) => { if (!open) setDrillMonth(null); }}>
+      <Sheet open={drillMonth !== null} onOpenChange={(open) => { if (!open) { setDrillMonth(null); setDrillStatus("all"); } }}>
         <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
           <SheetHeader className="mb-4">
             <SheetTitle className="flex items-center justify-between">
               <span>Declarations — {drillMonth?.label ?? ""}</span>
-              <Button variant="ghost" size="icon" onClick={() => setDrillMonth(null)}>
+              <Button variant="ghost" size="icon" onClick={() => { setDrillMonth(null); setDrillStatus("all"); }}>
                 <X className="h-4 w-4" />
               </Button>
             </SheetTitle>
           </SheetHeader>
+          {/* Status filter */}
+          <div className="mb-4">
+            <Select value={drillStatus} onValueChange={setDrillStatus}>
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="submitted">Submitted</SelectItem>
+                <SelectItem value="under_assessment">Under Assessment</SelectItem>
+                <SelectItem value="docs_required">Docs Required</SelectItem>
+                <SelectItem value="payment_pending">Payment Pending</SelectItem>
+                <SelectItem value="payment_confirmed">Payment Confirmed</SelectItem>
+                <SelectItem value="under_examination">Under Examination</SelectItem>
+                <SelectItem value="examination_complete">Examination Complete</SelectItem>
+                <SelectItem value="cleared">Cleared</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {drillLoading ? (
             <div className="flex items-center justify-center h-40 text-muted-foreground">Loading…</div>
           ) : !drillData || drillData.declarations.length === 0 ? (
             <div className="flex items-center justify-center h-40 text-muted-foreground">
-              No declarations found for this month.
+              No declarations found{drillStatus !== "all" ? ` with status "${drillStatus.replace(/_/g, " ")}"` : ""} for this month.
             </div>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 {drillData.total} declaration{drillData.total !== 1 ? "s" : ""} submitted in {drillMonth?.label}
+                {drillStatus !== "all" && <span className="ml-1">(filtered: <strong>{drillStatus.replace(/_/g, " ")}</strong>)</span>}
               </p>
               <Table>
                 <TableHeader>

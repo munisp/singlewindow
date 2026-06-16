@@ -1616,6 +1616,7 @@ export const cepPatterns = pgTable("cep_patterns", {
   parameters: jsonb("parameters").notNull().default({}),
   triggerCount: integer("trigger_count").notNull().default(0),
   lastTriggeredAt: timestamp("last_triggered_at"),
+  dailyAlertThreshold: integer("daily_alert_threshold"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -1638,6 +1639,8 @@ export const cepAlerts = pgTable("cep_alerts", {
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: integer("resolved_by").references(() => users.id),
   resolutionNote: text("resolution_note"),
+  suppressedUntil: timestamp("suppressed_until"),
+  suppressedBy: integer("suppressed_by").references(() => users.id),
   detectedAt: timestamp("detected_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [

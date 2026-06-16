@@ -211,6 +211,13 @@
       "when": 1781641772920,
       "tag": "0029_lying_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1781652276896,
+      "tag": "0030_giant_tombstone",
+      "breakpoints": true
     }
   ]
 }

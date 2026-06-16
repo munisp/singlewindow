@@ -69,7 +69,7 @@ const PATTERN_ICONS: Record<string, React.ReactNode> = {
 };
 
 /** PatternSparkline — fetches real 7-day daily alert counts for a single pattern */
-function PatternSparkline({ patternId }: { patternId: string }) {
+function PatternSparkline({ patternId, threshold }: { patternId: string; threshold?: number | null }) {
   const { data, isLoading } = trpc.cep.getPatternAlertHistory.useQuery(
     { patternId, days: 7 },
     { staleTime: 60_000 }
@@ -80,13 +80,24 @@ function PatternSparkline({ patternId }: { patternId: string }) {
   const chartData = data?.days ?? [];
   const maxCount = Math.max(...chartData.map((d) => d.count), 1);
   const totalCount = chartData.reduce((s, d) => s + d.count, 0);
-  const barColor = totalCount > 5 ? "#EF4444" : totalCount > 2 ? "#F59E0B" : "#10B981";
+  // If threshold set, highlight red when any day exceeds threshold; otherwise use volume heuristic
+  const thresholdExceeded = threshold != null && chartData.some((d) => d.count > threshold);
+  const barColor = thresholdExceeded ? "#EF4444" : totalCount > 5 ? "#EF4444" : totalCount > 2 ? "#F59E0B" : "#10B981";
+  // Per-bar colour: red if that day exceeds threshold
+  const getBarColor = (count: number) => {
+    if (threshold != null && count > threshold) return "#EF4444";
+    return barColor;
+  };
   return (
     <div className="mt-2 flex items-center gap-3">
       <div style={{ height: 36, width: 100 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-            <Bar dataKey="count" fill={barColor} radius={[2, 2, 0, 0]} maxBarSize={12} />
+            <Bar dataKey="count" radius={[2, 2, 0, 0]} maxBarSize={12}>
+              {chartData.map((entry, index) => (
+                <rect key={index} fill={getBarColor(entry.count)} />
+              ))}
+            </Bar>
             <RechartsTooltip
               contentStyle={{ backgroundColor: "#1F2937", border: "none", borderRadius: "6px", fontSize: "11px" }}
               formatter={(v: number) => [v, "Alerts"]}
@@ -100,6 +111,9 @@ function PatternSparkline({ patternId }: { patternId: string }) {
         <span style={{ color: barColor }} className="font-semibold">{totalCount}</span>{" "}
         alert{totalCount !== 1 ? "s" : ""} / 7d
         {maxCount > 0 && <span className="ml-1 text-muted-foreground/60">(peak {maxCount})</span>}
+        {threshold != null && thresholdExceeded && (
+          <span className="ml-1 text-red-400 font-semibold">⚠ threshold exceeded</span>
+        )}
       </span>
     </div>
   );
@@ -153,6 +167,32 @@ export default function FlinkCepAlerts() {
     onSuccess: (data) => {
       toast.success(`Pattern "${data.name}" ${data.status === "enabled" ? "enabled" : "disabled"}`);
       patternsQuery.refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Suppress alert state
+  const [suppressDialog, setSuppressDialog] = useState<{ alertId: string; patternName: string } | null>(null);
+  const [suppressHours, setSuppressHours] = useState<string>("24");
+  const suppressMutation = trpc.cep.suppressAlert.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Alert suppressed until ${new Date(data.suppressedUntil).toLocaleString()}`);
+      alertsQuery.refetch();
+      setSuppressDialog(null);
+      setSuppressHours("24");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  // Pattern threshold state
+  const [thresholdDialog, setThresholdDialog] = useState<{ patternId: string; patternName: string; current: number | null } | null>(null);
+  const [thresholdInput, setThresholdInput] = useState<string>("");
+  const updateThresholdMutation = trpc.cep.updatePatternThreshold.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.threshold ? `Threshold set to ${data.threshold}/day` : "Threshold cleared");
+      patternsQuery.refetch();
+      setThresholdDialog(null);
+      setThresholdInput("");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -612,10 +652,10 @@ export default function FlinkCepAlerts() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">{p.description}</p>
-                  {/* Real 7-day alert history sparkline */}
-                  <PatternSparkline patternId={p.pattern_id} />
+                  {/* Real 7-day alert history sparkline with threshold highlight */}
+                  <PatternSparkline patternId={p.pattern_id} threshold={p.daily_alert_threshold ?? null} />
                   {user?.role === "admin" && (
-                    <div className="mt-2">
+                    <div className="mt-2 flex gap-2 flex-wrap">
                       <Button
                         variant="outline"
                         size="sm"
@@ -623,6 +663,14 @@ export default function FlinkCepAlerts() {
                         onClick={() => { setTestFireDialog({ patternId: p.pattern_id, patternName: p.name }); setTestFireResult(null); }}
                       >
                         <Zap className="h-3 w-3 mr-1" /> Test Pattern
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-xs border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
+                        onClick={() => { setThresholdDialog({ patternId: p.pattern_id, patternName: p.name, current: p.daily_alert_threshold ?? null }); setThresholdInput(""); }}
+                      >
+                        {p.daily_alert_threshold ? `Threshold: ${p.daily_alert_threshold}/day` : "Set Threshold"}
                       </Button>
                     </div>
                   )}
@@ -887,7 +935,7 @@ export default function FlinkCepAlerts() {
 
               {/* Quick-action buttons */}
               {(drawerAlert.status === "open" || drawerAlert.status === "investigating") && (
-                <div className="flex gap-2 pt-2 border-t border-border">
+                <div className="flex gap-2 pt-2 border-t border-border flex-wrap">
                   {drawerAlert.status === "open" && (
                     <Button
                       size="sm"
@@ -912,6 +960,18 @@ export default function FlinkCepAlerts() {
                     }}
                   >
                     Resolve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                    onClick={() => {
+                      setSuppressDialog({ alertId: drawerAlert.alert_id, patternName: drawerAlert.pattern_name });
+                      setSuppressHours("24");
+                      setDrawerAlert(null);
+                    }}
+                  >
+                    Suppress
                   </Button>
                 </div>
               )}
@@ -965,6 +1025,107 @@ export default function FlinkCepAlerts() {
               className="bg-yellow-500 hover:bg-yellow-600 text-black"
             >
               {testFireLoading ? "Firing…" : "Fire Test Event"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suppress Alert Dialog */}
+      <Dialog open={!!suppressDialog} onOpenChange={(open) => { if (!open) { setSuppressDialog(null); setSuppressHours("24"); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Suppress Alert</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Alert: <strong className="text-foreground">{suppressDialog?.patternName}</strong>
+            </p>
+            <p className="text-sm text-muted-foreground">
+              This alert will be hidden from the active list until the suppression window expires.
+              It remains in the database and can still be audited.
+            </p>
+            <div className="space-y-2">
+              <Label>Suppress for</Label>
+              <Select value={suppressHours} onValueChange={setSuppressHours}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 hour</SelectItem>
+                  <SelectItem value="4">4 hours</SelectItem>
+                  <SelectItem value="8">8 hours</SelectItem>
+                  <SelectItem value="24">24 hours (1 day)</SelectItem>
+                  <SelectItem value="72">72 hours (3 days)</SelectItem>
+                  <SelectItem value="168">168 hours (1 week)</SelectItem>
+                  <SelectItem value="720">720 hours (30 days)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSuppressDialog(null)}>Cancel</Button>
+            <Button
+              className="bg-amber-500 hover:bg-amber-600 text-black"
+              disabled={suppressMutation.isPending}
+              onClick={() => suppressDialog && suppressMutation.mutate({
+                alertId: suppressDialog.alertId,
+                hours: parseInt(suppressHours, 10),
+              })}
+            >
+              {suppressMutation.isPending ? "Suppressing…" : `Suppress for ${suppressHours}h`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Pattern Alert Threshold Dialog */}
+      <Dialog open={!!thresholdDialog} onOpenChange={(open) => { if (!open) { setThresholdDialog(null); setThresholdInput(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Set Alert Threshold</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Pattern: <strong className="text-foreground">{thresholdDialog?.patternName}</strong>
+            </p>
+            <p className="text-sm text-muted-foreground">
+              When the daily alert count exceeds this threshold, the sparkline bar will turn red.
+              Leave blank to clear the threshold.
+            </p>
+            <div className="space-y-2">
+              <Label>Daily alert threshold</Label>
+              <Input
+                type="number"
+                min="1"
+                placeholder={thresholdDialog?.current ? String(thresholdDialog.current) : "e.g. 5"}
+                value={thresholdInput}
+                onChange={(e) => setThresholdInput(e.target.value)}
+              />
+              {thresholdDialog?.current && (
+                <p className="text-xs text-muted-foreground">Current threshold: {thresholdDialog.current}/day</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            {thresholdDialog?.current && (
+              <Button
+                variant="outline"
+                className="text-red-400 border-red-400/40 hover:bg-red-500/10 mr-auto"
+                disabled={updateThresholdMutation.isPending}
+                onClick={() => thresholdDialog && updateThresholdMutation.mutate({ patternId: thresholdDialog.patternId, threshold: null })}
+              >
+                Clear
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setThresholdDialog(null)}>Cancel</Button>
+            <Button
+              disabled={updateThresholdMutation.isPending || !thresholdInput}
+              onClick={() => thresholdDialog && updateThresholdMutation.mutate({
+                patternId: thresholdDialog.patternId,
+                threshold: parseInt(thresholdInput, 10),
+              })}
+            >
+              {updateThresholdMutation.isPending ? "Saving…" : "Save Threshold"}
             </Button>
           </DialogFooter>
         </DialogContent>

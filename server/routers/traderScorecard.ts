@@ -357,6 +357,7 @@ export const traderScorecardRouter = router({
       traderId: z.string().optional(),
       year: z.number().int().min(2020).max(2100),
       month: z.number().int().min(1).max(12),
+      status: z.enum(["all", "draft", "submitted", "under_assessment", "docs_required", "payment_pending", "payment_confirmed", "under_examination", "examination_complete", "cleared", "rejected", "cancelled"]).optional().default("all"),
     }))
     .query(async ({ ctx, input }) => {
       const db = await getDb();
@@ -366,6 +367,14 @@ export const traderScorecardRouter = router({
       const targetId = parseInt(String(rawTargetId), 10);
       const start = new Date(input.year, input.month - 1, 1);
       const end = new Date(input.year, input.month, 1);
+      const conditions = [
+        eq(declarations.traderId, isNaN(targetId) ? 0 : targetId),
+        gte(declarations.submittedAt, start),
+        lt(declarations.submittedAt, end),
+      ];
+      if (input.status !== "all") {
+        conditions.push(eq(declarations.status, input.status as "draft" | "submitted" | "under_assessment" | "docs_required" | "payment_pending" | "payment_confirmed" | "under_examination" | "examination_complete" | "cleared" | "rejected" | "cancelled"));
+      }
       const rows = await db.select({
         id: declarations.id,
         ucr: declarations.ucr,
@@ -376,16 +385,13 @@ export const traderScorecardRouter = router({
         declaredValue: declarations.invoiceValue,
         currency: declarations.invoiceCurrency,
       }).from(declarations)
-        .where(and(
-          eq(declarations.traderId, isNaN(targetId) ? 0 : targetId),
-          gte(declarations.submittedAt, start),
-          lt(declarations.submittedAt, end),
-        ))
+        .where(and(...conditions))
         .orderBy(desc(declarations.submittedAt))
         .limit(100);
       return {
         year: input.year,
         month: input.month,
+        status: input.status,
         total: rows.length,
         declarations: rows,
       };
