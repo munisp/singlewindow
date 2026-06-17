@@ -22,7 +22,7 @@ import {
 } from "recharts";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X } from "lucide-react";
+import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X, Link } from "lucide-react";
 
 const TIER_COLORS: Record<string, string> = {
   gold: "#D4A017",
@@ -545,9 +545,25 @@ export default function TraderScorecard() {
           <SheetHeader className="mb-4">
             <SheetTitle className="flex items-center justify-between">
               <span>Declarations — {drillMonth?.label ?? ""}</span>
-              <Button variant="ghost" size="icon" onClick={() => { setDrillMonth(null); setDrillStatus("all"); }}>
-                <X className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Copy link to this view"
+                  onClick={() => {
+                    navigator.clipboard.writeText(window.location.href).then(() => {
+                      toast.success("Link copied to clipboard");
+                    }).catch(() => {
+                      toast.error("Failed to copy link");
+                    });
+                  }}
+                >
+                  <Link className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => { setDrillMonth(null); setDrillStatus("all"); }}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
             </SheetTitle>
           </SheetHeader>
           {/* Status filter */}

@@ -424,4 +424,40 @@ export const cepRouter = router({
       );
       return { patternId: input.patternId, threshold: input.threshold };
     }),
+
+  /**
+   * getPatternsInBreach — returns patterns where today's alert count exceeds daily_alert_threshold.
+   * Used by ExecutiveDashboard to show a "Patterns in Breach" banner.
+   */
+  getPatternsInBreach: adminProcedure
+    .query(async () => {
+      const rows = await pgQuery<{
+        pattern_id: string;
+        name: string;
+        daily_alert_threshold: number;
+        today_count: string;
+      }>(
+        `SELECT
+           cp.pattern_id,
+           cp.name,
+           cp.daily_alert_threshold,
+           COUNT(ca.id)::text AS today_count
+         FROM cep_patterns cp
+         LEFT JOIN cep_alerts ca
+           ON ca.pattern_id = cp.pattern_id
+           AND ca.detected_at >= CURRENT_DATE
+         WHERE cp.daily_alert_threshold IS NOT NULL
+           AND cp.status = 'enabled'
+         GROUP BY cp.pattern_id, cp.name, cp.daily_alert_threshold
+         HAVING COUNT(ca.id) > cp.daily_alert_threshold
+         ORDER BY COUNT(ca.id) DESC
+         LIMIT 20`
+      );
+      return rows.map((r) => ({
+        patternId: r.pattern_id,
+        name: r.name,
+        threshold: r.daily_alert_threshold,
+        todayCount: parseInt(r.today_count, 10),
+      }));
+    }),
 });

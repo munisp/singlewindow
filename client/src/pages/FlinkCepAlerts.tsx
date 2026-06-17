@@ -699,14 +699,29 @@ export default function FlinkCepAlerts() {
                 <ShieldAlert className="h-4 w-4 text-muted-foreground" />
                 Suppression History
               </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => { setShowSuppressionHistory(!showSuppressionHistory); setSuppLogPage(1); }}
-              >
-                {showSuppressionHistory ? "Hide" : "Show Audit Log"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = "/api/cep/suppression-log.csv";
+                    a.download = "suppression-log.csv";
+                    a.click();
+                  }}
+                >
+                  Download CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => { setShowSuppressionHistory(!showSuppressionHistory); setSuppLogPage(1); }}
+                >
+                  {showSuppressionHistory ? "Hide" : "Show Audit Log"}
+                </Button>
+              </div>
             </div>
           </CardHeader>
           {showSuppressionHistory && (

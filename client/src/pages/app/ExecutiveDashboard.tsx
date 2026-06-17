@@ -45,6 +45,8 @@ export default function ExecutiveDashboard() {
   const { data: ratingStats } = trpc.traderRatings.getStats.useQuery(undefined, { enabled: isAdmin });
   const { data: ratingTrend } = trpc.traderRatings.getTrend.useQuery({ days: 30 }, { enabled: isAdmin });
   const { data: daily } = trpc.executiveDashboard.getDailyCollectionVsTarget.useQuery({ dailyTargetNaira: 500_000_000 });
+  const [breachBannerDismissed, setBreachBannerDismissed] = useState(false);
+  const { data: patternsInBreach } = trpc.cep.getPatternsInBreach.useQuery(undefined, { enabled: isAdmin });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
   const { data: topScanned } = trpc.rulesOfOrigin.topScanned.useQuery({ limit: 10, days: 30 });
   const exportTopScannedMutation = trpc.rulesOfOrigin.exportTopScannedCsv.useMutation({
@@ -103,6 +105,39 @@ export default function ExecutiveDashboard() {
         {isError && (
           <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
             Failed to load executive data. Please refresh the page.
+          </div>
+        )}
+        {/* Patterns in Breach Banner — admin only */}
+        {isAdmin && patternsInBreach && patternsInBreach.length > 0 && !breachBannerDismissed && (
+          <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-300 rounded-lg text-amber-900">
+            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm">
+                {patternsInBreach.length} CEP Pattern{patternsInBreach.length !== 1 ? "s" : ""} in Breach Today
+              </p>
+              <p className="text-xs mt-1 text-amber-800">
+                The following patterns have exceeded their daily alert threshold:{" "}
+                {patternsInBreach.map((p, i) => (
+                  <span key={p.patternId}>
+                    <strong>{p.name}</strong> ({p.todayCount}/{p.threshold})
+                    {i < patternsInBreach.length - 1 ? ", " : ""}
+                  </span>
+                ))}
+              </p>
+              <a
+                href="/app/flink-cep-alerts"
+                className="text-xs underline text-amber-700 hover:text-amber-900 mt-1 inline-block"
+              >
+                View CEP Alerts →
+              </a>
+            </div>
+            <button
+              onClick={() => setBreachBannerDismissed(true)}
+              className="text-amber-600 hover:text-amber-900 shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         )}
         {/* Header */}

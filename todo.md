@@ -333,3 +333,12 @@
 - [x] TraderScorecard.tsx — persist selectedMonth (year+month) and drillStatus in URL query string (?month=2026-01&status=green)
 - [x] TraderScorecard.tsx — read initial state from URL on mount so bookmarked/shared links restore the correct filter view
 - [x] Push v52 codebase to GitHub munisp/singlewindow
+
+## v53 Sprint — CSV Export, Breach Widget, Copy Link
+
+- [x] server/_core/index.ts — add GET /api/cep/suppression-log.csv endpoint (admin-only, streams CSV)
+- [x] FlinkCepAlerts.tsx — add "Download CSV" button to Suppression History card that fetches /api/cep/suppression-log.csv
+- [x] cep.ts — add getPatternsInBreach procedure returning patterns where today's alert count > daily_alert_threshold
+- [x] ExecutiveDashboard.tsx — add "Patterns in Breach" banner widget using getPatternsInBreach
+- [x] TraderScorecard.tsx — add "Copy link" icon button next to Sheet title that writes current URL to clipboard
+- [x] Push v53 codebase to GitHub munisp/singlewindow
