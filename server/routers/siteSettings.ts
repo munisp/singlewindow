@@ -32,6 +32,10 @@ export const KNOWN_SETTINGS: Record<string, { defaultValue: string; description:
     defaultValue: "48",
     description: "SLA threshold in hours for blue-lane declarations.",
   },
+  cep_suppression_log_retention_days: {
+    defaultValue: "90",
+    description: "Number of days to retain CEP suppression log entries. Entries older than this are pruned nightly.",
+  },
 };
 
 export const siteSettingsRouter = router({

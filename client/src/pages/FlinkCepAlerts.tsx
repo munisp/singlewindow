@@ -52,6 +52,7 @@ import {
   Package,
   Zap,
   Download,
+  Settings,
 } from "lucide-react";
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -197,6 +198,24 @@ export default function FlinkCepAlerts() {
     onError: (err) => toast.error(err.message),
   });
 
+  // Log Retention admin state
+  const [retentionDays, setRetentionDays] = useState<string>("90");
+  const [retentionSaved, setRetentionSaved] = useState(false);
+  const retentionQuery = trpc.siteSettings.get.useQuery(
+    { key: "cep_suppression_log_retention_days" },
+    { enabled: user?.role === "admin" }
+  );
+  const setRetentionMutation = trpc.siteSettings.set.useMutation({
+    onSuccess: () => {
+      toast.success("Retention policy saved");
+      setRetentionSaved(true);
+      setTimeout(() => setRetentionSaved(false), 3000);
+      retentionQuery.refetch();
+    },
+    onError: (e) => toast.error("Failed to save retention policy", { description: e.message }),
+  });
+  // Sync retention days from server
+  const serverRetentionDays = retentionQuery.data?.value ?? "90";
   // Suppression History state
   const [showSuppressionHistory, setShowSuppressionHistory] = useState(false);
   const [suppLogPage, setSuppLogPage] = useState(1);
@@ -784,6 +803,47 @@ export default function FlinkCepAlerts() {
         </Card>
       )}
 
+      {/* Log Retention Settings — admin-only */}
+      {user?.role === "admin" && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+              Suppression Log Retention
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-3">
+              Entries in the suppression log older than the configured number of days are automatically pruned by the nightly maintenance job.
+              Current server value: <strong>{serverRetentionDays} days</strong>.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={7}
+                max={3650}
+                value={retentionDays}
+                onChange={(e) => setRetentionDays(e.target.value)}
+                className="w-28 h-8 text-sm"
+                placeholder="90"
+              />
+              <span className="text-sm text-muted-foreground">days</span>
+              <Button
+                size="sm"
+                className="h-8"
+                disabled={setRetentionMutation.isPending || retentionSaved}
+                onClick={() => {
+                  const n = parseInt(retentionDays, 10);
+                  if (isNaN(n) || n < 7) { toast.error("Minimum retention is 7 days"); return; }
+                  setRetentionMutation.mutate({ key: "cep_suppression_log_retention_days", value: String(n) });
+                }}
+              >
+                {retentionSaved ? "Saved ✓" : setRetentionMutation.isPending ? "Saving…" : "Save"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {/* Create Pattern Dialog */}
       <Dialog open={createPatternDialog} onOpenChange={(open) => { if (!open) { setCreatePatternDialog(false); setNewPatternName(""); setNewPatternDesc(""); } }}>
         <DialogContent>

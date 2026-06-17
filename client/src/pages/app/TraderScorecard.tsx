@@ -21,6 +21,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X, Link } from "lucide-react";
 
@@ -123,6 +124,7 @@ export default function TraderScorecard() {
     const params = new URLSearchParams(window.location.search);
     return params.get("ds") ?? "all";
   });
+  const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
 
   // Sync drill state to URL whenever it changes
   useEffect(() => {
@@ -546,20 +548,46 @@ export default function TraderScorecard() {
             <SheetTitle className="flex items-center justify-between">
               <span>Declarations — {drillMonth?.label ?? ""}</span>
               <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  title="Copy link to this view"
-                  onClick={() => {
-                    navigator.clipboard.writeText(window.location.href).then(() => {
-                      toast.success("Link copied to clipboard");
-                    }).catch(() => {
-                      toast.error("Failed to copy link");
-                    });
-                  }}
-                >
-                  <Link className="h-4 w-4" />
-                </Button>
+                <Popover open={copyPopoverOpen} onOpenChange={setCopyPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" title="Share this view">
+                      <Link className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-3" align="end">
+                    <p className="text-xs font-semibold mb-1">Share this view</p>
+                    <p className="text-xs text-muted-foreground mb-2 break-all">{window.location.href}</p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 h-7 text-xs"
+                        onClick={() => {
+                          navigator.clipboard.writeText(window.location.href).then(() => {
+                            toast.success("Link copied to clipboard");
+                            setCopyPopoverOpen(false);
+                          }).catch(() => toast.error("Failed to copy link"));
+                        }}
+                      >
+                        Copy Link
+                      </Button>
+                      {typeof navigator.share === "function" && (
+                        <Button
+                          size="sm"
+                          className="flex-1 h-7 text-xs"
+                          onClick={() => {
+                            navigator.share({
+                              title: `Trader Scorecard — ${drillMonth?.label ?? ""}`,
+                              url: window.location.href,
+                            }).then(() => setCopyPopoverOpen(false)).catch(() => {});
+                          }}
+                        >
+                          Share
+                        </Button>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 <Button variant="ghost" size="icon" onClick={() => { setDrillMonth(null); setDrillStatus("all"); }}>
                   <X className="h-4 w-4" />
                 </Button>

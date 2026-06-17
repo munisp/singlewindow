@@ -342,3 +342,10 @@
 - [x] ExecutiveDashboard.tsx — add "Patterns in Breach" banner widget using getPatternsInBreach
 - [x] TraderScorecard.tsx — add "Copy link" icon button next to Sheet title that writes current URL to clipboard
 - [x] Push v53 codebase to GitHub munisp/singlewindow
+
+## v54 Sprint — Retention Cron, Breach Digest, Copy Link Popover
+- [x] server/_core/index.ts — add nightly cron to prune cep_suppression_log entries older than 90 days
+- [x] FlinkCepAlerts.tsx — add "Log Retention" setting card (admin-only) showing current retention days + prune-now button
+- [x] server/_core/index.ts — extend 30-min threshold breach notifier to also accumulate daily breach summary and send via notifyOwner at 08:00 UTC
+- [x] TraderScorecard.tsx — replace plain Copy Link button with Popover showing URL preview + Web Share API button (falls back to clipboard-only on desktop)
+- [x] Push v54 codebase to GitHub munisp/singlewindow

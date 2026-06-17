@@ -294,12 +294,52 @@ async function runAmendmentSLACheck() {
   }
 }
 
+
+// ── CEP Suppression Log Retention ─────────────────────────────────────────────────────────────
+// Runs nightly as part of runNightlyJobs().
+// Prunes cep_suppression_log entries older than the configured retention window (default 90 days).
+async function runSuppressionLogRetention() {
+  try {
+    const { getPool } = await import("../db");
+    const pool = getPool();
+    if (!pool) {
+      console.warn("[Cron] Suppression log retention: DB unavailable");
+      return;
+    }
+    // Read retention days from site_settings (key: cep_suppression_log_retention_days), default 90
+    let retentionDays = 90;
+    try {
+      const { rows: setting } = await pool.query<{ value: string }>(
+        `SELECT value FROM site_settings WHERE key = 'cep_suppression_log_retention_days' LIMIT 1`
+      );
+      if (setting.length > 0) {
+        const parsed = parseInt(setting[0].value, 10);
+        if (!isNaN(parsed) && parsed > 0) retentionDays = parsed;
+      }
+    } catch { /* use default */ }
+
+    const { rowCount } = await pool.query(
+      `DELETE FROM cep_suppression_log WHERE created_at < NOW() - ($1 || ' days')::interval`,
+      [String(retentionDays)]
+    );
+    const deleted = rowCount ?? 0;
+    if (deleted > 0) {
+      console.log(`[Cron] Suppression log retention: pruned ${deleted} entries older than ${retentionDays} days`);
+    } else {
+      console.log(`[Cron] Suppression log retention: no entries to prune (retention: ${retentionDays} days)`);
+    }
+  } catch (err) {
+    console.error("[Cron] Suppression log retention failed:", err);
+  }
+}
+
 async function runNightlyJobs() {
   await runNightlyRiskScan();
   await runPermitExpiryCheck();
   await runSLABreachScan();
   await runBondedWarehouseExpiryCheck();
   await runAmendmentSLACheck();
+  await runSuppressionLogRetention();
 }
 
 // ── Bonded Warehouse Expiry Notification cron ──────────────────────────────────────────────────
@@ -632,6 +672,63 @@ async function runNotificationDigest(mode: "daily" | "weekly") {
   }
 }
 
+
+// ── CEP Daily Breach Digest ───────────────────────────────────────────────────────────────────
+// Runs daily at 08:00 UTC. Sends a single consolidated owner notification listing all CEP
+// patterns that breached their daily_alert_threshold at least once in the past 24 hours.
+// Complements the 30-min per-pattern alerts by providing a morning summary.
+async function runDailyBreachDigest() {
+  try {
+    const { getPool } = await import("../db");
+    const pool = getPool();
+    if (!pool) return;
+    const { rows } = await pool.query<{
+      pattern_id: string;
+      pattern_name: string;
+      daily_alert_threshold: number;
+      today_count: string;
+    }>(
+      `SELECT
+         cp.pattern_id,
+         cp.pattern_name,
+         cp.daily_alert_threshold,
+         COUNT(ca.id)::text AS today_count
+       FROM cep_patterns cp
+       LEFT JOIN cep_alerts ca
+         ON ca.pattern_id = cp.pattern_id
+         AND ca.detected_at >= NOW() - INTERVAL '24 hours'
+       WHERE cp.daily_alert_threshold IS NOT NULL
+         AND cp.is_active = true
+       GROUP BY cp.pattern_id, cp.pattern_name, cp.daily_alert_threshold
+       HAVING COUNT(ca.id) > cp.daily_alert_threshold
+       ORDER BY COUNT(ca.id) DESC`
+    );
+    if (rows.length === 0) {
+      console.log("[Cron] Daily breach digest: no patterns in breach — skipping notification");
+      return;
+    }
+    const lines = rows.map((r) =>
+      `  • ${r.pattern_name}: ${r.today_count} alerts (threshold: ${r.daily_alert_threshold})`
+    ).join("\n");
+    const { notifyOwner } = await import("./notification");
+    await notifyOwner({
+      title: `[Daily Digest] ${rows.length} CEP Pattern${rows.length !== 1 ? "s" : ""} Breached Threshold in Last 24h`,
+      content: [
+        `Daily CEP breach summary — ${new Date().toUTCString()}`,
+        "",
+        `The following ${rows.length} pattern${rows.length !== 1 ? "s" : ""} exceeded their configured daily alert threshold in the past 24 hours:`,
+        "",
+        lines,
+        "",
+        "Review the CEP Alerts dashboard and consider adjusting thresholds or suppressing noisy patterns.",
+      ].join("\n"),
+    }).catch(() => {});
+    console.log(`[Cron] Daily breach digest sent — ${rows.length} pattern${rows.length !== 1 ? "s" : ""} in breach`);
+  } catch (err) {
+    console.error("[Cron] Daily breach digest failed:", err);
+  }
+}
+
 // Schedule: second(0) minute(0) hour(2) day(*) month(*) weekday(*) = 02:00 UTC daily
 cron.schedule("0 0 2 * * *", runNightlyJobs, { timezone: "UTC" });
 console.log("[Cron] Nightly jobs scheduled at 02:00 UTC daily (risk scan + permit expiry check + SLA breach scan)");
@@ -643,6 +740,9 @@ console.log("[Cron] Port congestion alert scan scheduled every 15 minutes");
 // Daily digest — every day at 08:00 UTC
 cron.schedule("0 0 8 * * *", () => runNotificationDigest("daily"), { timezone: "UTC" });
 console.log("[Cron] Daily notification digest scheduled at 08:00 UTC");
+// CEP daily breach digest — every day at 08:05 UTC (5 min after daily digest)
+cron.schedule("0 5 8 * * *", runDailyBreachDigest, { timezone: "UTC" });
+console.log("[Cron] CEP daily breach digest scheduled at 08:05 UTC");
 
 // ── Weekly admin analytics KPI report ───────────────────────────────────────────────
 // Sends a weekly KPI summary to the owner every Monday at 08:00 UTC.
