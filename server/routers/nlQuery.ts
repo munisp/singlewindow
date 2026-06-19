@@ -269,6 +269,18 @@ export const nlQueryRouter = router({
         }
       }
 
+      // Persist query to history
+      try {
+        const { nlQueryHistory } = await import("../../drizzle/schema");
+        await db.insert(nlQueryHistory).values({
+          userId: ctx.user.id,
+          query: input.question,
+          sql: JSON.stringify({ queryType: parsed.queryType, filters: parsed.filters, aggregation: parsed.aggregation }),
+          resultCount: results.length,
+          success: true,
+        });
+      } catch { /* non-fatal */ }
+
       return {
         question: input.question,
         explanation: parsed.explanation,
@@ -332,12 +344,34 @@ export const nlQueryRouter = router({
     }),
 
   /**
-   * Get query history for the current user (last 20 queries).
-   * Stored in memory per-session (not persisted to DB for privacy).
+   * Get query history for the current user (last 20 queries from DB).
    */
   getHistory: protectedProcedure
-    .query(() => {
-      // History is managed client-side for privacy
-      return { history: [] };
+    .query(async ({ ctx }) => {
+      try {
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (!db) return { history: [] };
+        const { nlQueryHistory } = await import("../../drizzle/schema");
+        const { eq, desc } = await import("drizzle-orm");
+        const rows = await db
+          .select()
+          .from(nlQueryHistory)
+          .where(eq(nlQueryHistory.userId, ctx.user.id))
+          .orderBy(desc(nlQueryHistory.createdAt))
+          .limit(20);
+        return {
+          history: rows.map(r => ({
+            id: r.id,
+            question: r.query,
+            queryType: r.sql ? (() => { try { return JSON.parse(r.sql).queryType; } catch { return "unknown"; } })() : "unknown",
+            rowCount: r.resultCount ?? 0,
+            success: r.success,
+            createdAt: r.createdAt,
+          })),
+        };
+      } catch {
+        return { history: [] };
+      }
     }),
 });

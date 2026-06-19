@@ -276,7 +276,35 @@ class SDKServer {
   }
 
   async authenticateRequest(req: Request): Promise<User> {
-    // Regular authentication flow
+    // ── Path 1: Keycloak Bearer token (JWKS RS256) ───────────────────────────────
+    // APISIX forwards Keycloak-issued Bearer tokens via Authorization header.
+    // We verify them against the Keycloak JWKS endpoint and upsert the user.
+    const authHeader = req.headers.authorization as string | undefined;
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const { verifyKeycloakToken, extractRoleFromPayload } = await import("./keycloakVerifier");
+        const payload = await verifyKeycloakToken(authHeader);
+        if (payload?.sub) {
+          const signedInAt = new Date();
+          const role = extractRoleFromPayload(payload);
+          await db.upsertUser({
+            openId: payload.sub,
+            name: payload.preferred_username ?? payload.sub,
+            email: typeof payload.email === "string" ? payload.email : null,
+            loginMethod: "keycloak",
+            lastSignedIn: signedInAt,
+            ...(role ? { role } : {}),
+          });
+          const kcUser = await db.getUserByOpenId(payload.sub);
+          if (kcUser) return kcUser;
+        }
+      } catch (err) {
+        // Keycloak path failed — fall through to Manus session cookie path
+        console.debug("[Auth] Keycloak Bearer path failed, falling back to session cookie:", String(err));
+      }
+    }
+
+    // ── Path 2: Manus session cookie (HS256) ──────────────────────────────────
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
     const session = await this.verifySession(sessionCookie);

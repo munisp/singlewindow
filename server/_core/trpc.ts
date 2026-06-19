@@ -193,12 +193,33 @@ async function _writeAuditLog(p: {
     const { auditEvents } = await import("../../drizzle/schema");
     const db = await (await import("../db")).getDb();
     if (!db) return;
-    await db.insert(auditEvents).values({
+    const [inserted] = await db.insert(auditEvents).values({
       entityType: p.resourceType as any, entityId: p.entityId ?? 0, action: p.action,
       actorId: p.userId ?? null, actorType: p.userId ? "user" : null,
       ipAddress: p.ipAddress, userAgent: p.userAgent,
       metadata: { path: p.path, duration: p.duration, success: p.success, error: p.error, requestId: p.requestId ?? null },
-    });
+    }).returning();
+    // Async dual-write to OpenSearch (non-blocking, fail-safe)
+    if (inserted) {
+      setImmediate(async () => {
+        try {
+          const { indexAuditEvent } = await import("./opensearch");
+          await indexAuditEvent({
+            id: inserted.id,
+            entityType: inserted.entityType ?? p.resourceType,
+            entityId: inserted.entityId ?? p.entityId ?? 0,
+            action: inserted.action,
+            actorId: inserted.actorId,
+            actorType: inserted.actorType,
+            ipAddress: inserted.ipAddress,
+            userAgent: inserted.userAgent,
+            entryHash: null,
+            prevHash: null,
+            createdAt: inserted.createdAt ?? new Date(),
+          });
+        } catch { /* OpenSearch unavailable — DB write already succeeded */ }
+      });
+    }
   } catch (e) { console.error("[AuditLog] Write failed:", e); }
 }
 

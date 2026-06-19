@@ -377,3 +377,13 @@
 - [x] New test files: server/temporal.db.test.ts (5 tests) + server/auditEngine.db.test.ts (7 tests)
 - [x] 1,858 tests passing (68 files), 0 TypeScript errors
 - [x] Push v56 codebase to GitHub munisp/singlewindow
+
+## v57 Sprint — Keycloak OIDC, Permify RBAC, OpenSearch Audit, Gap Closure
+
+- [x] server/_core/keycloakVerifier.ts — implement real JWKS-based token verification (fetch Keycloak JWKS, verify RS256 JWT, extract roles/groups)
+- [x] server/_core/sdk.ts — integrate Keycloak verifier as primary auth path with Manus OAuth as fallback
+- [x] server/_core/trpc.ts — hook indexAuditEvent into _writeAuditLog for OpenSearch dual-write
+- [x] server/routers/nlQuery.ts — persist NL queries to nl_query_history DB table; getHistory reads from DB
+- [x] server/routers/payments.ts — add assertCan to payments.cancel for Permify RBAC enforcement
+- [x] server/v57.test.ts — 18 new tests: Keycloak verifier (8), OpenSearch (2), nlQuery DB (2), Permify (3), SDK (3)
+- [x] Push v57 codebase to GitHub munisp/singlewindow

@@ -487,6 +487,9 @@ export const paymentsRouter = router({
       const [existing] = await db.select().from(payments).where(eq(payments.id, input.paymentId)).limit(1);
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
 
+      // Permify RBAC: only the owner or an admin can cancel a payment
+      await assertCan(String(ctx.user.id), "payment", String(input.paymentId), "cancel");
+
       if (existing.traderId !== ctx.user.id && ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN" });
       }
