@@ -19,6 +19,8 @@ import {
   BarChart2, RefreshCw, Download
 } from "lucide-react";
 import { toast } from "sonner";
+import DashboardLayout from "@/components/DashboardLayout";
+
 
 interface QueryResult {
   question: string;
@@ -79,9 +81,9 @@ function ResultTable({ results }: { results: any[] }) {
     <div className="overflow-x-auto rounded border border-[#1E3A5F]/30">
       <table className="w-full text-xs">
         <thead>
-          <tr className="bg-[#0A1628] border-b border-[#1E3A5F]/50">
+          <tr className="bg-primary border-b border-[#1E3A5F]/50">
             {headers.map((h) => (
-              <th key={h} className="px-3 py-2 text-left text-[#D4A017] font-semibold whitespace-nowrap">
+              <th key={h} className="px-3 py-2 text-left text-accent font-semibold whitespace-nowrap">
                 {h.replace(/([A-Z])/g, " $1").trim()}
               </th>
             ))}
@@ -89,7 +91,7 @@ function ResultTable({ results }: { results: any[] }) {
         </thead>
         <tbody>
           {results.slice(0, 50).map((row, i) => (
-            <tr key={i} className="border-b border-[#1E3A5F]/20 hover:bg-[#1E3A5F]/10">
+            <tr key={i} className="border-b border-[#1E3A5F]/20 hover:bg-primary/80/10">
               {headers.map((h) => {
                 const v = row[h];
                 const display = v instanceof Date
@@ -106,7 +108,7 @@ function ResultTable({ results }: { results: any[] }) {
         </tbody>
       </table>
       {results.length > 50 && (
-        <div className="px-3 py-2 text-xs text-slate-500 bg-[#0A1628]/50">
+        <div className="px-3 py-2 text-xs text-slate-500 bg-primary/50">
           Showing first 50 of {results.length} results. Download CSV for full data.
         </div>
       )}
@@ -119,10 +121,10 @@ function SummaryCard({ summary, queryType }: { summary: Record<string, any>; que
   const entries = Object.entries(summary).filter(([, v]) => v !== null && v !== undefined);
   if (!entries.length) return null;
   return (
-    <div className="flex flex-wrap gap-4 p-4 bg-[#0A1628]/60 rounded-lg border border-[#D4A017]/30">
+    <div className="flex flex-wrap gap-4 p-4 bg-primary/60 rounded-lg border border-accent/30">
       {entries.map(([key, value]) => (
         <div key={key} className="text-center">
-          <div className="text-2xl font-bold text-[#D4A017]">
+          <div className="text-2xl font-bold text-accent">
             {typeof value === "number" ? value.toLocaleString() : String(value)}
           </div>
           <div className="text-xs text-slate-400 capitalize">{key.replace(/([A-Z])/g, " $1").trim()}</div>
@@ -178,8 +180,8 @@ export default function NLFinancialQuery() {
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 bg-[#D4A017]/20 rounded-lg">
-            <Sparkles className="w-6 h-6 text-[#D4A017]" />
+          <div className="p-2 bg-accent/20 rounded-lg">
+            <Sparkles className="w-6 h-6 text-accent" />
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white">Natural Language Financial Query</h1>
@@ -189,7 +191,7 @@ export default function NLFinancialQuery() {
       </div>
 
       {/* Query Input */}
-      <Card className="bg-[#0A1628] border-[#1E3A5F]/50 mb-6">
+      <Card className="bg-primary border-[#1E3A5F]/50 mb-6">
         <CardContent className="pt-6">
           <div className="flex gap-3">
             <div className="relative flex-1">
@@ -200,14 +202,14 @@ export default function NLFinancialQuery() {
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder='e.g. "Show me all failed payments last month" or "What is my total duty paid in Q1 2026?"'
-                className="pl-10 bg-[#060E1A] border-[#1E3A5F]/50 text-white placeholder:text-slate-500 focus:border-[#D4A017]/50"
+                className="pl-10 bg-[#060E1A] border-[#1E3A5F]/50 text-white placeholder:text-slate-500 focus:border-accent/50"
                 disabled={queryMutation.isPending}
               />
             </div>
             <Button
               onClick={() => handleSubmit()}
               disabled={!question.trim() || queryMutation.isPending}
-              className="bg-[#D4A017] hover:bg-[#B8860B] text-[#0A1628] font-semibold px-6"
+              className="bg-accent hover:bg-accent/80 text-primary font-semibold px-6"
             >
               {queryMutation.isPending ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Analyzing...</>
@@ -220,7 +222,7 @@ export default function NLFinancialQuery() {
           {/* Loading indicator */}
           {queryMutation.isPending && (
             <div className="mt-4 flex items-center gap-3 text-sm text-slate-400">
-              <Loader2 className="w-4 h-4 animate-spin text-[#D4A017]" />
+              <Loader2 className="w-4 h-4 animate-spin text-accent" />
               <span>Analyzing your question with AI and querying the database...</span>
             </div>
           )}
@@ -230,9 +232,9 @@ export default function NLFinancialQuery() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Suggestions */}
         <div className="lg:col-span-1">
-          <Card className="bg-[#0A1628] border-[#1E3A5F]/50">
+          <Card className="bg-primary border-[#1E3A5F]/50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold text-[#D4A017] flex items-center gap-2">
+              <CardTitle className="text-sm font-semibold text-accent flex items-center gap-2">
                 <Sparkles className="w-4 h-4" />
                 Suggested Questions
               </CardTitle>
@@ -243,9 +245,9 @@ export default function NLFinancialQuery() {
                   key={i}
                   onClick={() => handleSubmit(s)}
                   disabled={queryMutation.isPending}
-                  className="w-full text-left text-xs text-slate-300 hover:text-white hover:bg-[#1E3A5F]/30 px-3 py-2 rounded flex items-center gap-2 group transition-colors disabled:opacity-50"
+                  className="w-full text-left text-xs text-slate-300 hover:text-white hover:bg-primary/80/30 px-3 py-2 rounded flex items-center gap-2 group transition-colors disabled:opacity-50"
                 >
-                  <ChevronRight className="w-3 h-3 text-[#D4A017] flex-shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                  <ChevronRight className="w-3 h-3 text-accent flex-shrink-0 group-hover:translate-x-0.5 transition-transform" />
                   <span>{s}</span>
                 </button>
               ))}
@@ -257,7 +259,7 @@ export default function NLFinancialQuery() {
         <div className="lg:col-span-2 space-y-4">
           {history.length === 0 && !queryMutation.isPending && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="p-4 bg-[#1E3A5F]/20 rounded-full mb-4">
+              <div className="p-4 bg-primary/80/20 rounded-full mb-4">
                 <Search className="w-8 h-8 text-slate-500" />
               </div>
               <p className="text-slate-400 text-sm">Ask a question to see results here</p>
@@ -266,12 +268,12 @@ export default function NLFinancialQuery() {
           )}
 
           {history.map((result, idx) => (
-            <Card key={idx} className="bg-[#0A1628] border-[#1E3A5F]/50">
+            <Card key={idx} className="bg-primary border-[#1E3A5F]/50">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="outline" className="text-[#D4A017] border-[#D4A017]/30 text-xs flex items-center gap-1">
+                      <Badge variant="outline" className="text-accent border-accent/30 text-xs flex items-center gap-1">
                         <QueryTypeIcon type={result.queryType} />
                         {result.queryType.replace(/_/g, " ")}
                       </Badge>
@@ -327,7 +329,7 @@ export default function NLFinancialQuery() {
                     {Object.entries(result.filters)
                       .filter(([, v]) => v)
                       .map(([k, v]) => (
-                        <Badge key={k} variant="secondary" className="text-xs bg-[#1E3A5F]/50 text-slate-300">
+                        <Badge key={k} variant="secondary" className="text-xs bg-primary/80/50 text-slate-300">
                           {k}: {String(v)}
                         </Badge>
                       ))}

@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   Shield, RefreshCw, Search, CheckCircle, AlertTriangle,
   Plus, Award, Star, TrendingUp,
@@ -108,12 +110,13 @@ export default function AEOApplications() {
   const selectedItem = showDetailId !== null ? rawList.find((a) => a.id === showDetailId) : null;
 
   return (
-    <div className="p-6 space-y-6">
+    <DashboardLayout>
+      <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Shield className="w-7 h-7 text-[#D4A017]" />
+            <Shield className="w-7 h-7 text-accent" />
             AEO Applications
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -123,7 +126,7 @@ export default function AEOApplications() {
         {!isAdmin && !myApp && (
           <Button
             onClick={() => setShowApplyDialog(true)}
-            className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+            className="bg-accent hover:bg-[#b8891a] text-white"
           >
             <Plus className="w-4 h-4 mr-2" /> Apply for AEO
           </Button>
@@ -156,7 +159,7 @@ export default function AEOApplications() {
       {!isAdmin && !myApp && (
         <div className="bg-gradient-to-r from-[#0A1628] to-[#1E3A5F] rounded-xl p-6 text-white">
           <div className="flex items-start gap-4">
-            <Award className="w-10 h-10 text-[#D4A017] flex-shrink-0 mt-1" />
+            <Award className="w-10 h-10 text-accent flex-shrink-0 mt-1" />
             <div>
               <h3 className="text-lg font-bold mb-2">Become an Authorised Economic Operator</h3>
               <p className="text-blue-100 text-sm mb-4">
@@ -170,7 +173,7 @@ export default function AEOApplications() {
                   { icon: <Star className="w-4 h-4" />, text: "Trusted trader status" },
                 ].map((b, i) => (
                   <div key={i} className="flex items-center gap-2 text-blue-100">
-                    <span className="text-[#D4A017]">{b.icon}</span>
+                    <span className="text-accent">{b.icon}</span>
                     {b.text}
                   </div>
                 ))}
@@ -216,7 +219,7 @@ export default function AEOApplications() {
           <Shield className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No AEO applications found</p>
           {!isAdmin && (
-            <Button className="mt-4 bg-[#D4A017] hover:bg-[#b8891a] text-white" onClick={() => setShowApplyDialog(true)}>
+            <Button className="mt-4 bg-accent hover:bg-[#b8891a] text-white" onClick={() => setShowApplyDialog(true)}>
               <Plus className="w-4 h-4 mr-2" /> Apply Now
             </Button>
           )}
@@ -245,7 +248,7 @@ export default function AEOApplications() {
                     <div className="flex items-center gap-2">
                       <div className="flex-1 bg-muted rounded-full h-2 max-w-20">
                         <div
-                          className="h-2 rounded-full bg-[#D4A017]"
+                          className="h-2 rounded-full bg-accent"
                           style={{ width: `${a.complianceScore ?? 0}%` }}
                         />
                       </div>
@@ -336,7 +339,7 @@ export default function AEOApplications() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowApplyDialog(false)}>Cancel</Button>
             <Button
-              className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+              className="bg-accent hover:bg-[#b8891a] text-white"
               disabled={!applyForm.yearsInBusiness || !applyForm.annualTradeVolume || applyMutation.isPending}
               onClick={() => applyMutation.mutate({
                 applicantType: applyForm.applicantType,
@@ -413,5 +416,6 @@ export default function AEOApplications() {
         </DialogContent>
       </Dialog>
     </div>
+  </DashboardLayout>
   );
 }

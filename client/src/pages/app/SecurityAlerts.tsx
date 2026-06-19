@@ -11,6 +11,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   Shield, AlertTriangle, CheckCircle, RefreshCw, Play,
   Server, Cpu, Activity, Lock, Eye,
@@ -79,7 +81,7 @@ export default function SecurityAlerts() {
     return (
       <div className="p-6">
         <div className="flex items-center gap-3 mb-4">
-          <Shield className="w-7 h-7 text-[#D4A017]" />
+          <Shield className="w-7 h-7 text-accent" />
           <div>
             <h1 className="text-2xl font-bold">Security Center</h1>
             <p className="text-muted-foreground text-sm">Your platform security score</p>
@@ -115,7 +117,7 @@ export default function SecurityAlerts() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Shield className="w-7 h-7 text-[#D4A017]" />
+            <Shield className="w-7 h-7 text-accent" />
             Security Alerts (Wazuh SIEM)
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -159,7 +161,7 @@ export default function SecurityAlerts() {
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
               activeTab === tab
-                ? "border-[#D4A017] text-[#D4A017]"
+                ? "border-accent text-accent"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -284,7 +286,7 @@ export default function SecurityAlerts() {
                 </div>
                 <Button
                   size="sm"
-                  className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+                  className="bg-accent hover:bg-[#b8891a] text-white"
                   disabled={triggerPlaybookMutation.isPending}
                   onClick={() => triggerPlaybookMutation.mutate({ playbookId: pb.id, alertId: selectedAlert?.id ?? "manual" })}
                 >
@@ -330,7 +332,7 @@ export default function SecurityAlerts() {
                     <div className="flex items-center gap-3">
                       <div className="w-32 bg-muted rounded-full h-2">
                         <div
-                          className="bg-[#D4A017] h-2 rounded-full"
+                          className="bg-accent h-2 rounded-full"
                           style={{ width: `${Math.min(100, typeof score === "number" ? score : 0)}%` }}
                         />
                       </div>
@@ -394,7 +396,7 @@ export default function SecurityAlerts() {
           <DialogFooter>
             {selectedAlert && !selectedAlert.acknowledged && (
               <Button
-                className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+                className="bg-accent hover:bg-[#b8891a] text-white"
                 disabled={acknowledgeMutation.isPending}
                 onClick={() => acknowledgeMutation.mutate({ alertId: selectedAlert.id })}
               >

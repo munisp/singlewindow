@@ -48,6 +48,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import DashboardLayout from "@/components/DashboardLayout";
+
 
 // ─── HEALTH STATUS BADGE ──────────────────────────────────────────────────────
 

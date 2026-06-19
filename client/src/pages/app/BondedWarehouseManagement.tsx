@@ -18,6 +18,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
+import DashboardLayout from "@/components/DashboardLayout";
+
 
 const WAREHOUSE_STATUS_COLORS: Record<string, string> = {
   active: "bg-green-100 text-green-700",

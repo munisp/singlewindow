@@ -1,15 +1,14 @@
-// TradeGateway NGSWTP — Service Worker v2
-// R4 FIX: Background Sync offline action queue + push notifications
+// TradeGateway NGSWTP — Service Worker v3
+// v56: Cache-busting on deployment — SKIP_WAITING message handler + bumped cache version
 
-const CACHE_NAME = 'tradegateway-v2';
+const CACHE_NAME = 'tradegateway-v3';
 const OFFLINE_QUEUE_NAME = 'tradegateway-offline-queue';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.json',
+  // Note: index.html is intentionally excluded — always fetched from network
 ];
 
-// Install: cache static assets
+// Install: cache static assets and activate immediately
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -18,13 +17,20 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate: clean up old caches
+// Activate: clean up all old caches and claim clients immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_QUEUE_NAME).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
+});
+
+// ─── MESSAGE (SKIP_WAITING for instant activation on deployment) ─────────────
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 // ─── FETCH ───────────────────────────────────────────────────────────────────
@@ -68,14 +74,23 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests from here
   if (request.method !== 'GET') return;
 
-  // ── HTML navigation: network-first, fallback to shell ────────────────────
-  if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+  // ── HTML navigation: always network-first, never serve stale HTML ─────────
+  // This is the core cache-busting behaviour — HTML is never cached by the SW
+  if (request.mode === 'navigate' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(request).catch(() => {
+        // Offline fallback only — serve cached shell if network is unavailable
+        return caches.match('/') || caches.match('/index.html') ||
+          new Response('<h1>TradeGateway — Offline</h1>', { headers: { 'Content-Type': 'text/html' } });
+      })
+    );
     return;
   }
 
-  // ── Static assets: cache-first ────────────────────────────────────────────
-  if (url.pathname.match(/\.(js|css|woff2?|png|svg|ico|webp|json)$/)) {
+  // ── Hashed static assets (JS/CSS/fonts/images): cache-first ─────────────
+  // Vite uses content-hash filenames so these are safe to cache indefinitely
+  if (url.pathname.match(/\.(js|css|woff2?|png|svg|ico|webp)$/) &&
+      (url.pathname.includes('/assets/') || url.pathname.match(/\.[a-f0-9]{8,}\./))) {
     event.respondWith(
       caches.match(request).then((cached) => {
         if (cached) return cached;

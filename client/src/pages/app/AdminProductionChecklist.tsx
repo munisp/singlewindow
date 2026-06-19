@@ -8,6 +8,8 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, XCircle, AlertTriangle, RefreshCw, Loader2, Server } from "lucide-react";
 import { cn } from "@/lib/utils";
+import DashboardLayout from "@/components/DashboardLayout";
+
 
 interface CheckItem {
   id: string;

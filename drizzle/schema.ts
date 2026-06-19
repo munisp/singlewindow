@@ -1754,3 +1754,333 @@ export const traderRatings = pgTable("trader_ratings", {
   index("idx_trader_ratings_created").on(t.createdAt),
 ]);
 export type TraderRating = typeof traderRatings.$inferSelect;
+
+// ─── AUDIT ENGINE TASKS & FINDINGS (v56) ─────────────────────────────────────
+export const auditSelectionReasonEnum = pgEnum("audit_selection_reason", [
+  "risk_score_high", "random_sample", "trader_tier_review", "value_threshold",
+  "hs_chapter_sensitive", "repeat_offender", "post_green_lane",
+]);
+export const auditTaskStatusEnum = pgEnum("audit_task_status", [
+  "pending", "assigned", "in_progress", "findings_submitted", "closed", "appealed",
+]);
+export const auditFindingTypeEnum = pgEnum("audit_finding_type", [
+  "undervaluation", "misclassification", "origin_mismatch", "quantity_discrepancy",
+  "prohibited_goods", "documentation_fraud", "duty_evasion", "no_finding",
+]);
+export const auditTasks = pgTable("audit_tasks", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  declarationId: varchar("declaration_id", { length: 64 }).notNull(),
+  declarantName: varchar("declarant_name", { length: 255 }).notNull(),
+  hsCode: varchar("hs_code", { length: 20 }),
+  declaredValueUsd: decimal("declared_value_usd", { precision: 18, scale: 2 }).notNull(),
+  dutyPaidUsd: decimal("duty_paid_usd", { precision: 18, scale: 2 }).notNull(),
+  selectionReason: auditSelectionReasonEnum("selection_reason").notNull(),
+  riskScore: decimal("risk_score", { precision: 5, scale: 4 }).notNull(),
+  status: auditTaskStatusEnum("status").default("pending").notNull(),
+  assignedOfficerId: varchar("assigned_officer_id", { length: 64 }),
+  assignedOfficerName: varchar("assigned_officer_name", { length: 255 }),
+  dueAt: timestamp("due_at").notNull(),
+  dutyDiscrepancyUsd: decimal("duty_discrepancy_usd", { precision: 18, scale: 2 }).default("0"),
+  appealNotes: text("appeal_notes").default(""),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  closedAt: timestamp("closed_at"),
+}, (t) => [
+  index("idx_audit_tasks_status").on(t.status),
+  index("idx_audit_tasks_decl").on(t.declarationId),
+  index("idx_audit_tasks_created").on(t.createdAt),
+]);
+export type AuditTask = typeof auditTasks.$inferSelect;
+
+export const auditFindings = pgTable("audit_findings", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  auditTaskId: varchar("audit_task_id", { length: 64 }).notNull().references(() => auditTasks.id, { onDelete: "cascade" }),
+  findingType: auditFindingTypeEnum("finding_type").notNull(),
+  description: text("description").notNull(),
+  amountUsd: decimal("amount_usd", { precision: 18, scale: 2 }).default("0"),
+  evidenceUrl: text("evidence_url"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_audit_findings_task").on(t.auditTaskId),
+]);
+export type AuditFinding = typeof auditFindings.$inferSelect;
+
+// ─── TEMPORAL WORKFLOW REGISTRY (v56) ────────────────────────────────────────
+export const temporalWorkflowStatusEnum = pgEnum("temporal_workflow_status", [
+  "RUNNING", "COMPLETED", "FAILED", "TIMED_OUT", "CANCELLED",
+]);
+export const temporalWorkflows = pgTable("temporal_workflows", {
+  id: serial("id").primaryKey(),
+  workflowId: varchar("workflow_id", { length: 255 }).notNull().unique(),
+  runId: varchar("run_id", { length: 255 }).notNull(),
+  workflowType: varchar("workflow_type", { length: 128 }).notNull(),
+  declarationId: integer("declaration_id"),
+  status: temporalWorkflowStatusEnum("status").default("RUNNING").notNull(),
+  startTime: timestamp("start_time").defaultNow().notNull(),
+  closeTime: timestamp("close_time"),
+  currentStep: varchar("current_step", { length: 128 }),
+  steps: jsonb("steps").default([]),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_temporal_wf_decl").on(t.declarationId),
+  index("idx_temporal_wf_status").on(t.status),
+  index("idx_temporal_wf_type").on(t.workflowType),
+]);
+export type TemporalWorkflow = typeof temporalWorkflows.$inferSelect;
+
+// ─── NL QUERY HISTORY (v56) ───────────────────────────────────────────────────
+export const nlQueryHistory = pgTable("nl_query_history", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  query: text("query").notNull(),
+  sql: text("sql"),
+  resultCount: integer("result_count"),
+  executionMs: integer("execution_ms"),
+  success: boolean("success").default(true).notNull(),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_nl_query_user").on(t.userId),
+  index("idx_nl_query_created").on(t.createdAt),
+]);
+export type NlQueryHistory = typeof nlQueryHistory.$inferSelect;
+
+// ─── OFFICER WORKLOAD SNAPSHOTS (v56) ─────────────────────────────────────────
+export const officerWorkloadSnapshots = pgTable("officer_workload_snapshots", {
+  id: serial("id").primaryKey(),
+  officerId: integer("officer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  snapshotDate: timestamp("snapshot_date").defaultNow().notNull(),
+  pendingDeclarations: integer("pending_declarations").default(0).notNull(),
+  completedToday: integer("completed_today").default(0).notNull(),
+  avgClearanceHours: decimal("avg_clearance_hours", { precision: 8, scale: 2 }),
+  slaBreachCount: integer("sla_breach_count").default(0).notNull(),
+  capacityPct: integer("capacity_pct").default(0),
+}, (t) => [
+  index("idx_officer_workload_officer").on(t.officerId),
+  index("idx_officer_workload_date").on(t.snapshotDate),
+]);
+export type OfficerWorkloadSnapshot = typeof officerWorkloadSnapshots.$inferSelect;
+
+// ─── SLA ESCALATIONS (v56) ────────────────────────────────────────────────────
+export const slaEscalationStatusEnum = pgEnum("sla_escalation_status", [
+  "open", "acknowledged", "resolved", "escalated",
+]);
+export const slaEscalations = pgTable("sla_escalations", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  declarationNumber: varchar("declaration_number", { length: 64 }),
+  escalationLevel: integer("escalation_level").default(1).notNull(),
+  breachType: varchar("breach_type", { length: 64 }).notNull(),
+  breachHours: decimal("breach_hours", { precision: 8, scale: 2 }),
+  status: slaEscalationStatusEnum("status").default("open").notNull(),
+  assignedTo: integer("assigned_to").references(() => users.id, { onDelete: "set null" }),
+  resolvedAt: timestamp("resolved_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_sla_esc_status").on(t.status),
+  index("idx_sla_esc_decl").on(t.declarationId),
+  index("idx_sla_esc_created").on(t.createdAt),
+]);
+export type SlaEscalation = typeof slaEscalations.$inferSelect;
+
+// ─── THREAT INTEL FEEDS (v56) ─────────────────────────────────────────────────
+export const threatIntelSeverityEnum = pgEnum("threat_intel_severity", [
+  "info", "low", "medium", "high", "critical",
+]);
+export const threatIntelFeeds = pgTable("threat_intel_feeds", {
+  id: serial("id").primaryKey(),
+  feedSource: varchar("feed_source", { length: 128 }).notNull(),
+  indicatorType: varchar("indicator_type", { length: 64 }).notNull(),
+  indicatorValue: text("indicator_value").notNull(),
+  severity: threatIntelSeverityEnum("severity").default("medium").notNull(),
+  description: text("description"),
+  tags: jsonb("tags").default([]),
+  firstSeen: timestamp("first_seen").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  relatedDeclarations: jsonb("related_declarations").default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_threat_intel_source").on(t.feedSource),
+  index("idx_threat_intel_severity").on(t.severity),
+  index("idx_threat_intel_active").on(t.isActive),
+]);
+export type ThreatIntelFeed = typeof threatIntelFeeds.$inferSelect;
+
+// ─── STREAM EVENTS (v56) ──────────────────────────────────────────────────────
+export const streamEvents = pgTable("stream_events", {
+  id: serial("id").primaryKey(),
+  topic: varchar("topic", { length: 128 }).notNull(),
+  partitionKey: varchar("partition_key", { length: 128 }),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  source: varchar("source", { length: 128 }),
+  correlationId: varchar("correlation_id", { length: 128 }),
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_stream_events_topic").on(t.topic),
+  index("idx_stream_events_type").on(t.eventType),
+  index("idx_stream_events_created").on(t.createdAt),
+  index("idx_stream_events_correlation").on(t.correlationId),
+]);
+export type StreamEvent = typeof streamEvents.$inferSelect;
+
+// ─── SOC INCIDENTS (v56) ──────────────────────────────────────────────────────
+export const socIncidentSeverityEnum = pgEnum("soc_incident_severity", [
+  "low", "medium", "high", "critical",
+]);
+export const socIncidentStatusEnum = pgEnum("soc_incident_status", [
+  "open", "investigating", "contained", "resolved", "closed",
+]);
+export const socIncidents = pgTable("soc_incidents", {
+  id: serial("id").primaryKey(),
+  incidentNumber: varchar("incident_number", { length: 64 }).notNull().unique(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  severity: socIncidentSeverityEnum("severity").default("medium").notNull(),
+  status: socIncidentStatusEnum("status").default("open").notNull(),
+  assignedTo: integer("assigned_to").references(() => users.id, { onDelete: "set null" }),
+  affectedSystems: jsonb("affected_systems").default([]),
+  iocs: jsonb("iocs").default([]),
+  timeline: jsonb("timeline").default([]),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_soc_incidents_status").on(t.status),
+  index("idx_soc_incidents_severity").on(t.severity),
+  index("idx_soc_incidents_created").on(t.createdAt),
+]);
+export type SocIncident = typeof socIncidents.$inferSelect;
+
+// ─── ASEAN SINGLE WINDOW MESSAGES (v56) ───────────────────────────────────────
+export const aseanSwMessageTypeEnum = pgEnum("asean_sw_message_type", [
+  "CUSCAR", "CUSRES", "CUSDEC", "IFTMIN", "IFTSTA", "COPARN", "COARRI",
+]);
+export const aseanSwMessages = pgTable("asean_sw_messages", {
+  id: serial("id").primaryKey(),
+  messageId: varchar("message_id", { length: 128 }).notNull().unique(),
+  messageType: aseanSwMessageTypeEnum("message_type").notNull(),
+  senderCountry: varchar("sender_country", { length: 3 }).notNull(),
+  receiverCountry: varchar("receiver_country", { length: 3 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  payload: jsonb("payload").notNull(),
+  status: varchar("status", { length: 32 }).default("sent").notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_asean_sw_type").on(t.messageType),
+  index("idx_asean_sw_decl").on(t.declarationId),
+  index("idx_asean_sw_sent").on(t.sentAt),
+]);
+export type AseanSwMessage = typeof aseanSwMessages.$inferSelect;
+
+// ─── FREE ZONE OPERATIONS (v56) ───────────────────────────────────────────────
+export const freeZoneOperationTypeEnum = pgEnum("free_zone_operation_type", [
+  "admission", "manufacturing", "re_export", "destruction", "transfer",
+]);
+export const freeZoneOperations = pgTable("free_zone_operations", {
+  id: serial("id").primaryKey(),
+  operationNumber: varchar("operation_number", { length: 64 }).notNull().unique(),
+  operationType: freeZoneOperationTypeEnum("operation_type").notNull(),
+  zoneId: varchar("zone_id", { length: 64 }).notNull(),
+  zoneName: varchar("zone_name", { length: 255 }),
+  traderId: integer("trader_id").references(() => users.id, { onDelete: "set null" }),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  goodsDescription: text("goods_description"),
+  quantityKg: decimal("quantity_kg", { precision: 12, scale: 3 }),
+  valueUsd: decimal("value_usd", { precision: 18, scale: 2 }),
+  status: varchar("status", { length: 32 }).default("pending").notNull(),
+  approvedBy: integer("approved_by").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_free_zone_ops_type").on(t.operationType),
+  index("idx_free_zone_ops_zone").on(t.zoneId),
+  index("idx_free_zone_ops_trader").on(t.traderId),
+  index("idx_free_zone_ops_created").on(t.createdAt),
+]);
+export type FreeZoneOperation = typeof freeZoneOperations.$inferSelect;
+
+// ─── CEN MESSAGES (v56) ───────────────────────────────────────────────────────
+export const cenMessages = pgTable("cen_messages", {
+  id: serial("id").primaryKey(),
+  messageRef: varchar("message_ref", { length: 128 }).notNull().unique(),
+  messageType: varchar("message_type", { length: 64 }).notNull(),
+  originCountry: varchar("origin_country", { length: 3 }).notNull(),
+  targetCountry: varchar("target_country", { length: 3 }),
+  subject: varchar("subject", { length: 255 }),
+  body: text("body"),
+  attachments: jsonb("attachments").default([]),
+  priority: varchar("priority", { length: 16 }).default("normal"),
+  status: varchar("status", { length: 32 }).default("sent").notNull(),
+  relatedDeclarations: jsonb("related_declarations").default([]),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cen_messages_type").on(t.messageType),
+  index("idx_cen_messages_origin").on(t.originCountry),
+  index("idx_cen_messages_sent").on(t.sentAt),
+]);
+export type CenMessage = typeof cenMessages.$inferSelect;
+
+// ─── KNOWLEDGE GRAPH NODES & EDGES (v56) ──────────────────────────────────────
+export const knowledgeGraphNodes = pgTable("knowledge_graph_nodes", {
+  id: serial("id").primaryKey(),
+  nodeId: varchar("node_id", { length: 128 }).notNull().unique(),
+  nodeType: varchar("node_type", { length: 64 }).notNull(),
+  label: varchar("label", { length: 255 }).notNull(),
+  properties: jsonb("properties").default({}),
+  riskScore: decimal("risk_score", { precision: 5, scale: 4 }),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kg_nodes_type").on(t.nodeType),
+  index("idx_kg_nodes_label").on(t.label),
+]);
+export type KnowledgeGraphNode = typeof knowledgeGraphNodes.$inferSelect;
+
+export const knowledgeGraphEdges = pgTable("knowledge_graph_edges", {
+  id: serial("id").primaryKey(),
+  sourceNodeId: varchar("source_node_id", { length: 128 }).notNull().references(() => knowledgeGraphNodes.nodeId, { onDelete: "cascade" }),
+  targetNodeId: varchar("target_node_id", { length: 128 }).notNull().references(() => knowledgeGraphNodes.nodeId, { onDelete: "cascade" }),
+  edgeType: varchar("edge_type", { length: 64 }).notNull(),
+  weight: decimal("weight", { precision: 8, scale: 4 }).default("1.0"),
+  properties: jsonb("properties").default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kg_edges_source").on(t.sourceNodeId),
+  index("idx_kg_edges_target").on(t.targetNodeId),
+  index("idx_kg_edges_type").on(t.edgeType),
+]);
+export type KnowledgeGraphEdge = typeof knowledgeGraphEdges.$inferSelect;
+
+// ─── RISK MODEL CONFIGURATIONS (v56) ─────────────────────────────────────────
+export const riskModelConfigs = pgTable("risk_model_configs", {
+  id: serial("id").primaryKey(),
+  modelName: varchar("model_name", { length: 128 }).notNull().unique(),
+  version: varchar("version", { length: 32 }).notNull(),
+  featureWeights: jsonb("feature_weights").notNull(),
+  thresholds: jsonb("thresholds").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastTrainedAt: timestamp("last_trained_at"),
+  accuracy: decimal("accuracy", { precision: 5, scale: 4 }),
+  f1Score: decimal("f1_score", { precision: 5, scale: 4 }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_risk_model_active").on(t.isActive),
+  index("idx_risk_model_name").on(t.modelName),
+]);
+export type RiskModelConfig = typeof riskModelConfigs.$inferSelect;

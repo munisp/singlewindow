@@ -15,6 +15,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   Webhook, Plus, RefreshCw, Trash2, RotateCcw, Eye, CheckCircle,
   XCircle, Clock, Shield,
@@ -98,12 +100,13 @@ export default function WebhookLogs() {
   const subs = subscriptions ?? [];
 
   return (
-    <div className="p-6 space-y-6">
+    <DashboardLayout>
+      <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Webhook className="w-7 h-7 text-[#D4A017]" />
+            <Webhook className="w-7 h-7 text-accent" />
             Webhook Subscriptions
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -112,7 +115,7 @@ export default function WebhookLogs() {
         </div>
         <Button
           onClick={() => setShowCreateDialog(true)}
-          className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+          className="bg-accent hover:bg-[#b8891a] text-white"
         >
           <Plus className="w-4 h-4 mr-2" /> Add Webhook
         </Button>
@@ -149,7 +152,7 @@ export default function WebhookLogs() {
         <div className="text-center py-12 text-muted-foreground">
           <Webhook className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No webhook subscriptions yet</p>
-          <Button className="mt-4 bg-[#D4A017] hover:bg-[#b8891a] text-white" onClick={() => setShowCreateDialog(true)}>
+          <Button className="mt-4 bg-accent hover:bg-[#b8891a] text-white" onClick={() => setShowCreateDialog(true)}>
             <Plus className="w-4 h-4 mr-2" /> Create your first webhook
           </Button>
         </div>
@@ -258,7 +261,7 @@ export default function WebhookLogs() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
             <Button
-              className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+              className="bg-accent hover:bg-[#b8891a] text-white"
               disabled={!createForm.name || !createForm.url || createForm.events.length === 0 || createMutation.isPending}
               onClick={() => createMutation.mutate({
                 name: createForm.name,
@@ -322,5 +325,6 @@ export default function WebhookLogs() {
         </DialogContent>
       </Dialog>
     </div>
+  </DashboardLayout>
   );
 }

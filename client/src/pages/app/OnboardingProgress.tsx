@@ -11,6 +11,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   CheckCircle, Circle, RefreshCw, ChevronRight, Building2,
   FileText, CreditCard, UserCheck, Star, AlertTriangle,
@@ -40,10 +42,10 @@ function StepIndicator({ steps, currentStep, completedSteps }: {
           <div key={step.id} className="flex items-center flex-1">
             <div className={`flex items-center gap-2 flex-1 ${idx > 0 ? "pl-2" : ""}`}>
               {idx > 0 && (
-                <div className={`flex-1 h-0.5 ${isCompleted ? "bg-[#D4A017]" : "bg-border"}`} />
+                <div className={`flex-1 h-0.5 ${isCompleted ? "bg-accent" : "bg-border"}`} />
               )}
               <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isCurrent ? "bg-[#D4A017]/10 text-[#D4A017] border border-[#D4A017]/30" :
+                isCurrent ? "bg-accent/10 text-accent border border-accent/30" :
                 isCompleted ? "text-green-600" : "text-muted-foreground"
               }`}>
                 {isCompleted ? (
@@ -186,7 +188,7 @@ export default function OnboardingProgress() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <UserCheck className="w-7 h-7 text-[#D4A017]" />
+            <UserCheck className="w-7 h-7 text-accent" />
             Trader Onboarding
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -215,7 +217,7 @@ export default function OnboardingProgress() {
       {/* Progress Bar */}
       <div className="w-full bg-muted rounded-full h-2">
         <div
-          className="bg-[#D4A017] h-2 rounded-full transition-all duration-500"
+          className="bg-accent h-2 rounded-full transition-all duration-500"
           style={{ width: `${overallPct}%` }}
         />
       </div>
@@ -254,7 +256,7 @@ export default function OnboardingProgress() {
         {activeStep === "company_info" && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-[#D4A017]" /> Company Information
+              <Building2 className="w-5 h-5 text-accent" /> Company Information
             </h2>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -347,7 +349,7 @@ export default function OnboardingProgress() {
         {activeStep === "documents" && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <FileText className="w-5 h-5 text-[#D4A017]" /> Required Documents
+              <FileText className="w-5 h-5 text-accent" /> Required Documents
             </h2>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
               Upload your documents to a secure storage service and paste the URL below. Accepted formats: PDF, JPG, PNG.
@@ -393,7 +395,7 @@ export default function OnboardingProgress() {
         {activeStep === "bank_details" && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-[#D4A017]" /> Bank Account Details
+              <CreditCard className="w-5 h-5 text-accent" /> Bank Account Details
             </h2>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
@@ -447,7 +449,7 @@ export default function OnboardingProgress() {
         {activeStep === "review" && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-[#D4A017]" /> Review & Submit
+              <UserCheck className="w-5 h-5 text-accent" /> Review & Submit
             </h2>
             <div className="space-y-3">
               {STEP_ORDER.slice(0, 3).map((stepId) => {
@@ -495,7 +497,7 @@ export default function OnboardingProgress() {
             Back
           </Button>
           <Button
-            className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+            className="bg-accent hover:bg-[#b8891a] text-white"
             disabled={saveStepMutation.isPending}
             onClick={handleSaveStep}
           >

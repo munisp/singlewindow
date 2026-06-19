@@ -11,6 +11,8 @@ import {
   ClipboardCheck, ChevronRight, User, DollarSign, TrendingUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import DashboardLayout from "@/components/DashboardLayout";
+
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-gray-100 text-gray-700",

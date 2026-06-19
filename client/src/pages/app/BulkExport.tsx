@@ -10,6 +10,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   Download, FileText, RefreshCw, Calendar, Filter,
   Table2, FileJson, CheckCircle,
@@ -122,11 +124,12 @@ export default function BulkExport() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <DashboardLayout>
+      <div className="p-6 space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-          <Download className="w-7 h-7 text-[#D4A017]" />
+          <Download className="w-7 h-7 text-accent" />
           Bulk Export
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
@@ -148,11 +151,11 @@ export default function BulkExport() {
                 onClick={() => setExportType(t.value as ExportType)}
                 className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-colors text-left ${
                   exportType === t.value
-                    ? "border-[#D4A017] bg-[#D4A017]/5"
+                    ? "border-accent bg-accent/5"
                     : "border-border hover:border-muted-foreground"
                 }`}
               >
-                <span className={exportType === t.value ? "text-[#D4A017]" : "text-muted-foreground"}>
+                <span className={exportType === t.value ? "text-accent" : "text-muted-foreground"}>
                   {t.icon}
                 </span>
                 <span className="font-medium text-sm">{t.label}</span>
@@ -225,7 +228,7 @@ export default function BulkExport() {
         {/* Export Button */}
         <div className="flex items-center gap-4">
           <Button
-            className="bg-[#D4A017] hover:bg-[#b8891a] text-white px-8"
+            className="bg-accent hover:bg-[#b8891a] text-white px-8"
             disabled={isExporting}
             onClick={handleExport}
           >
@@ -263,5 +266,6 @@ export default function BulkExport() {
         </div>
       </div>
     </div>
+  </DashboardLayout>
   );
 }

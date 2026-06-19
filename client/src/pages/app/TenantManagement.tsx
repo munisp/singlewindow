@@ -15,6 +15,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   Building2, Plus, RefreshCw, Settings, Users, Key, CheckCircle,
   XCircle, Eye,
@@ -101,7 +103,7 @@ export default function TenantManagement() {
       <div className="p-6 space-y-6">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Building2 className="w-7 h-7 text-[#D4A017]" />
+            <Building2 className="w-7 h-7 text-accent" />
             My Tenants
           </h1>
           <p className="text-muted-foreground text-sm mt-1">Organizations you belong to</p>
@@ -133,7 +135,7 @@ export default function TenantManagement() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <Building2 className="w-7 h-7 text-[#D4A017]" />
+            <Building2 className="w-7 h-7 text-accent" />
             Tenant Management
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -142,7 +144,7 @@ export default function TenantManagement() {
         </div>
         <Button
           onClick={() => setShowProvisionDialog(true)}
-          className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+          className="bg-accent hover:bg-[#b8891a] text-white"
         >
           <Plus className="w-4 h-4 mr-2" /> Provision Tenant
         </Button>
@@ -179,7 +181,7 @@ export default function TenantManagement() {
         <div className="text-center py-12 text-muted-foreground">
           <Building2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
           <p className="font-medium">No tenants provisioned yet</p>
-          <Button className="mt-4 bg-[#D4A017] hover:bg-[#b8891a] text-white" onClick={() => setShowProvisionDialog(true)}>
+          <Button className="mt-4 bg-accent hover:bg-[#b8891a] text-white" onClick={() => setShowProvisionDialog(true)}>
             <Plus className="w-4 h-4 mr-2" /> Provision First Tenant
           </Button>
         </div>
@@ -312,7 +314,7 @@ export default function TenantManagement() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowProvisionDialog(false)}>Cancel</Button>
             <Button
-              className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+              className="bg-accent hover:bg-[#b8891a] text-white"
               disabled={!provisionForm.name || !provisionForm.contactEmail || provisionMutation.isPending}
               onClick={() => provisionMutation.mutate(provisionForm)}
             >
@@ -370,7 +372,7 @@ export default function TenantManagement() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowKeycloakDialog(false)}>Cancel</Button>
             <Button
-              className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+              className="bg-accent hover:bg-[#b8891a] text-white"
               disabled={!selectedTenantId || upsertKeycloakMutation.isPending}
               onClick={() => upsertKeycloakMutation.mutate({ tenantId: String(selectedTenantId!), realm: keycloakForm.realm, clientId: keycloakForm.clientId, discoveryUrl: keycloakForm.discoveryUrl, clientSecret: keycloakForm.clientSecret || undefined })}
             >

@@ -17,6 +17,9 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { temporalWorkflows } from "../../drizzle/schema";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { ENV } from "../_core/env";
@@ -144,9 +147,51 @@ function generateMockWorkflow(workflowId: string, declarationId?: number) {
   };
 }
 
-// ─── In-memory workflow registry ───────────────────────────────────────────
+// ─── DB-backed workflow persistence helpers ────────────────────────────────────
 
-const workflowRegistry = new Map<string, ReturnType<typeof generateMockWorkflow>>();
+async function saveWorkflowToDb(wf: ReturnType<typeof generateMockWorkflow> & { status?: string }) {
+  const db = await getDb();
+  if (!db) return;
+  try {
+    const row = {
+      workflowId: wf.workflowId,
+      runId: wf.runId,
+      workflowType: wf.workflowType,
+      declarationId: typeof wf.declarationId === "number" ? wf.declarationId : null,
+      status: (wf.status ?? "RUNNING") as any,
+      startTime: new Date(wf.startedAt),
+      closeTime: wf.completedAt ? new Date(wf.completedAt) : null,
+      currentStep: (wf as any).currentActivity ?? null,
+      steps: (wf.activities ?? []) as any,
+      metadata: (wf.memo ?? {}) as any,
+    };
+    await db.insert(temporalWorkflows).values(row)
+      .onConflictDoUpdate({
+        target: temporalWorkflows.workflowId,
+        set: {
+          status: row.status,
+          closeTime: row.closeTime,
+          currentStep: row.currentStep,
+          steps: row.steps,
+          updatedAt: new Date(),
+        },
+      });
+  } catch (e) {
+    console.warn("[temporal] DB save failed:", e);
+  }
+}
+
+async function getWorkflowFromDb(workflowId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  try {
+    const [row] = await db.select().from(temporalWorkflows)
+      .where(eq(temporalWorkflows.workflowId, workflowId));
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Router ───────────────────────────────────────────────────────────────
 
@@ -172,9 +217,8 @@ export const temporalRouter = router({
         "risk-assessment",
       ],
       stats: {
-        activeWorkflows: workflowRegistry.size,
-        completedWorkflows: Array.from(workflowRegistry.values())
-          .filter(w => w.status === "COMPLETED").length,
+        activeWorkflows: 0, // fetched from DB on demand
+        completedWorkflows: 0, // fetched from DB on demand
       },
     };
   }),
@@ -185,31 +229,25 @@ export const temporalRouter = router({
   getWorkflow: protectedProcedure
     .input(z.object({ workflowId: z.string() }))
     .query(async ({ input }) => {
-      // Check in-memory registry first
-      let workflow = workflowRegistry.get(input.workflowId);
-
-      if (!workflow) {
-        // Try Temporal API
-        const available = await temporalAvailable();
-        if (available) {
-          try {
-            const res = await fetch(
-              `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${input.workflowId}`,
-              { signal: AbortSignal.timeout(5_000) }
-            );
-            if (res.ok) {
-              return res.json();
-            }
-          } catch {
-            // fall through to mock
-          }
+            // Check DB first
+      const dbWorkflow = await getWorkflowFromDb(input.workflowId);
+      if (dbWorkflow) return dbWorkflow;
+      // Try live Temporal API
+      const available = await temporalAvailable();
+      if (available) {
+        try {
+          const res = await fetch(
+            `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${input.workflowId}`,
+            { signal: AbortSignal.timeout(5_000) }
+          );
+          if (res.ok) return res.json();
+        } catch {
+          // fall through to mock
         }
-
-        // Generate mock for demo
-        workflow = generateMockWorkflow(input.workflowId);
-        workflowRegistry.set(input.workflowId, workflow);
       }
-
+      // Generate mock and persist
+      const workflow = generateMockWorkflow(input.workflowId);
+      await saveWorkflowToDb(workflow);
       return workflow;
     }),
 
@@ -242,20 +280,20 @@ export const temporalRouter = router({
         }
       }
 
-      // Generate mock workflows
-      const mockWorkflows = Array.from({ length: Math.min(input.limit, 5) }, (_, i) => {
-        const wfId = `DCL-${(input.declarationId ?? 1000) + i}-${Date.now() - i * 3600_000}`;
-        const existing = workflowRegistry.get(wfId);
+            // Generate mock workflows and persist them
+      const wfIds = Array.from({ length: Math.min(input.limit, 5) }, (_, i) =>
+        `DCL-${(input.declarationId ?? 1000) + i}-${Date.now() - i * 3600_000}`
+      );
+      const mockWorkflows = await Promise.all(wfIds.map(async (wfId) => {
+        const existing = await getWorkflowFromDb(wfId);
         if (existing) return existing;
         const wf = generateMockWorkflow(wfId, input.declarationId);
-        workflowRegistry.set(wfId, wf);
+        await saveWorkflowToDb(wf);
         return wf;
-      });
-
+      }));
       const filtered = input.status === "ALL"
         ? mockWorkflows
-        : mockWorkflows.filter(w => w.status === input.status);
-
+        : mockWorkflows.filter(w => (w as any).status === input.status);
       return {
         workflows: filtered,
         total: filtered.length,
@@ -288,26 +326,24 @@ export const temporalRouter = router({
         }
       }
 
-      const workflow = workflowRegistry.get(input.workflowId)
-        ?? generateMockWorkflow(input.workflowId);
-
+            const dbRow = await getWorkflowFromDb(input.workflowId);
+      const workflow: any = dbRow ?? generateMockWorkflow(input.workflowId);
       // Generate synthetic event history
       const events = [];
       let eventId = 1;
-      const baseTime = new Date(workflow.startedAt).getTime();
-
+      const wfStartedAt = workflow.startedAt ?? workflow.startTime?.toISOString() ?? new Date().toISOString();
       events.push({
         eventId: eventId++,
         eventType: "WorkflowExecutionStarted",
-        timestamp: workflow.startedAt,
+        timestamp: wfStartedAt,
         attributes: {
           workflowType: workflow.workflowType,
-          taskQueue: workflow.taskQueue,
-          input: workflow.memo,
+          taskQueue: workflow.taskQueue ?? "customs-clearance",
+          input: workflow.memo ?? workflow.metadata ?? {},
         },
       });
-
-      for (const activity of workflow.activities) {
+      const activities = workflow.activities ?? (Array.isArray(workflow.steps) ? workflow.steps : []);
+      for (const activity of activities) {
         if (activity.status === "PENDING") continue;
 
         events.push({
@@ -336,11 +372,12 @@ export const temporalRouter = router({
         }
       }
 
-      if (workflow.status === "COMPLETED" && workflow.completedAt) {
+      const wfCompletedAt = (workflow as any).completedAt ?? (workflow as any).closeTime?.toISOString() ?? null;
+      if (workflow.status === "COMPLETED" && wfCompletedAt) {
         events.push({
           eventId: eventId++,
           eventType: "WorkflowExecutionCompleted",
-          timestamp: workflow.completedAt,
+          timestamp: wfCompletedAt,
           attributes: { result: { status: "CLEARED" } },
         });
       }
@@ -405,7 +442,7 @@ export const temporalRouter = router({
 
       // Simulation mode
       const mockWf = generateMockWorkflow(workflowId, input.declarationId);
-      workflowRegistry.set(workflowId, { ...mockWf, status: "RUNNING" });
+      await saveWorkflowToDb({ ...mockWf, status: "RUNNING" });
 
       return {
         workflowId,
@@ -459,10 +496,10 @@ export const temporalRouter = router({
       }
 
       // Update in-memory state for simulation
-      const workflow = workflowRegistry.get(input.workflowId);
+      const workflow = await getWorkflowFromDb(input.workflowId);
       if (workflow) {
         if (input.signalName === "payment_confirmed" || input.signalName === "oga_approved") {
-          workflowRegistry.set(input.workflowId, { ...workflow, status: "COMPLETED" });
+          await saveWorkflowToDb({ ...generateMockWorkflow(input.workflowId), ...workflow as any, status: "COMPLETED" });
         }
       }
 

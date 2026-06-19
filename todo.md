@@ -357,3 +357,23 @@
 - [x] FlinkCepAlerts.tsx — add toggle switch for cep_daily_breach_digest_enabled inside Log Retention card
 - [x] Install qrcode npm package and add QR code to TraderScorecard Share popover
 - [x] Push v55 codebase to GitHub munisp/singlewindow
+
+## v56 Sprint — Comprehensive Audit & Production Hardening
+
+- [x] v56 feature: Retention audit log collapsible in FlinkCepAlerts Log Retention card
+- [x] v56 feature: cep_daily_breach_digest_enabled toggle in Log Retention card + server opt-out check
+- [x] v56 feature: QR code in TraderScorecard Share popover (qrcode npm package)
+- [x] Deep codebase audit: business logic scoring across all middleware and services
+- [x] Replace temporal router in-memory workflowRegistry with PostgreSQL temporal_workflows table
+- [x] Replace auditEngine router in-memory stores with PostgreSQL audit_tasks + audit_findings tables
+- [x] Add 15 missing DB tables to schema.ts and apply migrations to local PostgreSQL
+- [x] Security audit: helmet CSP, CORS, rate limiting, sanitization, RBAC all verified
+- [x] Cache-busting: vite.ts serveStatic adds no-cache headers for HTML responses
+- [x] Cache-busting: index.html meta http-equiv Cache-Control/Pragma/Expires tags added
+- [x] Cache-busting: sw.js upgraded to v3 with SKIP_WAITING message handler + HTML excluded from STATIC_ASSETS
+- [x] UI/UX consistency: 15 pages wrapped with DashboardLayout (AEOApplications, BulkExport, etc.)
+- [x] UI/UX consistency: 80 hardcoded hex color instances replaced with design tokens across 8 files
+- [x] Top-10 stakeholder scenario validation report written to references/scenario-validation-v56.md
+- [x] New test files: server/temporal.db.test.ts (5 tests) + server/auditEngine.db.test.ts (7 tests)
+- [x] 1,858 tests passing (68 files), 0 TypeScript errors
+- [x] Push v56 codebase to GitHub munisp/singlewindow

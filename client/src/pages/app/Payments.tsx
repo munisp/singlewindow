@@ -15,6 +15,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import DashboardLayout from "@/components/DashboardLayout";
+
 import {
   DollarSign, RefreshCw, Search, CheckCircle, Clock, AlertTriangle,
   TrendingUp, FileText, CreditCard, Smartphone, Building2, Shield,
@@ -139,7 +141,7 @@ export default function Payments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-            <DollarSign className="w-7 h-7 text-[#D4A017]" />
+            <DollarSign className="w-7 h-7 text-accent" />
             Payments
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
@@ -148,7 +150,7 @@ export default function Payments() {
         </div>
         <Button
           onClick={() => setShowInitiateDialog(true)}
-          className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+          className="bg-accent hover:bg-[#b8891a] text-white"
         >
           <DollarSign className="w-4 h-4 mr-2" />
           Initiate Payment
@@ -193,7 +195,7 @@ export default function Payments() {
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
               activeTab === tab
-                ? "border-[#D4A017] text-[#D4A017]"
+                ? "border-accent text-accent"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -361,7 +363,7 @@ export default function Payments() {
                       return (
                         <div key={i} className="flex-1 flex flex-col items-center gap-1">
                           <div
-                            className="w-full bg-[#D4A017] rounded-t opacity-80"
+                            className="w-full bg-accent rounded-t opacity-80"
                             style={{ height: `${h}%`, minHeight: h > 0 ? "4px" : "0" }}
                             title={`${d.date}: ${formatCurrency(d.totalAmount)}`}
                           />
@@ -464,7 +466,7 @@ export default function Payments() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowInitiateDialog(false)}>Cancel</Button>
             <Button
-              className="bg-[#D4A017] hover:bg-[#b8891a] text-white"
+              className="bg-accent hover:bg-[#b8891a] text-white"
               disabled={!initiateForm.declarationId || initiateMutation.isPending}
               onClick={() => {
                 const id = parseInt(initiateForm.declarationId);
