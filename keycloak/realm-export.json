@@ -1,0 +1,328 @@
+{
+  "realm": "tradegateway",
+  "displayName": "TradeGateway NGSWTP",
+  "displayNameHtml": "<b>TradeGateway</b> National Single Window",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "defaultSignatureAlgorithm": "RS256",
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanUserAction": 300,
+  "accessCodeLifespanLogin": 1800,
+
+  "roles": {
+    "realm": [
+      {
+        "name": "tradegateway-admin",
+        "description": "Full administrative access to TradeGateway platform",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-customs-officer",
+        "description": "Customs officer — can review, assess, and clear declarations",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-oga-officer",
+        "description": "Other Government Agency officer — can approve/reject permits",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-inspector",
+        "description": "Physical inspection officer — can record inspection results",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-finance",
+        "description": "Finance officer — can view and export financial reports",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-trader",
+        "description": "Registered trader — can submit declarations and track cargo",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-aeo",
+        "description": "Authorised Economic Operator — expedited processing",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-clearing-agent",
+        "description": "Licensed clearing agent — can submit on behalf of traders",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-port-operator",
+        "description": "Port/terminal operator — can view cargo manifest and berth schedules",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-soc-analyst",
+        "description": "Security Operations Centre analyst — read-only SOC access",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-audit-reviewer",
+        "description": "Post-clearance audit reviewer — can initiate and review audits",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "tradegateway-api-consumer",
+        "description": "Third-party API consumer — restricted to public API endpoints",
+        "composite": false,
+        "clientRole": false
+      }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "tradegateway-web",
+      "name": "TradeGateway Web Portal",
+      "description": "React SPA — public-facing trade portal",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://*.manus.space/*",
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "https://*.manus.space",
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles",
+        "tradegateway-roles"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300"
+      }
+    },
+    {
+      "clientId": "tradegateway-api",
+      "name": "TradeGateway API Server",
+      "description": "Backend Express/tRPC server — confidential client for M2M",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "secret": "CHANGE_ME_IN_PRODUCTION",
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "serviceAccountRoles": [
+        "tradegateway-admin"
+      ]
+    },
+    {
+      "clientId": "tradegateway-permify",
+      "name": "TradeGateway Permify Sidecar",
+      "description": "Service account for Permify to sync roles from Keycloak",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "CHANGE_ME_IN_PRODUCTION",
+      "serviceAccountRoles": [
+        "view-users",
+        "view-realm"
+      ]
+    }
+  ],
+
+  "clientScopes": [
+    {
+      "name": "tradegateway-roles",
+      "description": "TradeGateway-specific role claims in the access token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "tradegateway-realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tradegateway-groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    }
+  ],
+
+  "groups": [
+    {
+      "name": "customs-officers",
+      "realmRoles": ["tradegateway-customs-officer"]
+    },
+    {
+      "name": "oga-officers",
+      "realmRoles": ["tradegateway-oga-officer"]
+    },
+    {
+      "name": "inspectors",
+      "realmRoles": ["tradegateway-inspector"]
+    },
+    {
+      "name": "finance-team",
+      "realmRoles": ["tradegateway-finance"]
+    },
+    {
+      "name": "traders",
+      "realmRoles": ["tradegateway-trader"]
+    },
+    {
+      "name": "aeo-traders",
+      "realmRoles": ["tradegateway-trader", "tradegateway-aeo"]
+    },
+    {
+      "name": "clearing-agents",
+      "realmRoles": ["tradegateway-clearing-agent"]
+    },
+    {
+      "name": "port-operators",
+      "realmRoles": ["tradegateway-port-operator"]
+    },
+    {
+      "name": "soc-analysts",
+      "realmRoles": ["tradegateway-soc-analyst"]
+    },
+    {
+      "name": "audit-reviewers",
+      "realmRoles": ["tradegateway-audit-reviewer"]
+    },
+    {
+      "name": "administrators",
+      "realmRoles": ["tradegateway-admin"]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "admin-service-account",
+      "enabled": true,
+      "serviceAccountClientId": "tradegateway-api",
+      "realmRoles": ["tradegateway-admin"]
+    }
+  ],
+
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
+
+  "browserSecurityHeaders": {
+    "contentSecurityPolicyReportOnly": "",
+    "xContentTypeOptions": "nosniff",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  },
+
+  "smtpServer": {
+    "host": "smtp.example.com",
+    "port": "587",
+    "from": "noreply@tradegateway.gov",
+    "fromDisplayName": "TradeGateway NGSWTP",
+    "starttls": "true",
+    "auth": "true",
+    "user": "CHANGE_ME",
+    "password": "CHANGE_ME"
+  },
+
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging", "email"],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "REGISTER",
+    "UPDATE_PASSWORD",
+    "UPDATE_PROFILE",
+    "RESET_PASSWORD",
+    "CLIENT_LOGIN",
+    "CLIENT_LOGIN_ERROR",
+    "CODE_TO_TOKEN",
+    "CODE_TO_TOKEN_ERROR"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en", "fr", "ar", "sw", "pt"],
+  "defaultLocale": "en"
+}

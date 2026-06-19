@@ -387,3 +387,16 @@
 - [x] server/routers/payments.ts — add assertCan to payments.cancel for Permify RBAC enforcement
 - [x] server/v57.test.ts — 18 new tests: Keycloak verifier (8), OpenSearch (2), nlQuery DB (2), Permify (3), SDK (3)
 - [x] Push v57 codebase to GitHub munisp/singlewindow
+
+## v58 Sprint — OpenSearch Audit UI, Keycloak Realm Export, Permify Schema
+
+- [x] server/routers/opensearch.ts — searchAuditTrail, searchDeclarations, searchSecurityAlerts procedures
+- [x] server/_core/opensearch.ts — added generic searchDocuments export
+- [x] server/routers.ts — registered opensearch router in appRouter
+- [x] client/src/pages/app/SecurityOperationsCentre.tsx — "Audit Trail Search" tab with full-text, date-range, actor filters, pagination
+- [x] keycloak/realm-export.json — 12 roles, 3 clients (web, api, permify), 11 groups, client scopes, SMTP, events
+- [x] keycloak/README.md — Docker bootstrap, realm import, env vars, role reference table
+- [x] permify/schema.perm — 13 entity types with full permission model
+- [x] permify/README.md — Docker bootstrap, schema write, relationship seeding, Keycloak role mapping
+- [x] 1,876 tests passing (69 files), 0 TypeScript errors
+- [x] Push v58 codebase to GitHub munisp/singlewindow

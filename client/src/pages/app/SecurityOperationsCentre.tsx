@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import {
   Shield, AlertTriangle, Activity, Server, Eye, CheckCircle, Clock,
-  ChevronRight, Cpu, Network,
+  ChevronRight, Cpu, Network, Search, User,
 } from "lucide-react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -122,6 +123,7 @@ export default function SecurityOperationsCentre() {
           <TabsTrigger value="incidents">Incident Queue</TabsTrigger>
           <TabsTrigger value="mitre">MITRE ATT&CK</TabsTrigger>
           <TabsTrigger value="agents">Agent Status</TabsTrigger>
+          <TabsTrigger value="audit-trail">Audit Trail Search</TabsTrigger>
         </TabsList>
 
         {/* ─── Alerts Tab ─────────────────────────────────────────────────── */}
@@ -337,7 +339,135 @@ export default function SecurityOperationsCentre() {
             ))}
           </div>
         </TabsContent>
+
+        {/* ─── Audit Trail Search Tab ─────────────────────────────────── */}
+        <TabsContent value="audit-trail" className="space-y-4">
+          <AuditTrailSearch />
+        </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ─── AUDIT TRAIL SEARCH COMPONENT ────────────────────────────────────────────
+function AuditTrailSearch() {
+  const [query, setQuery] = useState("");
+  const [entityType, setEntityType] = useState("");
+  const [action, setAction] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 25;
+
+  const hasFilter = !!(query || entityType || action || fromDate || toDate);
+
+  const { data, isLoading, isFetching } = trpc.opensearch.searchAuditTrail.useQuery(
+    {
+      query: query || undefined,
+      entityType: entityType || undefined,
+      action: action || undefined,
+      fromDate: fromDate ? new Date(fromDate).toISOString() : undefined,
+      toDate: toDate ? new Date(toDate).toISOString() : undefined,
+      limit: PAGE_SIZE,
+      from: page * PAGE_SIZE,
+    },
+    { enabled: hasFilter, keepPreviousData: true } as any
+  );
+
+  const hits = (data?.hits ?? []) as any[];
+  const total = data?.total ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Search className="h-4 w-4" />
+            Audit Trail Full-Text Search
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Input
+            placeholder="Search actions, entity types, IP addresses…"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPage(0); }}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Input
+              placeholder="Entity type (e.g. declaration)"
+              value={entityType}
+              onChange={(e) => { setEntityType(e.target.value); setPage(0); }}
+              className="w-48"
+            />
+            <Input
+              placeholder="Action (e.g. approve)"
+              value={action}
+              onChange={(e) => { setAction(e.target.value); setPage(0); }}
+              className="w-40"
+            />
+            <Input
+              type="datetime-local"
+              value={fromDate}
+              onChange={(e) => { setFromDate(e.target.value); setPage(0); }}
+              className="w-52"
+            />
+            <Input
+              type="datetime-local"
+              value={toDate}
+              onChange={(e) => { setToDate(e.target.value); setPage(0); }}
+              className="w-52"
+            />
+            {hasFilter && (
+              <Button variant="ghost" size="sm" onClick={() => {
+                setQuery(""); setEntityType(""); setAction("");
+                setFromDate(""); setToDate(""); setPage(0);
+              }}>Clear</Button>
+            )}
+          </div>
+          {hasFilter && (
+            <p className="text-xs text-muted-foreground">
+              {isFetching ? "Searching…" : `${total.toLocaleString()} result${total !== 1 ? "s" : ""}`}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {!hasFilter && (
+        <div className="text-center py-12 text-muted-foreground">
+          <Search className="h-8 w-8 mx-auto mb-2 opacity-40" />
+          <p>Enter a search term or filter to query the OpenSearch audit trail index.</p>
+        </div>
+      )}
+      {hasFilter && isLoading && <div className="text-center py-8 text-muted-foreground">Loading…</div>}
+      {hasFilter && !isLoading && hits.length === 0 && <div className="text-center py-8 text-muted-foreground">No results found.</div>}
+
+      {hits.length > 0 && (
+        <div className="space-y-2">
+          {hits.map((hit: any, i: number) => (
+            <Card key={hit.id ?? i} className="text-sm">
+              <CardContent className="py-3 flex flex-wrap items-start gap-3">
+                <Badge variant="outline" className="shrink-0">{hit.entityType}</Badge>
+                <span className="font-medium">{hit.action}</span>
+                {hit.entityId && <span className="text-muted-foreground">#{hit.entityId}</span>}
+                {hit.actorId && (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <User className="h-3 w-3" />actor:{hit.actorId}
+                  </span>
+                )}
+                {hit.ipAddress && <span className="text-muted-foreground font-mono text-xs">{hit.ipAddress}</span>}
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {hit.createdAt ? new Date(hit.createdAt).toLocaleString() : ""}
+                </span>
+              </CardContent>
+            </Card>
+          ))}
+          <div className="flex items-center justify-between pt-2">
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</Button>
+            <span className="text-xs text-muted-foreground">Page {page + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}</span>
+            <Button variant="outline" size="sm" disabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage(p => p + 1)}>Next</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

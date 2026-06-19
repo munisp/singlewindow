@@ -139,6 +139,34 @@ export async function searchDeclarations(query: string, traderId?: number, limit
 }
 
 // ─── INDEX AUDIT EVENTS ───────────────────────────────────────────────────────
+// ─── GENERIC SEARCH ────────────────────────────────────────────────────────────────
+/**
+ * Generic search helper — accepts any OpenSearch query body and returns hits + total.
+ * Used by the opensearch tRPC router for flexible full-text queries.
+ */
+export async function searchDocuments(
+  index: string,
+  body: Record<string, unknown>
+): Promise<{ hits: unknown[]; total: number }> {
+  const client = getOpenSearchClient();
+  if (!client) return { hits: [], total: 0 };
+  try {
+    const response = await client.search({ index, body });
+    const hits = (response.body.hits?.hits ?? []).map((h: any) => ({
+      ...h._source,
+      _score: h._score,
+      _highlight: h.highlight,
+    }));
+    const total = response.body.hits?.total;
+    const totalCount =
+      typeof total === "number" ? total : (total as any)?.value ?? 0;
+    return { hits, total: totalCount };
+  } catch (err) {
+    console.error(`[OpenSearch] searchDocuments(${index}) failed:`, err);
+    return { hits: [], total: 0 };
+  }
+}
+
 export interface AuditEventDocument {
   id: number;
   entityType: string;

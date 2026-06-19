@@ -1,0 +1,196 @@
+// ─── TradeGateway NGSWTP — Permify Permission Schema ────────────────────────
+// Version: 1.0.0
+// This schema defines the full entity model for fine-grained RBAC/ABAC
+// enforcement across the TradeGateway National Single Window platform.
+//
+// Entities: user, declaration, payment, permit, aeo_application,
+//           audit_task, cargo_shipment, oga_permit, kyc_record,
+//           drawback_claim, finance_report, bulk_export, organisation
+//
+// Deploy with:
+//   permify schema write --schema permify/schema.perm
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── ORGANISATION ────────────────────────────────────────────────────────────
+entity organisation {
+  // Relations
+  relation admin    @user
+  relation member   @user
+  relation oga      @user   // Other Government Agency officer
+  relation finance  @user
+  relation auditor  @user
+
+  // Permissions
+  permission manage_members = admin
+  permission view           = admin or member or oga or finance or auditor
+}
+
+// ─── USER ────────────────────────────────────────────────────────────────────
+entity user {
+  // No relations on user itself — roles are carried by Keycloak realm_access.roles
+  // and mapped to Permify subject types externally.
+}
+
+// ─── DECLARATION ─────────────────────────────────────────────────────────────
+entity declaration {
+  // Relations
+  relation owner          @user          // Trader who submitted
+  relation customs_officer @user         // Assigned customs officer
+  relation inspector      @user          // Assigned physical inspector
+  relation org            @organisation  // Owning organisation
+
+  // Permissions
+  permission submit       = owner
+  permission view         = owner or customs_officer or inspector or org.admin or org.oga
+  permission assess       = customs_officer or org.admin
+  permission approve      = customs_officer or org.admin
+  permission reject       = customs_officer or org.admin
+  permission inspect      = inspector or org.admin
+  permission amend        = owner or customs_officer
+  permission export_csv   = org.admin or org.finance or customs_officer
+  permission delete       = org.admin
+}
+
+// ─── PAYMENT ─────────────────────────────────────────────────────────────────
+entity payment {
+  // Relations
+  relation payer          @user
+  relation finance_officer @user
+  relation org            @organisation
+
+  // Permissions
+  permission initiate     = payer
+  permission view         = payer or finance_officer or org.admin or org.finance
+  permission cancel       = finance_officer or org.admin
+  permission refund       = finance_officer or org.admin
+  permission export       = org.admin or org.finance or finance_officer
+}
+
+// ─── PERMIT (OGA) ────────────────────────────────────────────────────────────
+entity permit {
+  // Relations
+  relation applicant      @user
+  relation oga_officer    @user
+  relation org            @organisation
+
+  // Permissions
+  permission apply        = applicant
+  permission view         = applicant or oga_officer or org.admin or org.oga
+  permission approve      = oga_officer or org.admin
+  permission reject       = oga_officer or org.admin
+  permission revoke       = org.admin
+}
+
+// ─── AEO APPLICATION ─────────────────────────────────────────────────────────
+entity aeo_application {
+  // Relations
+  relation applicant      @user
+  relation reviewer       @user
+  relation org            @organisation
+
+  // Permissions
+  permission submit       = applicant
+  permission view         = applicant or reviewer or org.admin
+  permission review       = reviewer or org.admin
+  permission approve      = reviewer or org.admin
+  permission reject       = reviewer or org.admin
+  permission revoke       = org.admin
+}
+
+// ─── AUDIT TASK ──────────────────────────────────────────────────────────────
+entity audit_task {
+  // Relations
+  relation auditor        @user
+  relation subject_trader @user
+  relation org            @organisation
+
+  // Permissions
+  permission create       = org.admin or org.auditor
+  permission view         = auditor or subject_trader or org.admin or org.auditor
+  permission update       = auditor or org.admin
+  permission close        = auditor or org.admin
+  permission export       = org.admin or org.auditor
+}
+
+// ─── CARGO SHIPMENT ──────────────────────────────────────────────────────────
+entity cargo_shipment {
+  // Relations
+  relation shipper        @user
+  relation port_operator  @user
+  relation customs_officer @user
+  relation org            @organisation
+
+  // Permissions
+  permission track        = shipper or port_operator or customs_officer or org.admin
+  permission update_status = port_operator or customs_officer or org.admin
+  permission view_manifest = shipper or port_operator or customs_officer or org.admin
+  permission release      = customs_officer or org.admin
+}
+
+// ─── KYC RECORD ──────────────────────────────────────────────────────────────
+entity kyc_record {
+  // Relations
+  relation subject        @user
+  relation reviewer       @user
+  relation org            @organisation
+
+  // Permissions
+  permission submit       = subject
+  permission view         = subject or reviewer or org.admin
+  permission approve      = reviewer or org.admin
+  permission reject       = reviewer or org.admin
+  permission view_sensitive = org.admin
+}
+
+// ─── DRAWBACK CLAIM ──────────────────────────────────────────────────────────
+entity drawback_claim {
+  // Relations
+  relation claimant       @user
+  relation finance_officer @user
+  relation org            @organisation
+
+  // Permissions
+  permission submit       = claimant
+  permission view         = claimant or finance_officer or org.admin or org.finance
+  permission approve      = finance_officer or org.admin
+  permission reject       = finance_officer or org.admin
+  permission disburse     = org.admin or org.finance
+}
+
+// ─── FINANCE REPORT ──────────────────────────────────────────────────────────
+entity finance_report {
+  // Relations
+  relation author         @user
+  relation finance_officer @user
+  relation org            @organisation
+
+  // Permissions
+  permission create       = org.admin or org.finance or finance_officer
+  permission view         = org.admin or org.finance or finance_officer
+  permission export       = org.admin or org.finance
+  permission delete       = org.admin
+}
+
+// ─── BULK EXPORT ─────────────────────────────────────────────────────────────
+entity bulk_export {
+  // Relations
+  relation requester      @user
+  relation org            @organisation
+
+  // Permissions
+  permission create       = org.admin or org.finance or requester
+  permission view         = requester or org.admin
+  permission download     = requester or org.admin
+  permission delete       = org.admin
+}
+
+// ─── SITE SETTINGS ───────────────────────────────────────────────────────────
+entity site_settings {
+  // Relations
+  relation admin          @user
+  relation org            @organisation
+
+  // Permissions
+  permission read         = admin or org.admin
+  permission write        = admin or org.admin
+}
