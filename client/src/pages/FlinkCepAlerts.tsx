@@ -53,6 +53,7 @@ import {
   Zap,
   Download,
   Settings,
+  ChevronDown,
 } from "lucide-react";
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -216,6 +217,25 @@ export default function FlinkCepAlerts() {
   });
   // Sync retention days from server
   const serverRetentionDays = retentionQuery.data?.value ?? "90";
+  // Digest toggle state
+  const [showAuditLog, setShowAuditLog] = useState(false);
+  const digestEnabledQuery = trpc.siteSettings.get.useQuery(
+    { key: "cep_daily_breach_digest_enabled" },
+    { enabled: user?.role === "admin" }
+  );
+  const setDigestEnabledMutation = trpc.siteSettings.set.useMutation({
+    onSuccess: () => {
+      toast.success("Digest setting saved");
+      digestEnabledQuery.refetch();
+    },
+    onError: (e) => toast.error("Failed to save digest setting", { description: e.message }),
+  });
+  const digestEnabled = (digestEnabledQuery.data?.value ?? "true") === "true";
+  // Audit log for retention setting
+  const auditLogQuery = trpc.siteSettings.listAuditLog.useQuery(
+    { key: "cep_suppression_log_retention_days", limit: 10 },
+    { enabled: showAuditLog && user?.role === "admin" }
+  );
   // Suppression History state
   const [showSuppressionHistory, setShowSuppressionHistory] = useState(false);
   const [suppLogPage, setSuppLogPage] = useState(1);
@@ -812,34 +832,93 @@ export default function FlinkCepAlerts() {
               Suppression Log Retention
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground mb-3">
-              Entries in the suppression log older than the configured number of days are automatically pruned by the nightly maintenance job.
-              Current server value: <strong>{serverRetentionDays} days</strong>.
-            </p>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={7}
-                max={3650}
-                value={retentionDays}
-                onChange={(e) => setRetentionDays(e.target.value)}
-                className="w-28 h-8 text-sm"
-                placeholder="90"
+          <CardContent className="space-y-4">
+            {/* Retention days setting */}
+            <div>
+              <p className="text-xs text-muted-foreground mb-2">
+                Entries older than the configured number of days are automatically pruned by the nightly maintenance job.
+                Current server value: <strong>{serverRetentionDays} days</strong>.
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={7}
+                  max={3650}
+                  value={retentionDays}
+                  onChange={(e) => setRetentionDays(e.target.value)}
+                  className="w-28 h-8 text-sm"
+                  placeholder="90"
+                />
+                <span className="text-sm text-muted-foreground">days</span>
+                <Button
+                  size="sm"
+                  className="h-8"
+                  disabled={setRetentionMutation.isPending || retentionSaved}
+                  onClick={() => {
+                    const n = parseInt(retentionDays, 10);
+                    if (isNaN(n) || n < 7) { toast.error("Minimum retention is 7 days"); return; }
+                    setRetentionMutation.mutate({ key: "cep_suppression_log_retention_days", value: String(n) });
+                  }}
+                >
+                  {retentionSaved ? "Saved ✓" : setRetentionMutation.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Daily breach digest toggle */}
+            <div className="flex items-center justify-between pt-1 border-t border-border">
+              <div>
+                <p className="text-xs font-medium">Daily Breach Digest Email</p>
+                <p className="text-xs text-muted-foreground">Send a 08:05 UTC email when patterns exceed their threshold</p>
+              </div>
+              <Switch
+                checked={digestEnabled}
+                disabled={setDigestEnabledMutation.isPending || digestEnabledQuery.isLoading}
+                onCheckedChange={(checked) =>
+                  setDigestEnabledMutation.mutate({ key: "cep_daily_breach_digest_enabled", value: checked ? "true" : "false" })
+                }
               />
-              <span className="text-sm text-muted-foreground">days</span>
-              <Button
-                size="sm"
-                className="h-8"
-                disabled={setRetentionMutation.isPending || retentionSaved}
-                onClick={() => {
-                  const n = parseInt(retentionDays, 10);
-                  if (isNaN(n) || n < 7) { toast.error("Minimum retention is 7 days"); return; }
-                  setRetentionMutation.mutate({ key: "cep_suppression_log_retention_days", value: String(n) });
-                }}
+            </div>
+
+            {/* Change history collapsible */}
+            <div className="pt-1 border-t border-border">
+              <button
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setShowAuditLog((v) => !v)}
               >
-                {retentionSaved ? "Saved ✓" : setRetentionMutation.isPending ? "Saving…" : "Save"}
-              </Button>
+                <ChevronDown className={`h-3 w-3 transition-transform ${showAuditLog ? "rotate-180" : ""}`} />
+                Change history (retention setting)
+              </button>
+              {showAuditLog && (
+                <div className="mt-2">
+                  {auditLogQuery.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading…</p>
+                  ) : (auditLogQuery.data ?? []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">No changes recorded yet.</p>
+                  ) : (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-muted-foreground border-b border-border">
+                          <th className="text-left pb-1 font-medium">When</th>
+                          <th className="text-left pb-1 font-medium">By</th>
+                          <th className="text-left pb-1 font-medium">Old</th>
+                          <th className="text-left pb-1 font-medium">New</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(auditLogQuery.data ?? []).map((row: any, i: number) => (
+                          <tr key={i} className="border-b border-border/50">
+                            <td className="py-1 pr-2 text-muted-foreground">{new Date(row.changedAt).toLocaleString()}</td>
+                            <td className="py-1 pr-2 truncate max-w-[80px]">{row.changedByName ?? row.changedBy}</td>
+                            <td className="py-1 pr-2 text-muted-foreground">{row.oldValue ?? "—"}</td>
+                            <td className="py-1 font-medium">{row.newValue}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

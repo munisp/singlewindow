@@ -679,9 +679,18 @@ async function runNotificationDigest(mode: "daily" | "weekly") {
 // Complements the 30-min per-pattern alerts by providing a morning summary.
 async function runDailyBreachDigest() {
   try {
+    // Check opt-out setting before running
     const { getPool } = await import("../db");
     const pool = getPool();
     if (!pool) return;
+    const { rows: settingRows } = await pool.query<{ value: string }>(
+      `SELECT value FROM site_settings WHERE key = 'cep_daily_breach_digest_enabled' LIMIT 1`
+    );
+    const digestEnabled = settingRows[0]?.value ?? "true";
+    if (digestEnabled === "false") {
+      console.log("[Cron] Daily breach digest: disabled via site setting — skipping");
+      return;
+    }
     const { rows } = await pool.query<{
       pattern_id: string;
       pattern_name: string;

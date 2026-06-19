@@ -349,3 +349,11 @@
 - [x] server/_core/index.ts — extend 30-min threshold breach notifier to also accumulate daily breach summary and send via notifyOwner at 08:00 UTC
 - [x] TraderScorecard.tsx — replace plain Copy Link button with Popover showing URL preview + Web Share API button (falls back to clipboard-only on desktop)
 - [x] Push v54 codebase to GitHub munisp/singlewindow
+
+## v55 Sprint — Retention Audit Log, Digest Toggle, Share QR Code
+- [x] FlinkCepAlerts.tsx — add collapsible "Change history" table inside Log Retention card showing settingsAuditLog entries for cep_suppression_log_retention_days
+- [x] server/routers/siteSettings.ts — add cep_daily_breach_digest_enabled to KNOWN_SETTINGS (default "true")
+- [x] server/_core/index.ts — read cep_daily_breach_digest_enabled before sending daily breach digest; skip if "false"
+- [x] FlinkCepAlerts.tsx — add toggle switch for cep_daily_breach_digest_enabled inside Log Retention card
+- [x] Install qrcode npm package and add QR code to TraderScorecard Share popover
+- [x] Push v55 codebase to GitHub munisp/singlewindow

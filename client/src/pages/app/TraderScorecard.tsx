@@ -22,6 +22,8 @@ import {
 } from "recharts";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useEffect as useQrEffect, useRef as useQrRef } from "react";
+import QRCode from "qrcode";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X, Link } from "lucide-react";
 
@@ -125,6 +127,12 @@ export default function TraderScorecard() {
     return params.get("ds") ?? "all";
   });
   const [copyPopoverOpen, setCopyPopoverOpen] = useState(false);
+  const qrCanvasRef = useQrRef<HTMLCanvasElement>(null);
+  useQrEffect(() => {
+    if (copyPopoverOpen && qrCanvasRef.current) {
+      QRCode.toCanvas(qrCanvasRef.current, window.location.href, { width: 120, margin: 1 }).catch(() => {});
+    }
+  }, [copyPopoverOpen]);
 
   // Sync drill state to URL whenever it changes
   useEffect(() => {
@@ -554,9 +562,12 @@ export default function TraderScorecard() {
                       <Link className="h-4 w-4" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-72 p-3" align="end">
+                  <PopoverContent className="w-80 p-3" align="end">
                     <p className="text-xs font-semibold mb-1">Share this view</p>
                     <p className="text-xs text-muted-foreground mb-2 break-all">{window.location.href}</p>
+                    <div className="flex justify-center mb-2">
+                      <canvas ref={qrCanvasRef} className="rounded" />
+                    </div>
                     <div className="flex gap-2">
                       <Button
                         size="sm"

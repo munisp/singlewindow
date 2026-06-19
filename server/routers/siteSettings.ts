@@ -36,6 +36,10 @@ export const KNOWN_SETTINGS: Record<string, { defaultValue: string; description:
     defaultValue: "90",
     description: "Number of days to retain CEP suppression log entries. Entries older than this are pruned nightly.",
   },
+  cep_daily_breach_digest_enabled: {
+    defaultValue: "true",
+    description: "When set to \"true\", the 08:05 UTC daily CEP breach digest email is sent. Set to \"false\" to disable.",
+  },
 };
 
 export const siteSettingsRouter = router({
