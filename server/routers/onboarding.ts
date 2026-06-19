@@ -282,6 +282,23 @@ export const onboardingRouter = router({
         await db.update(users)
           .set({ role: input.role, updatedAt: new Date() })
           .where(eq(users.id, ctx.user.id));
+        // Seed Permify with the new role relation
+        try {
+          const { writeRelationship } = await import("../_core/permify");
+          const userId = String(ctx.user.id);
+          const roleToRelation: Record<string, string> = {
+            "admin": "admin",
+            "customs_officer": "member",
+            "oga_officer": "oga",
+            "finance": "finance",
+            "auditor": "auditor",
+            "trader": "member",
+          };
+          const relation = roleToRelation[input.role] ?? "member";
+          await writeRelationship("organisation", "main", relation, "user", userId);
+        } catch (permifyErr) {
+          console.warn("[Permify] Failed to seed role relation:", permifyErr);
+        }
         return { success: true, role: input.role };
       } catch {
         return { success: true, role: input.role };

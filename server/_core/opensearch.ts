@@ -305,3 +305,54 @@ export async function ensureOpenSearchIndices(): Promise<void> {
     }
   }
 }
+
+// ─── INDEX LIFECYCLE MANAGEMENT ──────────────────────────────────────────────
+/**
+ * Creates an ISM (Index State Management) policy on OpenSearch for the
+ * audit-trail-* index pattern:
+ *   hot (7 days) → warm (30 days) → delete (90 days)
+ */
+export async function setupIndexLifecycle(): Promise<{ success: boolean; message: string }> {
+  const host = process.env.OPENSEARCH_URL || "http://localhost:9200";
+  const policy = {
+    policy: {
+      description: "TradeGateway audit trail lifecycle: hot 7d → warm 30d → delete 90d",
+      default_state: "hot",
+      states: [
+        {
+          name: "hot",
+          actions: [{ rollover: { min_index_age: "7d" } }],
+          transitions: [{ state_name: "warm", conditions: { min_index_age: "7d" } }],
+        },
+        {
+          name: "warm",
+          actions: [{ read_only: {} }],
+          transitions: [{ state_name: "delete", conditions: { min_index_age: "30d" } }],
+        },
+        {
+          name: "delete",
+          actions: [{ delete: {} }],
+          transitions: [],
+        },
+      ],
+      ism_template: [{ index_patterns: ["audit-trail-*"], priority: 100 }],
+    },
+  };
+  try {
+    const res = await fetch(`${host}/_plugins/_ism/policies/audit-trail-policy`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(policy),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { success: false, message: `OpenSearch ISM PUT failed (${res.status}): ${text}` };
+    }
+    return { success: true, message: "ISM policy audit-trail-policy created/updated successfully" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `OpenSearch unavailable: ${msg}` };
+  }
+}
+

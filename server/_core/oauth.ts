@@ -55,6 +55,14 @@ export function registerOAuthRoutes(app: Express) {
         loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
         lastSignedIn: new Date(),
       });
+      // Seed Permify: add user as a member of the default organisation
+      try {
+        const { writeRelationship } = await import("./permify");
+        const userId = String(userInfo.openId);
+        await writeRelationship("organisation", "main", "member", "user", userId);
+      } catch (permifyErr) {
+        console.warn("[Permify] Failed to seed organisation membership:", permifyErr);
+      }
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId, {
         name: userInfo.name || "",

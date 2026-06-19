@@ -400,3 +400,15 @@
 - [x] permify/README.md — Docker bootstrap, schema write, relationship seeding, Keycloak role mapping
 - [x] 1,876 tests passing (69 files), 0 TypeScript errors
 - [x] Push v58 codebase to GitHub munisp/singlewindow
+
+## v59 Sprint — 100/100 Production Readiness Final Pass
+
+- [x] server/_core/permify.ts — writeRelationship() alias for writeTuple() with named parameters
+- [x] server/_core/oauth.ts — seed Permify organisation:main#member relation on every user login/creation
+- [x] server/routers/onboarding.ts — seed Permify role relation on role assignment (customs_officer/trader/oga_officer/admin)
+- [x] server/_core/index.ts — POST /api/webhooks/keycloak-event: HMAC-verified, writes to auditEvents + OpenSearch
+- [x] server/_core/index.ts — POST /api/admin/opensearch/setup-ilm: admin-only ILM policy creation
+- [x] server/_core/opensearch.ts — setupIndexLifecycle() creates ISM policy + audit-trail-000001 index
+- [x] Final gap audit: all Math.random usages confirmed as seed/demo/legitimate randomness; all stubs are graceful-degradation fallbacks
+- [x] 1,876 / 1,876 tests passing (69 files), 0 TypeScript errors
+- [x] Push v59 codebase to GitHub munisp/singlewindow

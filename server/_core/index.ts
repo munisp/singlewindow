@@ -1301,6 +1301,86 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
   // OAuth callback under /api/oauth/callback — apply strict rate limiting
   app.use("/api/oauth", authRateLimit);
+
+  // ─── KEYCLOAK EVENT WEBHOOK ──────────────────────────────────────────────────
+  app.post("/api/webhooks/keycloak-event", express.json(), async (req, res) => {
+    try {
+      const secret = process.env.KEYCLOAK_WEBHOOK_SECRET;
+      if (secret) {
+        const sig = req.headers["x-keycloak-signature"] as string | undefined;
+        if (!sig) { res.status(401).json({ error: "Missing signature" }); return; }
+        const { createHmac } = await import("crypto");
+        const hmac = createHmac("sha256", secret);
+        hmac.update(JSON.stringify(req.body));
+        const expected = hmac.digest("hex");
+        if (sig !== expected) { res.status(401).json({ error: "Invalid signature" }); return; }
+      }
+      const event = req.body as {
+        type?: string; realmId?: string; userId?: string;
+        resourceType?: string; operationType?: string;
+        representation?: unknown; time?: number;
+      };
+      const eventType = event.type ?? event.operationType ?? "UNKNOWN";
+      const actor = event.userId ?? "keycloak-system";
+      const detail = JSON.stringify({ resourceType: event.resourceType, representation: event.representation });
+      // Write to auditEvents
+      try {
+        const dbModule = await import("../db");
+        const db = await dbModule.getDb();
+        if (db) {
+          const { auditEvents } = await import("../../drizzle/schema");
+          await db.insert(auditEvents).values({
+            action: `KEYCLOAK_${eventType}`,
+            entityType: "user" as any,
+            entityId: 0,
+            actorId: null,
+            actorType: "keycloak",
+            metadata: { actor, detail },
+            createdAt: event.time ? new Date(event.time) : new Date(),
+          });
+        }
+      } catch (dbErr) {
+        console.warn("[Keycloak Webhook] DB write failed:", dbErr);
+      }
+      // Index in OpenSearch
+      try {
+        const { indexAuditEvent } = await import("./opensearch");
+        await indexAuditEvent({
+          id: 0,
+          action: `KEYCLOAK_${eventType}`,
+          entityType: event.resourceType ?? "keycloak",
+          entityId: 0,
+          actorId: null,
+          actorType: "keycloak",
+          createdAt: event.time ? new Date(event.time) : new Date(),
+        });
+      } catch (osErr) {
+        console.warn("[Keycloak Webhook] OpenSearch index failed:", osErr);
+      }
+      res.json({ received: true });
+    } catch (err) {
+      console.error("[Keycloak Webhook] Error:", err);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // ─── OPENSEARCH ILM ADMIN ENDPOINT ───────────────────────────────────────────
+  app.post("/api/admin/opensearch/setup-ilm", async (req, res) => {
+    try {
+      const authResult = await sdk.authenticateRequest(req);
+      if (!authResult || authResult.role !== "admin") {
+        res.status(403).json({ error: "Admin access required" });
+        return;
+      }
+      const { setupIndexLifecycle } = await import("./opensearch");
+      const result = await setupIndexLifecycle();
+      res.json(result);
+    } catch (err) {
+      console.error("[ILM Setup] Error:", err);
+      res.status(500).json({ error: "ILM setup failed" });
+    }
+  });
+
   registerOAuthRoutes(app);
   // Sprint 68: OpenAPI spec endpoint
   registerOpenApiRoute(app);

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 /**
  * Duty Drawback tRPC Router
  * Allows traders to submit duty drawback claims for re-exported goods.
@@ -17,7 +18,7 @@ import { eq, desc, and, sql, count, or, ilike } from "drizzle-orm";
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function generateClaimNumber(): string {
   const year = new Date().getFullYear();
-  const seq = Math.floor(Math.random() * 900000) + 100000;
+  const seq = parseInt(crypto.randomUUID().replace(/-/g, '').slice(0, 6), 16) % 900000 + 100000;
   return `DDC-${year}-${seq}`;
 }
 

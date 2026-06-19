@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 /**
  * Fraud Cases tRPC Router
  *
@@ -28,7 +29,7 @@ function requireInvestigator(role: string) {
 function generateCaseNumber(): string {
   const now = new Date();
   const yymmdd = now.toISOString().slice(2, 10).replace(/-/g, "");
-  const rand = Math.floor(Math.random() * 9000) + 1000;
+  const rand = parseInt(crypto.randomUUID().replace(/-/g, '').slice(0, 4), 16) % 9000 + 1000;
   return `FC-${yymmdd}-${rand}`;
 }
 

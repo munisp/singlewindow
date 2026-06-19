@@ -206,3 +206,18 @@ export async function assignReviewer(
 ): Promise<void> {
   await writeTuple(entityType, String(entityId), relation, "user", String(reviewerId));
 }
+
+/**
+ * writeRelationship — alias for writeTuple with named parameters.
+ * Use this to seed Permify when creating users or assigning roles.
+ */
+export async function writeRelationship(
+  entityType: string,
+  entityId: string,
+  relation: string,
+  subjectType: string,
+  subjectId: string
+): Promise<void> {
+  await writeTuple(entityType, entityId, relation, subjectType, subjectId);
+}
+

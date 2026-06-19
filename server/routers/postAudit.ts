@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 /**
  * Post-Clearance Audit tRPC Router
  * Allows customs officers to schedule, conduct, and record post-clearance audits.
@@ -15,7 +16,7 @@ import { eq, desc, and, sql, count, or, ilike } from "drizzle-orm";
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function generateAuditNumber(): string {
   const year = new Date().getFullYear();
-  const seq = Math.floor(Math.random() * 900000) + 100000;
+  const seq = parseInt(crypto.randomUUID().replace(/-/g, '').slice(0, 6), 16) % 900000 + 100000;
   return `PCA-${year}-${seq}`;
 }
 
