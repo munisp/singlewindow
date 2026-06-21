@@ -22,6 +22,7 @@ from typing import Any
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fund_flow_writer import FundFlowWriteRequest, FundFlowWriteResponse, handle_fund_flow_write
 
 
 # ─── Application Lifespan ───────────────────────────────────────────────────
@@ -265,6 +266,11 @@ def get_duty_revenue(period: str = Query("monthly", enum=["daily", "weekly", "mo
         "time_series": time_series[-30:],
         "avg_daily_revenue_usd": round(total / max(len(by_date), 1), 2),
     }
+
+@app.post("/fund-flow/write", response_model=FundFlowWriteResponse)
+def write_fund_flow(req: FundFlowWriteRequest) -> FundFlowWriteResponse:
+    """Idempotent fund-flow record persistence for all 20 scenarios."""
+    return handle_fund_flow_write(req)
 
 @app.post("/ingest")
 def ingest_events(req: IngestRequest) -> dict:

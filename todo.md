@@ -439,3 +439,20 @@
 - [x] helm/README.md — helm install/upgrade instructions, prerequisites, values reference
 - [x] server/v60.test.ts — tests for docker-compose health check endpoints + helm values validation (62/62 passing)
 - [x] Push v60 codebase to GitHub munisp/singlewindow
+
+## v61 Sprint — Fund-Flow Atomicity Audit & Hardening (All 20 Scenarios)
+- [x] docs/FUND_FLOW_AUDIT_v61.md — top-20 fund-flow scenarios with gap analysis, middleware mapping, and atomicity guarantees
+- [x] services/go/workflow-service/workflows/duty_drawback.go — Temporal DutyDrawbackWorkflow (Scenario 3)
+- [x] services/go/workflow-service/workflows/bond_management.go — Temporal BondManagementWorkflow (Scenarios 5, 6, 7)
+- [x] services/go/workflow-service/workflows/transit_guarantee.go — Temporal TransitGuaranteeWorkflow (Scenarios 8, 9)
+- [x] services/go/workflow-service/workflows/audit_recovery.go — Temporal AuditRecoveryWorkflow + OverpaymentRefundWorkflow (Scenarios 14, 15)
+- [x] services/go/workflow-service/workflows/batch_settlement.go — Temporal BatchSettlementWorkflow + RevenueReconciliationWorkflow (Scenarios 18, 19)
+- [x] services/go/workflow-service/workflows/fund_flow_types.go — shared input/output types for all fund-flow workflows
+- [x] services/go/workflow-service/activities/fund_flow_activities.go — Go activity implementations (TigerBeetle, Mojaloop, Kafka, Fluvio, Permify, Delta Lake)
+- [x] services/rust/tigerbeetle-bridge-rs/src/scenarios.rs — Rust TigerBeetle transfer builders for all 20 scenarios (double-entry, atomic, idempotent)
+- [x] services/python/deltalake-svc/fund_flow_writer.go — Python Delta Lake audit writer for all 20 scenarios
+- [x] server/routers/fund-flow.ts — TypeScript tRPC router: 20 fund-flow procedures with Redis idempotency + Temporal delegation
+- [x] server/routers.ts — fundFlowRouter registered in appRouter
+- [x] server/fund-flow.test.ts — 57/57 vitest tests passing: all 20 scenarios, idempotency, authorization, atomicity, input validation
+- [x] TypeScript: 0 errors
+- [x] Push v61 codebase to GitHub munisp/singlewindow
