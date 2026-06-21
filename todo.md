@@ -538,3 +538,15 @@
 - [x] server/v65.test.ts — 67/67 vitest tests passing
 - [x] TypeScript: 0 errors
 - [x] Push v65 codebase to GitHub munisp/singlewindow
+
+## v66 Sprint — FSPIOP Error Callbacks, Helm NOTES.txt, Trader Seed UI (COMPLETE)
+
+- [x] services/go/mojaloop-gateway/internal/dfsp/callbacks.go — HandlePartyErrorCallback, HandleQuoteErrorCallback, HandleTransferErrorCallback; ErrorInformation parsing; mojaloop.*.error Kafka events; 200 ACK to prevent Hub retry storm
+- [x] services/go/mojaloop-gateway/internal/dfsp/callbacks_test.go — 22 Go tests total (18 original + 4 error callback tests incl. malformed-body-still-ACKs)
+- [x] services/go/mojaloop-gateway/cmd/main.go — registered PUT /parties/{partyIdType}/{partyIdentifier}/error, PUT /quotes/{id}/error, PUT /transfers/{id}/error
+- [x] helm/tradegateway/templates/NOTES.txt — 8-step post-install checklist with helm upgrade/rollback commands and template variables
+- [x] client/src/pages/app/AdminSettings.tsx — TigerBeetleTraderSeedSection: traderId input, Enter key support, loading spinner, accountsCreated/accountsSkipped result panel, toast notifications
+- [x] server/routers/tigerbeetleSeed.ts — traderId added to SeedResult interface; returned in seedTraderAccounts response
+- [x] server/v66.test.ts — 52/52 vitest tests passing
+- [x] TypeScript: 0 errors
+- [x] Push v66 codebase to GitHub munisp/singlewindow

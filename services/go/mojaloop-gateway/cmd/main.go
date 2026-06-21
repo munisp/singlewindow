@@ -501,6 +501,10 @@ func main() {
 	r.Put("/parties/{partyIdType}/{partyIdentifier}", cbHandler.HandlePartyCallback)
 	r.Put("/quotes/{id}", cbHandler.HandleQuoteCallback)
 	r.Put("/transfers/{id}", cbHandler.HandleTransferCallback)
+	// FSPIOP error callbacks — Hub calls these when a request fails
+	r.Put("/parties/{partyIdType}/{partyIdentifier}/error", cbHandler.HandlePartyErrorCallback)
+	r.Put("/quotes/{id}/error", cbHandler.HandleQuoteErrorCallback)
+	r.Put("/transfers/{id}/error", cbHandler.HandleTransferErrorCallback)
 	// DFSP JWKS endpoint — Hub fetches this to verify outbound DFSP signatures
 	dfspSigner, _ := dfsp.NewSigner(logger)
 	r.Get("/dfsp/jwks.json", dfspSigner.JWKSHandler)

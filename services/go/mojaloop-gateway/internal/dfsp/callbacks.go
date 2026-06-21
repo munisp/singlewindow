@@ -46,6 +46,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
@@ -753,4 +754,152 @@ func getEnvOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// ─── FSPIOP Error Callbacks ───────────────────────────────────────────────────
+
+// ErrorInformation is the Mojaloop error payload sent by the Hub on failure.
+type ErrorInformation struct {
+	ErrorCode        string `json:"errorCode"`
+	ErrorDescription string `json:"errorDescription"`
+	ExtensionList    *struct {
+		Extension []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"extension"`
+	} `json:"extensionList,omitempty"`
+}
+
+// ErrorCallbackBody wraps the Hub error response body.
+type ErrorCallbackBody struct {
+	ErrorInformation ErrorInformation `json:"errorInformation"`
+}
+
+// HandlePartyErrorCallback handles PUT /parties/{type}/{id}/error from the Mojaloop Hub.
+// Called when an ALS party lookup fails (e.g. MSISDN not found).
+func (h *CallbackHandler) HandlePartyErrorCallback(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "3100", "failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	if err := verifyInboundJWS(r.Context(), r, body, h.jwksCache); err != nil {
+		h.logger.Warn("party error callback JWS verification failed", zap.Error(err))
+		h.writeError(w, http.StatusUnauthorized, "3105", "Invalid Hub signature: "+err.Error())
+		return
+	}
+
+	var cb ErrorCallbackBody
+	if err := json.Unmarshal(body, &cb); err != nil {
+		h.writeError(w, http.StatusBadRequest, "3100", "Invalid error callback body")
+		return
+	}
+
+	h.logger.Warn("party lookup failed",
+		zap.String("errorCode", cb.ErrorInformation.ErrorCode),
+		zap.String("errorDescription", cb.ErrorInformation.ErrorDescription),
+	)
+
+	h.publishKafkaEvent(r.Context(), "mojaloop.party.lookup.failed", map[string]interface{}{
+		"errorCode":        cb.ErrorInformation.ErrorCode,
+		"errorDescription": cb.ErrorInformation.ErrorDescription,
+	})
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// HandleQuoteErrorCallback handles PUT /quotes/{id}/error from the Mojaloop Hub.
+// Called when a quote request fails (e.g. payee DFSP rejected the quote).
+func (h *CallbackHandler) HandleQuoteErrorCallback(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "3100", "failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	if err := verifyInboundJWS(r.Context(), r, body, h.jwksCache); err != nil {
+		h.logger.Warn("quote error callback JWS verification failed", zap.Error(err))
+		h.writeError(w, http.StatusUnauthorized, "3105", "Invalid Hub signature: "+err.Error())
+		return
+	}
+
+	var cb ErrorCallbackBody
+	if err := json.Unmarshal(body, &cb); err != nil {
+		h.writeError(w, http.StatusBadRequest, "3100", "Invalid error callback body")
+		return
+	}
+
+	quoteID := chi.URLParam(r, "id")
+	h.logger.Warn("quote failed",
+		zap.String("quoteID", quoteID),
+		zap.String("errorCode", cb.ErrorInformation.ErrorCode),
+		zap.String("errorDescription", cb.ErrorInformation.ErrorDescription),
+	)
+
+	// Publish compensation event so Temporal workflow can rollback duty reservation.
+	h.publishKafkaEvent(r.Context(), "mojaloop.quote.failed", map[string]interface{}{
+		"quoteID":          quoteID,
+		"errorCode":        cb.ErrorInformation.ErrorCode,
+		"errorDescription": cb.ErrorInformation.ErrorDescription,
+	})
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// HandleTransferErrorCallback handles PUT /transfers/{id}/error from the Mojaloop Hub.
+// Called when a transfer fails after the prepare phase (timeout, abort, or Hub rejection).
+// Voids the TigerBeetle pending transfer and publishes mojaloop.transfer.failed to Kafka.
+func (h *CallbackHandler) HandleTransferErrorCallback(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "3100", "failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	if err := verifyInboundJWS(r.Context(), r, body, h.jwksCache); err != nil {
+		h.logger.Warn("transfer error callback JWS verification failed", zap.Error(err))
+		h.writeError(w, http.StatusUnauthorized, "3105", "Invalid Hub signature: "+err.Error())
+		return
+	}
+
+	var cb ErrorCallbackBody
+	if err := json.Unmarshal(body, &cb); err != nil {
+		h.writeError(w, http.StatusBadRequest, "3100", "Invalid error callback body")
+		return
+	}
+
+	transferID := chi.URLParam(r, "id")
+	h.logger.Warn("transfer failed",
+		zap.String("transferID", transferID),
+		zap.String("errorCode", cb.ErrorInformation.ErrorCode),
+		zap.String("errorDescription", cb.ErrorInformation.ErrorDescription),
+	)
+
+	// Void the TigerBeetle pending transfer so funds are released back to the trader.
+	if err := h.tigerbeetleVoid(r.Context(), transferID); err != nil {
+		h.logger.Error("tigerbeetle void failed on transfer error",
+			zap.String("transferID", transferID),
+			zap.Error(err),
+		)
+		// Non-fatal: publish Kafka event regardless so Temporal can retry the void.
+	}
+
+	// Remove from pending ILP map.
+	h.pendingMu.Lock()
+	delete(h.pendingILP, transferID)
+	h.pendingMu.Unlock()
+
+	// Publish mojaloop.transfer.failed so Temporal DeclarationClearanceWorkflow compensates.
+	h.publishKafkaEvent(r.Context(), "mojaloop.transfer.failed", map[string]interface{}{
+		"transferID":       transferID,
+		"errorCode":        cb.ErrorInformation.ErrorCode,
+		"errorDescription": cb.ErrorInformation.ErrorDescription,
+		"action":           "void",
+	})
+
+	w.WriteHeader(http.StatusOK)
 }

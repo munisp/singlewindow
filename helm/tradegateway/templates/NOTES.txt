@@ -1,0 +1,183 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║          TradeGateway NGSWTP — Post-Install Checklist                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Release : {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Chart   : {{ .Chart.Name }}-{{ .Chart.Version }}
+AppVer  : {{ .Chart.AppVersion }}
+Date    : {{ now | date "2006-01-02T15:04:05Z" }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 1 — Verify all pods are Running
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  Expected: app, workflow-worker, keycloak, permify, opensearch,
+            kafka, zookeeper, redis, apisix — all in Running/1/1 state.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 2 — Seed TigerBeetle System Accounts
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The TigerBeetle bridge must be seeded with 13 system accounts before any
+  fund-flow workflow can execute. Run the seed binary from inside the cluster:
+
+    kubectl exec -n {{ .Release.Namespace }} \
+      deploy/{{ include "tradegateway.fullname" . }}-tigerbeetle-bridge -- \
+      /app/seed
+
+  OR trigger via the admin tRPC procedure (requires admin login):
+
+    curl -X POST https://<your-domain>/api/trpc/tigerbeetleSeed.seedSystemAccounts \
+      -H "Cookie: <admin-session-cookie>" \
+      -H "Content-Type: application/json" \
+      -d '{}'
+
+  Expected response: { "accountsCreated": 13, "accountsSkipped": 0 }
+  On re-run (idempotent): { "accountsCreated": 0, "accountsSkipped": 13 }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 3 — Verify Temporal Worker Registration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The workflow-worker must register all 20 fund-flow workflows with Temporal
+  before any declaration can be processed. Check the health endpoint:
+
+    WORKER_POD=$(kubectl get pod -n {{ .Release.Namespace }} \
+      -l app={{ include "tradegateway.fullname" . }}-workflow-worker \
+      -o jsonpath='{.items[0].metadata.name}')
+
+    kubectl exec -n {{ .Release.Namespace }} $WORKER_POD -- \
+      wget -qO- http://localhost:{{ .Values.workflowWorker.healthPort | default 8090 }}/ready
+
+  Expected: {"status":"ready","workflowsRegistered":20,"activitiesRegistered":25}
+
+  If not ready, check logs:
+    kubectl logs -n {{ .Release.Namespace }} $WORKER_POD --tail=50
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 4 — Register the Mojaloop DFSP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The DFSP (tradegateway) must be registered with the Mojaloop Hub before any
+  payment can be initiated. Run the registration bootstrap binary:
+
+    kubectl exec -n {{ .Release.Namespace }} \
+      deploy/{{ include "tradegateway.fullname" . }}-mojaloop-gateway -- \
+      /app/register-dfsp
+
+  Environment variables required (set via Helm secrets or external-secrets):
+    MOJALOOP_HUB_URL          — e.g. http://mojaloop-hub:3001
+    MOJALOOP_DFSP_ID          — e.g. tradegateway
+    MOJALOOP_DFSP_CALLBACK_URL — e.g. https://<your-domain>/fspiop
+    DFSP_JWS_PRIVATE_KEY_PATH — path to RSA/Ed25519 private key PEM
+
+  Expected exit code: 0
+  Expected output (JSON):
+    {
+      "dfspId": "tradegateway",
+      "steps": {
+        "participant": "ok",
+        "netDebitCap": "ok",
+        "accounts": "ok",
+        "alsParty": "ok",
+        "endpoints": "ok",
+        "quoteCapability": "ok",
+        "transferCapability": "ok"
+      },
+      "alreadyRegistered": false
+    }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 5 — Verify DFSP JWKS Public Key Fingerprint
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The Mojaloop Hub verifies every outbound DFSP request using the JWKS endpoint.
+  Confirm the public key is reachable and matches the registered key:
+
+    curl -s https://<your-domain>/dfsp/jwks.json | jq '.keys[0] | {kty, alg, kid}'
+
+  The Hub must be configured with this JWKS URL:
+    https://<your-domain>/dfsp/jwks.json
+
+  Share the kid value with the Mojaloop Hub operator to complete trust setup.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 6 — Smoke-test the application
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Application URL:
+{{- if .Values.ingress.enabled }}
+    https://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+    kubectl port-forward -n {{ .Release.Namespace }} \
+      svc/{{ include "tradegateway.fullname" . }} 3000:{{ .Values.service.port }}
+    then open: http://localhost:3000
+{{- end }}
+
+  Health endpoint:
+    curl https://<your-domain>/health
+
+  Admin panel (requires admin login):
+    https://<your-domain>/app/admin/settings
+    → Infrastructure → Seed System Accounts (verify 13 accounts seeded)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 7 — Keycloak Realm Import
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  If Keycloak was deployed fresh (not restored from backup), import the realm:
+
+    kubectl exec -n {{ .Release.Namespace }} \
+      deploy/{{ include "tradegateway.fullname" . }}-keycloak -- \
+      /opt/keycloak/bin/kc.sh import \
+        --file /opt/keycloak/data/import/tradegateway-realm.json
+
+  Realm: tradegateway
+  Default admin: admin / (set via KEYCLOAK_ADMIN_PASSWORD secret)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STEP 8 — Permify Schema Load
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Load the TradeGateway authorization schema into Permify:
+
+    kubectl exec -n {{ .Release.Namespace }} \
+      deploy/{{ include "tradegateway.fullname" . }}-permify -- \
+      permify schema write --schema /etc/permify/schema.perm \
+        --endpoint permify:3476
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Useful commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  View all resources:
+    kubectl get all -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+  Tail app logs:
+    kubectl logs -n {{ .Release.Namespace }} -l app={{ include "tradegateway.fullname" . }} -f
+
+  Tail workflow-worker logs:
+    kubectl logs -n {{ .Release.Namespace }} \
+      -l app={{ include "tradegateway.fullname" . }}-workflow-worker -f
+
+  Upgrade release:
+    helm upgrade {{ .Release.Name }} ./helm/tradegateway \
+      -f helm/tradegateway/values.prod.yaml \
+      -n {{ .Release.Namespace }}
+
+  Rollback:
+    helm rollback {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Documentation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Fund-flow audit:  docs/FUND_FLOW_AUDIT_v61.md
+  Helm README:      helm/README.md
+  E2E test guide:   e2e/README.md
+  Architecture:     docs/ARCHITECTURE.md
+
+  GitHub: https://github.com/munisp/singlewindow

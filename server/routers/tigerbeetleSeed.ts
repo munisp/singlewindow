@@ -48,6 +48,7 @@ interface SeedResult {
   accountsCreated?: number;
   accountsSkipped?: number;
   durationMs?: number;
+  traderId?: string;
   error?: string;
 }
 
@@ -166,6 +167,7 @@ export const tigerbeetleSeedRouter = router({
               : `4 accounts seeded for trader ${input.traderId}`,
           accountsCreated: (data?.accounts_created as number) ?? 0,
           accountsSkipped: (data?.accounts_skipped as number) ?? 0,
+          traderId: input.traderId,
           durationMs,
         };
       }

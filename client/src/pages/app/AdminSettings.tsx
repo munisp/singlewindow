@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Settings, Save, RefreshCw, ShieldAlert, Clock, History, Database, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Settings, Save, RefreshCw, ShieldAlert, Clock, History, Database, CheckCircle2, AlertCircle, Loader2, UserPlus } from "lucide-react";
 
 // Human-readable labels for known setting keys
 const SETTING_META: Record<string, { label: string; unit?: string; icon?: React.ReactNode; min?: number; max?: number }> = {
@@ -162,6 +162,8 @@ export default function AdminSettings() {
 
       {/* TigerBeetle System Account Seeding */}
       <TigerBeetleSeedSection />
+      {/* TigerBeetle Trader Account Seeding */}
+      <TigerBeetleTraderSeedSection />
       {/* Settings Audit Log */}
       <SettingsAuditLogSection />
     </DashboardLayout>
@@ -238,6 +240,127 @@ function TigerBeetleSeedSection() {
                   <AlertCircle className="h-4 w-4 text-destructive" />
                 )}
                 Seed Result
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Accounts created:</span>
+                  <span className="font-semibold text-green-600">{result.accountsCreated ?? 0}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Already existed:</span>
+                  <span className="font-semibold text-blue-600">{result.accountsSkipped ?? 0}</span>
+                </div>
+              </div>
+              {result.error && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-destructive">Error:</p>
+                  <p className="text-xs text-destructive font-mono bg-destructive/10 rounded px-2 py-1">{result.error}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── TigerBeetle Trader Seed Section ────────────────────────────────────────
+function TigerBeetleTraderSeedSection() {
+  const [traderId, setTraderId] = useState("");
+  const [result, setResult] = useState<{
+    success: boolean;
+    message: string;
+    accountsCreated?: number;
+    accountsSkipped?: number;
+    traderId?: string;
+    error?: string;
+  } | null>(null);
+
+  const seedMutation = trpc.tigerbeetleSeed.seedTraderAccounts.useMutation({
+    onSuccess: (data) => {
+      setResult(data);
+      if (data.success) {
+        toast.success("Trader accounts seeded", {
+          description: `${data.accountsCreated ?? 0} accounts created for trader ${data.traderId}.`,
+        });
+        setTraderId("");
+      } else {
+        toast.error("Trader seeding failed", {
+          description: data.error ?? "Unknown error.",
+        });
+      }
+    },
+    onError: (err) => {
+      toast.error("Trader seeding failed", { description: err.message });
+    },
+  });
+
+  const handleSeed = () => {
+    const id = traderId.trim();
+    if (!id) {
+      toast.error("Trader ID required", { description: "Enter a trader ID before seeding." });
+      return;
+    }
+    seedMutation.mutate({ traderId: id });
+  };
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-primary" />
+              TigerBeetle Trader Accounts
+            </CardTitle>
+            <Badge variant="outline" className="text-xs font-mono">Per-Trader Ledger</Badge>
+          </div>
+          <CardDescription>
+            Provisions 4 TigerBeetle accounts for a specific trader: DUTY_RECEIVABLE, DUTY_PAYABLE,
+            BOND_ESCROW, and REFUND_PAYABLE. Normally called automatically during trader onboarding.
+            Use this to manually provision accounts for traders registered before the ledger was
+            deployed, or to repair missing accounts. Fully idempotent.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="trader-id-input" className="text-sm font-medium">
+                Trader ID
+              </Label>
+              <Input
+                id="trader-id-input"
+                placeholder="e.g. TRD-00123 or user UUID"
+                value={traderId}
+                onChange={(e) => setTraderId(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSeed()}
+                disabled={seedMutation.isPending}
+                className="font-mono text-sm"
+              />
+            </div>
+            <Button
+              onClick={handleSeed}
+              disabled={seedMutation.isPending || !traderId.trim()}
+              className="gap-2 shrink-0"
+            >
+              {seedMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <UserPlus className="h-4 w-4" />
+              )}
+              {seedMutation.isPending ? "Seeding..." : "Seed Trader Accounts"}
+            </Button>
+          </div>
+          {result && (
+            <div className="rounded-md border bg-muted/30 p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {result.success ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                )}
+                Seed Result{result.traderId ? ` — ${result.traderId}` : ""}
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="flex items-center gap-1.5">
