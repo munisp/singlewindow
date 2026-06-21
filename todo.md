@@ -482,3 +482,32 @@
 - [x] server/routers/fund-flow.ts — seedTraderAccounts procedure calls TigerBeetle bridge POST /seed/trader
 - [x] server/v62.test.ts — 75/75 vitest tests passing: Temporal worker, TigerBeetle seeding, Mojaloop DFSP registration, docker-compose, Helm chart
 - [x] Push v62 codebase to GitHub munisp/singlewindow
+
+## v63 Sprint — JWS Signing, Temporal Health, CI Pipeline
+
+### FSPIOP JWS Signing (Go)
+- [ ] services/go/mojaloop-gateway/internal/dfsp/jws.go — RSA-PSS + Ed25519 JWS signer for FSPIOP-Signature header
+- [ ] services/go/mojaloop-gateway/internal/dfsp/jws_test.go — unit tests: sign/verify round-trip, header format, key rotation
+
+### Temporal Worker Health Endpoint (Go)
+- [ ] services/go/workflow-service/cmd/worker/health.go — GET /health (port 8090): Temporal connection + workflow registry check
+- [ ] services/go/workflow-service/cmd/worker/health_test.go — unit tests: healthy/degraded/unhealthy responses
+
+### GitHub Actions CI Pipeline (Go + Rust)
+- [ ] .github/workflows/services.yml — go test ./... for all Go services + cargo test for Rust TigerBeetle bridge
+- [ ] .github/workflows/services.yml — matrix build across go/payment-service, go/workflow-service, go/mojaloop-gateway, rust/tigerbeetle-bridge-rs
+
+### TypeScript Integration + Tests
+- [ ] server/v63.test.ts — vitest tests: JWS header format validation, health endpoint contract, CI workflow YAML structure
+- [ ] Push v63 codebase to GitHub munisp/singlewindow
+
+## v63 Sprint — JWS Signing, Temporal Health, CI Pipeline (COMPLETED)
+
+- [x] services/go/mojaloop-gateway/internal/dfsp/jws.go — RSA-PSS + Ed25519 + ECDSA JWS signer; FSPIOP-Signature header; JWKS endpoint; key rotation
+- [x] services/go/mojaloop-gateway/internal/dfsp/jws_test.go — 24 Go unit tests: sign/verify round-trip (RSA/EC/Ed25519), tampered body detection, key rotation, JWKS, ephemeral signer
+- [x] services/go/workflow-service/cmd/worker/health.go — GET /health (8090): healthy/degraded/unhealthy; GET /ready (readiness probe); GET /live (liveness probe); Temporal connectivity polling every 15s
+- [x] services/go/workflow-service/cmd/worker/health_test.go — 12 Go unit tests: healthy/unhealthy/degraded, nil guard, concurrent access, uptime, content-type
+- [x] .github/workflows/services.yml — matrix CI: go test -race for payment-service + workflow-service + mojaloop-gateway; cargo clippy + cargo fmt + cargo test for tigerbeetle-bridge-rs; jws-integration job with real openssl key; worker-health job; summary gate
+- [x] server/v63.test.ts — 95/95 vitest tests passing
+- [x] TypeScript: 0 errors
+- [x] Push v63 codebase to GitHub munisp/singlewindow
