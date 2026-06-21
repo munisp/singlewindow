@@ -1,0 +1,188 @@
+{{- if .Values.workflowWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-workflow-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workflow-worker
+  annotations:
+    # Trigger rolling restart when config changes
+    checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+spec:
+  replicas: {{ .Values.workflowWorker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-workflow-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Keep at least one worker running during rolling updates so no
+      # in-flight Temporal workflow tasks are dropped.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-workflow-worker
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: workflow-worker
+    spec:
+      serviceAccountName: {{ include "tradegateway.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      # Terminate gracefully: allow 60s for in-flight activities to complete
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: workflow-worker
+          image: "{{ .Values.workflowWorker.image.repository }}:{{ .Values.workflowWorker.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.workflowWorker.image.pullPolicy }}
+          ports:
+            - name: health
+              containerPort: {{ .Values.workflowWorker.healthPort }}
+              protocol: TCP
+          env:
+            # Temporal connection
+            - name: TEMPORAL_HOST
+              value: "{{ .Values.temporal.host }}:{{ .Values.temporal.port }}"
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            # Health endpoint port
+            - name: WORKER_HEALTH_PORT
+              value: {{ .Values.workflowWorker.healthPort | quote }}
+            # TigerBeetle bridge — seed system accounts on startup
+            - name: TIGERBEETLE_BRIDGE_URL
+              value: {{ .Values.workflowWorker.tigerbeetleBridgeUrl | quote }}
+            # Mojaloop
+            - name: MOJALOOP_URL
+              value: {{ .Values.mojaloop.fspiopUrl | quote }}
+            # Kafka
+            - name: KAFKA_BROKERS
+              value: {{ include "tradegateway.kafkaBrokers" . }}
+            - name: KAFKA_REST_URL
+              value: {{ .Values.workflowWorker.kafkaRestUrl | quote }}
+            # Fluvio
+            - name: FLUVIO_HTTP_URL
+              value: {{ .Values.workflowWorker.fluvioHttpUrl | quote }}
+            # Permify
+            - name: PERMIFY_URL
+              value: {{ include "tradegateway.permifyHttp" . }}
+            # Delta Lake
+            - name: DELTALAKE_SERVICE_URL
+              value: {{ .Values.deltalake.serviceUrl | quote }}
+            # Database (for Postgres mirror queries)
+            - name: DATABASE_URL
+              value: {{ include "tradegateway.postgresUrl" . }}
+            # Secrets
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.auth.existingSecret }}
+                  key: {{ .Values.postgresql.auth.secretKeys.userPasswordKey }}
+          # ── Startup Probe ──────────────────────────────────────────────────────
+          # Allows up to 120s (24 * 5s) for the worker to connect to Temporal,
+          # seed TigerBeetle accounts, and register all 20 workflow types.
+          # Temporal connection timeout is typically 30-60s on cold start.
+          startupProbe:
+            httpGet:
+              path: /live
+              port: {{ .Values.workflowWorker.healthPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 24    # 24 * 5s = 120s max startup window
+            successThreshold: 1
+            timeoutSeconds: 3
+          # ── Liveness Probe ─────────────────────────────────────────────────────
+          # Restarts the pod if the worker process becomes unresponsive.
+          # Only active after startupProbe succeeds.
+          # Uses /live (always 200 if process is running) not /ready (which checks
+          # Temporal connectivity) to avoid restarting on transient Temporal blips.
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: {{ .Values.workflowWorker.healthPort }}
+            initialDelaySeconds: 0
+            periodSeconds: 15
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          # ── Readiness Probe ────────────────────────────────────────────────────
+          # Removes the pod from any Service endpoints when Temporal is unreachable.
+          # Uses /ready which verifies the Temporal client connection is live and
+          # all 20 workflow types are registered.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.workflowWorker.healthPort }}
+            initialDelaySeconds: 0
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.workflowWorker.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+      {{- with .Values.workflowWorker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.workflowWorker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.workflowWorker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+# ── Service for health probes (Kubernetes internal only) ─────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-workflow-worker
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workflow-worker
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.workflowWorker.healthPort }}
+      targetPort: {{ .Values.workflowWorker.healthPort }}
+      protocol: TCP
+      name: health
+  selector:
+    app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-workflow-worker
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+# ── PodDisruptionBudget — keep at least 1 worker running during node drains ──
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-workflow-worker-pdb
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: workflow-worker
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-workflow-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+{{- end }}

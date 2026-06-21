@@ -48,21 +48,41 @@ app:
   # kubectl create secret generic tradegateway-secrets --from-env-file=.env
   secretName: tradegateway-secrets
 
+  # startupProbe: allows up to 90s (18 * 5s) for cold-start before liveness kicks in.
+  # Accommodates DB migrations, Keycloak token fetch, and TigerBeetle seed on startup.
+  startupProbe:
+    httpGet:
+      path: /api/health
+      port: 9000
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 18    # 18 * 5s = 90s max startup window
+    successThreshold: 1
+    timeoutSeconds: 3
+
+  # livenessProbe: restarts the pod if /api/health fails 3 consecutive times.
+  # Only active after startupProbe succeeds.
   livenessProbe:
     httpGet:
       path: /api/health
       port: 9000
-    initialDelaySeconds: 30
+    initialDelaySeconds: 0   # startupProbe guards the initial window
     periodSeconds: 15
     failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 5
 
+  # readinessProbe: removes pod from Service endpoints when unhealthy.
+  # Uses /api/health which verifies DB + Redis connectivity.
   readinessProbe:
     httpGet:
       path: /api/health
       port: 9000
-    initialDelaySeconds: 15
+    initialDelaySeconds: 0
     periodSeconds: 10
     failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 5
 
   podAnnotations: {}
   nodeSelector: {}
@@ -464,16 +484,37 @@ secrets:
   forgeApiKey: "CHANGE_ME_FORGE_API_KEY"
   viteFrontendForgeApiKey: "CHANGE_ME_VITE_FORGE_API_KEY"
 
-# ─── OpenSearch index prefix ─────────────────────────────────────────────────
-opensearch:
-  indexPrefix: "tradegateway"
+# ─── OpenSearch index prefix and Redis standalone extra fields are merged above ─
+# (indexPrefix is set in the opensearch section; maxmemory in the redis section)
 
-# ─── Redis standalone (used by templates/redis-deployment.yaml) ──────────────
-# Note: The `redis` section above uses Bitnami chart dependency.
-# This section adds fields needed by the standalone redis-deployment.yaml template.
-redis:
-  maxmemory: "512mb"
-  persistence:
-    enabled: true
-    size: 8Gi
-    storageClass: ""
+# ─── Temporal Workflow Worker ─────────────────────────────────────────────────
+# Dedicated Go binary that registers all 20 fund-flow workflows and activities
+# with the Temporal server. Exposes /live, /ready, /health on healthPort.
+workflowWorker:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/munisp/tradegateway-workflow-worker
+    tag: "v64"
+    pullPolicy: IfNotPresent
+
+  # Health check port — matches WORKER_HEALTH_PORT env var in the Go binary
+  healthPort: 8090
+
+  # Middleware URLs injected as environment variables
+  tigerbeetleBridgeUrl: "http://tigerbeetle-bridge:4600"
+  kafkaRestUrl: "http://kafka-rest-proxy:8082"
+  fluvioHttpUrl: "http://fluvio-sc:9003"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}

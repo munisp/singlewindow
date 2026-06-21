@@ -61,8 +61,34 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// ── JWS Signer ──────────────────────────────────────────────────
+	// Load the DFSP private key for FSPIOP-Signature signing.
+	// If MOJALOOP_JWS_KEY_PATH is not set, fall back to an ephemeral Ed25519 key
+	// (suitable for development; production MUST set the env var).
+	var signer *dfsp.Signer
+	keyPath := os.Getenv("MOJALOOP_JWS_KEY_PATH")
+	if keyPath != "" {
+		signer, err = dfsp.NewSignerFromFile(keyPath, cfg.DFSP_ID)
+		if err != nil {
+			logger.Warn("Failed to load JWS key from file — falling back to ephemeral key",
+				zap.String("path", keyPath), zap.Error(err))
+			signer, err = dfsp.NewEphemeralSigner(cfg.DFSP_ID)
+			if err != nil {
+				logger.Fatal("Failed to create ephemeral JWS signer", zap.Error(err))
+			}
+		} else {
+			logger.Info("JWS signer loaded from file", zap.String("path", keyPath))
+		}
+	} else {
+		logger.Warn("MOJALOOP_JWS_KEY_PATH not set — using ephemeral Ed25519 key (not suitable for production)")
+		signer, err = dfsp.NewEphemeralSigner(cfg.DFSP_ID)
+		if err != nil {
+			logger.Fatal("Failed to create ephemeral JWS signer", zap.Error(err))
+		}
+	}
+
 	// ── Execute registration ──────────────────────────────────────────────────
-	registrar := dfsp.NewRegistrar(cfg, logger)
+	registrar := dfsp.NewRegistrar(cfg, logger, signer)
 	report, err := registrar.Register(ctx)
 	if err != nil {
 		logger.Fatal("Registration failed with fatal error", zap.Error(err))

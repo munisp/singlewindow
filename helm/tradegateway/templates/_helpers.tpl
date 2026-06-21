@@ -115,6 +115,14 @@ Permify gRPC endpoint helper.
 {{- end }}
 
 {{/*
+Permify HTTP URL helper.
+*/}}
+{{- define "tradegateway.permifyHttp" -}}
+{{- $host := printf "%s-permify" .Release.Name }}
+{{- printf "http://%s:3476" $host }}
+{{- end }}
+
+{{/*
 OpenSearch URL helper.
 */}}
 {{- define "tradegateway.opensearchUrl" -}}

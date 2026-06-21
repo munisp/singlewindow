@@ -70,6 +70,7 @@ import { kpiTargetsRouter } from "./routers/kpiTargets";
 import { traderRatingsRouter } from "./routers/traderRatings";
 import { opensearchRouter } from "./routers/opensearch";
 import { fundFlowRouter } from "./routers/fund-flow";
+import { tigerbeetleSeedRouter } from "./routers/tigerbeetleSeed";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -272,6 +273,7 @@ export const appRouter = router({
   traderRatings: traderRatingsRouter,
   opensearch: opensearchRouter,
   fundFlow: fundFlowRouter,
+  tigerbeetleSeed: tigerbeetleSeedRouter,
 });
 
 export type AppRouter = typeof appRouter;

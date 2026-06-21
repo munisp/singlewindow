@@ -90,16 +90,20 @@ type Registrar struct {
 	cfg    Config
 	client *http.Client
 	logger *zap.Logger
+	// signer is the JWS signer used to add FSPIOP-Signature to all outbound requests.
+	// If nil, requests are sent without a signature (development/test mode only).
+	signer *Signer
 }
 
 // NewRegistrar creates a new Registrar with the given config.
-func NewRegistrar(cfg Config, logger *zap.Logger) *Registrar {
+// The signer parameter may be nil — in that case outbound requests are sent
+// without FSPIOP-Signature headers (suitable for unit tests and local dev).
+func NewRegistrar(cfg Config, logger *zap.Logger, signer *Signer) *Registrar {
 	return &Registrar{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		cfg:    cfg,
+		client: &http.Client{Timeout: 30 * time.Second},
 		logger: logger,
+		signer: signer,
 	}
 }
 
@@ -383,6 +387,7 @@ func (r *Registrar) advertiseTransferCapability(ctx context.Context) Registratio
 
 // ─── HTTP Helpers ─────────────────────────────────────────────────────────────
 
+// post sends a POST request with JSON content-type and optional JWS signature.
 func (r *Registrar) post(ctx context.Context, url string, body []byte) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -390,12 +395,27 @@ func (r *Registrar) post(ctx context.Context, url string, body []byte) (*http.Re
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("FSPIOP-Source", r.cfg.DFSP_ID)
+	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+	if r.signer != nil {
+		if signErr := r.signer.SignRequest(req); signErr != nil {
+			r.logger.Warn("JWS signing failed — sending unsigned request",
+				zap.Error(signErr), zap.String("url", url))
+		}
+	}
 	return r.client.Do(req)
 }
 
+// setFSPIOPHeaders sets standard FSPIOP headers and applies JWS signing.
 func (r *Registrar) setFSPIOPHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/vnd.interoperability.participants+json;version=1.1")
 	req.Header.Set("Accept", "application/vnd.interoperability.participants+json;version=1.1")
 	req.Header.Set("FSPIOP-Source", r.cfg.DFSP_ID)
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
+	if r.signer != nil {
+		if signErr := r.signer.SignRequest(req); signErr != nil {
+			r.logger.Warn("JWS signing failed for FSPIOP request",
+				zap.Error(signErr), zap.String("url", req.URL.String()))
+		}
+	}
 }

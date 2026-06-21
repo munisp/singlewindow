@@ -103,6 +103,10 @@ spec:
                   name: {{ .Values.app.secretName }}
                   key: BUILT_IN_FORGE_API_KEY
                   optional: true
+          {{- if .Values.app.startupProbe }}
+          startupProbe:
+            {{- toYaml .Values.app.startupProbe | nindent 12 }}
+          {{- end }}
           livenessProbe:
             {{- toYaml .Values.app.livenessProbe | nindent 12 }}
           readinessProbe:

@@ -77,6 +77,23 @@ func main() {
 		zap.String("namespace", temporalNamespace),
 	)
 
+	// ── Seed TigerBeetle system accounts (idempotent) ─────────────────────────────
+	// Ensures 13 WCO GL system accounts exist before any workflow executes.
+	// Idempotent: Rust bridge returns 409 if accounts already exist (treated as success).
+	tbBridgeURL := getEnv("TIGERBEETLE_BRIDGE_URL", "http://localhost:4600")
+	seedCtx, seedCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer seedCancel()
+	if err := seedSystemAccounts(seedCtx, tbBridgeURL, logger); err != nil {
+		logger.Warn("TigerBeetle system account seeding failed — worker will start anyway",
+			zap.String("bridge_url", tbBridgeURL),
+			zap.Error(err),
+		)
+	} else {
+		logger.Info("TigerBeetle system accounts seeded",
+			zap.String("bridge_url", tbBridgeURL),
+		)
+	}
+
 	// ── Create workers for both task queues ───────────────────────────────────
 	fundFlowWorker := worker.New(c, workflows.TaskQueue, worker.Options{
 		MaxConcurrentActivityExecutionSize:      100,
@@ -295,6 +312,29 @@ func startHealthServer(port string, logger *zap.Logger) *http.Server {
 	}()
 
 	return srv
+}
+
+// seedSystemAccounts calls POST /seed/system on the Rust TigerBeetle bridge.
+// Returns nil on HTTP 200 (seeded) or 409 (already exists). Non-fatal on error.
+func seedSystemAccounts(ctx context.Context, bridgeURL string, logger *zap.Logger) error {
+	url := bridgeURL + "/seed/system"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return fmt.Errorf("build seed request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	httpClient := &http.Client{Timeout: 25 * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict {
+		logger.Debug("TigerBeetle seed response",
+			zap.Int("status", resp.StatusCode), zap.String("url", url))
+		return nil
+	}
+	return fmt.Errorf("unexpected HTTP %d from TigerBeetle bridge at %s", resp.StatusCode, url)
 }
 
 func getEnv(key, fallback string) string {

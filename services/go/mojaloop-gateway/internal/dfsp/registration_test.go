@@ -77,7 +77,7 @@ func TestRegisterParticipant_Success(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.registerParticipant(context.Background())
 	if result.Status != "created" {
@@ -93,7 +93,7 @@ func TestRegisterParticipant_AlreadyExists(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.registerParticipant(context.Background())
 	if result.Status != "already_exists" {
@@ -109,7 +109,7 @@ func TestRegisterParticipant_Failure(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.registerParticipant(context.Background())
 	if result.Status != "failed" {
@@ -125,7 +125,7 @@ func TestSetNetDebitCap_Success(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.setNetDebitCap(context.Background())
 	if result.Status != "created" {
@@ -141,7 +141,7 @@ func TestCreateSettlementAccounts_Success(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.createSettlementAccounts(context.Background())
 	if result.Status != "created" {
@@ -157,7 +157,7 @@ func TestRegisterPartyInALS_Success(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.registerPartyInALS(context.Background())
 	if result.Status != "created" {
@@ -173,7 +173,7 @@ func TestRegisterEndpoints_Success(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	result := r.registerEndpoints(context.Background())
 	if result.Status != "created" {
@@ -189,7 +189,7 @@ func TestFullRegistration_AllSuccess(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	report, err := r.Register(context.Background())
 	if err != nil {
@@ -215,7 +215,7 @@ func TestFullRegistration_AllAlreadyExist(t *testing.T) {
 
 	cfg := testConfig(hub.URL, fspiop.URL)
 	logger := zaptest.NewLogger(t)
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 
 	report, err := r.Register(context.Background())
 	if err != nil {
@@ -254,8 +254,123 @@ func TestRegistrationReport_JSON(t *testing.T) {
 func TestNewRegistrar(t *testing.T) {
 	cfg := DefaultConfig()
 	logger := zap.NewNop()
-	r := NewRegistrar(cfg, logger)
+	r := NewRegistrar(cfg, logger, nil)
 	if r == nil {
 		t.Error("NewRegistrar must not return nil")
+	}
+}
+
+// ─── JWS Wiring Tests ─────────────────────────────────────────────────────────
+
+// TestRegisterParticipant_WithJWSSigner verifies that when a Signer is provided,
+// the FSPIOP-Signature header is present on the outbound POST /participants request.
+func TestRegisterParticipant_WithJWSSigner(t *testing.T) {
+	var capturedSignature string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedSignature = r.Header.Get("FSPIOP-Signature")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer hub.Close()
+
+	fspiop := mockFSPIOPServer(t, 201)
+	defer fspiop.Close()
+
+	cfg := testConfig(hub.URL, fspiop.URL)
+	logger := zaptest.NewLogger(t)
+
+	signer, err := NewEphemeralSigner(cfg.DFSP_ID)
+	if err != nil {
+		t.Fatalf("NewEphemeralSigner: %v", err)
+	}
+
+	r := NewRegistrar(cfg, logger, signer)
+	result := r.registerParticipant(context.Background())
+
+	if result.Status != "created" {
+		t.Errorf("expected status=created, got %s: %s", result.Status, result.Message)
+	}
+	if capturedSignature == "" {
+		t.Error("expected FSPIOP-Signature header to be set, but it was empty")
+	}
+}
+
+// TestRegisterPartyInALS_WithJWSSigner verifies JWS signing on the FSPIOP ALS request.
+func TestRegisterPartyInALS_WithJWSSigner(t *testing.T) {
+	var capturedSignature, capturedSource string
+	fspiop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedSignature = r.Header.Get("FSPIOP-Signature")
+		capturedSource = r.Header.Get("FSPIOP-Source")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer fspiop.Close()
+
+	hub := mockHubServer(t, 201)
+	defer hub.Close()
+
+	cfg := testConfig(hub.URL, fspiop.URL)
+	logger := zaptest.NewLogger(t)
+
+	signer, err := NewEphemeralSigner(cfg.DFSP_ID)
+	if err != nil {
+		t.Fatalf("NewEphemeralSigner: %v", err)
+	}
+
+	r := NewRegistrar(cfg, logger, signer)
+	result := r.registerPartyInALS(context.Background())
+
+	if result.Status != "created" {
+		t.Errorf("expected status=created, got %s: %s", result.Status, result.Message)
+	}
+	if capturedSignature == "" {
+		t.Error("expected FSPIOP-Signature header on ALS request, but it was empty")
+	}
+	if capturedSource != cfg.DFSP_ID {
+		t.Errorf("expected FSPIOP-Source=%s, got %s", cfg.DFSP_ID, capturedSource)
+	}
+}
+
+// TestNilSigner_NoSignatureHeader verifies that nil signer does NOT set FSPIOP-Signature.
+func TestNilSigner_NoSignatureHeader(t *testing.T) {
+	var capturedSignature string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedSignature = r.Header.Get("FSPIOP-Signature")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer hub.Close()
+
+	fspiop := mockFSPIOPServer(t, 201)
+	defer fspiop.Close()
+
+	cfg := testConfig(hub.URL, fspiop.URL)
+	logger := zaptest.NewLogger(t)
+
+	r := NewRegistrar(cfg, logger, nil) // nil signer — no JWS
+	r.registerParticipant(context.Background())
+
+	if capturedSignature != "" {
+		t.Errorf("expected no FSPIOP-Signature with nil signer, got: %s", capturedSignature)
+	}
+}
+
+// TestFSPIOPSourceHeader verifies FSPIOP-Source is always set (with or without signer).
+func TestFSPIOPSourceHeader(t *testing.T) {
+	var capturedSource string
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedSource = r.Header.Get("FSPIOP-Source")
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer hub.Close()
+
+	fspiop := mockFSPIOPServer(t, 201)
+	defer fspiop.Close()
+
+	cfg := testConfig(hub.URL, fspiop.URL)
+	logger := zaptest.NewLogger(t)
+
+	r := NewRegistrar(cfg, logger, nil)
+	r.registerParticipant(context.Background())
+
+	if capturedSource != cfg.DFSP_ID {
+		t.Errorf("expected FSPIOP-Source=%s, got %s", cfg.DFSP_ID, capturedSource)
 	}
 }

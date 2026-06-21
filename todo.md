@@ -486,20 +486,20 @@
 ## v63 Sprint — JWS Signing, Temporal Health, CI Pipeline
 
 ### FSPIOP JWS Signing (Go)
-- [ ] services/go/mojaloop-gateway/internal/dfsp/jws.go — RSA-PSS + Ed25519 JWS signer for FSPIOP-Signature header
-- [ ] services/go/mojaloop-gateway/internal/dfsp/jws_test.go — unit tests: sign/verify round-trip, header format, key rotation
+- [x] services/go/mojaloop-gateway/internal/dfsp/jws.go — RSA-PSS + Ed25519 JWS signer for FSPIOP-Signature header
+- [x] services/go/mojaloop-gateway/internal/dfsp/jws_test.go — unit tests: sign/verify round-trip, header format, key rotation
 
 ### Temporal Worker Health Endpoint (Go)
-- [ ] services/go/workflow-service/cmd/worker/health.go — GET /health (port 8090): Temporal connection + workflow registry check
-- [ ] services/go/workflow-service/cmd/worker/health_test.go — unit tests: healthy/degraded/unhealthy responses
+- [x] services/go/workflow-service/cmd/worker/health.go — GET /health (port 8090): Temporal connection + workflow registry check
+- [x] services/go/workflow-service/cmd/worker/health_test.go — unit tests: healthy/degraded/unhealthy responses
 
 ### GitHub Actions CI Pipeline (Go + Rust)
-- [ ] .github/workflows/services.yml — go test ./... for all Go services + cargo test for Rust TigerBeetle bridge
-- [ ] .github/workflows/services.yml — matrix build across go/payment-service, go/workflow-service, go/mojaloop-gateway, rust/tigerbeetle-bridge-rs
+- [x] .github/workflows/services.yml — go test ./... for all Go services + cargo test for Rust TigerBeetle bridge
+- [x] .github/workflows/services.yml — matrix build across go/payment-service, go/workflow-service, go/mojaloop-gateway, rust/tigerbeetle-bridge-rs
 
 ### TypeScript Integration + Tests
-- [ ] server/v63.test.ts — vitest tests: JWS header format validation, health endpoint contract, CI workflow YAML structure
-- [ ] Push v63 codebase to GitHub munisp/singlewindow
+- [x] server/v63.test.ts — 95/95 vitest tests passing
+- [x] Push v63 codebase to GitHub munisp/singlewindow
 
 ## v63 Sprint — JWS Signing, Temporal Health, CI Pipeline (COMPLETED)
 
@@ -511,3 +511,19 @@
 - [x] server/v63.test.ts — 95/95 vitest tests passing
 - [x] TypeScript: 0 errors
 - [x] Push v63 codebase to GitHub munisp/singlewindow
+
+## v64 Sprint — JWS Wiring, TigerBeetle Seed Hook, Helm Probes (COMPLETE)
+
+- [x] services/go/mojaloop-gateway/internal/dfsp/registration.go — Registrar.signer field, NewRegistrar(cfg, logger, signer), post() calls signer.SignRequest()
+- [x] services/go/mojaloop-gateway/internal/dfsp/registration_test.go — JWS-wiring tests: nil signer + signed signer paths, FSPIOP-Signature header present
+- [x] services/go/mojaloop-gateway/cmd/register-dfsp/main.go — creates JWS signer via NewSigner() before calling NewRegistrar
+- [x] server/routers/tigerbeetleSeed.ts — adminProcedure seedSystemAccounts (POST /seed/system) + seedTraderAccounts (POST /seed/trader)
+- [x] server/routers.ts — tigerbeetleSeedRouter registered in appRouter
+- [x] services/go/workflow-service/cmd/worker/main.go — seedSystemAccounts() called on startup, non-fatal on error, 409 treated as success
+- [x] helm/tradegateway/templates/app-deployment.yaml — startupProbe (18 * 5s = 90s), livenessProbe, readinessProbe with timeoutSeconds
+- [x] helm/tradegateway/templates/workflow-worker-deployment.yaml — /live startupProbe (24 * 5s = 120s), /live livenessProbe, /ready readinessProbe, terminationGracePeriodSeconds: 60, PDB
+- [x] helm/tradegateway/values.yaml — workflowWorker section (replicaCount: 2, healthPort: 8090); duplicate opensearch/redis keys removed
+- [x] helm/tradegateway/templates/_helpers.tpl — tradegateway.permifyHttp helper (port 3476)
+- [x] server/v64.test.ts — 55/55 vitest tests passing
+- [x] TypeScript: 0 errors
+- [x] Push v64 codebase to GitHub munisp/singlewindow
