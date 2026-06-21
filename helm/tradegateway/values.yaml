@@ -375,3 +375,105 @@ networkPolicy:
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
+
+# ─── PostgreSQL (standalone StatefulSet — used by templates/postgres-statefulset.yaml) ──
+# Note: The `postgresql` section above uses Bitnami chart dependency.
+# This `postgres` section is for the standalone StatefulSet template.
+postgres:
+  enabled: false  # disabled by default — use postgresql (Bitnami) instead
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  database: tradegateway
+  storage: 20Gi
+  storageClass: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+# ─── Temporal ────────────────────────────────────────────────────────────────
+temporal:
+  host: temporal-frontend
+  port: "7233"
+  namespace: tradegateway
+
+# ─── Fluvio ──────────────────────────────────────────────────────────────────
+fluvio:
+  endpoint: "fluvio-sc:9003"
+  tlsEnabled: "false"
+
+# ─── TigerBeetle ─────────────────────────────────────────────────────────────
+tigerbeetle:
+  address: "tigerbeetle:3000"
+  clusterId: "0"
+
+# ─── Mojaloop ────────────────────────────────────────────────────────────────
+mojaloop:
+  fspiopUrl: "http://ml-api-adapter:3000"
+  alsUrl: "http://account-lookup-service:4002"
+  quotesUrl: "http://quoting-service:3002"
+  transfersUrl: "http://ml-api-adapter:3000"
+  dfspId: "tradegateway"
+
+# ─── Delta Lake / Lakehouse ───────────────────────────────────────────────────
+deltalake:
+  serviceUrl: "http://deltalake-svc:8080"
+  s3Bucket: "tradegateway-lakehouse"
+  s3Endpoint: "http://minio:9000"
+
+# ─── Autoscaling (cross-service HPA via templates/hpa.yaml) ──────────────────
+autoscaling:
+  enabled: false
+  app:
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  opensearch:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: 85
+
+# ─── Secrets (override in production via external-secrets or sealed-secrets) ──
+# WARNING: Do NOT commit real credentials. Use a secrets manager in production.
+secrets:
+  postgresUser: "tradegateway"
+  postgresPassword: "CHANGE_ME_POSTGRES"
+  redisPassword: "CHANGE_ME_REDIS"
+  jwtSecret: "CHANGE_ME_JWT_SECRET_32_CHARS_MIN"
+  keycloakAdminPassword: "CHANGE_ME_KEYCLOAK_ADMIN"
+  keycloakClientSecret: "CHANGE_ME_KEYCLOAK_CLIENT_SECRET"
+  permifyApiKey: "CHANGE_ME_PERMIFY_API_KEY"
+  tigerbeetleClusterId: "0"
+  mojaloopClientKey: ""
+  mojaloopClientCert: ""
+  mojaloopCaCert: ""
+  s3AccessKeyId: "CHANGE_ME_S3_ACCESS_KEY"
+  s3SecretAccessKey: "CHANGE_ME_S3_SECRET_KEY"
+  apisixAdminKey: "CHANGE_ME_APISIX_ADMIN_KEY"
+  fluvioTlsCert: ""
+  fluvioTlsKey: ""
+  wazuhApiKey: "CHANGE_ME_WAZUH_API_KEY"
+  openctiApiKey: "CHANGE_ME_OPENCTI_API_KEY"
+  forgeApiKey: "CHANGE_ME_FORGE_API_KEY"
+  viteFrontendForgeApiKey: "CHANGE_ME_VITE_FORGE_API_KEY"
+
+# ─── OpenSearch index prefix ─────────────────────────────────────────────────
+opensearch:
+  indexPrefix: "tradegateway"
+
+# ─── Redis standalone (used by templates/redis-deployment.yaml) ──────────────
+# Note: The `redis` section above uses Bitnami chart dependency.
+# This section adds fields needed by the standalone redis-deployment.yaml template.
+redis:
+  maxmemory: "512mb"
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""

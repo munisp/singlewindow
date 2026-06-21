@@ -425,17 +425,17 @@
 - [x] helm/tradegateway/values.yaml — default values for all 8 deployments
 - [x] helm/tradegateway/values.prod.yaml — production overlay (replicas, resource limits, ingress TLS)
 - [x] helm/tradegateway/templates/app-deployment.yaml — TradeGateway app Deployment + Service
-- [ ] helm/tradegateway/templates/postgres-deployment.yaml — PostgreSQL StatefulSet + PVC + Service
+- [x] helm/tradegateway/templates/postgres-deployment.yaml — PostgreSQL StatefulSet + PVC + Service
 - [x] helm/tradegateway/templates/keycloak-deployment.yaml — Keycloak Deployment + ConfigMap + Service
 - [x] helm/tradegateway/templates/permify-deployment.yaml — Permify Deployment + Service
 - [x] helm/tradegateway/templates/opensearch-deployment.yaml — OpenSearch StatefulSet + PVC + Service
-- [ ] helm/tradegateway/templates/redis-deployment.yaml — Redis Deployment + Service
+- [x] helm/tradegateway/templates/redis-deployment.yaml — Redis Deployment + Service
 - [x] helm/tradegateway/templates/kafka-deployment.yaml — Kafka + Zookeeper StatefulSets + Services
 - [x] helm/tradegateway/templates/apisix-deployment.yaml — APISIX Deployment + Service + Ingress
-- [ ] helm/tradegateway/templates/configmap.yaml — middleware URL ConfigMap
-- [ ] helm/tradegateway/templates/secrets.yaml — DATABASE_URL, JWT_SECRET, KEYCLOAK_SECRET, etc.
+- [x] helm/tradegateway/templates/configmap.yaml — middleware URL ConfigMap
+- [x] helm/tradegateway/templates/secrets.yaml — DATABASE_URL, JWT_SECRET, KEYCLOAK_SECRET, etc.
 - [x] helm/tradegateway/templates/ingress.yaml — Ingress with TLS annotations
-- [ ] helm/tradegateway/templates/hpa.yaml — HorizontalPodAutoscaler for app + opensearch
+- [x] helm/tradegateway/templates/hpa.yaml — HorizontalPodAutoscaler for app + opensearch
 - [x] helm/README.md — helm install/upgrade instructions, prerequisites, values reference
 - [x] server/v60.test.ts — tests for docker-compose health check endpoints + helm values validation (62/62 passing)
 - [x] Push v60 codebase to GitHub munisp/singlewindow

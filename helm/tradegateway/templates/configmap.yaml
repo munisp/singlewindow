@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-config
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+data:
+  # ─── Application ────────────────────────────────────────────────────────────
+  NODE_ENV: {{ .Values.app.nodeEnv | quote }}
+  PORT: {{ .Values.app.port | quote }}
+
+  # ─── Database ────────────────────────────────────────────────────────────────
+  POSTGRES_HOST: {{ printf "%s-postgres" (include "tradegateway.fullname" .) | quote }}
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: {{ .Values.postgres.database | quote }}
+
+  # ─── Redis ───────────────────────────────────────────────────────────────────
+  REDIS_HOST: {{ printf "%s-redis" (include "tradegateway.fullname" .) | quote }}
+  REDIS_PORT: "6379"
+
+  # ─── Keycloak ────────────────────────────────────────────────────────────────
+  KEYCLOAK_URL: {{ printf "http://%s-keycloak:8080" (include "tradegateway.fullname" .) | quote }}
+  KEYCLOAK_REALM: {{ .Values.keycloak.realm | quote }}
+  KEYCLOAK_CLIENT_ID: {{ .Values.keycloak.clientId | quote }}
+  OAUTH_SERVER_URL: {{ printf "http://%s-keycloak:8080/realms/%s" (include "tradegateway.fullname" .) .Values.keycloak.realm | quote }}
+  VITE_OAUTH_PORTAL_URL: {{ printf "http://%s-keycloak:8080/realms/%s/protocol/openid-connect/auth" (include "tradegateway.fullname" .) .Values.keycloak.realm | quote }}
+
+  # ─── Permify ─────────────────────────────────────────────────────────────────
+  PERMIFY_URL: {{ printf "http://%s-permify:3476" (include "tradegateway.fullname" .) | quote }}
+  PERMIFY_GRPC_URL: {{ printf "%s-permify:3478" (include "tradegateway.fullname" .) | quote }}
+
+  # ─── Temporal ────────────────────────────────────────────────────────────────
+  TEMPORAL_HOST: {{ .Values.temporal.host | quote }}
+  TEMPORAL_PORT: {{ .Values.temporal.port | quote }}
+  TEMPORAL_NAMESPACE: {{ .Values.temporal.namespace | quote }}
+  TEMPORAL_SERVICE_URL: {{ printf "http://%s:%s" .Values.temporal.host .Values.temporal.port | quote }}
+
+  # ─── Kafka ───────────────────────────────────────────────────────────────────
+  KAFKA_BROKERS: {{ printf "%s-kafka:9092" (include "tradegateway.fullname" .) | quote }}
+  KAFKA_CLIENT_ID: {{ printf "%s-app" (include "tradegateway.fullname" .) | quote }}
+  KAFKA_GROUP_ID: {{ printf "%s-consumer-group" (include "tradegateway.fullname" .) | quote }}
+
+  # ─── Fluvio ──────────────────────────────────────────────────────────────────
+  FLUVIO_ENDPOINT: {{ .Values.fluvio.endpoint | quote }}
+  FLUVIO_TLS_ENABLED: {{ .Values.fluvio.tlsEnabled | quote }}
+
+  # ─── TigerBeetle ─────────────────────────────────────────────────────────────
+  TIGERBEETLE_ADDRESS: {{ .Values.tigerbeetle.address | quote }}
+  TIGERBEETLE_CLUSTER_ID: {{ .Values.tigerbeetle.clusterId | quote }}
+
+  # ─── Mojaloop ────────────────────────────────────────────────────────────────
+  MOJALOOP_FSPIOP_URL: {{ .Values.mojaloop.fspiopUrl | quote }}
+  MOJALOOP_ALS_URL: {{ .Values.mojaloop.alsUrl | quote }}
+  MOJALOOP_QUOTES_URL: {{ .Values.mojaloop.quotesUrl | quote }}
+  MOJALOOP_TRANSFERS_URL: {{ .Values.mojaloop.transfersUrl | quote }}
+  MOJALOOP_DFSP_ID: {{ .Values.mojaloop.dfspId | quote }}
+
+  # ─── OpenSearch ──────────────────────────────────────────────────────────────
+  OPENSEARCH_URL: {{ printf "http://%s-opensearch:9200" (include "tradegateway.fullname" .) | quote }}
+  OPENSEARCH_INDEX_PREFIX: {{ .Values.opensearch.indexPrefix | quote }}
+
+  # ─── APISIX ──────────────────────────────────────────────────────────────────
+  APISIX_ADMIN_URL: {{ printf "http://%s-apisix:9180" (include "tradegateway.fullname" .) | quote }}
+
+  # ─── Delta Lake / Lakehouse ───────────────────────────────────────────────────
+  DELTALAKE_SERVICE_URL: {{ .Values.deltalake.serviceUrl | quote }}
+  DELTALAKE_S3_BUCKET: {{ .Values.deltalake.s3Bucket | quote }}
+  DELTALAKE_S3_ENDPOINT: {{ .Values.deltalake.s3Endpoint | quote }}
+
+  # ─── Dapr ────────────────────────────────────────────────────────────────────
+  DAPR_HTTP_PORT: "3500"
+  DAPR_GRPC_PORT: "50001"
+  DAPR_APP_ID: {{ printf "%s-app" (include "tradegateway.fullname" .) | quote }}
