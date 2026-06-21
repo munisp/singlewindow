@@ -554,46 +554,46 @@
 ## v67 Sprint — Mojaloop Quote Builder, Temporal Kafka Consumer, Batch Seed UI, Insider Threat Prevention (IN PROGRESS)
 
 ### Mojaloop & Temporal (Go)
-- [ ] services/go/mojaloop-gateway/internal/dfsp/quote.go — PostQuoteRequest() builder: FSPIOP POST /quotes payload, JWS signed, pendingILP correlation
-- [ ] services/go/mojaloop-gateway/internal/dfsp/quote_test.go — 12 Go unit tests: quote payload structure, JWS signed, correlation stored
-- [ ] services/go/workflow-service/internal/kafka/consumer.go — Kafka consumer subscribing to mojaloop.transfer.failed + mojaloop.*.error; signals Temporal workflow via client.SignalWorkflow()
-- [ ] services/go/workflow-service/internal/kafka/consumer_test.go — 8 Go unit tests: message routing, signal dispatch, dead-letter on unknown workflow
+- [x] services/go/mojaloop-gateway/internal/dfsp/quote.go — PostQuoteRequest() builder: FSPIOP POST /quotes payload, JWS signed, pendingILP correlation
+- [x] services/go/mojaloop-gateway/internal/dfsp/quote_test.go — 12 Go unit tests: quote payload structure, JWS signed, correlation stored
+- [x] services/go/workflow-service/internal/kafka/consumer.go — Kafka consumer subscribing to mojaloop.transfer.failed + mojaloop.*.error; signals Temporal workflow via client.SignalWorkflow()
+- [x] services/go/workflow-service/internal/kafka/consumer_test.go — 8 Go unit tests: message routing, signal dispatch, dead-letter on unknown workflow
 
 ### Insider Threat Prevention — Database Schema
-- [ ] drizzle/schema.ts — add insider_threat_events, privileged_action_approvals, session_audit_log, anomaly_detections tables
-- [ ] pnpm db:push — migrate new tables
+- [x] drizzle/schema.ts — add insider_threat_events, privileged_action_approvals, session_audit_log, anomaly_detections tables
+- [x] pnpm db:push — migrate new tables (applied directly via SQL; migration file 0033_stiff_chat.sql generated)
 
 ### Insider Threat Prevention — Rust (Immutable Audit Log)
-- [ ] services/rust/tigerbeetle-bridge-rs/src/immutable_audit.rs — append-only audit ledger using TigerBeetle transfers as tamper-evident log entries; SHA-256 chain hash
-- [ ] services/rust/tigerbeetle-bridge-rs/src/bin/audit_verify.rs — standalone binary to verify audit chain integrity
+- [x] services/rust/tigerbeetle-bridge-rs/src/immutable_audit.rs — append-only audit ledger using TigerBeetle transfers as tamper-evident log entries; SHA-256 chain hash
+- [x] services/rust/tigerbeetle-bridge-rs/src/bin/audit_verify.rs — standalone binary to verify audit chain integrity
 
 ### Insider Threat Prevention — Python (Anomaly Detection)
-- [ ] services/python/insider-threat-svc/main.py — FastAPI service: POST /detect (user behaviour anomaly scoring via isolation forest), POST /alert (publish to Kafka insider.threat.detected), GET /health
-- [ ] services/python/insider-threat-svc/anomaly_detector.py — scikit-learn IsolationForest model: features = (hour_of_day, action_count_per_hour, unique_records_accessed, off_hours_flag, role_mismatch_score)
-- [ ] services/python/insider-threat-svc/requirements.txt — fastapi, uvicorn, scikit-learn, pandas, numpy, kafka-python, redis
+- [x] services/python/insider-threat-svc/main.py — FastAPI service: POST /detect (user behaviour anomaly scoring via isolation forest), POST /alert (publish to Kafka insider.threat.detected), GET /health
+- [x] services/python/insider-threat-svc/anomaly_detector.py — scikit-learn IsolationForest model: features = (hour_of_day, action_count_per_hour, unique_records_accessed, off_hours_flag, role_mismatch_score)
+- [x] services/python/insider-threat-svc/requirements.txt — fastapi, uvicorn, scikit-learn, pandas, numpy, kafka-python, redis
 
 ### Insider Threat Prevention — Go (RBAC Middleware)
-- [ ] services/go/audit-service/internal/rbac/middleware.go — Chi middleware: verify Permify authorization on every request; log privileged actions to Kafka insider.privileged.action topic; enforce time-of-day restrictions
-- [ ] services/go/audit-service/internal/rbac/four_eyes.go — 4-eyes approval: require second approver for high-risk actions (duty override, bond forfeiture, AEO revocation); store pending approvals in Redis with 24h TTL
+- [x] services/go/audit-service/internal/rbac/middleware.go — Chi middleware: verify Permify authorization on every request; log privileged actions to Kafka insider.privileged.action topic; enforce time-of-day restrictions
+- [x] services/go/audit-service/internal/rbac/four_eyes.go — 4-eyes approval: require second approver for high-risk actions (duty override, bond forfeiture, AEO revocation); store pending approvals in Redis with 24h TTL
 
 ### Insider Threat Prevention — TypeScript tRPC
-- [ ] server/routers/insiderThreat.ts — adminProcedure procedures: getAnomalyDetections, getPendingApprovals, approvePrivilegedAction, revokePrivilegedAction, getSessionAuditLog, forceLogoutSession, getInsiderThreatEvents
-- [ ] server/routers.ts — register insiderThreatRouter in appRouter
+- [x] server/routers/insiderThreat.ts — adminProcedure procedures: getAnomalyDetections, getPendingApprovals, approvePrivilegedAction, revokePrivilegedAction, getSessionAuditLog, forceLogoutSession, getInsiderThreatEvents
+- [x] server/routers.ts — register insiderThreatRouter in appRouter
 
 ### Insider Threat Prevention — PWA
-- [ ] client/src/pages/app/InsiderThreatMonitor.tsx — real-time anomaly feed (Fluvio SSE), session audit log table, 4-eyes approval queue with approve/reject buttons, force-logout action
-- [ ] client/src/pages/app/AdminSettings.tsx — add batch seed UI (textarea + progress bar)
-- [ ] client/src/App.tsx — register /admin/insider-threat route
+- [x] client/src/pages/app/SecurityMonitor.tsx — real-time anomaly feed, session audit log table, 4-eyes approval queue with approve/reject buttons, force-logout action
+- [x] client/src/pages/app/AdminBatchSeed.tsx — batch seed UI with textarea + progress bar
+- [x] client/src/App.tsx — register /app/security/monitor and /app/admin/batch-seed routes
 
 ### Insider Threat Prevention — React Native
-- [ ] mobile/react-native/src/screens/InsiderThreatScreen.tsx — anomaly alerts list, session audit log, 4-eyes approval actions
+- [x] mobile/react-native/screens/SecurityMonitorScreen.tsx — anomaly alerts list, session audit log, 4-eyes approval actions
 
 ### Insider Threat Prevention — Flutter
-- [ ] mobile/flutter/lib/screens/insider_threat_screen.dart — anomaly alerts list, session audit log, approve/reject privileged actions
+- [x] mobile/flutter/lib/screens/security_monitor_screen.dart — anomaly alerts list, session audit log, approve/reject privileged actions
 
 ### Tests
-- [ ] server/v67.test.ts — vitest tests: insiderThreat router, schema tables, anomaly detection payload, 4-eyes approval flow, batch seed UI
-- [ ] Push v67 codebase to GitHub munisp/singlewindow
+- [x] server/v67.test.ts — 32 vitest tests: insiderThreat router, schema tables, anomaly detection payload, 4-eyes approval flow, session audit log, Rust chain, RBAC concepts
+- [x] Push v67 codebase to GitHub munisp/singlewindow (commit 67f61bf, 17 files, 4342 insertions)
 
 ## v67 Sprint — Completed Items
 - [x] services/rust/tigerbeetle-bridge-rs/src/immutable_audit.rs — append-only SHA-256 chain hash audit ledger

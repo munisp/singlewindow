@@ -232,6 +232,13 @@
       "when": 1781887439269,
       "tag": "0032_big_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1782069006280,
+      "tag": "0033_stiff_chat",
+      "breakpoints": true
     }
   ]
 }

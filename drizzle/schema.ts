@@ -2084,3 +2084,104 @@ export const riskModelConfigs = pgTable("risk_model_configs", {
   index("idx_risk_model_name").on(t.modelName),
 ]);
 export type RiskModelConfig = typeof riskModelConfigs.$inferSelect;
+
+// ─── INSIDER THREAT EVENTS (v67) ──────────────────────────────────────────────
+export const insiderThreatEvents = pgTable("insider_threat_events", {
+  id: serial("id").primaryKey(),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  tbEventCode: integer("tb_event_code").notNull(),
+  actorId: integer("actor_id").references(() => users.id, { onDelete: "set null" }),
+  actorRole: varchar("actor_role", { length: 64 }),
+  targetEntityType: varchar("target_entity_type", { length: 64 }),
+  targetEntityId: varchar("target_entity_id", { length: 255 }),
+  action: varchar("action", { length: 255 }).notNull(),
+  description: text("description"),
+  ipAddress: varchar("ip_address", { length: 64 }),
+  sessionId: varchar("session_id", { length: 255 }),
+  chainHash: varchar("chain_hash", { length: 64 }),
+  prevChainHash: varchar("prev_chain_hash", { length: 64 }),
+  severity: varchar("severity", { length: 16 }).default("LOW").notNull(),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_insider_events_actor").on(t.actorId),
+  index("idx_insider_events_type").on(t.eventType),
+  index("idx_insider_events_severity").on(t.severity),
+  index("idx_insider_events_created").on(t.createdAt),
+  index("idx_insider_events_session").on(t.sessionId),
+]);
+export type InsiderThreatEvent = typeof insiderThreatEvents.$inferSelect;
+
+// ─── PRIVILEGED ACTION APPROVALS — 4-Eyes Control (v67) ──────────────────────
+export const privilegedActionApprovals = pgTable("privileged_action_approvals", {
+  id: serial("id").primaryKey(),
+  approvalRef: varchar("approval_ref", { length: 128 }).notNull().unique(),
+  requesterId: integer("requester_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  approverId: integer("approver_id").references(() => users.id, { onDelete: "set null" }),
+  action: varchar("action", { length: 255 }).notNull(),
+  entityType: varchar("entity_type", { length: 64 }).notNull(),
+  entityId: varchar("entity_id", { length: 255 }).notNull(),
+  description: text("description").notNull(),
+  status: varchar("status", { length: 32 }).default("pending").notNull(),
+  approverReason: text("approver_reason"),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+  expiresAt: timestamp("expires_at").notNull(),
+  metadata: jsonb("metadata").default({}),
+}, (t) => [
+  index("idx_paa_requester").on(t.requesterId),
+  index("idx_paa_status").on(t.status),
+  index("idx_paa_expires").on(t.expiresAt),
+  index("idx_paa_ref").on(t.approvalRef),
+]);
+export type PrivilegedActionApproval = typeof privilegedActionApprovals.$inferSelect;
+
+// ─── SESSION AUDIT LOG (v67) ──────────────────────────────────────────────────
+export const sessionAuditLog = pgTable("session_audit_log", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  sessionId: varchar("session_id", { length: 255 }).notNull(),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  ipAddress: varchar("ip_address", { length: 64 }),
+  userAgent: varchar("user_agent", { length: 512 }),
+  geoLocation: varchar("geo_location", { length: 128 }),
+  riskScore: decimal("risk_score", { precision: 5, scale: 4 }).default("0"),
+  isSuspicious: boolean("is_suspicious").default(false).notNull(),
+  suspicionReason: text("suspicion_reason"),
+  forcedByUserId: integer("forced_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_sal_user").on(t.userId),
+  index("idx_sal_session").on(t.sessionId),
+  index("idx_sal_event_type").on(t.eventType),
+  index("idx_sal_suspicious").on(t.isSuspicious),
+  index("idx_sal_created").on(t.createdAt),
+]);
+export type SessionAuditLogEntry = typeof sessionAuditLog.$inferSelect;
+
+// ─── ANOMALY DETECTIONS (v67) ─────────────────────────────────────────────────
+export const anomalyDetections = pgTable("anomaly_detections", {
+  id: serial("id").primaryKey(),
+  ruleId: varchar("rule_id", { length: 64 }).notNull(),
+  ruleName: varchar("rule_name", { length: 255 }).notNull(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  sessionId: varchar("session_id", { length: 255 }),
+  severity: varchar("severity", { length: 16 }).notNull(),
+  anomalyScore: decimal("anomaly_score", { precision: 8, scale: 6 }),
+  description: text("description").notNull(),
+  recommendedAction: text("recommended_action"),
+  features: jsonb("features").default({}),
+  isAcknowledged: boolean("is_acknowledged").default(false).notNull(),
+  acknowledgedBy: integer("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  linkedEventId: integer("linked_event_id").references(() => insiderThreatEvents.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_anomaly_user").on(t.userId),
+  index("idx_anomaly_severity").on(t.severity),
+  index("idx_anomaly_rule").on(t.ruleId),
+  index("idx_anomaly_acknowledged").on(t.isAcknowledged),
+  index("idx_anomaly_created").on(t.createdAt),
+]);
+export type AnomalyDetection = typeof anomalyDetections.$inferSelect;
