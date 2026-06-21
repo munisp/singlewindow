@@ -456,3 +456,29 @@
 - [x] server/fund-flow.test.ts — 57/57 vitest tests passing: all 20 scenarios, idempotency, authorization, atomicity, input validation
 - [x] TypeScript: 0 errors
 - [x] Push v61 codebase to GitHub munisp/singlewindow
+
+## v62 Sprint — Temporal Worker, TigerBeetle Seeding, Mojaloop DFSP Registration
+
+### Temporal Worker — Register All 20 Fund-Flow Workflows
+- [x] services/go/workflow-service/cmd/worker/main.go — dedicated worker binary registering all 20 fund-flow workflows + activities
+- [x] services/go/workflow-service/cmd/worker/Dockerfile — multi-stage distroless build
+- [x] services/go/workflow-service/cmd/worker/Dockerfile — multi-stage distroless build (duplicate, see above)
+- [x] services/go/workflow-service/workflows/registry.go — central registry (RegisterAll) listing all workflow and activity types
+
+### TigerBeetle Account Seeding (Rust)
+- [x] services/rust/tigerbeetle-bridge-rs/src/seed.rs — 13 system accounts across 6 WCO GL ledgers, idempotent seeding
+- [x] services/rust/tigerbeetle-bridge-rs/src/trader_accounts.rs — per-trader account creation (DUTY_RECEIVABLE, DUTY_PAYABLE, BOND_ESCROW, REFUND_PAYABLE) + POST /seed/trader endpoint
+- [x] services/rust/tigerbeetle-bridge-rs/src/bin/seed.rs — standalone seed binary (cargo run --bin seed)
+
+### Mojaloop DFSP Registration Bootstrap (Go)
+- [x] services/go/mojaloop-gateway/cmd/register-dfsp/main.go — DFSP registration bootstrap binary with JSON report + exit codes
+- [x] services/go/mojaloop-gateway/internal/dfsp/registration_test.go — 12 Go unit tests (success, already_exists, failure, idempotency)
+- [x] services/go/mojaloop-gateway/internal/dfsp/registration.go — 7-step registration: participant, net debit cap, accounts, ALS party, 7 endpoints, quote+transfer capability
+- [x] services/go/mojaloop-gateway/internal/dfsp/registration.go — FSPIOP callback URL registration (7 endpoint types)
+- [x] services/go/mojaloop-gateway/internal/dfsp/registration.go — FSPIOP-Source header set on all ALS requests
+
+### TypeScript Integration + Tests
+- [x] server/routers/temporal-worker.ts — covered by fund-flow.ts Temporal delegation
+- [x] server/routers/fund-flow.ts — seedTraderAccounts procedure calls TigerBeetle bridge POST /seed/trader
+- [x] server/v62.test.ts — 75/75 vitest tests passing: Temporal worker, TigerBeetle seeding, Mojaloop DFSP registration, docker-compose, Helm chart
+- [x] Push v62 codebase to GitHub munisp/singlewindow

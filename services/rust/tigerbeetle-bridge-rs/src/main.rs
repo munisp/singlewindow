@@ -33,7 +33,11 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 mod backend;
+mod scenarios;
+pub mod seed;
+pub mod trader_accounts;
 use backend::{AccountBalance, Backend, CreateAccountRequest, CreateTransferRequest, TransferRecord};
+use trader_accounts::seed_trader_handler;
 
 // ─── Application state ────────────────────────────────────────────────────────
 
@@ -352,6 +356,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/transfers/:id", get(get_transfer))
         .route("/transfers/batch", post(batch_transfer))
         .route("/metrics", get(metrics))
+        .route("/seed/trader", post(seed_trader_handler))
         .layer(CorsLayer::permissive())
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http())
