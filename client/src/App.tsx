@@ -111,6 +111,9 @@ const WebhookLogs = lazy(() => import('./pages/app/WebhookLogs'));
 const SecurityAlerts = lazy(() => import('./pages/app/SecurityAlerts'));
 const TenantManagement = lazy(() => import('./pages/app/TenantManagement'));
 const OnboardingProgress = lazy(() => import('./pages/app/OnboardingProgress'));
+// v67 — Insider Threat Prevention & Batch Seed
+const SecurityMonitor = lazy(() => import('./pages/app/SecurityMonitor'));
+const AdminBatchSeed = lazy(() => import('./pages/app/AdminBatchSeed'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -470,6 +473,15 @@ function Router() {
       <Route path="/app/onboarding/progress">
         <Suspense fallback={<LazyFallback />}><OnboardingProgress /></Suspense>
       </Route>
+
+      {/* v67 — Insider Threat Prevention */}
+      <Route path="/app/security/monitor">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><SecurityMonitor /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/batch-seed">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminBatchSeed /></Suspense></AdminGuard>
+      </Route>
+
       {/* 404 */}
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

@@ -82,6 +82,7 @@ import {
   ShieldX,
   Building,
   GraduationCap,
+  Database,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -157,6 +158,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Activity, label: "Wazuh SIEM / XDR", path: "/app/security/wazuh" },
           { icon: Zap, label: "CEP Pattern Alerts", path: "/app/security/cep-alerts" },
           { icon: Shield, label: "SOC Dashboard", path: "/app/security/soc" },
+          { icon: ShieldAlert, label: "Insider Threat Monitor", path: "/app/security/monitor" },
         ],
       },
       {
@@ -219,6 +221,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Webhook, label: "Webhook Logs", path: "/app/developer/webhooks" },
           { icon: ShieldX, label: "Security Alerts", path: "/app/security/alerts" },
           { icon: GraduationCap, label: "Onboarding Progress", path: "/app/onboarding/progress" },
+          { icon: Database, label: "Batch Account Seed", path: "/app/admin/batch-seed" },
         ],
       },
       common,

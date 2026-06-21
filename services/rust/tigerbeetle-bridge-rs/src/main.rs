@@ -36,14 +36,19 @@ mod backend;
 mod scenarios;
 pub mod seed;
 pub mod trader_accounts;
+pub mod immutable_audit;
 use backend::{AccountBalance, Backend, CreateAccountRequest, CreateTransferRequest, TransferRecord};
 use trader_accounts::seed_trader_handler;
+use immutable_audit::{AuditChainState, AuditEntry, AuditEventType, build_audit_entry, verify_chain, VerificationResult};
+use std::sync::Mutex;
 
 // ─── Application state ────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 struct AppState {
     backend: Arc<dyn Backend + Send + Sync>,
+    audit_log: Arc<Mutex<Vec<AuditEntry>>>,
+    audit_chain: Arc<Mutex<AuditChainState>>,
 }
 
 // ─── Request / Response types ─────────────────────────────────────────────────
@@ -274,6 +279,56 @@ async fn metrics(State(state): State<AppState>) -> String {
     )
 }
 
+// ─── Audit log handlers ──────────────────────────────────────────────────────
+
+/// GET /audit/entries — returns all in-memory audit entries.
+async fn get_audit_entries(State(state): State<AppState>) -> Json<Vec<AuditEntry>> {
+    let log = state.audit_log.lock().unwrap_or_else(|e| e.into_inner());
+    Json(log.clone())
+}
+
+/// POST /audit/append — append a new audit entry (internal service use only).
+#[derive(Debug, serde::Deserialize)]
+struct AppendAuditReq {
+    event_type_code: u16,
+    actor_id: u128,
+    subject_id: u128,
+    payload_json: String,
+}
+
+async fn append_audit_entry(
+    State(state): State<AppState>,
+    Json(req): Json<AppendAuditReq>,
+) -> Result<Json<AuditEntry>, (StatusCode, Json<ErrorResponse>)> {
+    let event_type = AuditEventType::from_u16(req.event_type_code)
+        .ok_or_else(|| err("INVALID_EVENT_TYPE", format!("unknown event type code: {}", req.event_type_code)))?;
+
+    let id = {
+        let log = state.audit_log.lock().unwrap_or_else(|e| e.into_inner());
+        log.len() as u128 + 1
+    };
+
+    let entry = {
+        let mut chain = state.audit_chain.lock().unwrap_or_else(|e| e.into_inner());
+        build_audit_entry(id, event_type, req.actor_id, req.subject_id, req.payload_json, &mut chain)
+    };
+
+    {
+        let mut log = state.audit_log.lock().unwrap_or_else(|e| e.into_inner());
+        log.push(entry.clone());
+    }
+
+    info!("[AUDIT] Appended entry id={} type={:?} actor={}", id, event_type, req.actor_id);
+    Ok(Json(entry))
+}
+
+/// GET /audit/verify — verify the integrity of the entire audit chain.
+async fn verify_audit_chain(State(state): State<AppState>) -> Json<VerificationResult> {
+    let log = state.audit_log.lock().unwrap_or_else(|e| e.into_inner());
+    let result = verify_chain(&log);
+    Json(result)
+}
+
 // ─── Seed standard accounts ───────────────────────────────────────────────────
 
 async fn seed_standard_accounts(backend: &Arc<dyn Backend + Send + Sync>) {
@@ -345,7 +400,11 @@ async fn main() -> anyhow::Result<()> {
     // Seed standard GL accounts
     seed_standard_accounts(&backend).await;
 
-    let state = AppState { backend };
+    let state = AppState {
+        backend,
+        audit_log: Arc::new(Mutex::new(Vec::new())),
+        audit_chain: Arc::new(Mutex::new(AuditChainState::new())),
+    };
 
     let app = Router::new()
         .route("/health", get(health))
@@ -357,6 +416,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/transfers/batch", post(batch_transfer))
         .route("/metrics", get(metrics))
         .route("/seed/trader", post(seed_trader_handler))
+        .route("/audit/entries", get(get_audit_entries))
+        .route("/audit/append", post(append_audit_entry))
+        .route("/audit/verify", get(verify_audit_chain))
         .layer(CorsLayer::permissive())
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http())
