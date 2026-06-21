@@ -433,4 +433,50 @@ export const insiderThreatRouter = router({
     const token = await issueSSEToken(ctx.user.id, ctx.user.role ?? "user");
     return { token, expiresInSeconds: 300 };
   }),
+
+  /**
+   * getAuditEntryDiff — fetch the before/after JSON diff for a session_audit_log entry.
+   * Returns metadata.before and metadata.after for the JsonDiffViewer component.
+   */
+  getAuditEntryDiff: adminProcedure
+    .input(z.object({ entryId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (!db) return { hasDiff: false, before: null, after: null, source: "unavailable" };
+
+        const { auditEvents } = await import("../../drizzle/schema");
+        const { eq } = await import("drizzle-orm");
+
+        const rows = await db
+          .select()
+          .from(auditEvents)
+          .where(eq(auditEvents.id, input.entryId as any))
+          .limit(1);
+
+        if (rows.length === 0) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Audit entry not found" });
+        }
+
+        const row = rows[0];
+        const meta = (row.metadata ?? {}) as Record<string, unknown>;
+
+        return {
+          id: row.id,
+          actorId: row.actorId,
+          action: row.action,
+          entityType: row.entityType,
+          entityId: row.entityId,
+          createdAt: row.createdAt,
+          before: meta.before ?? null,
+          after: meta.after ?? null,
+          hasDiff: (meta.before !== undefined) || (meta.after !== undefined),
+          source: "database",
+        };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        return { hasDiff: false, before: null, after: null, source: "error" };
+      }
+    }),
 });

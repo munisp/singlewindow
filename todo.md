@@ -648,4 +648,48 @@
 - [x] server/scheduled/fourEyesExpiry.ts — Cron job: scans privileged_action_approvals for expired pending rows; transitions to expired; notifies owner per approval + batch summary; emits four_eyes_expired SSE event
 - [x] server/v68.test.ts — 25 vitest tests: SSE token issuance/verification, anomalyBus event routing, Kafka consumer graceful degradation, 4-eyes expiry cron (7 scenarios), SSE handler auth; all 25 passing
 - [x] TypeScript: 0 errors (npx tsc --noEmit clean)
-- [ ] Push v68 to GitHub munisp/singlewindow
+- [x] Push v68 to GitHub munisp/singlewindow (commit 95e5b66, 11 files, 1916 insertions)
+
+## v69 Sprint — Anomaly Retraining, Audit Diff View, Mobile Push Notifications
+
+### Python — Anomaly Model Retraining Pipeline
+- [ ] services/python/insider-threat-svc/main.py — add POST /train endpoint: accepts labelled events JSON, retrains IsolationForest model in-place, returns accuracy metrics
+- [ ] services/python/insider-threat-svc/model_store.py — persist trained model to disk (joblib) with versioning; load on startup
+- [ ] services/python/insider-threat-svc/retrain_scheduler.py — APScheduler nightly cron (02:00 UTC) that fetches last 30 days of insider_threat_events from DB and calls /train
+- [ ] services/python/insider-threat-svc/test_retrain.py — pytest tests: /train endpoint, model persistence, scheduler registration
+
+### TypeScript — Privileged Action Diff View in PWA Audit Log
+- [ ] server/routers/insiderThreat.ts — add getAuditEntryDiff procedure: fetches session_audit_log row by id, returns metadata.before + metadata.after JSON
+- [ ] client/src/pages/app/SecurityMonitor.tsx — AuditLogTab: add "View Diff" button on each row; opens Sheet side panel with side-by-side JSON diff (react-diff-viewer or custom)
+- [ ] client/src/components/JsonDiffViewer.tsx — reusable component: renders before/after JSON with added/removed/changed line highlighting
+
+### TypeScript — Mobile Push Notifications for Anomaly Alerts
+- [ ] server/kafkaConsumer.ts — on insider.threat.detected with score > 0.7: call notifyOwner({ title, content }) to deliver push notification to admin
+- [ ] server/routers/insiderThreat.ts — add subscribeAnomalyAlerts procedure: stores FCM/APNs device token in anomaly_alert_subscriptions table
+- [ ] drizzle/schema.ts — add anomaly_alert_subscriptions table (userId, deviceToken, platform, createdAt)
+- [ ] mobile/react-native/screens/SecurityMonitorScreen.tsx — add push notification registration on mount; call subscribeAnomalyAlerts with device token
+- [ ] mobile/flutter/lib/screens/security_monitor_screen.dart — add FCM token registration on init; call subscribeAnomalyAlerts API
+
+### Tests
+- [ ] server/v69.test.ts — vitest tests: getAuditEntryDiff procedure, subscribeAnomalyAlerts procedure, anomaly_alert_subscriptions schema, Kafka consumer notifyOwner trigger
+- [ ] Push v69 to GitHub munisp/singlewindow
+
+## v69 Sprint — Completed Items
+
+- [x] services/python/insider-threat-svc/model_store.py — joblib model persistence with versioning and atomic writes
+- [x] services/python/insider-threat-svc/anomaly_detector.py — IsolationForest with 5 behavioural features, contamination=0.05
+- [x] services/python/insider-threat-svc/main.py — FastAPI: POST /detect, POST /train, GET /health, GET /model/info
+- [x] services/python/insider-threat-svc/retrain_scheduler.py — APScheduler nightly cron at 02:00 UTC; 30-day lookback; min 50 events; publishes to Kafka insider.model.retrained
+- [x] services/python/insider-threat-svc/requirements.txt — fastapi, uvicorn, scikit-learn, pandas, numpy, kafka-python, redis, apscheduler, joblib
+- [x] services/python/insider-threat-svc/test_retrain.py — 23 pytest tests: model store, detector, train endpoint, retrain scheduler (all passing)
+- [x] client/src/components/JsonDiffViewer.tsx — side-by-side JSON diff with flattenObject, computeDiff, line highlighting (added/removed/changed/unchanged)
+- [x] server/routers/insiderThreat.ts — added getAuditEntryDiff procedure (reads session_audit_log metadata, returns before/after JSON)
+- [x] client/src/pages/app/SecurityMonitor.tsx — AuditLogTab updated with View Diff button and Sheet side panel using JsonDiffViewer
+- [x] mobile/react-native/TradeGateway/src/services/pushNotifications.ts — Expo Notifications: permissions, Android channel, FCM token, backend registration, local notification dispatch, badge management
+- [x] mobile/react-native/TradeGateway/src/hooks/usePushNotifications.ts — React hook: init on auth, SSE anomaly → local notification, notification tap handler, badge clear
+- [x] server/routers/pushTokens.ts — tRPC: registerPushToken, unregisterPushToken, sendAnomalyPushNotification, getRegisteredTokens; Kafka dispatch to insider.push.dispatch
+- [x] server/routers.ts — registered pushTokensRouter in appRouter
+- [x] mobile/flutter/lib/services/push_notification_service.dart — FCM token, permissions, Android channel, foreground/background handlers, local notification display, token refresh, badge management
+- [x] server/v69.test.ts — 40 vitest tests: pushTokens router, getAuditEntryDiff, JsonDiffViewer utilities, Python service contract, nightly cron contract (all passing)
+- [x] TypeScript: 0 errors
+- [ ] Push v69 to GitHub munisp/singlewindow

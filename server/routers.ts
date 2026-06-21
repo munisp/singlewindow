@@ -72,6 +72,7 @@ import { opensearchRouter } from "./routers/opensearch";
 import { fundFlowRouter } from "./routers/fund-flow";
 import { tigerbeetleSeedRouter } from "./routers/tigerbeetleSeed";
 import { insiderThreatRouter } from "./routers/insiderThreat";
+import { pushTokensRouter } from "./routers/pushTokens";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -276,6 +277,7 @@ export const appRouter = router({
   fundFlow: fundFlowRouter,
   tigerbeetleSeed: tigerbeetleSeedRouter,
   insiderThreat: insiderThreatRouter,
+  pushTokens: pushTokensRouter,
 });
 
 export type AppRouter = typeof appRouter;

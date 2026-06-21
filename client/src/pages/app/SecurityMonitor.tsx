@@ -21,14 +21,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   Shield, Users, AlertTriangle, CheckCircle2, XCircle, Clock,
-  RefreshCw, LogOut, Eye, Lock, Activity, Database, ChevronLeft, ChevronRight,
+  RefreshCw, LogOut, Eye, Lock, Activity, Database, ChevronLeft, ChevronRight, GitCompare,
 } from "lucide-react";
+import { JsonDiffViewer } from "@/components/JsonDiffViewer";
 
 // ─── Severity badge ───────────────────────────────────────────────────────────
 
@@ -468,16 +472,63 @@ function FourEyesQueueTab() {
 
 function AuditLogTab() {
   const [page, setPage] = useState(0);
+  const [diffEntryId, setDiffEntryId] = useState<string | null>(null);
   const limit = 25;
   const { data, isLoading } = trpc.insiderThreat.getAuditLog.useQuery(
     { limit, offset: page * limit },
     { keepPreviousData: true } as any
+  );
+  const { data: diffData, isLoading: diffLoading } = trpc.insiderThreat.getAuditEntryDiff.useQuery(
+    { entryId: diffEntryId! },
+    { enabled: !!diffEntryId }
   );
 
   const entries = data?.entries ?? [];
 
   return (
     <div className="space-y-4">
+      {/* Diff Sheet */}
+      <Sheet open={!!diffEntryId} onOpenChange={(open) => !open && setDiffEntryId(null)}>
+        <SheetContent side="right" className="w-[520px] sm:w-[620px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <GitCompare className="h-5 w-5" /> Privileged Action Diff
+            </SheetTitle>
+            <SheetDescription>
+              Before/after snapshot of the changed record
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4 space-y-3">
+            {diffLoading ? (
+              <Skeleton className="h-64 w-full" />
+            ) : diffData ? (
+              <>
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <p><span className="font-medium">Action:</span> {diffData.action}</p>
+                  <p><span className="font-medium">Entity:</span> {diffData.entityType}/{diffData.entityId}</p>
+                  <p><span className="font-medium">Actor:</span> {diffData.actorId ?? "—"}</p>
+                  <p><span className="font-medium">Time:</span> {diffData.createdAt ? new Date(diffData.createdAt).toLocaleString() : "—"}</p>
+                </div>
+                {diffData.hasDiff ? (
+                  <JsonDiffViewer
+                    before={diffData.before}
+                    after={diffData.after}
+                    showUnchanged={false}
+                    maxHeight="500px"
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    No before/after snapshot recorded for this entry.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Entry not found.</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Showing {page * limit + 1}–{page * limit + entries.length} · source: {data?.source ?? "—"}
@@ -508,6 +559,7 @@ function AuditLogTab() {
                 <th className="text-left py-2 px-2">Action</th>
                 <th className="text-left py-2 px-2">Entity</th>
                 <th className="text-left py-2 px-2">Actor</th>
+                <th className="text-left py-2 px-2">Diff</th>
               </tr>
             </thead>
             <tbody>
@@ -521,6 +573,16 @@ function AuditLogTab() {
                   </td>
                   <td className="py-1.5 px-2">{e.entityType}/{e.entityId}</td>
                   <td className="py-1.5 px-2">{e.actorId ?? "—"}</td>
+                  <td className="py-1.5 px-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => setDiffEntryId(e.id)}
+                    >
+                      <GitCompare className="h-3 w-3 mr-1" /> View
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>

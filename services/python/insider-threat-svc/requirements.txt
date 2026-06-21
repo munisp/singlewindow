@@ -1,0 +1,15 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+scikit-learn==1.5.2
+numpy==1.26.4
+pandas==2.2.3
+joblib==1.4.2
+apscheduler==3.10.4
+sqlalchemy==2.0.36
+requests==2.32.3
+kafka-python==2.0.2
+redis==5.2.1
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.28.1
