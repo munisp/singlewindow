@@ -423,4 +423,14 @@ export const insiderThreatRouter = router({
       return { is_valid: false, source: "unavailable" };
     }
   }),
+
+  /**
+   * getSSEToken — issue a short-lived JWT for the /api/events/anomalies SSE stream.
+   * Only admin users receive a token. Token expires in 5 minutes.
+   */
+  getSSEToken: adminProcedure.mutation(async ({ ctx }) => {
+    const { issueSSEToken } = await import("../sse");
+    const token = await issueSSEToken(ctx.user.id, ctx.user.role ?? "user");
+    return { token, expiresInSeconds: 300 };
+  }),
 });

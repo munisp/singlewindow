@@ -150,21 +150,76 @@ function ActiveSessionsTab() {
   );
 }
 
-// ─── Anomaly Alerts Tab ───────────────────────────────────────────────────────
+// ─── Anomaly Alerts Tab — SSE-powered live feed ───────────────────────────────
+
+interface LiveAlert {
+  type: "anomaly_detected" | "threat_blocked";
+  userId?: string;
+  sessionId?: string;
+  ruleId?: string;
+  ruleName?: string;
+  severity?: string;
+  anomalyScore?: number;
+  description?: string;
+  action?: string;
+  endpoint?: string;
+  ts?: number;
+  id: string;
+}
 
 function AnomalyAlertsTab() {
+  const [liveAlerts, setLiveAlerts] = useState<LiveAlert[]>([]);
+  const [sseStatus, setSseStatus] = useState<"connecting" | "connected" | "error" | "idle">("idle");
   const [severity, setSeverity] = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | undefined>();
+  const esRef = useState<EventSource | null>(null);
+
+  // Historical alerts from OpenSearch (fallback / initial load)
   const { data, isLoading, refetch } = trpc.insiderThreat.getAnomalyAlerts.useQuery(
     { severity, limit: 50 },
-    { refetchInterval: 30_000 }
+    { refetchInterval: 60_000 }
   );
 
-  const alerts = data?.alerts ?? [];
+  // SSE token mutation
+  const getToken = trpc.insiderThreat.getSSEToken.useMutation({
+    onSuccess: ({ token }) => {
+      // Close any existing connection
+      if (esRef[0]) { esRef[0].close(); }
+
+      setSseStatus("connecting");
+      const es = new EventSource(`/api/events/anomalies?token=${encodeURIComponent(token)}`);
+      // @ts-ignore — store ref
+      esRef[1](es);
+
+      es.addEventListener("connected", () => setSseStatus("connected"));
+
+      es.addEventListener("anomaly", (e) => {
+        try {
+          const data = JSON.parse(e.data) as Omit<LiveAlert, "id">;
+          setLiveAlerts((prev) => [{ ...data, id: `${Date.now()}-${Math.random()}` }, ...prev].slice(0, 200));
+        } catch { /* ignore */ }
+      });
+
+      es.addEventListener("blocked", (e) => {
+        try {
+          const data = JSON.parse(e.data) as Omit<LiveAlert, "id">;
+          setLiveAlerts((prev) => [{ ...data, type: "threat_blocked" as const, id: `${Date.now()}-${Math.random()}` }, ...prev].slice(0, 200));
+        } catch { /* ignore */ }
+      });
+
+      es.onerror = () => {
+        setSseStatus("error");
+        es.close();
+      };
+    },
+    onError: () => setSseStatus("error"),
+  });
+
+  const historicalAlerts = data?.alerts ?? [];
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const).map((s) => (
             <Button
               key={s}
@@ -176,44 +231,105 @@ function AnomalyAlertsTab() {
             </Button>
           ))}
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          <RefreshCw className="h-4 w-4 mr-1" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {sseStatus === "connected" ? (
+            <span className="flex items-center gap-1 text-xs text-green-600">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              Live
+            </span>
+          ) : sseStatus === "connecting" ? (
+            <span className="text-xs text-yellow-600">Connecting…</span>
+          ) : sseStatus === "error" ? (
+            <span className="text-xs text-red-500">Stream error</span>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => getToken.mutate()}
+            disabled={getToken.isPending}
+          >
+            <Activity className="h-4 w-4 mr-1" />
+            {sseStatus === "connected" ? "Reconnect" : "Connect Live"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 mr-1" /> Historical
+          </Button>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
-      ) : alerts.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <Activity className="h-12 w-12 mx-auto mb-3 opacity-40" />
-          <p>No anomaly alerts found</p>
-          <p className="text-xs mt-1">OpenSearch may be unavailable in sandbox mode</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {alerts.map((a: any, i: number) => (
-            <Card key={i} className="p-3">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">{a.rule_name ?? a.ruleName}</span>
-                    <SeverityBadge severity={a.severity} />
-                    <Badge variant="outline" className="text-xs">{a.rule_id ?? a.ruleId}</Badge>
+      {/* Live alerts from SSE */}
+      {liveAlerts.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Live Feed ({liveAlerts.length})</p>
+          <div className="space-y-2">
+            {liveAlerts
+              .filter((a) => !severity || a.severity === severity)
+              .map((a) => (
+                <Card key={a.id} className="p-3 border-l-4 border-l-orange-500">
+                  <div className="flex items-start gap-3">
+                    {a.type === "threat_blocked"
+                      ? <Lock className="h-4 w-4 mt-0.5 text-red-600 shrink-0" />
+                      : <AlertTriangle className="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">
+                          {a.type === "threat_blocked" ? "🚫 Blocked" : a.ruleName ?? "Anomaly Detected"}
+                        </span>
+                        {a.severity && <SeverityBadge severity={a.severity} />}
+                        {a.ruleId && <Badge variant="outline" className="text-xs">{a.ruleId}</Badge>}
+                        <Badge variant="secondary" className="text-xs">
+                          score: {a.anomalyScore?.toFixed(3) ?? "—"}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">{a.description}</p>
+                      <p className="text-xs text-muted-foreground">
+                        User: {a.userId} · {a.action ?? ""} · {a.ts ? new Date(a.ts).toLocaleString() : "—"}
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{a.description}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    User: {a.user_id ?? a.userId} · {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : "—"}
-                  </p>
-                  <p className="text-xs font-medium text-blue-600 mt-0.5">
-                    Action: {a.recommended_action ?? a.recommendedAction}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          ))}
+                </Card>
+              ))}
+          </div>
         </div>
       )}
+
+      {/* Historical alerts from OpenSearch */}
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Historical (OpenSearch)</p>
+        {isLoading ? (
+          <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
+        ) : historicalAlerts.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Activity className="h-10 w-10 mx-auto mb-3 opacity-40" />
+            <p className="text-sm">No historical alerts found</p>
+            <p className="text-xs mt-1">OpenSearch may be unavailable in sandbox mode</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {historicalAlerts.map((a: any, i: number) => (
+              <Card key={i} className="p-3">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 text-orange-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{a.rule_name ?? a.ruleName}</span>
+                      <SeverityBadge severity={a.severity} />
+                      <Badge variant="outline" className="text-xs">{a.rule_id ?? a.ruleId}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{a.description}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      User: {a.user_id ?? a.userId} · {a.timestamp ? new Date(a.timestamp * 1000).toLocaleString() : "—"}
+                    </p>
+                    <p className="text-xs font-medium text-blue-600 mt-0.5">
+                      Action: {a.recommended_action ?? a.recommendedAction}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

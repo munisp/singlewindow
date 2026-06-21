@@ -1433,10 +1433,34 @@ async function startServer() {
     registerDemoAuthRoute(app);
   }
 
+  // SSE endpoint for real-time anomaly alerts (insider threat monitoring)
+  {
+    const { anomalySSEHandler } = await import("../sse");
+    app.get("/api/events/anomalies", anomalySSEHandler);
+    console.log("[SSE] Anomaly alert stream mounted at GET /api/events/anomalies");
+  }
+
+  // Kafka consumer for insider threat topics → anomalyBus → SSE clients
+  {
+    const { startInsiderThreatKafkaConsumer } = await import("../kafkaConsumer");
+    startInsiderThreatKafkaConsumer().catch((err: Error) =>
+      console.warn("[KafkaConsumer] Failed to start insider threat consumer:", err.message)
+    );
+  }
+
   // Scheduled Heartbeat handlers — must be before Vite/static fallthrough
   {
     const { bondExpiryDigestHandler } = await import("../scheduled/bondExpiryDigest");
     app.post("/api/scheduled/bond-expiry-digest", bondExpiryDigestHandler);
+  }
+
+  // 4-Eyes Approval Expiry — heartbeat handler + cron
+  {
+    const { fourEyesExpiryHandler, runFourEyesExpiryCron } = await import("../scheduled/fourEyesExpiry");
+    app.post("/api/scheduled/four-eyes-expiry", fourEyesExpiryHandler);
+    // Also run as an in-process cron every 15 minutes
+    cron.schedule("0 */15 * * * *", runFourEyesExpiryCron, { timezone: "UTC" });
+    console.log("[Cron] 4-Eyes approval expiry scheduled every 15 minutes");
   }
 
   // tRPC API — apply general rate limiting

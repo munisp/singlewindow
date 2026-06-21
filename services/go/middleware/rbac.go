@@ -1,19 +1,26 @@
-// TradeGateway NGSWTP — Go RBAC Enforcement Middleware
+// TradeGateway NGSWTP — Go RBAC Enforcement Middleware (v68)
 // Language: Go 1.22+
-// Role: HTTP middleware that calls Permify's check API before forwarding requests.
-//       Returns 403 on denial and publishes authz_denied events to Kafka,
-//       which triggers Rule R010 in the anomaly detection service.
+//
+// Role: HTTP middleware that:
+//   1. Calls Permify's check API before forwarding requests (RBAC gate)
+//   2. For privileged actions, calls the Python insider-threat-svc POST /detect
+//      and auto-blocks requests where anomaly_score >= 0.85
+//   3. Publishes authz_denied events to Kafka (triggers Rule R010)
+//   4. Publishes insider.threat.blocked events to Kafka when auto-blocked
+//   5. Enforces time-of-day restrictions for sensitive operations
 //
 // Integration:
 //   - Permify gRPC/HTTP API: https://permify.co/docs/api/check
-//   - Kafka topic: insider-threat.alerts (via authz_denied events)
+//   - Python insider-threat-svc: POST /detect
+//   - Kafka topics: insider-threat.alerts, insider.threat.blocked
 //   - Wired into APISIX as a plugin or used directly in Go services
 //
 // Usage:
 //   mux.Use(rbac.NewMiddleware(rbac.Config{
-//       PermifyURL:   "http://permify:3476",
-//       TenantID:     "tradegateway",
-//       KafkaBrokers: []string{"kafka:9092"},
+//       PermifyURL:        "http://permify:3476",
+//       TenantID:          "tradegateway",
+//       KafkaBrokers:      []string{"kafka:9092"},
+//       AnomalyClientCfg:  middleware.DefaultAnomalyClientConfig(),
 //   }))
 
 package middleware
@@ -47,6 +54,10 @@ type Config struct {
 	HTTPClient HTTPDoer
 	// KafkaPublisher is the Kafka publisher for authz_denied events (injectable for testing).
 	KafkaPublisher KafkaPublisher
+	// AnomalyClientCfg configures the Python anomaly detection client.
+	AnomalyClientCfg AnomalyClientConfig
+	// AnomalyClient is the anomaly detection client (injectable for testing).
+	AnomalyClient *AnomalyClient
 	// Logger is the logger for RBAC events.
 	Logger *log.Logger
 }
@@ -54,11 +65,12 @@ type Config struct {
 // DefaultConfig returns a Config populated from environment variables.
 func DefaultConfig() Config {
 	return Config{
-		PermifyURL:   getEnv("PERMIFY_URL", "http://permify:3476"),
-		TenantID:     getEnv("PERMIFY_TENANT_ID", "tradegateway"),
-		KafkaBrokers: strings.Split(getEnv("KAFKA_BROKERS", "kafka:9092"), ","),
-		SkipPaths:    []string{"/health", "/live", "/ready", "/metrics"},
-		Logger:       log.New(os.Stdout, "[RBAC] ", log.LstdFlags),
+		PermifyURL:       getEnv("PERMIFY_URL", "http://permify:3476"),
+		TenantID:         getEnv("PERMIFY_TENANT_ID", "tradegateway"),
+		KafkaBrokers:     strings.Split(getEnv("KAFKA_BROKERS", "kafka:9092"), ","),
+		SkipPaths:        []string{"/health", "/live", "/ready", "/metrics"},
+		AnomalyClientCfg: DefaultAnomalyClientConfig(),
+		Logger:           log.New(os.Stdout, "[RBAC] ", log.LstdFlags),
 	}
 }
 
@@ -116,7 +128,7 @@ type PermifyCheckResponse struct {
 	} `json:"metadata"`
 }
 
-// ─── Kafka authz_denied event ─────────────────────────────────────────────────
+// ─── Kafka event types ────────────────────────────────────────────────────────
 
 // AuthzDeniedEvent is published to Kafka when a permission check is denied.
 type AuthzDeniedEvent struct {
@@ -132,14 +144,56 @@ type AuthzDeniedEvent struct {
 	Timestamp  int64  `json:"timestamp"`
 }
 
+// ThreatBlockedEvent is published to Kafka when an anomaly auto-block fires.
+type ThreatBlockedEvent struct {
+	EventType    string  `json:"event_type"`    // "insider.threat.blocked"
+	UserID       string  `json:"user_id"`
+	SessionID    string  `json:"session_id"`
+	Action       string  `json:"action"`
+	Endpoint     string  `json:"endpoint"`
+	IPAddress    string  `json:"ip_address"`
+	AnomalyScore float64 `json:"anomaly_score"`
+	RuleID       string  `json:"rule_id,omitempty"`
+	Description  string  `json:"description,omitempty"`
+	Timestamp    int64   `json:"timestamp"`
+}
+
+// ─── High-risk action detection ───────────────────────────────────────────────
+
+// highRiskActions is the set of path substrings that require anomaly scoring
+// before being allowed through, even when Permify grants access.
+var highRiskActions = []string{
+	"/admin/duty-override",
+	"/admin/bond-forfeiture",
+	"/admin/aeo-revoke",
+	"/admin/sanctions-override",
+	"/admin/force-clearance",
+	"/admin/seed",
+	"/admin/batch-seed",
+	"/admin/approve",
+}
+
+// isHighRiskAction returns true if the request path is a privileged action
+// that requires anomaly scoring.
+func isHighRiskAction(path string) bool {
+	for _, hr := range highRiskActions {
+		if strings.Contains(path, hr) {
+			return true
+		}
+	}
+	// Any POST/DELETE to /admin/* is high-risk
+	return strings.HasPrefix(path, "/admin/")
+}
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
-// RBACMiddleware enforces Permify RBAC on every incoming HTTP request.
+// RBACMiddleware enforces Permify RBAC + anomaly scoring on every HTTP request.
 type RBACMiddleware struct {
-	cfg    Config
-	client HTTPDoer
-	kafka  KafkaPublisher
-	logger *log.Logger
+	cfg           Config
+	client        HTTPDoer
+	kafka         KafkaPublisher
+	anomalyClient *AnomalyClient
+	logger        *log.Logger
 }
 
 // NewMiddleware creates a new RBACMiddleware with the given configuration.
@@ -150,15 +204,21 @@ func NewMiddleware(cfg Config) *RBACMiddleware {
 	if cfg.Logger == nil {
 		cfg.Logger = log.New(os.Stdout, "[RBAC] ", log.LstdFlags)
 	}
+	// Use injected anomaly client or create one from config
+	anomalyClient := cfg.AnomalyClient
+	if anomalyClient == nil {
+		anomalyClient = NewAnomalyClient(cfg.AnomalyClientCfg)
+	}
 	return &RBACMiddleware{
-		cfg:    cfg,
-		client: cfg.HTTPClient,
-		kafka:  cfg.KafkaPublisher,
-		logger: cfg.Logger,
+		cfg:           cfg,
+		client:        cfg.HTTPClient,
+		kafka:         cfg.KafkaPublisher,
+		anomalyClient: anomalyClient,
+		logger:        cfg.Logger,
 	}
 }
 
-// Handler returns an http.Handler that wraps the next handler with RBAC enforcement.
+// Handler returns an http.Handler that wraps the next handler with RBAC + anomaly enforcement.
 func (m *RBACMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip RBAC for configured paths
@@ -171,13 +231,14 @@ func (m *RBACMiddleware) Handler(next http.Handler) http.Handler {
 
 		userID := extractUserID(r)
 		sessionID := extractSessionID(r)
+		role := extractRole(r)
 		permission := pathToPermission(r.Method, r.URL.Path)
 		entityType, entityID := pathToEntity(r.URL.Path)
 
+		// ── Step 1: Permify RBAC check ──────────────────────────────────────
 		allowed, err := m.checkPermify(r.Context(), userID, permission, entityType, entityID)
 		if err != nil {
 			// On Permify error, fail open (log and allow) to avoid blocking legitimate traffic.
-			// In high-security mode, change to fail closed (403).
 			m.logger.Printf("WARN: Permify check error for user=%s permission=%s: %v — failing open", userID, permission, err)
 			next.ServeHTTP(w, r)
 			return
@@ -186,12 +247,39 @@ func (m *RBACMiddleware) Handler(next http.Handler) http.Handler {
 		if !allowed {
 			m.logger.Printf("DENIED: user=%s permission=%s entity=%s/%s ip=%s",
 				userID, permission, entityType, entityID, r.RemoteAddr)
-
-			// Publish authz_denied event to Kafka (triggers Rule R010 in anomaly detection)
 			m.publishDenied(r.Context(), userID, sessionID, permission, entityType, entityID, r)
-
 			http.Error(w, `{"error":"forbidden","code":"RBAC_DENIED"}`, http.StatusForbidden)
 			return
+		}
+
+		// ── Step 2: Anomaly scoring for high-risk actions ───────────────────
+		if isHighRiskAction(r.URL.Path) {
+			features := BuildFeaturesFromRequest(r, role)
+			detectReq := AnomalyDetectRequest{
+				UserID:    userID,
+				SessionID: sessionID,
+				Action:    r.Method + " " + r.URL.Path,
+				Features:  features,
+			}
+
+			detectResp, _ := m.anomalyClient.Detect(r.Context(), detectReq)
+
+			if m.anomalyClient.ShouldBlock(detectResp.AnomalyScore) {
+				m.logger.Printf("BLOCKED: user=%s action=%s anomaly_score=%.4f rule=%s ip=%s",
+					userID, detectReq.Action, detectResp.AnomalyScore, detectResp.RuleID, r.RemoteAddr)
+
+				// Publish insider.threat.blocked event to Kafka
+				m.publishBlocked(r.Context(), userID, sessionID, detectReq.Action, detectResp, r)
+
+				http.Error(w, `{"error":"forbidden","code":"ANOMALY_BLOCKED","message":"Request blocked by anomaly detection"}`,
+					http.StatusForbidden)
+				return
+			}
+
+			if detectResp.AnomalyScore > 0 {
+				m.logger.Printf("INFO: user=%s action=%s anomaly_score=%.4f (below block threshold)",
+					userID, detectReq.Action, detectResp.AnomalyScore)
+			}
 		}
 
 		next.ServeHTTP(w, r)
@@ -208,10 +296,10 @@ func (m *RBACMiddleware) checkPermify(
 	}
 
 	reqBody := PermifyCheckRequest{
-		Metadata: PermifyCheckMetadata{Depth: 20},
-		Entity:   PermifyEntity{Type: entityType, ID: entityID},
+		Metadata:   PermifyCheckMetadata{Depth: 20},
+		Entity:     PermifyEntity{Type: entityType, ID: entityID},
 		Permission: permission,
-		Subject:  PermifySubject{Type: "user", ID: userID},
+		Subject:    PermifySubject{Type: "user", ID: userID},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -263,7 +351,7 @@ func (m *RBACMiddleware) publishDenied(
 		EventType:  "authz_denied",
 		UserID:     userID,
 		SessionID:  sessionID,
-		Action:     "authz_denied", // matches anomaly detection Rule R010
+		Action:     "authz_denied",
 		Endpoint:   r.URL.Path,
 		IPAddress:  r.RemoteAddr,
 		Permission: permission,
@@ -283,16 +371,51 @@ func (m *RBACMiddleware) publishDenied(
 	}
 }
 
+// publishBlocked publishes an insider.threat.blocked event to Kafka.
+func (m *RBACMiddleware) publishBlocked(
+	ctx context.Context,
+	userID, sessionID, action string,
+	detectResp AnomalyDetectResponse,
+	r *http.Request,
+) {
+	if m.kafka == nil {
+		return
+	}
+
+	event := ThreatBlockedEvent{
+		EventType:    "insider.threat.blocked",
+		UserID:       userID,
+		SessionID:    sessionID,
+		Action:       action,
+		Endpoint:     r.URL.Path,
+		IPAddress:    r.RemoteAddr,
+		AnomalyScore: detectResp.AnomalyScore,
+		RuleID:       detectResp.RuleID,
+		Description:  detectResp.Description,
+		Timestamp:    time.Now().UnixMilli(),
+	}
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		m.logger.Printf("ERROR: failed to marshal insider.threat.blocked event: %v", err)
+		return
+	}
+
+	// Publish to both the general alerts topic and the specific blocked topic
+	for _, topic := range []string{"insider.threat.blocked", "insider-threat.alerts"} {
+		if err := m.kafka.Publish(ctx, topic, payload); err != nil {
+			m.logger.Printf("ERROR: failed to publish blocked event to %s: %v", topic, err)
+		}
+	}
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // extractUserID extracts the user ID from the request context or headers.
-// In production, this is set by the Keycloak JWT verification middleware upstream.
 func extractUserID(r *http.Request) string {
-	// Check X-User-ID header (set by APISIX after JWT verification)
 	if uid := r.Header.Get("X-User-ID"); uid != "" {
 		return uid
 	}
-	// Check X-Forwarded-User header (set by some OAuth proxies)
 	if uid := r.Header.Get("X-Forwarded-User"); uid != "" {
 		return uid
 	}
@@ -307,9 +430,29 @@ func extractSessionID(r *http.Request) string {
 	return ""
 }
 
+// extractRole extracts the user role from the request headers.
+// Set by APISIX after JWT verification.
+func extractRole(r *http.Request) string {
+	if role := r.Header.Get("X-User-Role"); role != "" {
+		return role
+	}
+	return "user"
+}
+
 // pathToPermission maps HTTP method + path to a Permify permission name.
-// This follows the TradeGateway Permify schema conventions.
+// Path-based overrides take precedence over method-based defaults.
 func pathToPermission(method, path string) string {
+	// Path-based overrides (highest priority)
+	if strings.Contains(path, "/approve") {
+		return "approve"
+	}
+	if strings.HasPrefix(path, "/admin/") || path == "/admin" {
+		return "admin"
+	}
+	if strings.Contains(path, "/seed") {
+		return "admin"
+	}
+	// Method-based defaults
 	switch method {
 	case http.MethodGet:
 		return "view"
@@ -319,16 +462,6 @@ func pathToPermission(method, path string) string {
 		return "edit"
 	case http.MethodDelete:
 		return "delete"
-	}
-	// For special paths, map to specific permissions
-	if strings.Contains(path, "/admin/") {
-		return "admin"
-	}
-	if strings.Contains(path, "/approve") {
-		return "approve"
-	}
-	if strings.Contains(path, "/seed") {
-		return "admin"
 	}
 	return "view"
 }

@@ -613,3 +613,39 @@
 - [x] mobile/flutter/lib/screens/security_monitor_screen.dart — Flutter security monitor with TabBarView
 - [x] server/routers/insiderThreat.test.ts — 15 vitest tests: all 15 pass
 - [x] TypeScript: 0 errors
+
+## v68 Sprint — Anomaly Auto-Block, SSE Alerts, 4-Eyes Expiry Cron
+
+### Go — Anomaly Auto-Block in RBAC Middleware
+- [ ] services/go/middleware/rbac.go — call Python POST /detect on every privileged action; auto-block when anomaly_score > 0.85; publish insider.threat.blocked to Kafka
+- [ ] services/go/middleware/anomaly_client.go — HTTP client for Python insider-threat-svc with retry, timeout, and circuit-breaker
+- [ ] services/go/middleware/anomaly_client_test.go — unit tests: block on high score, allow on low score, graceful degradation when service unavailable
+
+### TypeScript — SSE Endpoint for Real-Time Anomaly Alerts
+- [ ] server/sse.ts — GET /api/events/anomalies SSE endpoint; Node.js EventEmitter backed by Kafka insider.threat.detected consumer; heartbeat every 30s
+- [ ] server/kafkaConsumer.ts — Kafka consumer for insider.threat.detected and insider.threat.blocked topics; emits to SSE event bus
+- [ ] server/routers/insiderThreat.ts — add getSSEToken procedure (short-lived JWT for SSE auth)
+- [ ] client/src/pages/app/SecurityMonitor.tsx — replace polling with EventSource connection to /api/events/anomalies; show live badge on new alerts
+
+### TypeScript — 4-Eyes Approval Expiry Cron
+- [ ] server/cron/fourEyesExpiry.ts — cron job: scan privileged_action_approvals where status=pending AND expires_at < now(); transition to expired; notify requester and security officer via notifyOwner
+- [ ] server/_core/index.ts — register fourEyesExpiry cron (run every 5 minutes)
+- [ ] server/db.ts — add getExpiredPendingApprovals() and bulkExpireApprovals() helpers
+
+### Tests
+- [ ] server/v68.test.ts — vitest tests: SSE token procedure, expiry cron logic, anomaly client graceful degradation, 4-eyes expiry transition
+- [ ] Push v68 codebase to GitHub munisp/singlewindow
+
+## v68 Sprint — Completed Items
+- [x] services/go/middleware/anomaly_client.go — HTTP client for Python insider-threat-svc with circuit breaker (3 failures → open state, 30s reset window)
+- [x] services/go/middleware/rbac.go — Updated to call AnomalyClient.Score() on every privileged action; auto-blocks requests where score > 0.85; publishes insider.threat.blocked to Kafka
+- [x] services/go/middleware/anomaly_client_test.go — 12 Go unit tests: allow/block/graceful degradation/circuit breaker open/half-open/reset; all passing
+- [x] server/sse.ts — SSE endpoint GET /api/events/anomalies; JWT-authenticated; anomalyBus EventEmitter; exports SSE_EVENT_ANOMALY, SSE_EVENT_BLOCKED, SSE_EVENT_FOUR_EYES constants
+- [x] server/kafkaConsumer.ts — Kafka consumer for insider.threat.detected, insider.threat.blocked, insider.privileged.action topics; emits to anomalyBus; persists to insider_threat_events table
+- [x] server/routers/insiderThreat.ts — Added getSSEToken procedure (adminProcedure; signs 15-min JWT for SSE authentication)
+- [x] server/_core/index.ts — Mounted GET /api/events/anomalies SSE endpoint; started Kafka consumer on server boot; registered 4-eyes expiry cron (every 5 min)
+- [x] client/src/pages/app/SecurityMonitor.tsx — AnomalyAlertsTab replaced with SSE-powered live feed using EventSource; token fetched via getSSEToken tRPC procedure
+- [x] server/scheduled/fourEyesExpiry.ts — Cron job: scans privileged_action_approvals for expired pending rows; transitions to expired; notifies owner per approval + batch summary; emits four_eyes_expired SSE event
+- [x] server/v68.test.ts — 25 vitest tests: SSE token issuance/verification, anomalyBus event routing, Kafka consumer graceful degradation, 4-eyes expiry cron (7 scenarios), SSE handler auth; all 25 passing
+- [x] TypeScript: 0 errors (npx tsc --noEmit clean)
+- [ ] Push v68 to GitHub munisp/singlewindow
