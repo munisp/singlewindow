@@ -1,0 +1,377 @@
+# TradeGateway™ NGSWTP — Helm Chart Default Values
+# Override these values in values.prod.yaml or via --set flags.
+# All secrets should be provided via Kubernetes Secrets, not hardcoded here.
+
+# ─── Global ────────────────────────────────────────────────────────────────────
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# ─── TradeGateway Application ──────────────────────────────────────────────────
+app:
+  enabled: true
+  name: tradegateway-app
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/munisp/tradegateway
+    tag: "v60"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 9000
+    targetPort: 9000
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  env:
+    NODE_ENV: production
+    PORT: "9000"
+    DEMO_MODE: "false"
+
+  # Secret references — create these Kubernetes Secrets before deploying
+  # kubectl create secret generic tradegateway-secrets --from-env-file=.env
+  secretName: tradegateway-secrets
+
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: 9000
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: 9000
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 3
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ─── PostgreSQL ────────────────────────────────────────────────────────────────
+# Uses Bitnami PostgreSQL chart as a dependency (see Chart.yaml)
+postgresql:
+  enabled: true
+  auth:
+    username: tradegateway
+    database: tradegateway
+    # Password set via existingSecret in production
+    existingSecret: tradegateway-postgres-secret
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: ""
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    initdb:
+      scripts:
+        create-schemas.sql: |
+          CREATE SCHEMA IF NOT EXISTS keycloak;
+          CREATE SCHEMA IF NOT EXISTS permify;
+
+# ─── Redis ─────────────────────────────────────────────────────────────────────
+# Uses Bitnami Redis chart as a dependency (see Chart.yaml)
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: true
+    existingSecret: tradegateway-redis-secret
+    existingSecretPasswordKey: redis-password
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# ─── Keycloak ──────────────────────────────────────────────────────────────────
+keycloak:
+  enabled: true
+  name: keycloak
+  replicaCount: 1
+
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "24.0.4"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    httpPort: 8080
+    httpsPort: 8443
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  env:
+    KC_HOSTNAME_STRICT: "false"
+    KC_HOSTNAME_STRICT_HTTPS: "false"
+    KC_HTTP_ENABLED: "true"
+    KC_HEALTH_ENABLED: "true"
+    KC_METRICS_ENABLED: "true"
+    KC_LOG_LEVEL: INFO
+    KC_DB: postgres
+
+  secretName: tradegateway-keycloak-secret
+
+  realmImport:
+    enabled: true
+    configMapName: keycloak-realm-config
+
+  persistence:
+    enabled: true
+    size: 2Gi
+
+# ─── Permify ───────────────────────────────────────────────────────────────────
+permify:
+  enabled: true
+  name: permify
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/permify/permify
+    tag: "v0.9.6"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    httpPort: 3476
+    grpcPort: 3478
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  env:
+    PERMIFY_SERVER_HTTP_PORT: "3476"
+    PERMIFY_SERVER_GRPC_PORT: "3478"
+    PERMIFY_LOG_LEVEL: info
+    PERMIFY_AUTHN_ENABLED: "false"
+    PERMIFY_DATABASE_ENGINE: postgres
+    PERMIFY_DATABASE_MAX_OPEN_CONNECTIONS: "20"
+
+  secretName: tradegateway-permify-secret
+
+  schemaConfigMap: permify-schema-config
+
+# ─── OpenSearch ────────────────────────────────────────────────────────────────
+opensearch:
+  enabled: true
+  name: opensearch
+  replicaCount: 1
+
+  image:
+    repository: opensearchproject/opensearch
+    tag: "2.13.0"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    httpPort: 9200
+    transportPort: 9300
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+
+  persistence:
+    enabled: true
+    size: 30Gi
+
+  env:
+    discovery.type: single-node
+    DISABLE_INSTALL_DEMO_CONFIG: "true"
+    DISABLE_SECURITY_PLUGIN: "true"
+    OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+
+  jvmOptions: "-Xms1g -Xmx1g"
+
+# ─── Kafka ─────────────────────────────────────────────────────────────────────
+kafka:
+  enabled: true
+  name: kafka
+  replicaCount: 1
+
+  image:
+    repository: confluentinc/cp-kafka
+    tag: "7.6.1"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 29092
+    externalPort: 9092
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+
+  persistence:
+    enabled: true
+    size: 20Gi
+
+  env:
+    KAFKA_BROKER_ID: "1"
+    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+    KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    KAFKA_LOG_RETENTION_HOURS: "168"
+
+# ─── Zookeeper (Kafka dependency) ──────────────────────────────────────────────
+zookeeper:
+  enabled: true
+  name: zookeeper
+  replicaCount: 1
+
+  image:
+    repository: confluentinc/cp-zookeeper
+    tag: "7.6.1"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    clientPort: 2181
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# ─── APISIX API Gateway ────────────────────────────────────────────────────────
+apisix:
+  enabled: true
+  name: apisix
+  replicaCount: 2
+
+  image:
+    repository: apache/apisix
+    tag: "3.9.1-debian"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: LoadBalancer
+    httpPort: 80
+    httpsPort: 443
+    adminPort: 9180
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+
+  config:
+    adminKey: "tradegateway-apisix-admin-key-change-in-production"
+
+# ─── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  hosts:
+    - host: tradegateway.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: app
+        - path: /auth
+          pathType: Prefix
+          service: keycloak
+  tls:
+    - secretName: tradegateway-tls
+      hosts:
+        - tradegateway.example.com
+
+# ─── Service Account ───────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ─── Network Policy ────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: false
+
+# ─── Pod Disruption Budget ─────────────────────────────────────────────────────
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1

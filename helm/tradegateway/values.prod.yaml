@@ -1,0 +1,240 @@
+# TradeGateway™ NGSWTP — Production Values Overlay
+# Apply with: helm upgrade --install tradegateway ./helm/tradegateway \
+#               -f helm/tradegateway/values.yaml \
+#               -f helm/tradegateway/values.prod.yaml \
+#               --namespace tradegateway-prod
+#
+# All secrets MUST be pre-created as Kubernetes Secrets before deploying.
+# See helm/README.md for secret creation instructions.
+
+# ─── TradeGateway Application ──────────────────────────────────────────────────
+app:
+  replicaCount: 4
+
+  image:
+    tag: "v60"
+    pullPolicy: Always
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 70
+
+  env:
+    NODE_ENV: production
+    DEMO_MODE: "false"
+
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9000"
+    prometheus.io/path: "/api/metrics"
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - tradegateway-app
+            topologyKey: kubernetes.io/hostname
+
+# ─── PostgreSQL ────────────────────────────────────────────────────────────────
+postgresql:
+  primary:
+    persistence:
+      size: 200Gi
+      storageClass: "premium-rwo"
+    resources:
+      requests:
+        cpu: 2000m
+        memory: 4Gi
+      limits:
+        cpu: 4000m
+        memory: 8Gi
+  readReplicas:
+    replicaCount: 2
+    persistence:
+      size: 200Gi
+      storageClass: "premium-rwo"
+
+# ─── Redis ─────────────────────────────────────────────────────────────────────
+redis:
+  architecture: replication
+  master:
+    persistence:
+      size: 20Gi
+      storageClass: "premium-rwo"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  replica:
+    replicaCount: 2
+    persistence:
+      size: 20Gi
+
+# ─── Keycloak ──────────────────────────────────────────────────────────────────
+keycloak:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+
+  env:
+    KC_HOSTNAME_STRICT: "true"
+    KC_HOSTNAME_STRICT_HTTPS: "true"
+    KC_HTTP_ENABLED: "false"
+    KC_LOG_LEVEL: WARN
+
+# ─── Permify ───────────────────────────────────────────────────────────────────
+permify:
+  replicaCount: 2
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# ─── OpenSearch ────────────────────────────────────────────────────────────────
+opensearch:
+  replicaCount: 3
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+  persistence:
+    size: 100Gi
+    storageClass: "premium-rwo"
+
+  env:
+    discovery.type: ""
+    DISABLE_SECURITY_PLUGIN: "false"
+    OPENSEARCH_JAVA_OPTS: "-Xms4g -Xmx4g"
+
+  jvmOptions: "-Xms4g -Xmx4g"
+
+# ─── Kafka ─────────────────────────────────────────────────────────────────────
+kafka:
+  replicaCount: 3
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+  persistence:
+    size: 100Gi
+    storageClass: "premium-rwo"
+
+  env:
+    KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+    KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+    KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+    KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+    KAFKA_MIN_INSYNC_REPLICAS: "2"
+
+# ─── Zookeeper ─────────────────────────────────────────────────────────────────
+zookeeper:
+  replicaCount: 3
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  persistence:
+    size: 20Gi
+
+# ─── APISIX ────────────────────────────────────────────────────────────────────
+apisix:
+  replicaCount: 4
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 16
+    targetCPUUtilizationPercentage: 60
+
+# ─── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: tradegateway.gov.gh
+      paths:
+        - path: /
+          pathType: Prefix
+          service: app
+        - path: /auth
+          pathType: Prefix
+          service: keycloak
+  tls:
+    - secretName: tradegateway-prod-tls
+      hosts:
+        - tradegateway.gov.gh
+
+# ─── Network Policy ────────────────────────────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+# ─── Pod Disruption Budget ─────────────────────────────────────────────────────
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

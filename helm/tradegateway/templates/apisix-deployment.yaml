@@ -1,0 +1,168 @@
+{{- if .Values.apisix.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-apisix
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apisix
+spec:
+  {{- if not .Values.apisix.autoscaling.enabled }}
+  replicas: {{ .Values.apisix.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-apisix
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-apisix
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: apisix
+    spec:
+      securityContext:
+        runAsNonRoot: false
+      containers:
+        - name: apisix
+          image: "{{ .Values.apisix.image.repository }}:{{ .Values.apisix.image.tag }}"
+          imagePullPolicy: {{ .Values.apisix.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9080
+              protocol: TCP
+            - name: https
+              containerPort: 9443
+              protocol: TCP
+            - name: admin
+              containerPort: 9180
+              protocol: TCP
+          env:
+            - name: APISIX_STAND_ALONE
+              value: "false"
+          livenessProbe:
+            httpGet:
+              path: /apisix/status
+              port: 9080
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /apisix/status
+              port: 9080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.apisix.resources | nindent 12 }}
+          volumeMounts:
+            - name: apisix-config
+              mountPath: /usr/local/apisix/conf/config.yaml
+              subPath: config.yaml
+      volumes:
+        - name: apisix-config
+          configMap:
+            name: {{ include "tradegateway.fullname" . }}-apisix-config
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-apisix-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apisix
+data:
+  config.yaml: |
+    apisix:
+      node_listen: 9080
+      enable_ipv6: false
+      enable_admin: true
+      admin_listen:
+        ip: 0.0.0.0
+        port: 9180
+      admin_key:
+        - name: "admin"
+          key: {{ .Values.apisix.config.adminKey | quote }}
+          role: admin
+      ssl:
+        enable: true
+        listen_port: 9443
+    nginx_config:
+      http:
+        enable_access_log: true
+    etcd:
+      host:
+        - "http://{{ include "tradegateway.fullname" . }}-etcd:2379"
+      prefix: "/apisix"
+      timeout: 30
+    plugin_attr:
+      prometheus:
+        export_uri: /apisix/prometheus/metrics
+        enable_export_server: true
+        export_addr:
+          ip: "0.0.0.0"
+          port: 9091
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-apisix
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apisix
+spec:
+  type: {{ .Values.apisix.service.type }}
+  ports:
+    - port: {{ .Values.apisix.service.httpPort }}
+      targetPort: 9080
+      protocol: TCP
+      name: http
+    - port: {{ .Values.apisix.service.httpsPort }}
+      targetPort: 9443
+      protocol: TCP
+      name: https
+    - port: {{ .Values.apisix.service.adminPort }}
+      targetPort: 9180
+      protocol: TCP
+      name: admin
+  selector:
+    app.kubernetes.io/name: {{ include "tradegateway.fullname" . }}-apisix
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Values.apisix.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "tradegateway.fullname" . }}-apisix
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tradegateway.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "tradegateway.fullname" . }}-apisix
+  minReplicas: {{ .Values.apisix.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.apisix.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.apisix.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

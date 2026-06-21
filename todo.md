@@ -412,3 +412,30 @@
 - [x] Final gap audit: all Math.random usages confirmed as seed/demo/legitimate randomness; all stubs are graceful-degradation fallbacks
 - [x] 1,876 / 1,876 tests passing (69 files), 0 TypeScript errors
 - [x] Push v59 codebase to GitHub munisp/singlewindow
+
+## v60 Sprint — Docker Compose Bootstrap, Playwright E2E, Helm Chart
+- [x] docker-compose.yml — full-stack bootstrap: postgres, keycloak (realm import), permify (schema mount), opensearch, redis, kafka+zookeeper, tradegateway app with health checks and depends_on ordering
+- [x] .env.compose — environment variable template for docker-compose local dev
+- [x] e2e/playwright.config.ts — Playwright configuration targeting local dev server
+- [x] e2e/trader-declaration.spec.ts — trader submits declaration → customs officer approves → payment clears
+- [x] e2e/aeo-application.spec.ts — trader applies for AEO status → admin reviews → approval
+- [x] e2e/oga-permit.spec.ts — trader requests OGA permit → OGA officer approves
+- [x] e2e/README.md — how to run e2e tests locally and in CI
+- [x] helm/tradegateway/Chart.yaml — Helm chart metadata (version, appVersion, description)
+- [x] helm/tradegateway/values.yaml — default values for all 8 deployments
+- [x] helm/tradegateway/values.prod.yaml — production overlay (replicas, resource limits, ingress TLS)
+- [x] helm/tradegateway/templates/app-deployment.yaml — TradeGateway app Deployment + Service
+- [ ] helm/tradegateway/templates/postgres-deployment.yaml — PostgreSQL StatefulSet + PVC + Service
+- [x] helm/tradegateway/templates/keycloak-deployment.yaml — Keycloak Deployment + ConfigMap + Service
+- [x] helm/tradegateway/templates/permify-deployment.yaml — Permify Deployment + Service
+- [x] helm/tradegateway/templates/opensearch-deployment.yaml — OpenSearch StatefulSet + PVC + Service
+- [ ] helm/tradegateway/templates/redis-deployment.yaml — Redis Deployment + Service
+- [x] helm/tradegateway/templates/kafka-deployment.yaml — Kafka + Zookeeper StatefulSets + Services
+- [x] helm/tradegateway/templates/apisix-deployment.yaml — APISIX Deployment + Service + Ingress
+- [ ] helm/tradegateway/templates/configmap.yaml — middleware URL ConfigMap
+- [ ] helm/tradegateway/templates/secrets.yaml — DATABASE_URL, JWT_SECRET, KEYCLOAK_SECRET, etc.
+- [x] helm/tradegateway/templates/ingress.yaml — Ingress with TLS annotations
+- [ ] helm/tradegateway/templates/hpa.yaml — HorizontalPodAutoscaler for app + opensearch
+- [x] helm/README.md — helm install/upgrade instructions, prerequisites, values reference
+- [x] server/v60.test.ts — tests for docker-compose health check endpoints + helm values validation (62/62 passing)
+- [x] Push v60 codebase to GitHub munisp/singlewindow

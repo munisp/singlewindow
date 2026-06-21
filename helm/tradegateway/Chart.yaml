@@ -1,0 +1,55 @@
+apiVersion: v2
+name: tradegateway
+description: >
+  TradeGateway™ NGSWTP — Next Generation Single Window Trade Platform.
+  A production-grade national trade facilitation platform integrating customs,
+  OGA agencies, payments (Mojaloop), identity (Keycloak), RBAC (Permify),
+  event streaming (Kafka), analytics (OpenSearch), and security (Wazuh/OpenCTI).
+
+type: application
+
+# Chart version — increment on every chart change
+version: 1.0.0
+
+# Application version — matches the Docker image tag
+appVersion: "v60"
+
+keywords:
+  - trade
+  - customs
+  - single-window
+  - tradegateway
+  - ngswtp
+  - government
+  - fintech
+
+home: https://github.com/munisp/singlewindow
+
+sources:
+  - https://github.com/munisp/singlewindow
+
+maintainers:
+  - name: TradeGateway Team
+    email: platform@tradegateway.gov
+    url: https://github.com/munisp/singlewindow
+
+icon: https://raw.githubusercontent.com/munisp/singlewindow/main/client/public/favicon.ico
+
+annotations:
+  category: Government / Trade Facilitation
+  licenses: MIT
+
+dependencies:
+  # PostgreSQL — managed via Bitnami chart
+  - name: postgresql
+    version: "15.5.38"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+    alias: postgresql
+
+  # Redis — managed via Bitnami chart
+  - name: redis
+    version: "20.6.3"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+    alias: redis
