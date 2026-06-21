@@ -39,6 +39,8 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/tradegateway/mojaloop-gateway/internal/dfsp"
 )
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
@@ -493,6 +495,15 @@ func main() {
 	r.Post("/api/payments/initiate", gw.handleInitiate)
 	r.Get("/api/payments/{paymentId}/status", gw.handleStatus)
 	r.Put("/api/payments/callback/transfers/{transferId}", gw.handleCallback)
+
+	// FSPIOP callback endpoints — called by the Mojaloop Hub after quote/transfer
+	cbHandler := dfsp.NewCallbackHandler(logger)
+	r.Put("/parties/{partyIdType}/{partyIdentifier}", cbHandler.HandlePartyCallback)
+	r.Put("/quotes/{id}", cbHandler.HandleQuoteCallback)
+	r.Put("/transfers/{id}", cbHandler.HandleTransferCallback)
+	// DFSP JWKS endpoint — Hub fetches this to verify outbound DFSP signatures
+	dfspSigner, _ := dfsp.NewSigner(logger)
+	r.Get("/dfsp/jwks.json", dfspSigner.JWKSHandler)
 
 	httpPort := getEnv("HTTP_PORT", "8085")
 	httpServer := &http.Server{

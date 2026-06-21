@@ -238,3 +238,78 @@ networkPolicy:
 podDisruptionBudget:
   enabled: true
   minAvailable: 2
+
+# ─── Temporal Workflow Worker — Production Overlay ─────────────────────────────
+# Overrides the dev defaults in values.yaml for production deployment.
+# 3 replicas ensures HA — Temporal client-side sticky execution means each
+# worker handles its own workflow history, so 3 replicas = 3x throughput.
+workflowWorker:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/munisp/tradegateway-workflow-worker
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  healthPort: 8090
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "384Mi"
+  env:
+    TEMPORAL_HOST: "temporal-frontend:7233"
+    TEMPORAL_NAMESPACE: "tradegateway-prod"
+    TEMPORAL_TASK_QUEUE: "fund-flow-tasks"
+    TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:4600"
+    KAFKA_BROKER: "kafka:9092"
+    MOJALOOP_URL: "http://mojaloop-switch:3000"
+    LOG_LEVEL: "info"
+  startupProbe:
+    httpGet:
+      path: /live
+      port: 8090
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 24
+    timeoutSeconds: 3
+  livenessProbe:
+    httpGet:
+      path: /live
+      port: 8090
+    initialDelaySeconds: 0
+    periodSeconds: 15
+    failureThreshold: 3
+    timeoutSeconds: 5
+  readinessProbe:
+    httpGet:
+      path: /ready
+      port: 8090
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    failureThreshold: 6
+    timeoutSeconds: 5
+  terminationGracePeriodSeconds: 60
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          preference:
+            matchExpressions:
+              - key: node-role
+                operator: In
+                values:
+                  - worker
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: workflow-worker
+          topologyKey: kubernetes.io/hostname
+  imagePullSecrets:
+    - name: ghcr-pull-secret

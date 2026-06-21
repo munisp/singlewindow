@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Settings, Save, RefreshCw, ShieldAlert, Clock, History } from "lucide-react";
+import { Settings, Save, RefreshCw, ShieldAlert, Clock, History, Database, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 // Human-readable labels for known setting keys
 const SETTING_META: Record<string, { label: string; unit?: string; icon?: React.ReactNode; min?: number; max?: number }> = {
@@ -160,9 +160,106 @@ export default function AdminSettings() {
         </Card>
       </div>
 
+      {/* TigerBeetle System Account Seeding */}
+      <TigerBeetleSeedSection />
       {/* Settings Audit Log */}
       <SettingsAuditLogSection />
     </DashboardLayout>
+  );
+}
+
+// ─── TigerBeetle Seed Section ────────────────────────────────────────────────
+function TigerBeetleSeedSection() {
+  const [result, setResult] = useState<{ success: boolean; message: string; accountsCreated?: number; accountsSkipped?: number; error?: string } | null>(null);
+
+  const seedMutation = trpc.tigerbeetleSeed.seedSystemAccounts.useMutation({
+    onSuccess: (data) => {
+      setResult(data);
+      if (data.success) {
+        toast.success("System accounts seeded", {
+          description: `${data.accountsCreated ?? 0} accounts created, ${data.accountsSkipped ?? 0} already existed.`,
+        });
+      } else {
+        toast.error("Seeding completed with errors", {
+          description: data.error ?? "Unknown error. Check the result below.",
+        });
+      }
+    },
+    onError: (err) => {
+      toast.error("Seeding failed", { description: err.message });
+    },
+  });
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Database className="h-4 w-4 text-primary" />
+              TigerBeetle System Accounts
+            </CardTitle>
+            <Badge variant="outline" className="text-xs font-mono">Financial Ledger</Badge>
+          </div>
+          <CardDescription>
+            Seeds the 13 WCO General Ledger system accounts (Revenue Authority, Central Bank, Customs Escrow,
+            Bond Escrow, Transit Guarantee, Duty Drawback Reserve, Free Zone Fund, G2G Settlement) required
+            before any fund-flow workflow can execute. This operation is fully idempotent — running it multiple
+            times is safe.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={() => seedMutation.mutate()}
+              disabled={seedMutation.isPending}
+              className="gap-2"
+            >
+              {seedMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Database className="h-4 w-4" />
+              )}
+              {seedMutation.isPending ? "Seeding..." : "Seed System Accounts"}
+            </Button>
+            {result && !seedMutation.isPending && (
+              <span className="text-sm text-muted-foreground">
+                Last run: {result.accountsCreated ?? 0} created, {result.accountsSkipped ?? 0} existed
+              </span>
+            )}
+          </div>
+
+          {result && (
+            <div className="rounded-md border bg-muted/30 p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {result.success ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                )}
+                Seed Result
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Accounts created:</span>
+                  <span className="font-semibold text-green-600">{result.accountsCreated ?? 0}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Already existed:</span>
+                  <span className="font-semibold text-blue-600">{result.accountsSkipped ?? 0}</span>
+                </div>
+              </div>
+              {result.error && (
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-destructive">Error:</p>
+                  <p className="text-xs text-destructive font-mono bg-destructive/10 rounded px-2 py-1">{result.error}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

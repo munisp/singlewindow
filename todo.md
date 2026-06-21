@@ -527,3 +527,14 @@
 - [x] server/v64.test.ts — 55/55 vitest tests passing
 - [x] TypeScript: 0 errors
 - [x] Push v64 codebase to GitHub munisp/singlewindow
+
+## v65 Sprint — FSPIOP Callbacks, Helm Prod Values, PWA Seed UI (COMPLETE)
+
+- [x] services/go/mojaloop-gateway/internal/dfsp/callbacks.go — CallbackHandler with HandlePartyCallback, HandleQuoteCallback, HandleTransferCallback; inbound JWS verification via Hub JWKS cache (60min TTL); ILP fulfilment HMAC-SHA256 verification; thread-safe pendingILP map
+- [x] services/go/mojaloop-gateway/internal/dfsp/callbacks_test.go — 18 Go unit tests: all 3 handlers, tampered body, JWKS cache TTL refresh, ILP fulfilment valid/invalid pairs
+- [x] services/go/mojaloop-gateway/cmd/main.go — registered PUT /parties/{partyIdType}/{partyIdentifier}, PUT /quotes/{id}, PUT /transfers/{id}, GET /dfsp/jwks.json routes
+- [x] helm/tradegateway/values.prod.yaml — workflowWorker production overlay: replicaCount:3, image.tag:1.0.0, cpu:500m, memory:384Mi, startupProbe/livenessProbe/readinessProbe, terminationGracePeriodSeconds:60, PDB minAvailable:2, pod anti-affinity
+- [x] client/src/pages/app/AdminSettings.tsx — TigerBeetleSeedSection component: seedSystemAccounts mutation, loading spinner, accountsCreated/accountsSkipped/error result display, CheckCircle2/AlertCircle status icons
+- [x] server/v65.test.ts — 67/67 vitest tests passing
+- [x] TypeScript: 0 errors
+- [x] Push v65 codebase to GitHub munisp/singlewindow
