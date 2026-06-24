@@ -692,4 +692,15 @@
 - [x] mobile/flutter/lib/services/push_notification_service.dart — FCM token, permissions, Android channel, foreground/background handlers, local notification display, token refresh, badge management
 - [x] server/v69.test.ts — 40 vitest tests: pushTokens router, getAuditEntryDiff, JsonDiffViewer utilities, Python service contract, nightly cron contract (all passing)
 - [x] TypeScript: 0 errors
-- [ ] Push v69 to GitHub munisp/singlewindow
+- [x] Push v69 to GitHub munisp/singlewindow (commit 44a5a55, 16 files, 2855 insertions)
+
+## v70 Sprint - Completed Items
+- [x] Go notification-dispatcher: FCM v1 + APNs HTTP/2, Kafka consumer, retry (3 attempts, exponential backoff), DLQ to insider.push.dlq; 11 Go unit tests
+- [x] Python shadow_model.py: ShadowModel parallel scoring, GET /ab/stats, GET /ab/recent; 18 pytest tests
+- [x] anomaly_detector.py: AnomalyFeatures dataclass + AnomalyDetector class for shadow_model.py compatibility
+- [x] server/lib/redisIdempotency.ts: acquireIdempotencyKey / releaseIdempotencyKey / checkIdempotencyKey, 5-min TTL
+- [x] insiderThreat.approveFourEyes: Redis idempotency guard, CONFLICT on duplicate
+- [x] insiderThreat.getABStats + getABRecentScores: Python svc proxy procedures
+- [x] SecurityMonitor.tsx: A/B Model Comparison tab with LineChart + BarChart
+- [x] server/v70.test.ts: 25 vitest tests passing
+- [ ] Push v70 to GitHub munisp/singlewindow

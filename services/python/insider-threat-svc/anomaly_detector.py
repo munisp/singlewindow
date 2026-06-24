@@ -179,3 +179,51 @@ def train_model(
         len(events), n_anomalies, 100 * n_anomalies / len(events),
     )
     return model, scaler, metrics
+
+
+# ── Compatibility shims for shadow_model.py ───────────────────────────────────
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass
+class AnomalyFeatures:
+    """Feature vector for anomaly scoring."""
+    hour_of_day: int
+    action_count_per_hour: int
+    unique_records_accessed: int
+    off_hours_flag: int
+    role_mismatch_score: float
+
+
+class AnomalyDetector:
+    """Thin wrapper around the module-level score_event function for testability."""
+
+    def __init__(self, model=None) -> None:
+        self._model = model
+
+    def score(self, features: AnomalyFeatures) -> float:
+        """Return anomaly score in [0, 1] for the given feature vector."""
+        if self._model is None:
+            # Use the module-level score_event with a synthetic event dict
+            event = {
+                "hour_of_day": features.hour_of_day,
+                "action_count_per_hour": features.action_count_per_hour,
+                "unique_records_accessed": features.unique_records_accessed,
+                "off_hours_flag": features.off_hours_flag,
+                "role_mismatch_score": features.role_mismatch_score,
+                "action": "view",
+                "role": "user",
+            }
+            return score_event(event)
+        # Use the injected model directly
+        import numpy as np
+        X = np.array([[
+            features.hour_of_day,
+            features.action_count_per_hour,
+            features.unique_records_accessed,
+            features.off_hours_flag,
+            features.role_mismatch_score,
+        ]])
+        raw = self._model.decision_function(X)[0]
+        # Normalise to [0, 1]: more negative = more anomalous
+        return float(max(0.0, min(1.0, 0.5 - raw * 0.5)))
