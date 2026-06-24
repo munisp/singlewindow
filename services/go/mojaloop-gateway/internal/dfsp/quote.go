@@ -154,9 +154,9 @@ func (qb *QuoteBuilder) PostQuoteRequest(ctx context.Context, input PostQuoteInp
 	httpReq.Header.Set("FSPIOP-Destination", input.PayeeFspId)
 	httpReq.Header.Set("Date", now)
 
-	// Sign with JWS
+	// Sign with JWS — destination is the payee DFSP ID
 	if qb.signer != nil {
-		if err := qb.signer.SignRequest(httpReq, body); err != nil {
+		if err := qb.signer.SignRequest(httpReq, input.PayeeFspId, body); err != nil {
 			return nil, fmt.Errorf("sign quote request: %w", err)
 		}
 	}

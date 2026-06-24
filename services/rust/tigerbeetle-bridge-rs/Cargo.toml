@@ -45,7 +45,9 @@ uuid = { version = "1", features = ["v4"] }
 dotenvy = "0.15"
 
 # Optional: TigerBeetle client (production only)
-tigerbeetle = { version = "0.16", optional = true }
+# TigerBeetle 0.16+ is not yet published to crates.io; use the official GitHub source.
+# This dep is never compiled in default/CI mode (optional = true).
+tigerbeetle = { git = "https://github.com/tigerbeetle/tigerbeetle", optional = true }
 
 [dev-dependencies]
 axum-test = "14"

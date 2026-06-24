@@ -704,3 +704,20 @@
 - [x] SecurityMonitor.tsx: A/B Model Comparison tab with LineChart + BarChart
 - [x] server/v70.test.ts: 25 vitest tests passing
 - [x] Push v70 to GitHub munisp/singlewindow (commit 74f6f98, 11 files)
+
+## v71 Sprint — Production Audit & Fix (COMPLETED)
+- [x] docs/PRODUCTION_AUDIT_v71.md — full platform audit: 40+ components scored, gaps identified, fix plan
+- [x] services/go/shared/kafka/producer.go — ProducerConfig, ClientID, DLQ, retry with backoff, Confluent Wire Format, consumer group; producer_test.go
+- [x] services/go/shared/redispool/pool.go — Sentinel, Cluster, HealthCheck/Ping, pub/sub, TLS (286 lines, production-grade)
+- [x] services/go/shared/opensearch/provisioner.go — ProvisionAll(), 6 index templates with ILM lifecycle policies
+- [x] infra/opensearch/index-templates.json — 6 templates: declarations, audit-events, risk-scores, cargo-tracking, insider-threats, payments
+- [x] services/go/mojaloop-gateway/internal/dfsp/callbacks.go — parseRSAPublicKey (math/big), parseECPublicKey (elliptic), go vet passes
+- [x] services/go/mojaloop-gateway/internal/dfsp/signer_aliases.go — NewSigner, NewSignerFromFile, NewEphemeralSigner exports
+- [x] services/go/shared/keycloak/middleware.go — JWT validation, role extraction, 18 Go tests passing
+- [x] infra/keycloak/realm-export.json — 9 groups, 10 roles, 4 clients, MFA flows, brute-force protection
+- [x] microservices/sanctions-service/internal/screener/screener.go — Jaro-Winkler + Levenshtein, 5 list types (OFAC/UN/EU/HMT/WCO-CEN), ScreenBatch; 14 Go tests
+- [x] services/rust/tigerbeetle-bridge-rs/src/main.rs — POST /reconcile + GET /accounts/batch endpoints
+- [x] services/rust/tigerbeetle-bridge-rs/Cargo.toml — fixed git source for tigerbeetle crate (crates.io 0.16 broken)
+- [x] mobile/react-native/TradeGateway/src/screens/app/FreeZoneScreen.tsx — free zone permit tracking screen
+- [x] server/v71.test.ts — 64 vitest tests: all passing (Kafka, Redis, OpenSearch, Mojaloop, Keycloak, Sanctions, TigerBeetle, Notification dispatcher, PWA, Flutter, React Native, audit report)
+- [x] TypeScript: 0 errors

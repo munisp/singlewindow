@@ -33,6 +33,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -40,6 +41,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -51,21 +53,6 @@ import (
 )
 
 // ─── Hub JWKS cache ───────────────────────────────────────────────────────────
-
-// JWK represents a single JSON Web Key from the Hub's JWKS endpoint.
-type JWK struct {
-	Kty string `json:"kty"` // "RSA", "EC", "OKP"
-	Kid string `json:"kid"`
-	Use string `json:"use"`
-	Alg string `json:"alg"`
-	// RSA fields
-	N string `json:"n"`
-	E string `json:"e"`
-	// EC fields
-	Crv string `json:"crv"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
-}
 
 // JWKSResponse is the Hub's JWKS endpoint response.
 type JWKSResponse struct {
@@ -171,41 +158,64 @@ func parseJWK(jwk JWK) (crypto.PublicKey, error) {
 func parseRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
 	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
 	if err != nil {
-		return nil, fmt.Errorf("decode n: %w", err)
+		return nil, fmt.Errorf("decode RSA modulus N: %w", err)
 	}
 	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
 	if err != nil {
-		return nil, fmt.Errorf("decode e: %w", err)
+		return nil, fmt.Errorf("decode RSA exponent E: %w", err)
+	}
+	if len(nBytes) == 0 {
+		return nil, fmt.Errorf("RSA modulus N is empty")
+	}
+	if len(eBytes) == 0 || len(eBytes) > 4 {
+		return nil, fmt.Errorf("RSA exponent E has invalid length %d", len(eBytes))
 	}
 	var eInt int
 	for _, b := range eBytes {
 		eInt = eInt<<8 | int(b)
 	}
-	n := new(rsa.PublicKey)
-	n.N = new(interface{ BitLen() int }).(*rsa.PublicKey).N // placeholder
-	// Use math/big for real RSA key parsing
-	import_bigint := func(b []byte) interface{} { return b } // stub; real impl uses math/big
-	_ = import_bigint
-	// Simplified: return a placeholder that will fail verification gracefully
-	// In production this uses crypto/rsa + math/big
-	_ = nBytes
-	_ = eInt
-	return &rsa.PublicKey{}, nil
+	if eInt < 3 {
+		return nil, fmt.Errorf("RSA exponent %d is too small", eInt)
+	}
+	return &rsa.PublicKey{
+		N: new(big.Int).SetBytes(nBytes),
+		E: eInt,
+	}, nil
 }
 
 func parseECPublicKey(jwk JWK) (*ecdsa.PublicKey, error) {
 	xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
 	if err != nil {
-		return nil, fmt.Errorf("decode x: %w", err)
+		return nil, fmt.Errorf("decode EC x-coordinate: %w", err)
 	}
 	yBytes, err := base64.RawURLEncoding.DecodeString(jwk.Y)
 	if err != nil {
-		return nil, fmt.Errorf("decode y: %w", err)
+		return nil, fmt.Errorf("decode EC y-coordinate: %w", err)
 	}
-	_ = xBytes
-	_ = yBytes
-	// In production: use elliptic.P256() / elliptic.P384() based on crv
-	return &ecdsa.PublicKey{}, nil
+	if len(xBytes) == 0 || len(yBytes) == 0 {
+		return nil, fmt.Errorf("EC coordinates are empty")
+	}
+	var curve elliptic.Curve
+	switch jwk.Crv {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported EC curve %q", jwk.Crv)
+	}
+	x := new(big.Int).SetBytes(xBytes)
+	y := new(big.Int).SetBytes(yBytes)
+	if !curve.IsOnCurve(x, y) {
+		return nil, fmt.Errorf("EC point is not on curve %s", jwk.Crv)
+	}
+	return &ecdsa.PublicKey{
+		Curve: curve,
+		X:     x,
+		Y:     y,
+	}, nil
 }
 
 func parseOKPPublicKey(jwk JWK) (ed25519.PublicKey, error) {

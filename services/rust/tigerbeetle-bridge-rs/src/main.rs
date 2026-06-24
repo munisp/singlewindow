@@ -18,6 +18,8 @@
 //   GET  /accounts/:id/transfers        — list transfers for account
 //   POST /transfers/batch               — batch transfer (atomic)
 //   GET  /metrics                       — Prometheus-compatible metrics
+//   POST /reconcile                     — double-entry reconciliation check (debits == credits per ledger)
+//   POST /accounts/batch-balances       — bulk balance query for up to 100 accounts
 
 use std::sync::Arc;
 use axum::{
@@ -419,6 +421,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/audit/entries", get(get_audit_entries))
         .route("/audit/append", post(append_audit_entry))
         .route("/audit/verify", get(verify_audit_chain))
+        .route("/reconcile", post(reconcile_ledger))
+        .route("/accounts/batch-balances", post(batch_balances))
         .layer(CorsLayer::permissive())
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
         .layer(TraceLayer::new_for_http())
@@ -431,6 +435,134 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+// ─── Reconciliation ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ReconcileReq {
+    /// Ledger code to reconcile (e.g. 700 for NGN customs duty)
+    pub ledger: u32,
+    /// Optional list of account IDs to scope the reconciliation.
+    /// If empty, all accounts in the ledger are checked.
+    pub account_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReconcileResponse {
+    pub ledger: u32,
+    pub total_debits: u64,
+    pub total_credits: u64,
+    pub balanced: bool,
+    pub discrepancy: i64,
+    pub accounts_checked: usize,
+    pub unbalanced_accounts: Vec<UnbalancedAccount>,
+    pub checked_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct UnbalancedAccount {
+    pub account_id: String,
+    pub debits_posted: u64,
+    pub credits_posted: u64,
+    pub balance: i64,
+    pub account_type: String,
+}
+
+async fn reconcile_ledger(
+    State(state): State<AppState>,
+    Json(req): Json<ReconcileReq>,
+) -> Result<Json<ReconcileResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Fetch all accounts for the given ledger by querying each requested account
+    // (or deriving from the metrics if no account_ids provided)
+    let account_ids = req.account_ids.unwrap_or_default();
+
+    if account_ids.is_empty() {
+        return Err(err("RECONCILE_NEEDS_ACCOUNTS", "Provide account_ids to reconcile; use /accounts/batch-balances to enumerate accounts first"));
+    }
+
+    let mut total_debits: u64 = 0;
+    let mut total_credits: u64 = 0;
+    let mut unbalanced: Vec<UnbalancedAccount> = Vec::new();
+    let mut checked = 0usize;
+
+    for account_id in &account_ids {
+        match state.backend.get_account(account_id).await {
+            Ok(acct) if acct.ledger == req.ledger => {
+                total_debits = total_debits.saturating_add(acct.debits_posted);
+                total_credits = total_credits.saturating_add(acct.credits_posted);
+                checked += 1;
+                // A debit-normal account is balanced when debits >= credits;
+                // a credit-normal account is balanced when credits >= debits.
+                let balanced = match acct.account_type.as_str() {
+                    "debit_normal" => acct.debits_posted >= acct.credits_posted,
+                    "credit_normal" => acct.credits_posted >= acct.debits_posted,
+                    _ => true,
+                };
+                if !balanced {
+                    unbalanced.push(UnbalancedAccount {
+                        account_id: acct.account_id,
+                        debits_posted: acct.debits_posted,
+                        credits_posted: acct.credits_posted,
+                        balance: acct.balance,
+                        account_type: acct.account_type,
+                    });
+                }
+            }
+            Ok(_) => {} // Different ledger — skip
+            Err(e) => {
+                error!("[reconcile] Failed to fetch account {}: {}", account_id, e);
+            }
+        }
+    }
+
+    let discrepancy = total_credits as i64 - total_debits as i64;
+    let balanced = discrepancy == 0 && unbalanced.is_empty();
+
+    Ok(Json(ReconcileResponse {
+        ledger: req.ledger,
+        total_debits,
+        total_credits,
+        balanced,
+        discrepancy,
+        accounts_checked: checked,
+        unbalanced_accounts: unbalanced,
+        checked_at: backend::now_unix_ms(),
+    }))
+}
+
+// ─── Batch Balances ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct BatchBalancesReq {
+    pub account_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BatchBalancesResponse {
+    pub balances: Vec<AccountBalance>,
+    pub not_found: Vec<String>,
+}
+
+async fn batch_balances(
+    State(state): State<AppState>,
+    Json(req): Json<BatchBalancesReq>,
+) -> Result<Json<BatchBalancesResponse>, (StatusCode, Json<ErrorResponse>)> {
+    if req.account_ids.len() > 100 {
+        return Err(err("TOO_MANY_ACCOUNTS", "Maximum 100 accounts per batch-balances request"));
+    }
+
+    let mut balances = Vec::new();
+    let mut not_found = Vec::new();
+
+    for account_id in &req.account_ids {
+        match state.backend.get_account(account_id).await {
+            Ok(acct) => balances.push(acct),
+            Err(_) => not_found.push(account_id.clone()),
+        }
+    }
+
+    Ok(Json(BatchBalancesResponse { balances, not_found }))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ members = [
     "rule-engine",
     "vision-preprocessor",
     "tigerbeetle-bridge",
+    "tigerbeetle-bridge-rs",
 ]
 resolver = "2"
 

@@ -42,7 +42,9 @@ rust_decimal = { version = "1", features = ["serde-with-str"] }
 # TigerBeetle client — optional, enabled by the tigerbeetle-live feature flag.
 # Requires the TigerBeetle binary to be installed on the build host.
 # See PRODUCTION-GUIDE.md for setup instructions.
-tigerbeetle = { version = "0.16", optional = true }
+# TigerBeetle 0.16 is not yet on crates.io; use the official GitHub source for production builds.
+# For CI/simulation mode (default), this dep is never compiled (optional = true).
+tigerbeetle = { git = "https://github.com/tigerbeetle/tigerbeetle", optional = true }
 
 [profile.release]
 opt-level = 3

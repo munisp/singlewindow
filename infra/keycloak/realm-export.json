@@ -1,6 +1,7 @@
 {
   "realm": "tradegateway",
-  "displayName": "TradeGateway™ NGSWTP",
+  "displayName": "TradeGateway\u2122 NGSWTP",
+  "displayNameHtml": "<strong>TradeGateway</strong> NGSWTP",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -16,83 +17,447 @@
   "quickLoginCheckMilliSeconds": 1000,
   "maxDeltaTimeSeconds": 43200,
   "failureFactor": 5,
-  "accessTokenLifespan": 3600,
+  "accessTokenLifespan": 300,
   "accessTokenLifespanForImplicitFlow": 900,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "en",
+    "fr",
+    "ar",
+    "sw"
+  ],
+  "defaultLocale": "en",
+  "eventsEnabled": true,
+  "eventsListeners": [
+    "jboss-logging",
+    "kafka-event-listener"
+  ],
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "LOGOUT_ERROR",
+    "REGISTER",
+    "REGISTER_ERROR",
+    "UPDATE_PASSWORD",
+    "UPDATE_PASSWORD_ERROR",
+    "UPDATE_TOTP",
+    "UPDATE_TOTP_ERROR",
+    "CODE_TO_TOKEN",
+    "CODE_TO_TOKEN_ERROR",
+    "REFRESH_TOKEN",
+    "REFRESH_TOKEN_ERROR",
+    "INTROSPECT_TOKEN",
+    "INTROSPECT_TOKEN_ERROR",
+    "IMPERSONATE",
+    "IMPERSONATE_ERROR",
+    "CLIENT_LOGIN",
+    "CLIENT_LOGIN_ERROR"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
   "roles": {
     "realm": [
-      { "name": "trader",           "description": "Registered trader / importer / exporter" },
-      { "name": "customs_officer",  "description": "Customs authority officer" },
-      { "name": "oga_officer",      "description": "Other Government Agency officer" },
-      { "name": "admin",            "description": "System administrator" },
-      { "name": "security_analyst", "description": "Security operations center analyst" },
-      { "name": "auditor",          "description": "Post-clearance auditor" },
-      { "name": "finance_officer",    "description": "Finance officer managing duties, invoices, and drawback claims" },
-      { "name": "port_operator",      "description": "Port operator managing cargo release and berth scheduling" },
-      { "name": "compliance_officer", "description": "Compliance officer managing sanctions screening and WCO CEN alerts" },
-      { "name": "inspector",          "description": "Physical inspection officer using vision AI for container checks" }
+      {
+        "name": "trader",
+        "description": "Registered trader / importer / exporter",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "customs_officer",
+        "description": "Customs authority officer",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "oga_officer",
+        "description": "Other Government Agency officer",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "admin",
+        "description": "System administrator",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "security_analyst",
+        "description": "Security operations center analyst",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "auditor",
+        "description": "Post-clearance auditor",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "finance_officer",
+        "description": "Finance officer managing duties, invoices, and drawback claims",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "port_operator",
+        "description": "Port operator managing cargo release and berth scheduling",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "compliance_officer",
+        "description": "Compliance officer managing sanctions screening and WCO CEN alerts",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "inspector",
+        "description": "Physical inspection officer using vision AI for container checks",
+        "composite": false,
+        "clientRole": false
+      }
     ]
   },
+  "groups": [
+    {
+      "name": "Traders",
+      "path": "/Traders",
+      "realmRoles": [
+        "trader"
+      ],
+      "subGroups": [
+        {
+          "name": "AEO-Certified",
+          "path": "/Traders/AEO-Certified",
+          "realmRoles": [
+            "trader"
+          ]
+        },
+        {
+          "name": "Importers",
+          "path": "/Traders/Importers",
+          "realmRoles": [
+            "trader"
+          ]
+        },
+        {
+          "name": "Exporters",
+          "path": "/Traders/Exporters",
+          "realmRoles": [
+            "trader"
+          ]
+        },
+        {
+          "name": "Freight-Forwarders",
+          "path": "/Traders/Freight-Forwarders",
+          "realmRoles": [
+            "trader"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customs-Authority",
+      "path": "/Customs-Authority",
+      "realmRoles": [
+        "customs_officer"
+      ],
+      "subGroups": [
+        {
+          "name": "Supervisors",
+          "path": "/Customs-Authority/Supervisors",
+          "realmRoles": [
+            "customs_officer",
+            "admin"
+          ]
+        },
+        {
+          "name": "Risk-Officers",
+          "path": "/Customs-Authority/Risk-Officers",
+          "realmRoles": [
+            "customs_officer"
+          ]
+        },
+        {
+          "name": "Inspectors",
+          "path": "/Customs-Authority/Inspectors",
+          "realmRoles": [
+            "customs_officer",
+            "inspector"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "OGA",
+      "path": "/OGA",
+      "realmRoles": [
+        "oga_officer"
+      ],
+      "subGroups": [
+        {
+          "name": "NAFDAC",
+          "path": "/OGA/NAFDAC",
+          "realmRoles": [
+            "oga_officer"
+          ]
+        },
+        {
+          "name": "SON",
+          "path": "/OGA/SON",
+          "realmRoles": [
+            "oga_officer"
+          ]
+        },
+        {
+          "name": "NCS",
+          "path": "/OGA/NCS",
+          "realmRoles": [
+            "oga_officer"
+          ]
+        },
+        {
+          "name": "NESREA",
+          "path": "/OGA/NESREA",
+          "realmRoles": [
+            "oga_officer"
+          ]
+        },
+        {
+          "name": "DPR",
+          "path": "/OGA/DPR",
+          "realmRoles": [
+            "oga_officer"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Finance",
+      "path": "/Finance",
+      "realmRoles": [
+        "finance_officer"
+      ],
+      "subGroups": []
+    },
+    {
+      "name": "Port-Operators",
+      "path": "/Port-Operators",
+      "realmRoles": [
+        "port_operator"
+      ],
+      "subGroups": []
+    },
+    {
+      "name": "Security",
+      "path": "/Security",
+      "realmRoles": [
+        "security_analyst"
+      ],
+      "subGroups": []
+    },
+    {
+      "name": "Compliance",
+      "path": "/Compliance",
+      "realmRoles": [
+        "compliance_officer"
+      ],
+      "subGroups": []
+    },
+    {
+      "name": "Auditors",
+      "path": "/Auditors",
+      "realmRoles": [
+        "auditor"
+      ],
+      "subGroups": []
+    },
+    {
+      "name": "Administrators",
+      "path": "/Administrators",
+      "realmRoles": [
+        "admin"
+      ],
+      "subGroups": []
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "tradegateway-browser-mfa",
+      "description": "Browser login with conditional OTP for privileged roles",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "autheticatorFlow": false
+        },
+        {
+          "authenticator": "identity-provider-redirector",
+          "requirement": "ALTERNATIVE",
+          "priority": 25,
+          "autheticatorFlow": false
+        },
+        {
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "flowAlias": "tradegateway-browser-mfa forms",
+          "autheticatorFlow": true
+        }
+      ]
+    },
+    {
+      "alias": "tradegateway-browser-mfa forms",
+      "description": "Username/password + conditional OTP sub-flow",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-username-password-form",
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "requirement": "CONDITIONAL",
+          "priority": 20,
+          "userSetupAllowed": true,
+          "autheticatorFlow": false
+        }
+      ]
+    }
+  ],
   "clients": [
     {
       "clientId": "tradegateway-web",
       "name": "TradeGateway Web Portal",
+      "description": "Public PKCE client for the React PWA",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
       "redirectUris": [
         "http://localhost:3000/*",
         "http://localhost:9080/*",
         "https://*.manus.space/*"
       ],
-      "webOrigins": ["+"],
-      "protocol": "openid-connect",
+      "webOrigins": [
+        "+"
+      ],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "tradegateway-roles"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access"
+      ],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*##http://localhost:9080/*##https://*.manus.space/*"
       }
     },
     {
       "clientId": "tradegateway-api",
       "name": "TradeGateway API Gateway",
+      "description": "Confidential client for APISIX token introspection",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "authorizationServicesEnabled": true,
       "secret": "tradegateway-api-secret-2026",
-      "protocol": "openid-connect"
+      "protocol": "openid-connect",
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "tradegateway-roles"
+      ],
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
     },
     {
       "clientId": "tradegateway-services",
       "name": "TradeGateway Microservices",
+      "description": "Confidential client for service-to-service M2M tokens (client_credentials)",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "secret": "tradegateway-services-secret-2026",
-      "protocol": "openid-connect"
+      "protocol": "openid-connect",
+      "redirectUris": [],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "openid",
+        "tradegateway-roles"
+      ],
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    },
+    {
+      "clientId": "tradegateway-mobile",
+      "name": "TradeGateway Mobile App",
+      "description": "Public PKCE client for React Native and Flutter apps",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "tradegateway://auth/callback",
+        "com.tradegateway.app://auth/callback"
+      ],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "tradegateway-roles"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
     }
   ],
-  "requiredActions": [
-    { "alias": "CONFIGURE_TOTP", "name": "Configure OTP", "enabled": true, "defaultAction": false },
-    { "alias": "UPDATE_PASSWORD", "name": "Update Password", "enabled": true, "defaultAction": false },
-    { "alias": "VERIFY_EMAIL",    "name": "Verify Email",    "enabled": true, "defaultAction": true }
-  ],
-  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername",
-  "otpPolicyType": "totp",
-  "otpPolicyAlgorithm": "HmacSHA1",
-  "otpPolicyDigits": 6,
-  "otpPolicyPeriod": 30,
-
   "clientScopes": [
     {
       "name": "tradegateway-roles",
-      "description": "TradeGateway platform roles included in tokens",
+      "description": "TradeGateway platform roles and claims included in tokens",
       "protocol": "openid-connect",
-      "attributes": { "include.in.token.scope": "true" },
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
       "protocolMappers": [
         {
           "name": "tradegateway-roles-mapper",
@@ -106,6 +471,19 @@
             "access.token.claim": "true",
             "claim.name": "roles",
             "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "groups-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
           }
         },
         {
@@ -153,7 +531,58 @@
       ]
     }
   ],
-
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 30
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 50
+    },
+    {
+      "alias": "terms_and_conditions",
+      "name": "Terms and Conditions",
+      "providerId": "terms_and_conditions",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 20
+    }
+  ],
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail and passwordHistory(5)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyInitialCounter": 0,
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30,
+  "smtpServer": {
+    "host": "${env.SMTP_HOST}",
+    "port": "${env.SMTP_PORT}",
+    "from": "${env.SMTP_FROM}",
+    "fromDisplayName": "TradeGateway NGSWTP",
+    "ssl": "true",
+    "starttls": "false",
+    "auth": "true",
+    "user": "${env.SMTP_USER}",
+    "password": "${env.SMTP_PASSWORD}"
+  },
   "users": [
     {
       "username": "admin",
@@ -162,8 +591,16 @@
       "lastName": "Administrator",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Admin@TradeGateway2026", "temporary": true }],
-      "realmRoles": ["admin"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Admin@TradeGateway2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "admin"
+      ]
     },
     {
       "username": "demo_trader",
@@ -172,9 +609,27 @@
       "lastName": "Trader",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Trader@Demo2026", "temporary": true }],
-      "realmRoles": ["trader"],
-      "attributes": { "company_name": ["Demo Imports Ltd"], "tin": ["C0012345678"], "aeo_status": ["none"] }
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Trader@Demo2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "trader"
+      ],
+      "attributes": {
+        "company_name": [
+          "Demo Imports Ltd"
+        ],
+        "tin": [
+          "C0012345678"
+        ],
+        "aeo_status": [
+          "none"
+        ]
+      }
     },
     {
       "username": "demo_customs",
@@ -183,8 +638,16 @@
       "lastName": "Customs Officer",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Customs@Demo2026", "temporary": true }],
-      "realmRoles": ["customs_officer"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Customs@Demo2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "customs_officer"
+      ]
     },
     {
       "username": "demo_oga",
@@ -193,8 +656,16 @@
       "lastName": "OGA Officer",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "OGA@Demo2026", "temporary": true }],
-      "realmRoles": ["oga_officer"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "OGA@Demo2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "oga_officer"
+      ]
     },
     {
       "username": "demo_finance",
@@ -203,8 +674,16 @@
       "lastName": "Finance Officer",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Finance@Demo2026", "temporary": true }],
-      "realmRoles": ["finance_officer"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Finance@Demo2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "finance_officer"
+      ]
     },
     {
       "username": "demo_port",
@@ -213,8 +692,16 @@
       "lastName": "Port Operator",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Port@Demo2026", "temporary": true }],
-      "realmRoles": ["port_operator"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Port@Demo2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "port_operator"
+      ]
     },
     {
       "username": "demo_compliance",
@@ -223,8 +710,16 @@
       "lastName": "Compliance Officer",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Compliance@Demo2026", "temporary": true }],
-      "realmRoles": ["compliance_officer"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Compliance@Demo2026",
+          "temporary": true
+        }
+      ],
+      "realmRoles": [
+        "compliance_officer"
+      ]
     }
   ]
 }

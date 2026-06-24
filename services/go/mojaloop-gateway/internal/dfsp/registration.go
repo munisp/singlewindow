@@ -398,7 +398,7 @@ func (r *Registrar) post(ctx context.Context, url string, body []byte) (*http.Re
 	req.Header.Set("FSPIOP-Source", r.cfg.DFSP_ID)
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 	if r.signer != nil {
-		if signErr := r.signer.SignRequest(req); signErr != nil {
+		if signErr := r.signer.SignRequest(req, "", body); signErr != nil {
 			r.logger.Warn("JWS signing failed — sending unsigned request",
 				zap.Error(signErr), zap.String("url", url))
 		}
@@ -413,7 +413,7 @@ func (r *Registrar) setFSPIOPHeaders(req *http.Request) {
 	req.Header.Set("FSPIOP-Source", r.cfg.DFSP_ID)
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 	if r.signer != nil {
-		if signErr := r.signer.SignRequest(req); signErr != nil {
+		if signErr := r.signer.SignRequest(req, "", nil); signErr != nil {
 			r.logger.Warn("JWS signing failed for FSPIOP request",
 				zap.Error(signErr), zap.String("url", req.URL.String()))
 		}

@@ -1,0 +1,376 @@
+{
+  "_comment": "TradeGateway NGSWTP — OpenSearch Index Templates v71",
+  "_comment2": "Apply with: curl -X PUT 'https://opensearch:9200/_index_template/<name>' -H 'Content-Type: application/json' -d @index-templates.json",
+  "templates": [
+    {
+      "name": "tradegateway-declarations",
+      "body": {
+        "index_patterns": ["declarations-*"],
+        "priority": 100,
+        "template": {
+          "settings": {
+            "number_of_shards": 3,
+            "number_of_replicas": 1,
+            "refresh_interval": "5s",
+            "index.lifecycle.name": "tradegateway-hot-warm",
+            "index.lifecycle.rollover_alias": "declarations"
+          },
+          "mappings": {
+            "dynamic": "strict",
+            "properties": {
+              "declaration_id":    { "type": "keyword" },
+              "ucr":               { "type": "keyword" },
+              "trader_id":         { "type": "keyword" },
+              "trader_name":       { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+              "hs_code":           { "type": "keyword" },
+              "description":       { "type": "text", "analyzer": "english" },
+              "origin_country":    { "type": "keyword" },
+              "destination_country": { "type": "keyword" },
+              "port_of_entry":     { "type": "keyword" },
+              "declared_value":    { "type": "double" },
+              "currency":          { "type": "keyword" },
+              "weight_kg":         { "type": "double" },
+              "status":            { "type": "keyword" },
+              "risk_lane":         { "type": "keyword" },
+              "risk_score":        { "type": "float" },
+              "submitted_at":      { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "cleared_at":        { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "officer_id":        { "type": "keyword" },
+              "oga_permits":       { "type": "keyword" },
+              "duties_amount":     { "type": "double" },
+              "payment_status":    { "type": "keyword" },
+              "container_ids":     { "type": "keyword" },
+              "vessel_name":       { "type": "keyword" },
+              "voyage_number":     { "type": "keyword" },
+              "bl_number":         { "type": "keyword" },
+              "aeo_status":        { "type": "keyword" },
+              "geo_location": {
+                "type": "geo_point"
+              },
+              "metadata":          { "type": "object", "dynamic": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tradegateway-audit-events",
+      "body": {
+        "index_patterns": ["audit-events-*"],
+        "priority": 100,
+        "template": {
+          "settings": {
+            "number_of_shards": 3,
+            "number_of_replicas": 1,
+            "refresh_interval": "1s",
+            "index.lifecycle.name": "tradegateway-audit-retention"
+          },
+          "mappings": {
+            "dynamic": "strict",
+            "properties": {
+              "event_id":          { "type": "keyword" },
+              "event_type":        { "type": "keyword" },
+              "actor_id":          { "type": "keyword" },
+              "actor_name":        { "type": "keyword" },
+              "actor_role":        { "type": "keyword" },
+              "resource_type":     { "type": "keyword" },
+              "resource_id":       { "type": "keyword" },
+              "action":            { "type": "keyword" },
+              "outcome":           { "type": "keyword" },
+              "ip_address":        { "type": "ip" },
+              "user_agent":        { "type": "text" },
+              "session_id":        { "type": "keyword" },
+              "timestamp":         { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "before_state":      { "type": "object", "dynamic": true, "enabled": false },
+              "after_state":       { "type": "object", "dynamic": true, "enabled": false },
+              "chain_hash":        { "type": "keyword" },
+              "anomaly_score":     { "type": "float" },
+              "risk_flags":        { "type": "keyword" },
+              "service_name":      { "type": "keyword" },
+              "trace_id":          { "type": "keyword" },
+              "span_id":           { "type": "keyword" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tradegateway-risk-scores",
+      "body": {
+        "index_patterns": ["risk-scores-*"],
+        "priority": 100,
+        "template": {
+          "settings": {
+            "number_of_shards": 2,
+            "number_of_replicas": 1,
+            "refresh_interval": "5s"
+          },
+          "mappings": {
+            "dynamic": "strict",
+            "properties": {
+              "score_id":          { "type": "keyword" },
+              "declaration_id":    { "type": "keyword" },
+              "trader_id":         { "type": "keyword" },
+              "risk_score":        { "type": "float" },
+              "risk_lane":         { "type": "keyword" },
+              "model_version":     { "type": "keyword" },
+              "features": {
+                "type": "object",
+                "properties": {
+                  "hs_code_risk":        { "type": "float" },
+                  "trader_history_risk": { "type": "float" },
+                  "value_anomaly":       { "type": "float" },
+                  "origin_risk":         { "type": "float" },
+                  "doc_completeness":    { "type": "float" }
+                }
+              },
+              "rule_hits":         { "type": "keyword" },
+              "computed_at":       { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "processing_ms":     { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tradegateway-cargo-tracking",
+      "body": {
+        "index_patterns": ["cargo-tracking-*"],
+        "priority": 100,
+        "template": {
+          "settings": {
+            "number_of_shards": 2,
+            "number_of_replicas": 1,
+            "refresh_interval": "10s"
+          },
+          "mappings": {
+            "dynamic": "strict",
+            "properties": {
+              "tracking_id":       { "type": "keyword" },
+              "ucr":               { "type": "keyword" },
+              "container_id":      { "type": "keyword" },
+              "vessel_name":       { "type": "keyword" },
+              "voyage_number":     { "type": "keyword" },
+              "status":            { "type": "keyword" },
+              "location":          { "type": "geo_point" },
+              "port_code":         { "type": "keyword" },
+              "eta":               { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "ata":               { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "temperature_c":     { "type": "float" },
+              "humidity_pct":      { "type": "float" },
+              "seal_intact":       { "type": "boolean" },
+              "updated_at":        { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "source":            { "type": "keyword" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tradegateway-insider-threats",
+      "body": {
+        "index_patterns": ["insider-threats-*"],
+        "priority": 100,
+        "template": {
+          "settings": {
+            "number_of_shards": 1,
+            "number_of_replicas": 1,
+            "refresh_interval": "1s"
+          },
+          "mappings": {
+            "dynamic": "strict",
+            "properties": {
+              "event_id":          { "type": "keyword" },
+              "user_id":           { "type": "keyword" },
+              "username":          { "type": "keyword" },
+              "anomaly_score":     { "type": "float" },
+              "shadow_score":      { "type": "float" },
+              "model_version":     { "type": "keyword" },
+              "event_type":        { "type": "keyword" },
+              "action":            { "type": "keyword" },
+              "resource":          { "type": "keyword" },
+              "blocked":           { "type": "boolean" },
+              "features": {
+                "type": "object",
+                "properties": {
+                  "hour_of_day":             { "type": "integer" },
+                  "action_count_per_hour":   { "type": "integer" },
+                  "unique_records_accessed": { "type": "integer" },
+                  "off_hours_flag":          { "type": "boolean" },
+                  "role_mismatch_score":     { "type": "float" }
+                }
+              },
+              "detected_at":       { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "session_id":        { "type": "keyword" },
+              "ip_address":        { "type": "ip" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tradegateway-payments",
+      "body": {
+        "index_patterns": ["payments-*"],
+        "priority": 100,
+        "template": {
+          "settings": {
+            "number_of_shards": 3,
+            "number_of_replicas": 1,
+            "refresh_interval": "5s"
+          },
+          "mappings": {
+            "dynamic": "strict",
+            "properties": {
+              "payment_id":        { "type": "keyword" },
+              "declaration_id":    { "type": "keyword" },
+              "trader_id":         { "type": "keyword" },
+              "amount":            { "type": "double" },
+              "currency":          { "type": "keyword" },
+              "payment_rail":      { "type": "keyword" },
+              "mojaloop_transfer_id": { "type": "keyword" },
+              "tigerbeetle_transfer_id": { "type": "keyword" },
+              "status":            { "type": "keyword" },
+              "ilp_condition":     { "type": "keyword" },
+              "ilp_fulfilment":    { "type": "keyword" },
+              "initiated_at":      { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "confirmed_at":      { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "failed_at":         { "type": "date", "format": "epoch_millis||strict_date_optional_time" },
+              "failure_reason":    { "type": "text" },
+              "dfsp_id":           { "type": "keyword" },
+              "counterparty_dfsp": { "type": "keyword" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "ilm_policies": [
+    {
+      "name": "tradegateway-hot-warm",
+      "body": {
+        "policy": {
+          "phases": {
+            "hot": {
+              "min_age": "0ms",
+              "actions": {
+                "rollover": { "max_age": "7d", "max_size": "50gb" },
+                "set_priority": { "priority": 100 }
+              }
+            },
+            "warm": {
+              "min_age": "30d",
+              "actions": {
+                "shrink": { "number_of_shards": 1 },
+                "forcemerge": { "max_num_segments": 1 },
+                "set_priority": { "priority": 50 }
+              }
+            },
+            "cold": {
+              "min_age": "90d",
+              "actions": {
+                "set_priority": { "priority": 0 }
+              }
+            },
+            "delete": {
+              "min_age": "365d",
+              "actions": { "delete": {} }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "tradegateway-audit-retention",
+      "body": {
+        "policy": {
+          "phases": {
+            "hot": {
+              "min_age": "0ms",
+              "actions": {
+                "rollover": { "max_age": "30d", "max_size": "20gb" },
+                "set_priority": { "priority": 100 }
+              }
+            },
+            "warm": {
+              "min_age": "90d",
+              "actions": {
+                "forcemerge": { "max_num_segments": 1 },
+                "set_priority": { "priority": 50 }
+              }
+            },
+            "delete": {
+              "min_age": "2555d",
+              "actions": { "delete": {} }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "ingest_pipelines": [
+    {
+      "name": "tradegateway-declaration-enrich",
+      "body": {
+        "description": "Enrich declaration documents with geo-IP and HS code risk",
+        "processors": [
+          {
+            "geoip": {
+              "field": "ip_address",
+              "target_field": "geo",
+              "ignore_missing": true
+            }
+          },
+          {
+            "set": {
+              "field": "_index",
+              "value": "declarations-{{_ingest.timestamp | date('yyyy-MM')}}"
+            }
+          },
+          {
+            "date": {
+              "field": "submitted_at",
+              "formats": ["epoch_millis", "ISO8601"],
+              "target_field": "submitted_at"
+            }
+          },
+          {
+            "script": {
+              "lang": "painless",
+              "source": "if (ctx.risk_score == null) { ctx.risk_score = 0.0; } if (ctx.risk_score > 0.7) { ctx.risk_lane = 'RED'; } else if (ctx.risk_score > 0.4) { ctx.risk_lane = 'YELLOW'; } else { ctx.risk_lane = 'GREEN'; }"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tradegateway-audit-enrich",
+      "body": {
+        "description": "Enrich audit events with geo-IP and chain hash validation",
+        "processors": [
+          {
+            "geoip": {
+              "field": "ip_address",
+              "target_field": "geo",
+              "ignore_missing": true
+            }
+          },
+          {
+            "date": {
+              "field": "timestamp",
+              "formats": ["epoch_millis", "ISO8601"],
+              "target_field": "timestamp"
+            }
+          },
+          {
+            "set": {
+              "if": "ctx.chain_hash == null",
+              "field": "chain_hash_missing",
+              "value": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
