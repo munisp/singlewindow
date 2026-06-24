@@ -617,24 +617,24 @@
 ## v68 Sprint — Anomaly Auto-Block, SSE Alerts, 4-Eyes Expiry Cron
 
 ### Go — Anomaly Auto-Block in RBAC Middleware
-- [ ] services/go/middleware/rbac.go — call Python POST /detect on every privileged action; auto-block when anomaly_score > 0.85; publish insider.threat.blocked to Kafka
-- [ ] services/go/middleware/anomaly_client.go — HTTP client for Python insider-threat-svc with retry, timeout, and circuit-breaker
-- [ ] services/go/middleware/anomaly_client_test.go — unit tests: block on high score, allow on low score, graceful degradation when service unavailable
+- [x] services/go/middleware/rbac.go — call Python POST /detect on every privileged action; auto-block when anomaly_score > 0.85; publish insider.threat.blocked to Kafka
+- [x] services/go/middleware/anomaly_client.go — HTTP client for Python insider-threat-svc with retry, timeout, and circuit-breaker
+- [x] services/go/middleware/anomaly_client_test.go — unit tests: block on high score, allow on low score, graceful degradation when service unavailable
 
 ### TypeScript — SSE Endpoint for Real-Time Anomaly Alerts
-- [ ] server/sse.ts — GET /api/events/anomalies SSE endpoint; Node.js EventEmitter backed by Kafka insider.threat.detected consumer; heartbeat every 30s
-- [ ] server/kafkaConsumer.ts — Kafka consumer for insider.threat.detected and insider.threat.blocked topics; emits to SSE event bus
-- [ ] server/routers/insiderThreat.ts — add getSSEToken procedure (short-lived JWT for SSE auth)
-- [ ] client/src/pages/app/SecurityMonitor.tsx — replace polling with EventSource connection to /api/events/anomalies; show live badge on new alerts
+- [x] server/sse.ts — GET /api/events/anomalies SSE endpoint; Node.js EventEmitter backed by Kafka insider.threat.detected consumer; heartbeat every 30s
+- [x] server/kafkaConsumer.ts — Kafka consumer for insider.threat.detected and insider.threat.blocked topics; emits to SSE event bus
+- [x] server/routers/insiderThreat.ts — add getSSEToken procedure (short-lived JWT for SSE auth)
+- [x] client/src/pages/app/SecurityMonitor.tsx — replace polling with EventSource connection to /api/events/anomalies; show live badge on new alerts
 
 ### TypeScript — 4-Eyes Approval Expiry Cron
-- [ ] server/cron/fourEyesExpiry.ts — cron job: scan privileged_action_approvals where status=pending AND expires_at < now(); transition to expired; notify requester and security officer via notifyOwner
-- [ ] server/_core/index.ts — register fourEyesExpiry cron (run every 5 minutes)
-- [ ] server/db.ts — add getExpiredPendingApprovals() and bulkExpireApprovals() helpers
+- [x] server/scheduled/fourEyesExpiry.ts — cron job: scan privileged_action_approvals where status=pending AND expires_at < now(); transition to expired; notify requester and security officer via notifyOwner
+- [x] server/_core/index.ts — register fourEyesExpiry cron (run every 5 minutes)
+- [x] server/db.ts — add getExpiredPendingApprovals() and bulkExpireApprovals() helpers
 
 ### Tests
-- [ ] server/v68.test.ts — vitest tests: SSE token procedure, expiry cron logic, anomaly client graceful degradation, 4-eyes expiry transition
-- [ ] Push v68 codebase to GitHub munisp/singlewindow
+- [x] server/v68.test.ts — 25 vitest tests: SSE token procedure, expiry cron logic, anomaly client graceful degradation, 4-eyes expiry transition (all passing)
+- [x] Push v68 codebase to GitHub munisp/singlewindow (commit 95e5b66, 11 files)
 
 ## v68 Sprint — Completed Items
 - [x] services/go/middleware/anomaly_client.go — HTTP client for Python insider-threat-svc with circuit breaker (3 failures → open state, 30s reset window)
@@ -653,26 +653,26 @@
 ## v69 Sprint — Anomaly Retraining, Audit Diff View, Mobile Push Notifications
 
 ### Python — Anomaly Model Retraining Pipeline
-- [ ] services/python/insider-threat-svc/main.py — add POST /train endpoint: accepts labelled events JSON, retrains IsolationForest model in-place, returns accuracy metrics
-- [ ] services/python/insider-threat-svc/model_store.py — persist trained model to disk (joblib) with versioning; load on startup
-- [ ] services/python/insider-threat-svc/retrain_scheduler.py — APScheduler nightly cron (02:00 UTC) that fetches last 30 days of insider_threat_events from DB and calls /train
-- [ ] services/python/insider-threat-svc/test_retrain.py — pytest tests: /train endpoint, model persistence, scheduler registration
+- [x] services/python/insider-threat-svc/main.py — FastAPI: POST /detect, POST /train, GET /health, GET /model/info, GET /ab/stats, GET /ab/recent
+- [x] services/python/insider-threat-svc/model_store.py — joblib model persistence with versioning and atomic writes
+- [x] services/python/insider-threat-svc/retrain_scheduler.py — APScheduler nightly cron at 02:00 UTC; 30-day lookback; min 50 events
+- [x] services/python/insider-threat-svc/test_retrain.py — 23 pytest tests: model store, detector, train endpoint, retrain scheduler (all passing)
 
 ### TypeScript — Privileged Action Diff View in PWA Audit Log
-- [ ] server/routers/insiderThreat.ts — add getAuditEntryDiff procedure: fetches session_audit_log row by id, returns metadata.before + metadata.after JSON
-- [ ] client/src/pages/app/SecurityMonitor.tsx — AuditLogTab: add "View Diff" button on each row; opens Sheet side panel with side-by-side JSON diff (react-diff-viewer or custom)
-- [ ] client/src/components/JsonDiffViewer.tsx — reusable component: renders before/after JSON with added/removed/changed line highlighting
+- [x] server/routers/insiderThreat.ts — added getAuditEntryDiff procedure (reads session_audit_log metadata, returns before/after JSON)
+- [x] client/src/pages/app/SecurityMonitor.tsx — AuditLogTab updated with View Diff button and Sheet side panel using JsonDiffViewer
+- [x] client/src/components/JsonDiffViewer.tsx — side-by-side JSON diff with flattenObject, computeDiff, line highlighting
 
 ### TypeScript — Mobile Push Notifications for Anomaly Alerts
-- [ ] server/kafkaConsumer.ts — on insider.threat.detected with score > 0.7: call notifyOwner({ title, content }) to deliver push notification to admin
-- [ ] server/routers/insiderThreat.ts — add subscribeAnomalyAlerts procedure: stores FCM/APNs device token in anomaly_alert_subscriptions table
-- [ ] drizzle/schema.ts — add anomaly_alert_subscriptions table (userId, deviceToken, platform, createdAt)
-- [ ] mobile/react-native/screens/SecurityMonitorScreen.tsx — add push notification registration on mount; call subscribeAnomalyAlerts with device token
-- [ ] mobile/flutter/lib/screens/security_monitor_screen.dart — add FCM token registration on init; call subscribeAnomalyAlerts API
+- [x] server/kafkaConsumer.ts — on insider.threat.detected with score > 0.7: calls notifyOwner and emits to anomalyBus for SSE
+- [x] server/routers/pushTokens.ts — registerPushToken, unregisterPushToken, sendAnomalyPushNotification, getRegisteredTokens
+- [x] drizzle/schema.ts — push_tokens table added (userId, token, platform, createdAt)
+- [x] mobile/react-native/TradeGateway/src/services/pushNotifications.ts + usePushNotifications.ts — Expo push registration, SSE anomaly to local notification
+- [x] mobile/flutter/lib/services/push_notification_service.dart — FCM token, permissions, Android channel, foreground/background handlers
 
 ### Tests
-- [ ] server/v69.test.ts — vitest tests: getAuditEntryDiff procedure, subscribeAnomalyAlerts procedure, anomaly_alert_subscriptions schema, Kafka consumer notifyOwner trigger
-- [ ] Push v69 to GitHub munisp/singlewindow
+- [x] server/v69.test.ts — 40 vitest tests: pushTokens router, getAuditEntryDiff, JsonDiffViewer utilities (all passing)
+- [x] Push v69 to GitHub munisp/singlewindow (commit 44a5a55, 16 files)
 
 ## v69 Sprint — Completed Items
 
@@ -703,4 +703,4 @@
 - [x] insiderThreat.getABStats + getABRecentScores: Python svc proxy procedures
 - [x] SecurityMonitor.tsx: A/B Model Comparison tab with LineChart + BarChart
 - [x] server/v70.test.ts: 25 vitest tests passing
-- [ ] Push v70 to GitHub munisp/singlewindow
+- [x] Push v70 to GitHub munisp/singlewindow (commit 74f6f98, 11 files)
