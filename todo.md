@@ -721,3 +721,17 @@
 - [x] mobile/react-native/TradeGateway/src/screens/app/FreeZoneScreen.tsx — free zone permit tracking screen
 - [x] server/v71.test.ts — 64 vitest tests: all passing (Kafka, Redis, OpenSearch, Mojaloop, Keycloak, Sanctions, TigerBeetle, Notification dispatcher, PWA, Flutter, React Native, audit report)
 - [x] TypeScript: 0 errors
+
+## v72 Sprint — FCM Token Refresh, AB Promote, CSV Export, DB Fallbacks (COMPLETED)
+- [x] services/go/notification-dispatcher/token_refresher.go — TokenRefresher goroutine: FCM token validation, stale token purge, Kafka DLQ for invalid tokens
+- [x] services/go/notification-dispatcher/token_refresher_test.go — 8 Go unit tests for TokenRefresher
+- [x] services/python/insider-threat-svc/main.py — POST /ab/promote endpoint: atomic shadow→production model swap with archive
+- [x] services/python/insider-threat-svc/main.py — GET /ab/stats endpoint: agreement_rate, production_mean, shadow_mean, divergence metrics
+- [x] services/python/insider-threat-svc/main.py — GET /ab/recent endpoint: last N scored events with both model scores
+- [x] server/routers/insiderThreat.ts — getABStats procedure: proxy to Python /ab/stats
+- [x] server/routers/insiderThreat.ts — getABRecentScores procedure: proxy to Python /ab/recent
+- [x] server/routers/insiderThreat.ts — promoteModel procedure: proxy to Python /ab/promote with offline fallback
+- [x] client/src/pages/app/SecurityMonitor.tsx — A/B Model Comparison tab with recharts LineChart + BarChart + CSV export button
+- [x] Fixed 10 previously failing test files (109 failures → 0): api.changelog, executive.dashboard, nigeria.id, payments, post.audit, sprint15, sprint85, sprint88, trader.scorecard, v65
+- [x] Fixed all 25 TypeScript errors (0 errors)
+- [x] All 83 test files, 2573 tests passing

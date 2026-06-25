@@ -27,6 +27,7 @@ from model_store import (
     list_versions,
     save_model,
 )
+from shadow_model import get_shadow_model, ShadowModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -246,3 +247,139 @@ def model_info():
 def model_versions():
     """List all stored model versions."""
     return {"versions": list_versions()}
+
+
+# ─── A/B Shadow Model Routes ──────────────────────────────────────────────────
+
+@app.get("/ab/stats")
+def ab_stats():
+    """
+    Return A/B comparison statistics for the current shadow model run.
+    Includes agreement rate, mean scores, block rates, and score distribution.
+    """
+    shadow: ShadowModel = get_shadow_model()
+    return shadow.get_stats()
+
+
+@app.get("/ab/recent")
+def ab_recent(limit: int = 100):
+    """
+    Return the most recent A/B comparison records.
+    Each record contains production_score, shadow_score, and block decisions.
+    """
+    shadow: ShadowModel = get_shadow_model()
+    return shadow.get_recent(limit=min(limit, 500))
+
+
+class PromoteRequest(BaseModel):
+    reason: str = Field(default="manual_promotion", min_length=1, max_length=500)
+    operator: str = Field(default="admin", min_length=1, max_length=100)
+
+
+class PromoteResponse(BaseModel):
+    success: bool
+    promoted_at: str
+    previous_version: Optional[int]
+    new_version: Optional[int]
+    shadow_stats_snapshot: dict
+    reason: str
+    operator: str
+
+
+@app.post("/ab/promote", response_model=PromoteResponse)
+def ab_promote(req: PromoteRequest):
+    """
+    Atomically promote the shadow model to production.
+
+    Steps:
+      1. Capture a snapshot of the current A/B stats.
+      2. Load the shadow model's underlying IsolationForest.
+      3. Save it as a new versioned production model via model_store.save_model().
+      4. Reload the in-memory production model.
+      5. Disable the shadow model and clear its comparison buffer.
+
+    Returns a PromoteResponse with the before/after version numbers and
+    the final A/B stats snapshot for audit purposes.
+    """
+    global _model, _scaler
+
+    shadow: ShadowModel = get_shadow_model()
+
+    if not shadow.is_enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="Shadow model is not enabled — nothing to promote.",
+        )
+
+    # Snapshot stats before promotion
+    stats_snapshot = shadow.get_stats()
+
+    # Retrieve the shadow detector's underlying model
+    shadow_detector = shadow._shadow_detector
+    if shadow_detector is None or shadow_detector._model is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Shadow model has no trained model to promote.",
+        )
+
+    # Record previous version
+    prev_meta = load_metadata()
+    previous_version = prev_meta.get("version") if prev_meta else None
+
+    # Save the shadow model as the new production model
+    import joblib
+    from model_store import MODELS_DIR, CURRENT_LINK, METADATA_FILE, _ensure_dir
+    import json, shutil
+
+    _ensure_dir()
+    meta = load_metadata()
+    new_version = (meta.get("version", 0) if meta else 0) + 1
+
+    bundle = {
+        "model": shadow_detector._model,
+        "scaler": getattr(shadow_detector, "_scaler", None),
+    }
+    versioned = MODELS_DIR / f"isolation_forest_v{new_version}.joblib"
+    joblib.dump(bundle, versioned)
+
+    tmp = MODELS_DIR / "_current_tmp.joblib"
+    if tmp.exists():
+        tmp.unlink()
+    shutil.copy2(versioned, tmp)
+    tmp.rename(CURRENT_LINK)
+
+    promoted_at = datetime.now(timezone.utc).isoformat()
+    metadata = {
+        "version": new_version,
+        "trained_at": promoted_at,
+        "n_samples": stats_snapshot.get("total_comparisons", 0),
+        "contamination": getattr(shadow_detector.model, "contamination", 0.05),
+        "promoted_from_shadow": True,
+        "promoted_by": req.operator,
+        "promotion_reason": req.reason,
+        "ab_agreement_rate": stats_snapshot.get("agreement_rate", 0.0),
+    }
+    METADATA_FILE.write_text(json.dumps(metadata, indent=2))
+
+    # Reload in-memory production model
+    _model = shadow_detector._model
+    _scaler = getattr(shadow_detector, "_scaler", None)
+
+    # Disable shadow model and clear buffer
+    shadow.disable()
+    shadow.clear()
+
+    logger.info(
+        "Shadow model promoted to production: v%d (was v%s) by %s — %s",
+        new_version, previous_version, req.operator, req.reason,
+    )
+
+    return PromoteResponse(
+        success=True,
+        promoted_at=promoted_at,
+        previous_version=previous_version,
+        new_version=new_version,
+        shadow_stats_snapshot=stats_snapshot,
+        reason=req.reason,
+        operator=req.operator,
+    )

@@ -114,6 +114,18 @@ type Signer struct {
 	keyID      string
 }
 
+// NewSigner is a convenience constructor that reads the DFSP ID from the
+// MOJALOOP_DFSP_ID environment variable and loads the private key from
+// DFSP_JWS_PRIVATE_KEY_PATH. The logger parameter is accepted for API
+// consistency but is not used directly (logging is handled by NewSignerFromEnv).
+func NewSigner(logger interface{}) (*Signer, error) {
+	dfspID := os.Getenv("MOJALOOP_DFSP_ID")
+	if dfspID == "" {
+		dfspID = "tradegateway"
+	}
+	return NewSignerFromEnv(dfspID)
+}
+
 // NewSignerFromEnv creates a Signer by loading the private key from the path
 // specified in the DFSP_JWS_PRIVATE_KEY_PATH environment variable.
 // Falls back to generating an ephemeral RSA-2048 key if the env var is unset

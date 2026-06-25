@@ -91,7 +91,7 @@ export default function TraderScorecard() {
     month: h.month.slice(5), // "MM"
     cleared: h.cleared,
     rejected: h.rejected,
-    underReview: h.underReview,
+    underReview: (h as any).underReview ?? 0,
   })) ?? [];
 
   const trendChartData = trendData?.trend?.map((t) => ({
@@ -293,10 +293,10 @@ export default function TraderScorecard() {
             />
             <StatCard
               title="Rejection Rate"
-              value={`${summary.rejectionRate}%`}
+              value={`${summary.rejectionRate ?? 0}%`}
               sub={`${summary.rejected} rejected`}
               icon={AlertTriangle}
-              color={summary.rejectionRate > 10 ? "#EF4444" : summary.rejectionRate > 5 ? "#F59E0B" : "#10B981"}
+              color={(summary.rejectionRate ?? 0) > 10 ? "#EF4444" : (summary.rejectionRate ?? 0) > 5 ? "#F59E0B" : "#10B981"}
             />
             <StatCard
               title="Avg Clearance Time"

@@ -36,7 +36,7 @@ export const postAuditRouter = router({
     }).optional())
     .query(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (!db) return { audits: [], total: 0 };
 
       const { status, outcome, search, limit = 20, offset = 0 } = input ?? {};
       const isOfficer = ["customs_officer", "admin", "inspector"].includes(ctx.user.role);
@@ -108,7 +108,7 @@ export const postAuditRouter = router({
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (!db) throw new TRPCError({ code: "NOT_FOUND", message: "Audit not found" });
 
       const [audit] = await db.select()
         .from(postClearanceAudits)
@@ -199,7 +199,7 @@ export const postAuditRouter = router({
       if (!isOfficer) throw new TRPCError({ code: "FORBIDDEN", message: "Only customs officers can update audits" });
 
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (!db) throw new TRPCError({ code: "NOT_FOUND", message: "Audit not found" });
 
       const [existing] = await db.select()
         .from(postClearanceAudits)

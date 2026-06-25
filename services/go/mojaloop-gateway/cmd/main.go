@@ -506,7 +506,7 @@ func main() {
 	r.Put("/quotes/{id}/error", cbHandler.HandleQuoteErrorCallback)
 	r.Put("/transfers/{id}/error", cbHandler.HandleTransferErrorCallback)
 	// DFSP JWKS endpoint — Hub fetches this to verify outbound DFSP signatures
-	dfspSigner, _ := dfsp.NewSigner(getEnv("MOJALOOP_DFSP_ID", "tradegateway"))
+	dfspSigner, _ := dfsp.NewSigner(logger)
 	r.Get("/dfsp/jwks.json", dfspSigner.JWKSHandler())
 
 	httpPort := getEnv("HTTP_PORT", "8085")

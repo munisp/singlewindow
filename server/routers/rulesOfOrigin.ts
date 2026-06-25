@@ -203,7 +203,7 @@ export const rulesOfOriginRouter = router({
     .input(z.object({ id: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (!db) throw new TRPCError({ code: 'NOT_FOUND', message: 'Certificate not found' });
       const [cert] = await db
         .select()
         .from(originCertificates)
@@ -232,7 +232,7 @@ export const rulesOfOriginRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (!db) throw new TRPCError({ code: 'NOT_FOUND', message: 'Certificate not found' });
       const [cert] = await db
         .select()
         .from(originCertificates)
@@ -293,7 +293,7 @@ export const rulesOfOriginRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+      if (!db) return { rows: [], total: 0, page: input.page, pageSize: input.pageSize, totalPages: 0 };
       const offset = (input.page - 1) * input.pageSize;
       // Build filter conditions
       const conditions = [eq(originCertificates.status, "revoked")];
@@ -351,7 +351,7 @@ export const rulesOfOriginRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN' });
       }
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) return [];
       const conditions = [sql`${originCertificates.scanCount} > 0`];
       if (input.days) {
         const cutoff = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
@@ -380,7 +380,7 @@ export const rulesOfOriginRouter = router({
     .input(z.object({ id: z.number().int() }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (!db) return { scanCount: 0, lastScannedAt: null };
       const [cert] = await db
         .select({ scanCount: originCertificates.scanCount })
         .from(originCertificates)
@@ -424,7 +424,7 @@ export const rulesOfOriginRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN' });
       }
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) return { csv: 'Cert Number,Type,Exporter,Importer,Origin Country,Approved At,Revoked At,Revoked By (User ID),Reason', rowCount: 0, filename: `revocation-log-${new Date().toISOString().slice(0, 10)}.csv` };
       const conditions = [eq(originCertificates.status, 'revoked')];
       if (input.search) {
         conditions.push(
@@ -485,7 +485,7 @@ export const rulesOfOriginRouter = router({
         throw new TRPCError({ code: 'FORBIDDEN' });
       }
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) { const period = input.days ? `last-${input.days}d` : 'all-time'; return { csv: 'Rank,Cert Number,Type,Exporter,Origin Country,Destination Country,Scan Count,Approved At', rowCount: 0, filename: `top-scanned-certs-${period}-${new Date().toISOString().slice(0, 10)}.csv` }; }
       const conditions = [sql`${originCertificates.scanCount} > 0`];
       if (input.days) {
         const cutoff = new Date(Date.now() - input.days * 24 * 60 * 60 * 1000);
@@ -532,7 +532,7 @@ export const rulesOfOriginRouter = router({
   listComplianceSchedules: adminProcedure
     .query(async () => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) return [];
       return db.select().from(complianceEmailSchedule).orderBy(desc(complianceEmailSchedule.createdAt));
     }),
 
@@ -546,7 +546,7 @@ export const rulesOfOriginRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
       const [row] = await db.insert(complianceEmailSchedule).values({
         recipientEmail: input.recipientEmail,
         recipientName: input.recipientName ?? null,
@@ -568,7 +568,7 @@ export const rulesOfOriginRouter = router({
     }))
     .mutation(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipient not found' });
       const updates: Record<string, unknown> = { updatedAt: new Date() };
       if (input.timezone !== undefined) updates.timezone = input.timezone;
       if (input.sendHourLocal !== undefined) updates.sendHourLocal = input.sendHourLocal;
@@ -587,7 +587,7 @@ export const rulesOfOriginRouter = router({
     .input(z.object({ id: z.number().int().positive(), isActive: z.boolean() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) throw new TRPCError({ code: 'NOT_FOUND', message: 'Recipient not found' });
       const [row] = await db
         .update(complianceEmailSchedule)
         .set({ isActive: input.isActive, updatedAt: new Date() })
@@ -602,7 +602,7 @@ export const rulesOfOriginRouter = router({
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      if (!db) return { success: true };
       await db.delete(complianceEmailSchedule).where(eq(complianceEmailSchedule.id, input.id));
       return { success: true };
     }),

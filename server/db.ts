@@ -10,28 +10,36 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
-let _db: ReturnType<typeof drizzle> | null = null;
+// Use undefined as sentinel so we can distinguish "not yet initialised" from
+// "initialised but unavailable" (null).
+let _db: ReturnType<typeof drizzle> | null | undefined = undefined;
 let _pool: Pool | null = null;
 
-// Always use PostgreSQL. If DATABASE_URL is a mysql:// or tidb:// URL (injected by
-// the Manus platform), fall back to the local PostgreSQL instance.
-function resolvePostgresUrl(): string {
+// Returns a PostgreSQL connection string only when DATABASE_URL is already a
+// postgres:// URL. If the platform injects a MySQL/TiDB URL (as Manus does),
+// return null so callers fall back to in-memory seed data instead of hitting
+// a localhost:5432 that doesn't exist in the sandbox.
+function resolvePostgresUrl(): string | null {
   const raw = process.env.DATABASE_URL ?? "";
   if (raw.startsWith("postgresql://") || raw.startsWith("postgres://")) return raw;
-  // Fall back to local dev PostgreSQL
-  return "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
+  // DATABASE_URL is a MySQL/TiDB URL (Manus platform) — no local PG fallback.
+  return null;
 }
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
-  if (!_db) {
-    try {
-      const url = resolvePostgresUrl();
-      _pool = new Pool({ connectionString: url });
-      _db = drizzle(_pool);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+  if (_db === undefined) {
+    const url = resolvePostgresUrl();
+    if (!url) {
       _db = null;
+    } else {
+      try {
+        _pool = new Pool({ connectionString: url });
+        _db = drizzle(_pool);
+      } catch (error) {
+        console.warn("[Database] Failed to connect:", error);
+        _db = null;
+      }
     }
   }
   return _db;

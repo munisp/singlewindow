@@ -31,7 +31,12 @@ import { toast } from "sonner";
 import {
   Shield, Users, AlertTriangle, CheckCircle2, XCircle, Clock,
   RefreshCw, LogOut, Eye, Lock, Activity, Database, ChevronLeft, ChevronRight, GitCompare,
+  Download, TrendingUp, Zap,
 } from "lucide-react";
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend,
+} from "recharts";
 import { JsonDiffViewer } from "@/components/JsonDiffViewer";
 
 // ─── Severity badge ───────────────────────────────────────────────────────────
@@ -593,6 +598,149 @@ function AuditLogTab() {
   );
 }
 
+// ─── A/B Model Comparison Tab ────────────────────────────────────────────────
+
+function ABModelTab() {
+  const { data: stats, isLoading: statsLoading, refetch: refetchStats } =
+    trpc.insiderThreat.getABStats.useQuery(undefined, { refetchInterval: 30_000 });
+  const { data: recent, isLoading: recentLoading } =
+    trpc.insiderThreat.getABRecentScores.useQuery({ limit: 100 });
+  const promoteMutation = trpc.insiderThreat.promoteModel.useMutation({
+    onSuccess: () => {
+      toast.success("Shadow model promoted to production successfully.");
+      refetchStats();
+    },
+    onError: (err) => toast.error(`Promotion failed: ${err.message}`),
+  });
+
+  const chartData = (recent?.records ?? []).map((r: any, i: number) => ({
+    idx: i + 1,
+    production: Number(r.production_score.toFixed(3)),
+    shadow: Number(r.shadow_score.toFixed(3)),
+  }));
+
+  const distLabels = ["0–0.2", "0.2–0.4", "0.4–0.6", "0.6–0.8", "0.8–1.0"];
+  const distData = distLabels.map((label, i) => ({
+    bucket: label,
+    production: stats?.score_distribution?.production?.[i] ?? 0,
+    shadow: stats?.score_distribution?.shadow?.[i] ?? 0,
+  }));
+
+  const handleExportCSV = () => {
+    const records = recent?.records ?? [];
+    if (records.length === 0) { toast.info("No A/B records to export."); return; }
+    const header = "timestamp,production_score,shadow_score,production_blocked,shadow_blocked,model_version";
+    const rows = records.map((r: any) =>
+      [r.timestamp, r.production_score, r.shadow_score, r.production_blocked, r.shadow_blocked, r.model_version ?? "shadow-v1"].join(",")
+    );
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ab_comparison_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${records.length} records to CSV.`);
+  };
+
+  if (statsLoading || recentLoading) return <Skeleton className="h-64 w-full" />;
+
+  const enabled = stats?.enabled ?? false;
+  const agreementRate = stats?.agreement_rate ?? 0;
+  const totalComparisons = stats?.total_comparisons ?? 0;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <Badge variant={enabled ? "default" : "secondary"}>
+            {enabled ? "Shadow Active" : "Shadow Inactive"}
+          </Badge>
+          <span className="text-sm text-muted-foreground">
+            {totalComparisons.toLocaleString()} comparisons recorded
+          </span>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleExportCSV}>
+            <Download className="h-4 w-4 mr-1" /> Export CSV
+          </Button>
+          {enabled && (
+            <Button
+              size="sm"
+              onClick={() => promoteMutation.mutate({ reason: "manual_promotion", operator: "admin" })}
+              disabled={promoteMutation.isPending}
+            >
+              <Zap className="h-4 w-4 mr-1" />
+              {promoteMutation.isPending ? "Promoting…" : "Promote to Production"}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: "Agreement Rate", value: `${(agreementRate * 100).toFixed(1)}%` },
+          { label: "Prod Mean Score", value: (stats?.production_mean ?? 0).toFixed(3) },
+          { label: "Shadow Mean Score", value: (stats?.shadow_mean ?? 0).toFixed(3) },
+          { label: "Shadow Block Rate", value: `${((stats?.shadow_block_rate ?? 0) * 100).toFixed(1)}%` },
+        ].map(({ label, value }) => (
+          <div key={label} className="p-4 rounded-lg bg-muted">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="text-2xl font-bold">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {chartData.length > 0 && (
+        <div>
+          <p className="text-sm font-medium mb-2 flex items-center gap-1">
+            <TrendingUp className="h-4 w-4" /> Score Divergence (last {chartData.length} events)
+          </p>
+          <div style={{ height: 220 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="idx" tick={{ fontSize: 10 }} />
+                <YAxis domain={[0, 1]} tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="production" stroke="#3b82f6" dot={false} strokeWidth={1.5} />
+                <Line type="monotone" dataKey="shadow" stroke="#f59e0b" dot={false} strokeWidth={1.5} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {distData.some(d => d.production > 0 || d.shadow > 0) && (
+        <div>
+          <p className="text-sm font-medium mb-2">Score Distribution</p>
+          <div style={{ height: 180 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={distData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="production" fill="#3b82f6" />
+                <Bar dataKey="shadow" fill="#f59e0b" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {!enabled && (
+        <p className="text-sm text-muted-foreground text-center py-8">
+          Shadow model is not currently active. Enable it via the Python service to start A/B comparison.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Audit Chain Tab ──────────────────────────────────────────────────────────
 
 function AuditChainTab() {
@@ -692,6 +840,9 @@ export default function SecurityMonitor() {
             <TabsTrigger value="chain">
               <Database className="h-4 w-4 mr-1" /> Chain Integrity
             </TabsTrigger>
+            <TabsTrigger value="abmodel">
+              <GitCompare className="h-4 w-4 mr-1" /> A/B Model
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="sessions" className="mt-4">
@@ -757,6 +908,21 @@ export default function SecurityMonitor() {
               </CardHeader>
               <CardContent>
                 <AuditChainTab />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="abmodel" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>A/B Model Comparison</CardTitle>
+                <CardDescription>
+                  Compare production vs shadow IsolationForest models in real time.
+                  Export comparison data as CSV or promote the shadow model to production.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ABModelTab />
               </CardContent>
             </Card>
           </TabsContent>

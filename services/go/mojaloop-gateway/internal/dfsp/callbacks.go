@@ -54,6 +54,21 @@ import (
 
 // ─── Hub JWKS cache ───────────────────────────────────────────────────────────
 
+// type JWK struct is defined in jws.go (same package).
+// Reproduced here for documentation purposes:
+//
+//	type JWK struct {
+//		Kty string `json:"kty"`
+//		Use string `json:"use"`
+//		Kid string `json:"kid"`
+//		Alg string `json:"alg"`
+//		N   string `json:"n,omitempty"`
+//		E   string `json:"e,omitempty"`
+//		Crv string `json:"crv,omitempty"`
+//		X   string `json:"x,omitempty"`
+//		Y   string `json:"y,omitempty"`
+//	}
+
 // JWKSResponse is the Hub's JWKS endpoint response.
 type JWKSResponse struct {
 	Keys []JWK `json:"keys"`

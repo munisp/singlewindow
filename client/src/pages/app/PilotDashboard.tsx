@@ -61,8 +61,10 @@ export default function PilotDashboard() {
   });
 
   const { data: kpi, refetch: refetchKpi } = trpc.pilot.getKpiSummary.useQuery();
-  const { data: participants, refetch: refetchParticipants } = trpc.pilot.listParticipants.useQuery({ limit: 100, offset: 0 });
-  const { data: reports, refetch: refetchReports } = trpc.pilot.getReports.useQuery({ limit: 10 });
+  const { data: participantsRaw, refetch: refetchParticipants } = trpc.pilot.listParticipants.useQuery({ limit: 100, offset: 0 });
+  const participants = Array.isArray(participantsRaw) ? participantsRaw : (participantsRaw as any)?.participants ?? [];
+  const { data: reportsRaw, refetch: refetchReports } = trpc.pilot.getReports.useQuery({ limit: 10 });
+  const reports = Array.isArray(reportsRaw) ? reportsRaw : (reportsRaw as any)?.reports ?? [];
   const { data: reportDetail, isLoading: detailLoading } = trpc.pilot.getReportDetail.useQuery(
     { reportId: selectedReportId! },
     { enabled: selectedReportId !== null }
@@ -382,11 +384,12 @@ export default function PilotDashboard() {
                 <Separator />
 
                 {/* 7-day per-officer trend chart */}
-                {officerTrend && officerTrend.officers.length > 0 && (() => {
+                {officerTrend && !Array.isArray(officerTrend) && (officerTrend as any).officers?.length > 0 && (() => {
+                  const _trend = officerTrend as { days: string[]; officers: { officerName: string; dailyValues: number[] }[] };
                   const OFFICER_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
-                  const chartData = officerTrend.days.map((day: string, di: number) => {
+                  const chartData = _trend.days.map((day: string, di: number) => {
                     const row: Record<string, string | number> = { day };
-                    officerTrend.officers.forEach((o: { officerName: string; dailyValues: number[] }) => {
+                    _trend.officers.forEach((o: { officerName: string; dailyValues: number[] }) => {
                       row[o.officerName] = o.dailyValues[di];
                     });
                     return row;
@@ -426,14 +429,14 @@ export default function PilotDashboard() {
                             <Tooltip
                               contentStyle={{ fontSize: 11 }}
                               labelFormatter={(label) => {
-                                const idx = officerTrend.days.indexOf(label as string);
+                                const idx = _trend.days.indexOf(label as string);
                                 return idx >= 0
                                   ? `${label} (${dayIsoLabels[idx]}) — click to view declarations`
                                   : label;
                               }}
                             />
                             <Legend wrapperStyle={{ fontSize: 10 }} />
-                            {officerTrend.officers.map((o: { officerName: string; dailyValues: number[] }, i: number) => (
+                            {_trend.officers.map((o: { officerName: string; dailyValues: number[] }, i: number) => (
                               <Bar key={o.officerName} dataKey={o.officerName} stackId="a" fill={OFFICER_COLORS[i % OFFICER_COLORS.length]} />
                             ))}
                           </BarChart>

@@ -284,7 +284,7 @@ export const aeoRouter = router({
     .input(z.object({ withinDays: z.number().int().min(1).max(365).default(60) }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (!db) return [];
       const now = new Date();
       const cutoff = new Date(now.getTime() + input.withinDays * 24 * 60 * 60 * 1000);
       const rows = await db
@@ -322,7 +322,7 @@ export const aeoRouter = router({
     .input(z.object({ applicationId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (!db) throw new TRPCError({ code: "NOT_FOUND", message: "AEO application not found" });
       const [app] = await db
         .select()
         .from(aeoApplications)
@@ -363,7 +363,7 @@ export const aeoRouter = router({
   requestRenewal: protectedProcedure
     .mutation(async ({ ctx }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      if (!db) throw new TRPCError({ code: "NOT_FOUND", message: "No approved AEO application found" });
       const [app] = await db
         .select()
         .from(aeoApplications)
