@@ -670,3 +670,41 @@ services:
       targetCPUUtilizationPercentage: 65
     pdb:
       minAvailable: 1
+
+  # ─── Notification Dispatcher (Go) ──────────────────────────────────────────
+  # Consumes push.dispatch Kafka topic and fans out to FCM v1 + APNs HTTP/2.
+  # Admin HTTP server on port 8081 handles /healthz and /admin/refresh-tokens.
+  notification-dispatcher:
+    enabled: true
+    port: 8081
+    metricsPort: 9090
+    replicas: 2
+    daprEnabled: "false"
+    env:
+      KAFKA_BROKER: ""
+      FCM_PROJECT_ID: ""
+      APNS_BUNDLE_ID: "ng.gov.tradegateway"
+      PUSH_TOKENS_SVC_URL: "http://push-tokens-svc.tradegateway.svc.cluster.local:8080"
+      ADMIN_ADDR: ":8081"
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits:   { cpu: "500m", memory: "512Mi" }
+    hpa:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+    pdb:
+      minAvailable: 1
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8081
+      initialDelaySeconds: 10
+      periodSeconds: 30
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: 8081
+      initialDelaySeconds: 5
+      periodSeconds: 10

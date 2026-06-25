@@ -1,0 +1,117 @@
+# notification-dispatcher-token-refresh-cronjob.yaml
+#
+# Kubernetes CronJob that triggers the notification-dispatcher's built-in
+# /admin/refresh-tokens HTTP endpoint on a nightly schedule (02:00 UTC).
+#
+# The endpoint instructs the running dispatcher pod to run an immediate
+# token-refresh cycle outside of its normal 6-hour interval — useful for
+# post-deployment validation and on-demand purge operations.
+#
+# Prerequisites:
+#   - The notification-dispatcher Deployment must expose port 8081 (admin HTTP).
+#   - The Service "notification-dispatcher-admin" must route to port 8081.
+#   - RBAC: the "token-refresh-job" ServiceAccount needs no special permissions
+#     (it only calls an in-cluster HTTP endpoint).
+#
+# Usage:
+#   kubectl apply -f infra/k8s/notification-dispatcher-token-refresh-cronjob.yaml
+#   kubectl create job --from=cronjob/token-refresh-nightly manual-refresh-$(date +%s)
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: token-refresh-nightly
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/name: token-refresh-nightly
+    app.kubernetes.io/component: notification
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  # Run at 02:00 UTC every night.
+  schedule: "0 2 * * *"
+  # Keep the last 3 successful and 1 failed job for debugging.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  # If a scheduled run is missed (e.g. cluster downtime), skip it rather than
+  # running all missed jobs at once.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      # Retry up to 2 times before marking the job as failed.
+      backoffLimit: 2
+      # Kill the job if it runs longer than 10 minutes.
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: token-refresh-job
+            app.kubernetes.io/component: notification
+        spec:
+          serviceAccountName: token-refresh-job
+          restartPolicy: OnFailure
+          containers:
+            - name: trigger
+              # Use a minimal curl image to call the admin HTTP endpoint.
+              image: curlimages/curl:8.7.1
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "[token-refresh-job] triggering refresh at $(date -u)"
+                  curl -sf \
+                    --max-time 300 \
+                    --retry 3 \
+                    --retry-delay 10 \
+                    -X POST \
+                    http://notification-dispatcher-admin.tradegateway.svc.cluster.local:8081/admin/refresh-tokens
+                  echo "[token-refresh-job] done"
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "16Mi"
+                limits:
+                  cpu: "50m"
+                  memory: "32Mi"
+          # Tolerate node taints for batch workloads.
+          tolerations:
+            - key: "batch"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
+---
+# ServiceAccount used by the CronJob pod.
+# No additional RBAC rules are needed — the job only calls an in-cluster URL.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: token-refresh-job
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/name: token-refresh-job
+    app.kubernetes.io/component: notification
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+---
+# Admin HTTP Service for the notification-dispatcher.
+# Exposes port 8081 for internal health checks and the /admin/refresh-tokens
+# endpoint triggered by the CronJob above.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-dispatcher-admin
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/name: notification-dispatcher
+    app.kubernetes.io/component: notification
+    app.kubernetes.io/part-of: tradegateway-ngswtp
+spec:
+  selector:
+    app.kubernetes.io/name: notification-dispatcher
+  ports:
+    - name: admin-http
+      port: 8081
+      targetPort: 8081
+      protocol: TCP
+  type: ClusterIP

@@ -9,7 +9,7 @@
  *   4. Audit Log — paginated immutable audit trail
  *   5. Audit Chain — TigerBeetle chain integrity verification
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import {
   Shield, Users, AlertTriangle, CheckCircle2, XCircle, Clock,
   RefreshCw, LogOut, Eye, Lock, Activity, Database, ChevronLeft, ChevronRight, GitCompare,
-  Download, TrendingUp, Zap,
+  Download, TrendingUp, Zap, BellRing,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -600,11 +600,15 @@ function AuditLogTab() {
 
 // ─── A/B Model Comparison Tab ────────────────────────────────────────────────
 
+/** Agreement rate below this value triggers a warning banner + owner notification */
+const AB_ALERT_THRESHOLD = 0.85;
+
 function ABModelTab() {
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } =
     trpc.insiderThreat.getABStats.useQuery(undefined, { refetchInterval: 30_000 });
   const { data: recent, isLoading: recentLoading } =
     trpc.insiderThreat.getABRecentScores.useQuery({ limit: 100 });
+  const notifyOwner = trpc.system.notifyOwner.useMutation();
   const promoteMutation = trpc.insiderThreat.promoteModel.useMutation({
     onSuccess: () => {
       toast.success("Shadow model promoted to production successfully.");
@@ -644,14 +648,47 @@ function ABModelTab() {
     toast.success(`Exported ${records.length} records to CSV.`);
   };
 
+  // Fire owner notification once when agreement rate drops below threshold.
+  // The dependency array uses primitive values to avoid infinite re-renders.
+  useEffect(() => {
+    if (!stats || statsLoading) return;
+    const rate = stats.agreement_rate ?? 1;
+    const comparisons = stats.total_comparisons ?? 0;
+    if (rate < AB_ALERT_THRESHOLD && comparisons >= 10) {
+      notifyOwner.mutate({
+        title: "⚠️ A/B Model Divergence Alert",
+        content: `Shadow model agreement rate has dropped to ${(rate * 100).toFixed(1)}% (threshold: ${(AB_ALERT_THRESHOLD * 100).toFixed(0)}%) after ${comparisons} comparisons. Review the A/B tab in Security Monitor before promoting.`,
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats?.agreement_rate, stats?.total_comparisons]);
+
   if (statsLoading || recentLoading) return <Skeleton className="h-64 w-full" />;
 
   const enabled = stats?.enabled ?? false;
   const agreementRate = stats?.agreement_rate ?? 0;
   const totalComparisons = stats?.total_comparisons ?? 0;
+  const showDivergenceAlert = enabled && totalComparisons >= 10 && agreementRate < AB_ALERT_THRESHOLD;
 
   return (
     <div className="space-y-6">
+      {showDivergenceAlert && (
+        <div className="flex items-start gap-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
+          <BellRing className="h-5 w-5 text-yellow-500 mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+              Divergence Alert — Agreement Rate Below Threshold
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Current agreement rate is{" "}
+              <strong>{(agreementRate * 100).toFixed(1)}%</strong>, below the{" "}
+              {(AB_ALERT_THRESHOLD * 100).toFixed(0)}% threshold after{" "}
+              {totalComparisons.toLocaleString()} comparisons. Investigate model behaviour
+              before promoting the shadow model to production.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <Badge variant={enabled ? "default" : "secondary"}>

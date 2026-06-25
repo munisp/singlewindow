@@ -12,18 +12,43 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	kafkaBroker := getenv("KAFKA_BROKER", "kafka:9092")
-	fcmProjectID := getenv("FCM_PROJECT_ID", "tradegateway-prod")
-	apnsBundleID := getenv("APNS_BUNDLE_ID", "ng.gov.tradegateway")
+	kafkaBroker      := getenv("KAFKA_BROKER", "kafka:9092")
+	fcmProjectID     := getenv("FCM_PROJECT_ID", "tradegateway-prod")
+	apnsBundleID     := getenv("APNS_BUNDLE_ID", "ng.gov.tradegateway")
+	pushTokensSvcURL := getenv("PUSH_TOKENS_SVC_URL", "http://push-tokens-svc:8080")
+	adminAddr        := getenv("ADMIN_ADDR", ":8081")
 
-	fcmClient := NewFCMClient(fcmProjectID)
+	fcmClient  := NewFCMClient(fcmProjectID)
 	apnsClient := NewAPNsClient(apnsBundleID)
-	d := NewDispatcher(kafkaBroker, fcmClient, apnsClient)
 
+	// ── Main notification dispatcher ────────────────────────────────────────
+	d := NewDispatcher(kafkaBroker, fcmClient, apnsClient)
 	go func() {
 		if err := d.Run(ctx); err != nil && err != context.Canceled {
 			log.Printf("[dispatcher] fatal: %v", err)
 			cancel()
+		}
+	}()
+
+	// ── FCM token refresher ─────────────────────────────────────────────────
+	// Validates all stored push tokens every 6 hours and purges stale ones
+	// via the insider.push.purge Kafka topic, preventing silent delivery failures.
+	tokenRefresher := NewTokenRefresher(
+		fcmClient,
+		NewHTTPTokenProvider(pushTokensSvcURL),
+		NewKafkaPurgePublisher(kafkaBroker),
+		DefaultRefreshInterval,
+		DefaultBatchSize,
+	)
+	go tokenRefresher.Run(ctx)
+	log.Printf("[token-refresher] started (interval=%s, batchSize=%d)", DefaultRefreshInterval, DefaultBatchSize)
+
+	// ── Admin HTTP server ───────────────────────────────────────────────────
+	// Exposes /healthz and /admin/refresh-tokens for the nightly K8s CronJob.
+	adminSrv := NewAdminServer(adminAddr, tokenRefresher)
+	go func() {
+		if err := adminSrv.Start(); err != nil {
+			log.Printf("[admin] server stopped: %v", err)
 		}
 	}()
 
@@ -32,6 +57,7 @@ func main() {
 	<-sig
 	log.Println("[dispatcher] shutting down")
 	cancel()
+	_ = adminSrv.Shutdown(ctx)
 }
 
 func getenv(key, def string) string {

@@ -540,4 +540,22 @@ export const insiderThreatRouter = router({
         return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, promotedAt: new Date().toISOString() };
       }
     }),
+
+  /**
+   * getPromotionHistory — proxy to Python insider-threat-svc GET /ab/promotions.
+   * Returns the promotion audit log (most recent first).
+   */
+  getPromotionHistory: adminProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(500).default(50) }))
+    .query(async ({ input }) => {
+      const svcUrl = process.env.INSIDER_THREAT_SVC_URL ?? "http://insider-threat-svc:8000";
+      try {
+        const resp = await fetch(`${svcUrl}/ab/promotions?limit=${input.limit}`, { signal: AbortSignal.timeout(5000) });
+        if (!resp.ok) return { total: 0, records: [], source: "unavailable" };
+        const data = await resp.json();
+        return { ...data, source: "insider-threat-svc" };
+      } catch {
+        return { total: 0, records: [], source: "unavailable" };
+      }
+    }),
 });

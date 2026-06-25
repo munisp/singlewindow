@@ -735,3 +735,17 @@
 - [x] Fixed 10 previously failing test files (109 failures → 0): api.changelog, executive.dashboard, nigeria.id, payments, post.audit, sprint15, sprint85, sprint88, trader.scorecard, v65
 - [x] Fixed all 25 TypeScript errors (0 errors)
 - [x] All 83 test files, 2573 tests passing
+
+## v73 Sprint — FCM Scheduling, AB Audit Log, Divergence Alert, Dapr K8s (COMPLETED)
+- [x] services/python/insider-threat-svc/main.py — GET /ab/promotions: PromotionRecord model, deque ring buffer (maxlen=500), _record_promotion wired into POST /ab/promote
+- [x] services/python/insider-threat-svc/test_main.py — 30 pytest tests covering /detect, /ab/stats, /ab/recent, /ab/promote, /ab/promotions
+- [x] server/routers/insiderThreat.ts — getPromotionHistory procedure: proxy to Python /ab/promotions with offline fallback
+- [x] services/go/notification-dispatcher/admin_server.go — AdminServer struct: /healthz (200), /admin/refresh-tokens (202+goroutine), Shutdown(ctx)
+- [x] services/go/notification-dispatcher/admin_server_test.go — 8 Go unit tests for AdminServer
+- [x] services/go/notification-dispatcher/main.go — TokenRefresher.Run(ctx) + AdminServer.Start() wired as goroutines; ADMIN_ADDR env; graceful Shutdown on SIGTERM
+- [x] infra/k8s/notification-dispatcher-token-refresh-cronjob.yaml — K8s CronJob (nightly 02:00 UTC), curl /admin/refresh-tokens, concurrencyPolicy: Forbid
+- [x] infra/k8s/dapr/components.yaml — 7 Dapr components promoted to K8s: fluvio-binding, tigerbeetle-binding, lakehouse-binding, redis-lock, cron-model-retrain, keycloak-secrets, tradegateway-resiliency
+- [x] infra/helm/tradegateway/values.yaml — notification-dispatcher service entry: replicaCount, image, port 8081, /healthz probe, HPA, ADMIN_ADDR env
+- [x] client/src/pages/app/SecurityMonitor.tsx — AB_ALERT_THRESHOLD=0.85, showDivergenceAlert state, BellRing icon banner, trpc.system.notifyOwner mutation, useEffect with primitive deps
+- [x] server/v73.test.ts — 60 vitest tests: all passing
+- [x] All 84 test files, 2633 tests passing, 0 TypeScript errors

@@ -374,7 +374,7 @@ def ab_promote(req: PromoteRequest):
         new_version, previous_version, req.operator, req.reason,
     )
 
-    return PromoteResponse(
+    resp = PromoteResponse(
         success=True,
         promoted_at=promoted_at,
         previous_version=previous_version,
@@ -383,3 +383,56 @@ def ab_promote(req: PromoteRequest):
         reason=req.reason,
         operator=req.operator,
     )
+    _record_promotion(resp)
+    return resp
+
+
+# ─── Promotion Audit Log ──────────────────────────────────────────────────────
+# In-memory ring buffer of the last 500 promotion events.
+# In production, swap this for a database-backed store (e.g. PostgreSQL table).
+from collections import deque as _deque
+_PROMOTION_LOG: _deque = _deque(maxlen=500)
+
+
+class PromotionRecord(BaseModel):
+    """Single entry in the promotion audit log."""
+    id: int
+    promoted_at: str
+    operator: str
+    reason: str
+    previous_version: Optional[int]
+    new_version: Optional[int]
+    agreement_rate: float
+    total_comparisons: int
+
+
+class PromotionHistoryResponse(BaseModel):
+    total: int
+    records: list[PromotionRecord]
+
+
+def _record_promotion(resp: PromoteResponse) -> None:
+    """Append a PromoteResponse to the in-memory audit log."""
+    entry = PromotionRecord(
+        id=len(_PROMOTION_LOG) + 1,
+        promoted_at=resp.promoted_at,
+        operator=resp.operator,
+        reason=resp.reason,
+        previous_version=resp.previous_version,
+        new_version=resp.new_version,
+        agreement_rate=resp.shadow_stats_snapshot.get("agreement_rate", 0.0),
+        total_comparisons=resp.shadow_stats_snapshot.get("total_comparisons", 0),
+    )
+    _PROMOTION_LOG.append(entry)
+
+
+@app.get("/ab/promotions", response_model=PromotionHistoryResponse)
+def ab_promotions(limit: int = 50):
+    """
+    Return the promotion audit log (most recent first).
+    Each entry records who promoted the model, when, why, and the A/B
+    agreement rate at the time of promotion.
+    """
+    records = list(_PROMOTION_LOG)[-limit:]
+    records.reverse()
+    return PromotionHistoryResponse(total=len(_PROMOTION_LOG), records=records)

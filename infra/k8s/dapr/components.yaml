@@ -1,0 +1,240 @@
+# =============================================================================
+# TradeGateway™ NGSWTP — Dapr Kubernetes Components (production)
+#
+# This file promotes the remaining local-dev Dapr components from
+# infra/dapr/components/ to Kubernetes-scoped manifests.
+#
+# Components already in secretstore.yaml:
+#   - kubernetes-secrets (secretstores.kubernetes)
+#   - pubsub             (pubsub.kafka)
+#   - statestore         (state.redis)
+#
+# Components in this file:
+#   - fluvio-binding     (bindings.http  → Fluvio real-time streaming)
+#   - tigerbeetle-binding(bindings.http  → TigerBeetle financial ledger)
+#   - lakehouse-binding  (bindings.http  → Delta Lake ingest service)
+#   - redis-lock         (lock.redis     → Distributed locking)
+#   - cron-model-retrain (bindings.cron  → Weekly ML model retraining)
+#   - keycloak-secrets   (secretstores.http → Keycloak token endpoint)
+#   - tradegateway-resiliency (Resiliency → Retry/circuit-breaker policies)
+#
+# Deploy:
+#   kubectl apply -f infra/k8s/dapr/secretstore.yaml
+#   kubectl apply -f infra/k8s/dapr/components.yaml
+# =============================================================================
+---
+# ─── Fluvio Binding ──────────────────────────────────────────────────────────
+# Used by declaration-engine and risk-ai-engine to publish real-time events
+# to the Fluvio streaming platform (port 9003).
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: fluvio-binding
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: streaming
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+    - name: url
+      secretKeyRef:
+        name: tradegateway-secrets
+        key: fluvio-sc-url          # e.g. http://fluvio-sc.tradegateway.svc:9003
+    - name: method
+      value: "POST"
+    - name: direction
+      value: "output"
+auth:
+  secretStore: kubernetes-secrets
+---
+# ─── TigerBeetle Binding ─────────────────────────────────────────────────────
+# Used by payment-service and post-clearance-audit to write immutable ledger
+# entries via the Rust tigerbeetle-bridge-rs HTTP façade (port 8099).
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: tigerbeetle-binding
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: ledger
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+    - name: url
+      secretKeyRef:
+        name: tradegateway-secrets
+        key: tigerbeetle-bridge-url  # e.g. http://tigerbeetle-bridge.tradegateway.svc:8099
+    - name: method
+      value: "POST"
+    - name: direction
+      value: "output"
+auth:
+  secretStore: kubernetes-secrets
+---
+# ─── Lakehouse Binding ───────────────────────────────────────────────────────
+# Used by analytics pipeline services to push raw events to the Delta Lake
+# ingest service (port 8097) for Parquet storage and Spark/Flink processing.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: lakehouse-binding
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: analytics
+spec:
+  type: bindings.http
+  version: v1
+  metadata:
+    - name: url
+      secretKeyRef:
+        name: tradegateway-secrets
+        key: lakehouse-ingest-url    # e.g. http://lakehouse-ingest.tradegateway.svc:8097
+    - name: method
+      value: "POST"
+    - name: direction
+      value: "output"
+auth:
+  secretStore: kubernetes-secrets
+---
+# ─── Redis Distributed Lock ──────────────────────────────────────────────────
+# Used by declaration-engine and AEO-management to prevent duplicate processing
+# of the same consignment reference under concurrent load.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: redis-lock
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: locking
+spec:
+  type: lock.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      secretKeyRef:
+        name: tradegateway-secrets
+        key: redis-host             # e.g. redis-master.tradegateway.svc:6379
+    - name: redisPassword
+      secretKeyRef:
+        name: tradegateway-secrets
+        key: redis-password
+    - name: enableTLS
+      value: "false"
+auth:
+  secretStore: kubernetes-secrets
+---
+# ─── Cron — Weekly ML Model Retraining ───────────────────────────────────────
+# Triggers the insider-threat-svc /retrain endpoint every Sunday at 02:00 UTC.
+# The Dapr sidecar calls the app's /retrain route; the app then kicks off the
+# IsolationForest retraining pipeline.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: cron-model-retrain
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: ml
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+    - name: schedule
+      value: "@weekly"              # Every Sunday at 00:00 UTC (Dapr cron syntax)
+    - name: direction
+      value: "input"
+---
+# ─── Keycloak Secret Store ───────────────────────────────────────────────────
+# Allows services to fetch Keycloak client credentials at runtime without
+# embedding them in container images or ConfigMaps.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: keycloak-secrets
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: iam
+spec:
+  type: secretstores.http
+  version: v1
+  metadata:
+    - name: url
+      secretKeyRef:
+        name: tradegateway-secrets
+        key: keycloak-token-url     # e.g. https://keycloak.tradegateway.svc/realms/tradegateway/protocol/openid-connect/token
+    - name: method
+      value: "POST"
+auth:
+  secretStore: kubernetes-secrets
+---
+# ─── Resiliency Policy ───────────────────────────────────────────────────────
+# Applies retry, timeout, and circuit-breaker policies to all Dapr service
+# invocations and pub/sub subscriptions across the platform.
+apiVersion: dapr.io/v1alpha1
+kind: Resiliency
+metadata:
+  name: tradegateway-resiliency
+  namespace: tradegateway
+  labels:
+    app.kubernetes.io/part-of: tradegateway
+    app.kubernetes.io/component: resiliency
+spec:
+  policies:
+    timeouts:
+      defaultTimeout: 30s
+      riskScoringTimeout: 60s     # ML inference can be slow under load
+      paymentTimeout: 120s        # Mojaloop round-trips require extended timeout
+    retries:
+      defaultRetry:
+        policy: exponential
+        duration: 500ms
+        maxInterval: 10s
+        maxRetries: 3
+      criticalRetry:
+        policy: exponential
+        duration: 1s
+        maxInterval: 30s
+        maxRetries: 5
+      noRetry:
+        policy: constant
+        duration: 0
+        maxRetries: 0
+    circuitBreakers:
+      defaultCircuitBreaker:
+        maxRequests: 1
+        interval: 30s
+        timeout: 30s
+        trip: consecutiveFailures >= 5
+  targets:
+    apps:
+      risk-ai-engine:
+        timeout: riskScoringTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      payment-service:
+        timeout: paymentTimeout
+        retry: criticalRetry
+        circuitBreaker: defaultCircuitBreaker
+      declaration-engine:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      insider-threat-svc:
+        timeout: riskScoringTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+    components:
+      pubsub:
+        outbound:
+          retry: defaultRetry
+          circuitBreaker: defaultCircuitBreaker
+        inbound:
+          retry: defaultRetry
+          timeout: defaultTimeout
