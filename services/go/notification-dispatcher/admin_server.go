@@ -78,6 +78,27 @@ func NewAdminServer(addr string, refresher *TokenRefresher) *AdminServer {
 		})
 	})
 
+	// POST /admin/force-refresh — synchronous variant of refresh-tokens.
+	// Waits for the cycle to complete (up to 30s) and returns the updated stats.
+	// Used by the tRPC forceTokenRefresh procedure for operator-triggered refreshes.
+	mux.HandleFunc("POST /admin/force-refresh", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		log.Println("[admin] force-refresh requested")
+		as.refresher.runCycle(ctx)
+		stats := as.refresher.Stats()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"triggered":       true,
+			"total_cycles":    stats.TotalCycles,
+			"total_validated": stats.TotalValidated,
+			"total_stale":     stats.TotalStale,
+			"total_purged":    stats.TotalPurged,
+			"message":         "Force refresh complete",
+		})
+	})
+
 	as.server = &http.Server{
 		Addr:         addr,
 		Handler:      mux,

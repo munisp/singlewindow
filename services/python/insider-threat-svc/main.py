@@ -536,3 +536,42 @@ def ab_rollback(req: RollbackRequest):
     except Exception as exc:
         logger.error("Rollback failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}")
+
+
+@app.get("/ab/divergence")
+def get_ab_divergence(n: int = 100):
+    """
+    v76-15: Return A/B model divergence statistics.
+    Compares the last N scored events where both production and shadow models
+    produced a decision, and returns agree/disagree counts.
+    Falls back to zeros when no divergence history is available.
+    """
+    n = max(10, min(n, 1000))
+    # Retrieve divergence log from Redis if available
+    agree = 0
+    disagree = 0
+    total = 0
+    try:
+        import redis as _redis_mod
+        r = _redis_mod.Redis(
+            host=os.environ.get("REDIS_HOST", "redis"),
+            port=int(os.environ.get("REDIS_PORT", "6379")),
+            decode_responses=True,
+            socket_connect_timeout=1,
+        )
+        # Each entry in the divergence list is "agree" or "disagree"
+        entries = r.lrange("ab:divergence:log", -n, -1)
+        total = len(entries)
+        agree = sum(1 for e in entries if e == "agree")
+        disagree = total - agree
+    except Exception:
+        pass  # Redis unavailable — return zeros
+
+    agree_rate = round(agree / total, 4) if total > 0 else 0.0
+    return {
+        "agree": agree,
+        "disagree": disagree,
+        "agree_rate": agree_rate,
+        "total": total,
+        "requested_n": n,
+    }

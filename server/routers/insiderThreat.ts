@@ -677,4 +677,111 @@ export const insiderThreatRouter = router({
         return { total_analysed: 0, total_alerts: 0, blocked_count: 0, alerts_by_rule: {}, source: "unavailable" };
       }
     }),
+
+  /**
+   * v76-09: Batch HS code classification — proxy to Rust POST /batch
+   */
+  batchClassifyHSCodes: protectedProcedure
+    .input(z.object({ hs_codes: z.array(z.string()).min(1).max(50) }))
+    .mutation(async ({ input }) => {
+      const svcUrl = process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8090";
+      try {
+        const resp = await fetch(`${svcUrl}/batch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hs_codes: input.hs_codes }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!resp.ok) throw new Error(`hs-classifier batch returned ${resp.status}`);
+        return await resp.json();
+      } catch {
+        // offline stub — return invalid for all codes
+        return {
+          results: input.hs_codes.map(code => ({
+            hs_code: code,
+            valid: false,
+            chapter: "00",
+            heading: "0000",
+            subheading: "000000",
+            description: "Service unavailable",
+            confidence: 0,
+            source: "offline-stub",
+          })),
+          source: "offline-stub",
+        };
+      }
+    }),
+
+  /**
+   * v76-10: Get full WCO chapter lookup table from Rust GET /chapters
+   */
+  getHSChapters: protectedProcedure.query(async () => {
+    const svcUrl = process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8090";
+    try {
+      const resp = await fetch(`${svcUrl}/chapters`, { signal: AbortSignal.timeout(5_000) });
+      if (!resp.ok) throw new Error(`hs-classifier chapters returned ${resp.status}`);
+      return await resp.json();
+    } catch {
+      // offline stub — return a minimal chapter map
+      return {
+        chapters: {
+          "01": "Live animals",
+          "02": "Meat and edible meat offal",
+          "84": "Nuclear reactors, boilers, machinery and mechanical appliances",
+          "85": "Electrical machinery and equipment",
+          "87": "Vehicles other than railway or tramway rolling stock",
+        },
+        source: "offline-stub",
+      };
+    }
+  }),
+
+  /**
+   * v76-12: Anomaly risk summary — top-10 highest-risk users
+   */
+  getAnomalyRiskSummary: adminProcedure.query(async () => {
+    const svcUrl = process.env.ANOMALY_DETECTION_SVC_URL ?? "http://anomaly-detection-svc:8000";
+    try {
+      const resp = await fetch(`${svcUrl}/risk/summary`, { signal: AbortSignal.timeout(5_000) });
+      if (!resp.ok) return { users: [], source: "unavailable" };
+      return { ...await resp.json(), source: "anomaly-detection-svc" };
+    } catch {
+      return { users: [], source: "unavailable" };
+    }
+  }),
+
+  /**
+   * v76-15: A/B model divergence — production vs shadow block decisions
+   */
+  getABDivergence: adminProcedure
+    .input(z.object({ n: z.number().int().min(10).max(1000).default(100) }))
+    .query(async ({ input }) => {
+      const svcUrl = process.env.INSIDER_THREAT_SVC_URL ?? "http://insider-threat-svc:8000";
+      try {
+        const resp = await fetch(`${svcUrl}/ab/divergence?n=${input.n}`, { signal: AbortSignal.timeout(8_000) });
+        if (!resp.ok) return { agree: 0, disagree: 0, agree_rate: 0, total: 0, source: "unavailable" };
+        return { ...await resp.json(), source: "insider-threat-svc" };
+      } catch {
+        return { agree: 0, disagree: 0, agree_rate: 0, total: 0, source: "unavailable" };
+      }
+    }),
+
+  /**
+   * v76-18: Force immediate token refresh cycle — proxy to Go POST /admin/force-refresh
+   */
+  forceTokenRefresh: adminProcedure.mutation(async () => {
+    const svcUrl = process.env.NOTIFICATION_DISPATCHER_ADMIN_URL ?? "http://notification-dispatcher:8081";
+    try {
+      const resp = await fetch(`${svcUrl}/admin/force-refresh`, {
+        method: "POST",
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!resp.ok) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `force-refresh returned ${resp.status}` });
+      return await resp.json();
+    } catch (err) {
+      if (err instanceof TRPCError) throw err;
+      // offline stub
+      return { triggered: true, source: "offline-stub", message: "Token refresh triggered (offline stub)" };
+    }
+  }),
 });

@@ -25,7 +25,7 @@ import {
   ShieldQuestion,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -183,6 +183,40 @@ export default function NewDeclaration() {
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
   const [isScoring, setIsScoring] = useState(false);
   const utils = trpc.useUtils();
+
+  // HS code inline validation state
+  const [hsCodeInput, setHsCodeInput] = useState("");
+  const [hsValidation, setHsValidation] = useState<{
+    valid: boolean;
+    chapter: string;
+    heading: string;
+    description: string;
+    confidence: number;
+    source: string;
+  } | null>(null);
+  const [hsValidating, setHsValidating] = useState(false);
+
+  const classifyMutation = trpc.insiderThreat.classifyHSCode.useMutation({
+    onSuccess: (data: any) => {
+      setHsValidation(data);
+      setHsValidating(false);
+    },
+    onError: () => setHsValidating(false),
+  });
+
+  // Debounced HS code validation — fires 600ms after user stops typing
+  useEffect(() => {
+    if (hsCodeInput.length < 4) {
+      setHsValidation(null);
+      return;
+    }
+    setHsValidating(true);
+    const t = setTimeout(() => {
+      classifyMutation.mutate({ hs_code: hsCodeInput });
+    }, 600);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hsCodeInput]);
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -384,8 +418,45 @@ export default function NewDeclaration() {
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div className="grid gap-2">
                       <Label>HS Code *</Label>
-                      <Input {...register("hsCode")} placeholder="e.g. 8471.30.00" />
+                      <div className="relative">
+                        <Input
+                          {...register("hsCode")}
+                          placeholder="e.g. 8471.30.00"
+                          onChange={e => {
+                            register("hsCode").onChange(e);
+                            setHsCodeInput(e.target.value);
+                          }}
+                          className={hsValidation ? (hsValidation.valid ? "border-emerald-500 pr-8" : "border-red-500 pr-8") : ""}
+                        />
+                        {hsValidating && (
+                          <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
+                        {!hsValidating && hsValidation && (
+                          hsValidation.valid
+                            ? <CheckCircle className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-500" />
+                            : <AlertTriangle className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-red-500" />
+                        )}
+                      </div>
                       {errors.hsCode && <p className="text-xs text-destructive">{errors.hsCode.message}</p>}
+                      {/* Inline HS validation result */}
+                      {hsValidation && !errors.hsCode && (
+                        <div className={`rounded-md px-3 py-2 text-xs border ${
+                          hsValidation.valid
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300"
+                            : "bg-red-50 border-red-200 text-red-800 dark:bg-red-950/30 dark:border-red-800 dark:text-red-300"
+                        }`}>
+                          {hsValidation.valid ? (
+                            <>
+                              <span className="font-semibold">Ch.{hsValidation.chapter}</span>
+                              {" · "}
+                              <span>{hsValidation.description}</span>
+                              <span className="ml-2 opacity-60">({Math.round(hsValidation.confidence * 100)}% conf.)</span>
+                            </>
+                          ) : (
+                            <span>Invalid HS code — must be 6–10 digits</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="grid gap-2">
                       <Label>Country of Origin *</Label>
@@ -556,7 +627,12 @@ export default function NewDeclaration() {
                 Next <ArrowRight className="h-4 w-4" />
               </Button>
             ) : (
-              <Button type="submit" disabled={createMutation.isPending} className="gap-2">
+              <Button
+                type="submit"
+                disabled={createMutation.isPending || (hsValidation !== null && (!hsValidation.valid || hsValidation.confidence < 0.5))}
+                className="gap-2"
+                title={hsValidation && (!hsValidation.valid || hsValidation.confidence < 0.5) ? "Fix the HS code before submitting" : undefined}
+              >
                 {createMutation.isPending ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Submitting...</>
                 ) : (

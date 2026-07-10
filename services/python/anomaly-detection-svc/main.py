@@ -457,3 +457,41 @@ def get_user_risk(user_id: str):
         if val:
             profile[key.split(":")[0]] = val
     return {"user_id": user_id, "risk_profile": profile}
+
+
+@app.get("/risk/summary")
+def get_risk_summary():
+    """
+    v76-11: Return top-10 highest-risk users based on alert counts stored in Redis.
+    Falls back to empty list when Redis is unavailable.
+    """
+    user_scores: dict[str, int] = {}
+    try:
+        r = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=1)
+        for key in r.scan_iter("authz:denied:*", count=200):
+            user_id = key.split(":")[-1]
+            try:
+                count = int(r.get(key) or 0)
+                user_scores[user_id] = user_scores.get(user_id, 0) + count
+            except (ValueError, TypeError):
+                pass
+        for key in r.scan_iter("rate:*:actions", count=200):
+            parts = key.split(":")
+            if len(parts) >= 2:
+                user_id = parts[1]
+                try:
+                    count = int(r.get(key) or 0)
+                    user_scores[user_id] = user_scores.get(user_id, 0) + max(0, count - 10)
+                except (ValueError, TypeError):
+                    pass
+    except Exception:
+        pass  # Redis unavailable — return empty
+
+    top_users = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)[:10]
+    return {
+        "users": [
+            {"user_id": uid, "score": score, "alert_count": score}
+            for uid, score in top_users
+        ],
+        "total_tracked": len(user_scores),
+    }

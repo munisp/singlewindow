@@ -779,3 +779,25 @@
 - [x] services/python/anomaly-detection-svc/test_anomaly.py — add tests for rate-limit middleware, /metrics endpoint, batch size rejection
 - [x] client/src/pages/app/SecurityMonitor.tsx — HS Code Classifier panel: input field + classify button + result display using classifyHSCode tRPC
 - [x] server/v75.test.ts — 70+ vitest tests covering all 20 sprint items
+
+## v76 Sprint — 20 Next Steps (IN PROGRESS)
+- [x] v76-01: TraderDeclarations.tsx — inline HS code validation: debounced classifyHSCode call on hs_code input field, show chapter/heading/confidence badge inline before submission
+- [x] v76-02: TraderDeclarations.tsx — submission guard: disable Submit button if HS code is invalid (confidence < 0.5 or valid=false from classifier)
+- [x] v76-03: ExecutiveDashboard.tsx — Anomaly Detection Health card: total_analysed, blocked_count, top-3 alerts_by_rule from getAnomalyMetrics tRPC
+- [x] v76-04: ExecutiveDashboard.tsx — auto-refresh anomaly metrics every 30 seconds with last-updated timestamp
+- [x] v76-05: infra/monitoring/dashboards/notification-dispatcher.json — add Grafana alert rule: total_stale > 50 fires critical alert
+- [x] v76-06: infra/monitoring/dashboards/notification-dispatcher.json — add alert contact point (webhook) and notification policy to dashboard JSON
+- [x] v76-07: services/rust/hs-classifier/src/main.rs — add POST /batch endpoint: classify up to 50 HS codes in one request, return array of ClassifyResponse
+- [x] v76-08: services/rust/hs-classifier/src/main.rs — add GET /chapters endpoint: return full WCO chapter lookup table as JSON
+- [x] v76-09: server/routers/insiderThreat.ts — batchClassifyHSCodes procedure: proxy to Rust POST /batch, offline stub for each code
+- [x] v76-10: server/routers/insiderThreat.ts — getHSChapters procedure: proxy to Rust GET /chapters, offline stub with hardcoded chapter map
+- [x] v76-11: services/python/anomaly-detection-svc/main.py — add GET /risk/summary endpoint: top-10 highest-risk users with score + alert count
+- [x] v76-12: server/routers/insiderThreat.ts — getAnomalyRiskSummary procedure: proxy to Python GET /risk/summary
+- [x] v76-13: client/src/pages/app/SecurityMonitor.tsx — Risk Summary tab: table of top-10 risky users from getAnomalyRiskSummary
+- [x] v76-14: services/python/insider-threat-svc/main.py — add GET /ab/divergence endpoint: returns comparison of production vs shadow block decisions over last N events
+- [x] v76-15: server/routers/insiderThreat.ts — getABDivergence procedure: proxy to Python GET /ab/divergence
+- [x] v76-16: client/src/pages/app/SecurityMonitor.tsx — A/B Divergence chart in ABModelTab: bar chart of agree/disagree counts from getABDivergence
+- [x] v76-17: services/go/notification-dispatcher/admin_server.go — add POST /admin/force-refresh endpoint: triggers immediate token refresh cycle outside normal schedule
+- [x] v76-18: server/routers/insiderThreat.ts — forceTokenRefresh procedure: proxy to Go POST /admin/force-refresh, admin-only
+- [x] v76-19: client/src/pages/app/SecurityMonitor.tsx — Force Refresh button in notification-dispatcher metrics panel
+- [x] v76-20: server/v76.test.ts — 70+ vitest tests covering all 20 sprint v76 deliverables

@@ -162,6 +162,26 @@ struct ClassifyResponse {
     description: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct BatchClassifyRequest {
+    hs_codes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BatchClassifyResponse {
+    results: Vec<ClassifyResponse>,
+    total: usize,
+    valid_count: usize,
+    source: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ChaptersResponse {
+    chapters: HashMap<String, String>,
+    total: usize,
+    source: String,
+}
+
 #[derive(Debug, Serialize)]
 struct HealthResponse {
     status: &'static str,
@@ -253,6 +273,41 @@ async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
     state.prometheus_handle.render()
 }
 
+async fn handle_batch(
+    Json(req): Json<BatchClassifyRequest>,
+) -> impl IntoResponse {
+    // Cap at 50 codes per batch to prevent abuse
+    let codes: Vec<&String> = req.hs_codes.iter().take(50).collect();
+    let results: Vec<ClassifyResponse> = codes.iter().map(|c| classify(c)).collect();
+    let valid_count = results.iter().filter(|r| r.valid).count();
+    counter!("hs_classifications_total").increment(results.len() as u64);
+    counter!("hs_valid_total").increment(valid_count as u64);
+    counter!("hs_invalid_total").increment((results.len() - valid_count) as u64);
+    info!(batch_size = results.len(), valid = valid_count, "Batch classification complete");
+    (
+        StatusCode::OK,
+        Json(BatchClassifyResponse {
+            total: results.len(),
+            valid_count,
+            results,
+            source: "hs-classifier-v1".to_string(),
+        }),
+    )
+}
+
+async fn handle_chapters() -> impl IntoResponse {
+    let chapters: HashMap<String, String> = CHAPTER_DESCRIPTIONS
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let total = chapters.len();
+    Json(ChaptersResponse {
+        chapters,
+        total,
+        source: "hs-classifier-v1".to_string(),
+    })
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -276,6 +331,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/classify", post(handle_classify))
+        .route("/batch", post(handle_batch))
+        .route("/chapters", get(handle_chapters))
         .route("/health", get(handle_health))
         .route("/metrics", get(handle_metrics))
         .with_state(state)

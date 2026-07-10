@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,12 @@ export default function ExecutiveDashboard() {
   const [breachBannerDismissed, setBreachBannerDismissed] = useState(false);
   const { data: patternsInBreach } = trpc.cep.getPatternsInBreach.useQuery(undefined, { enabled: isAdmin });
   const { data: topChapters } = trpc.executiveDashboard.getTopHsChapters.useQuery({ limit: 10 });
+  const [anomalyLastUpdated, setAnomalyLastUpdated] = useState<Date | null>(null);
+  const { data: anomalyMetrics, refetch: refetchAnomaly } = trpc.insiderThreat.getAnomalyMetrics.useQuery(undefined, {
+    enabled: isAdmin,
+    refetchInterval: 30_000,
+    onSuccess: () => setAnomalyLastUpdated(new Date()),
+  } as any);
   const { data: topScanned } = trpc.rulesOfOrigin.topScanned.useQuery({ limit: 10, days: 30 });
   const exportTopScannedMutation = trpc.rulesOfOrigin.exportTopScannedCsv.useMutation({
     onSuccess: (result) => {
@@ -534,6 +540,76 @@ export default function ExecutiveDashboard() {
                   <span>{ratingTrend[ratingTrend.length - 1]?.day}</span>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Anomaly Detection Health */}
+        {isAdmin && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="h-4 w-4 text-primary" />
+                Anomaly Detection Health
+                <button
+                  onClick={() => refetchAnomaly()}
+                  className="ml-auto text-muted-foreground hover:text-foreground"
+                  title="Refresh anomaly metrics"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!anomalyMetrics ? (
+                <p className="text-sm text-muted-foreground">Loading anomaly metrics…</p>
+              ) : (
+                <div className="space-y-4">
+                  {/* KPI row */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {[
+                      { label: "Total Analysed", value: (anomalyMetrics as any).total_analysed?.toLocaleString() ?? "—", icon: BarChart2, color: "text-blue-500" },
+                      { label: "Blocked", value: (anomalyMetrics as any).blocked_count?.toLocaleString() ?? "—", icon: AlertTriangle, color: "text-red-500" },
+                      { label: "Block Rate", value: (anomalyMetrics as any).total_analysed > 0 ? `${((anomalyMetrics as any).blocked_count / (anomalyMetrics as any).total_analysed * 100).toFixed(1)}%` : "—", icon: Shield, color: "text-amber-500" },
+                    ].map(item => (
+                      <div key={item.label} className="text-center">
+                        <item.icon className={`h-5 w-5 mx-auto mb-1 ${item.color}`} />
+                        <div className="text-xl font-bold">{item.value}</div>
+                        <div className="text-xs text-muted-foreground">{item.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Top-3 alert rules */}
+                  {(anomalyMetrics as any).alerts_by_rule && Object.keys((anomalyMetrics as any).alerts_by_rule).length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium mb-2 text-muted-foreground">Top Alert Rules</p>
+                      <div className="space-y-1.5">
+                        {Object.entries((anomalyMetrics as any).alerts_by_rule as Record<string, number>)
+                          .sort(([, a], [, b]) => b - a)
+                          .slice(0, 3)
+                          .map(([rule, count]) => {
+                            const maxCount = Math.max(...Object.values((anomalyMetrics as any).alerts_by_rule as Record<string, number>));
+                            const pct = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
+                            return (
+                              <div key={rule} className="flex items-center gap-2 text-xs">
+                                <span className="w-20 shrink-0 font-mono text-muted-foreground">{rule}</span>
+                                <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                                  <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="w-8 text-right font-semibold">{count}</span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+                  {anomalyLastUpdated && (
+                    <p className="text-xs text-muted-foreground text-right">
+                      Last updated: {anomalyLastUpdated.toLocaleTimeString()} · auto-refreshes every 30s
+                    </p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
