@@ -230,6 +230,22 @@ spec:
         timeout: riskScoringTimeout
         retry: defaultRetry
         circuitBreaker: defaultCircuitBreaker
+      notification-dispatcher:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      mojaloop-gateway:
+        timeout: paymentTimeout
+        retry: criticalRetry
+        circuitBreaker: defaultCircuitBreaker
+      sanctions-service:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
+      cargo-tracking-svc:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
     components:
       pubsub:
         outbound:

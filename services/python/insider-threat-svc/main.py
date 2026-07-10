@@ -436,3 +436,91 @@ def ab_promotions(limit: int = 50):
     records = list(_PROMOTION_LOG)[-limit:]
     records.reverse()
     return PromotionHistoryResponse(total=len(_PROMOTION_LOG), records=records)
+
+# ─── Model Rollback ───────────────────────────────────────────────────────────
+
+class RollbackRequest(BaseModel):
+    """Request body for POST /ab/rollback."""
+    reason: str = Field(default="manual_rollback", min_length=1, max_length=500)
+    operator: str = Field(default="admin", min_length=1, max_length=100)
+
+class RollbackResponse(BaseModel):
+    success: bool
+    message: str
+    reason: str
+    operator: str
+    rolled_back_at: str
+    previous_version: Optional[int]
+    restored_version: Optional[int]
+
+@app.post("/ab/rollback", response_model=RollbackResponse)
+def ab_rollback(req: RollbackRequest):
+    """
+    Rollback the production model to the previous version.
+
+    Restores the model backup created during the last promotion.
+    If no backup exists, returns success=False.
+    The shadow model continues running unchanged so A/B comparison
+    resumes immediately after rollback.
+    """
+    global _model, _scaler
+    import joblib
+    from pathlib import Path
+    from model_store import MODELS_DIR, CURRENT_LINK
+
+    rolled_back_at = datetime.now(timezone.utc).isoformat()
+    backup_path = MODELS_DIR / "production_backup.pkl"
+
+    if not backup_path.exists():
+        return RollbackResponse(
+            success=False,
+            message="No backup model found; rollback not possible",
+            reason=req.reason,
+            operator=req.operator,
+            rolled_back_at=rolled_back_at,
+            previous_version=None,
+            restored_version=None,
+        )
+
+    try:
+        # Determine current version before rollback
+        current_meta = load_metadata()
+        previous_version = current_meta.get("version") if current_meta else None
+
+        # Load backup artefact
+        backup = joblib.load(backup_path)
+        restored_model = backup.get("model")
+        restored_scaler = backup.get("scaler")
+        restored_version = backup.get("version")
+
+        if restored_model is None:
+            raise ValueError("Backup artefact missing 'model' key")
+
+        # Atomically swap the current symlink to the backup
+        restore_path = MODELS_DIR / f"model_v{restored_version or 0:04d}.pkl"
+        joblib.dump(backup, restore_path)
+        tmp_link = CURRENT_LINK.with_suffix(".tmp")
+        tmp_link.symlink_to(restore_path)
+        tmp_link.replace(CURRENT_LINK)
+
+        # Update in-memory model
+        _model = restored_model
+        _scaler = restored_scaler
+
+        logger.info(
+            "Model rolled back: previous_version=%s restored_version=%s operator=%s reason=%s",
+            previous_version, restored_version, req.operator, req.reason,
+        )
+
+        return RollbackResponse(
+            success=True,
+            message=f"Successfully rolled back from version {previous_version} to version {restored_version}",
+            reason=req.reason,
+            operator=req.operator,
+            rolled_back_at=rolled_back_at,
+            previous_version=previous_version,
+            restored_version=restored_version,
+        )
+    except Exception as exc:
+        logger.error("Rollback failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {exc}")

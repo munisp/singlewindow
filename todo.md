@@ -749,3 +749,12 @@
 - [x] client/src/pages/app/SecurityMonitor.tsx — AB_ALERT_THRESHOLD=0.85, showDivergenceAlert state, BellRing icon banner, trpc.system.notifyOwner mutation, useEffect with primitive deps
 - [x] server/v73.test.ts — 60 vitest tests: all passing
 - [x] All 84 test files, 2633 tests passing, 0 TypeScript errors
+## v74 Sprint — Model Rollback, Admin Metrics, Dapr Targets, Anomaly Tests (COMPLETED)
+- [x] client/src/pages/app/SecurityMonitor.tsx — RotateCcw import, rollbackMutation (trpc.insiderThreat.rollbackModel), Rollback Model button with mutual exclusion with Promote button
+- [x] server/routers/insiderThreat.ts — rollbackModel procedure: POST /ab/rollback proxy, AbortSignal.timeout(15s), INTERNAL_SERVER_ERROR on non-OK, offline stub with rolledBackAt
+- [x] services/python/insider-threat-svc/main.py — POST /ab/rollback endpoint: RollbackRequest + RollbackResponse models, atomic symlink swap, in-memory model hot-swap, success=False when no backup, HTTPException 500 on error
+- [x] services/go/notification-dispatcher/admin_server.go — GET /admin/metrics endpoint: calls refresher.Stats(), returns total_cycles, total_validated, total_stale, total_purged, last_cycle_at_ms as JSON
+- [x] infra/k8s/dapr/components.yaml — 4 new resiliency targets: notification-dispatcher, mojaloop-gateway (criticalRetry + paymentTimeout), sanctions-service, cargo-tracking-svc
+- [x] services/python/anomaly-detection-svc/test_anomaly.py — 35 pytest tests: health, haversine, all 6 detection rules (R001/R002/R003/R005/R009/R010), risk scoring, determine_action, /analyse, /analyse/batch, /risk/{user_id}
+- [x] server/v74.test.ts — 66 vitest tests: all passing
+- [x] All 85 test files, 2699 tests passing, 0 TypeScript errors

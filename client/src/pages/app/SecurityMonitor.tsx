@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import {
   Shield, Users, AlertTriangle, CheckCircle2, XCircle, Clock,
   RefreshCw, LogOut, Eye, Lock, Activity, Database, ChevronLeft, ChevronRight, GitCompare,
-  Download, TrendingUp, Zap, BellRing,
+  Download, TrendingUp, Zap, BellRing, RotateCcw,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -616,6 +616,17 @@ function ABModelTab() {
     },
     onError: (err) => toast.error(`Promotion failed: ${err.message}`),
   });
+  const rollbackMutation = trpc.insiderThreat.rollbackModel.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success(`Model rolled back to version ${data.restored_version ?? "previous"}.`);
+      } else {
+        toast.warning(data.message ?? "Rollback unavailable — no backup found.");
+      }
+      refetchStats();
+    },
+    onError: (err) => toast.error(`Rollback failed: ${err.message}`),
+  });
 
   const chartData = (recent?.records ?? []).map((r: any, i: number) => ({
     idx: i + 1,
@@ -706,12 +717,21 @@ function ABModelTab() {
             <Button
               size="sm"
               onClick={() => promoteMutation.mutate({ reason: "manual_promotion", operator: "admin" })}
-              disabled={promoteMutation.isPending}
+              disabled={promoteMutation.isPending || rollbackMutation.isPending}
             >
               <Zap className="h-4 w-4 mr-1" />
               {promoteMutation.isPending ? "Promoting…" : "Promote to Production"}
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => rollbackMutation.mutate({ reason: "manual_rollback", operator: "admin" })}
+            disabled={rollbackMutation.isPending || promoteMutation.isPending}
+          >
+            <RotateCcw className="h-4 w-4 mr-1" />
+            {rollbackMutation.isPending ? "Rolling back…" : "Rollback Model"}
+          </Button>
         </div>
       </div>
 

@@ -4,6 +4,7 @@
 //   GET  /healthz                  — liveness probe (returns 200 OK)
 //   POST /admin/refresh-tokens     — triggers an immediate token-refresh cycle
 //                                    outside the normal 6-hour interval
+//   GET  /admin/metrics            — returns TokenRefresher stats as JSON
 //
 // The admin server is started alongside the main dispatcher goroutine and
 // listens on port 8081 (configurable via ADMIN_PORT env var).
@@ -38,6 +39,20 @@ func NewAdminServer(addr string, refresher *TokenRefresher) *AdminServer {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	// Expose TokenRefresher statistics as JSON.
+	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, r *http.Request) {
+		stats := as.refresher.Stats()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"total_cycles":     stats.TotalCycles,
+			"total_validated":  stats.TotalValidated,
+			"total_stale":      stats.TotalStale,
+			"total_purged":     stats.TotalPurged,
+			"last_cycle_at_ms": stats.LastCycleAt,
+		})
 	})
 
 	// Trigger an immediate token-refresh cycle.

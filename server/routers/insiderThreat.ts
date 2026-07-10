@@ -558,4 +558,34 @@ export const insiderThreatRouter = router({
         return { total: 0, records: [], source: "unavailable" };
       }
     }),
+
+  /**
+   * rollbackModel — proxy to Python insider-threat-svc POST /ab/rollback.
+   * Restores the previous production model from the backup file.
+   */
+  rollbackModel: adminProcedure
+    .input(z.object({
+      reason: z.string().min(1).max(500).default("manual_rollback"),
+      operator: z.string().min(1).max(100).default("admin"),
+    }))
+    .mutation(async ({ input }) => {
+      const svcUrl = process.env.INSIDER_THREAT_SVC_URL ?? "http://insider-threat-svc:8000";
+      try {
+        const resp = await fetch(`${svcUrl}/ab/rollback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: input.reason, operator: input.operator }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (body as any)?.detail ?? `Rollback failed with status ${resp.status}` });
+        }
+        return await resp.json();
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        // Service unavailable in test/dev — return offline stub
+        return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, rolledBackAt: new Date().toISOString() };
+      }
+    }),
 });
