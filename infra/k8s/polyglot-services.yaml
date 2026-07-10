@@ -944,3 +944,121 @@ data:
   TIGERBEETLE_BRIDGE_RUST_URL: "http://tigerbeetle-bridge-rust:50055"
   KAFKA_CONSUMER_METRICS_URL: "http://kafka-consumer-rust:9090"
   OPENSEARCH_INDEXER_URL: "http://opensearch-indexer:8002"
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Rust — HS Code Classifier (v75)
+# POST /classify  — validate + classify HS codes (WCO chapter lookup)
+# GET  /health    — liveness probe
+# GET  /metrics   — Prometheus counters
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hs-classifier
+  namespace: tradegateway
+  labels:
+    app: hs-classifier
+    language: rust
+    tier: intelligence
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hs-classifier
+  template:
+    metadata:
+      labels:
+        app: hs-classifier
+        language: rust
+        tier: intelligence
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "hs-classifier"
+        dapr.io/app-port: "8090"
+        dapr.io/config: "tradegateway-config"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: hs-classifier
+          image: tradegateway/hs-classifier:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: PORT
+              value: "8090"
+            - name: RUST_LOG
+              value: "hs_classifier=info,tower_http=info"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hs-classifier
+  namespace: tradegateway
+  labels:
+    app: hs-classifier
+spec:
+  selector:
+    app: hs-classifier
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hs-classifier-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hs-classifier
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

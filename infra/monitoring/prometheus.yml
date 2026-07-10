@@ -62,3 +62,45 @@ scrape_configs:
   - job_name: postgres
     static_configs:
       - targets: ["postgres:5432"]
+
+  # notification-dispatcher admin metrics (Go service, port 8081)
+  # Exposes: total_cycles, total_validated, total_stale, total_purged, last_cycle_at_ms
+  - job_name: notification-dispatcher
+    static_configs:
+      - targets: ["notification-dispatcher:8081"]
+    metrics_path: /admin/metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: notification-dispatcher
+      - target_label: component
+        replacement: token-refresher
+
+  # anomaly-detection-svc Prometheus metrics (Python FastAPI, port 8000)
+  # Exposes: total_analysed, total_alerts, blocked_count, alerts_by_rule
+  - job_name: anomaly-detection-svc
+    static_configs:
+      - targets: ["anomaly-detection-svc:8000"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: anomaly-detection-svc
+      - target_label: component
+        replacement: anomaly-detector
+
+  # hs-classifier Rust microservice (port 8090)
+  # Exposes: hs_classifications_total, hs_valid_total, hs_invalid_total
+  - job_name: hs-classifier
+    static_configs:
+      - targets: ["hs-classifier:8090"]
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: hs-classifier
+      - target_label: component
+        replacement: hs-code-validator

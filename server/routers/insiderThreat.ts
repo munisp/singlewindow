@@ -588,4 +588,93 @@ export const insiderThreatRouter = router({
         return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, rolledBackAt: new Date().toISOString() };
       }
     }),
+
+  /**
+   * rollbackToVersion — proxy to Python insider-threat-svc POST /ab/rollback
+   * with an explicit target_version so operators can restore any past version
+   * from the Promotion History table.
+   */
+  rollbackToVersion: adminProcedure
+    .input(z.object({
+      target_version: z.number().int().min(0),
+      reason: z.string().min(1).max(500).default("version_rollback"),
+      operator: z.string().min(1).max(100).default("admin"),
+    }))
+    .mutation(async ({ input }) => {
+      const svcUrl = process.env.INSIDER_THREAT_SVC_URL ?? "http://insider-threat-svc:8000";
+      try {
+        const resp = await fetch(`${svcUrl}/ab/rollback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: input.reason, operator: input.operator, target_version: input.target_version }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (body as any)?.detail ?? `Version rollback failed with status ${resp.status}` });
+        }
+        return await resp.json();
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, target_version: input.target_version, rolledBackAt: new Date().toISOString(), restored_version: input.target_version };
+      }
+    }),
+
+  /**
+   * classifyHSCode — proxy to Rust hs-classifier POST /classify.
+   * Returns HS code validity, chapter, heading, and description.
+   */
+  classifyHSCode: protectedProcedure
+    .input(z.object({
+      hs_code: z.string().min(2).max(12),
+      description: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const svcUrl = process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8090";
+      try {
+        const resp = await fetch(`${svcUrl}/classify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hs_code: input.hs_code, description: input.description }),
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (body as any)?.detail ?? `HS classification failed with status ${resp.status}` });
+        }
+        return await resp.json();
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        // Offline stub — basic regex validation
+        const code = input.hs_code.replace(/[^0-9]/g, "");
+        const valid = /^\d{6,10}$/.test(code);
+        const chapter = code.slice(0, 2);
+        return {
+          hs_code: input.hs_code,
+          valid,
+          chapter,
+          heading: code.slice(0, 4),
+          subheading: code.slice(0, 6),
+          description: valid ? `Chapter ${chapter} commodity` : "Invalid HS code format",
+          confidence: valid ? 0.6 : 0.0,
+          source: "offline-stub",
+        };
+      }
+    }),
+
+  /**
+   * getAnomalyMetrics — proxy to Python anomaly-detection-svc GET /metrics.
+   * Returns Prometheus-style counters as structured JSON.
+   */
+  getAnomalyMetrics: adminProcedure
+    .query(async () => {
+      const svcUrl = process.env.ANOMALY_DETECTION_SVC_URL ?? "http://anomaly-detection-svc:8000";
+      try {
+        const resp = await fetch(`${svcUrl}/metrics`, { signal: AbortSignal.timeout(5_000) });
+        if (!resp.ok) return { total_analysed: 0, total_alerts: 0, blocked_count: 0, alerts_by_rule: {}, source: "unavailable" };
+        return { ...await resp.json(), source: "anomaly-detection-svc" };
+      } catch {
+        return { total_analysed: 0, total_alerts: 0, blocked_count: 0, alerts_by_rule: {}, source: "unavailable" };
+      }
+    }),
 });

@@ -1,0 +1,85 @@
+---
+# ServiceMonitor CRD for notification-dispatcher admin metrics
+# Requires: Prometheus Operator (kube-prometheus-stack) installed in the cluster
+# Scrapes GET /admin/metrics on port 8081 every 30 s
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: notification-dispatcher-admin
+  namespace: tradegateway
+  labels:
+    app: notification-dispatcher
+    release: kube-prometheus-stack   # must match Prometheus Operator's serviceMonitorSelector
+spec:
+  selector:
+    matchLabels:
+      app: notification-dispatcher
+  namespaceSelector:
+    matchNames:
+      - tradegateway
+  endpoints:
+    - port: admin          # named port "admin" on the Service (8081)
+      path: /admin/metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: service
+          replacement: notification-dispatcher
+        - targetLabel: component
+          replacement: token-refresher
+
+---
+# ServiceMonitor for anomaly-detection-svc /metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: anomaly-detection-svc
+  namespace: tradegateway
+  labels:
+    app: anomaly-detection-svc
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: anomaly-detection-svc
+  namespaceSelector:
+    matchNames:
+      - tradegateway
+  endpoints:
+    - port: http           # named port "http" on the Service (8000)
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: service
+          replacement: anomaly-detection-svc
+        - targetLabel: component
+          replacement: anomaly-detector
+
+---
+# ServiceMonitor for hs-classifier /metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hs-classifier
+  namespace: tradegateway
+  labels:
+    app: hs-classifier
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: hs-classifier
+  namespaceSelector:
+    matchNames:
+      - tradegateway
+  endpoints:
+    - port: http           # named port "http" on the Service (8090)
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        - targetLabel: service
+          replacement: hs-classifier
+        - targetLabel: component
+          replacement: hs-code-validator

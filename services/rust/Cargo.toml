@@ -5,6 +5,7 @@ members = [
     "vision-preprocessor",
     "tigerbeetle-bridge",
     "tigerbeetle-bridge-rs",
+    "hs-classifier",
 ]
 resolver = "2"
 

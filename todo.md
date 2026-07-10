@@ -758,3 +758,24 @@
 - [x] services/python/anomaly-detection-svc/test_anomaly.py — 35 pytest tests: health, haversine, all 6 detection rules (R001/R002/R003/R005/R009/R010), risk scoring, determine_action, /analyse, /analyse/batch, /risk/{user_id}
 - [x] server/v74.test.ts — 66 vitest tests: all passing
 - [x] All 85 test files, 2699 tests passing, 0 TypeScript errors
+## v75 Sprint — 20 Next Steps (IN PROGRESS)
+- [x] SecurityMonitor: Promotion History section in ABModelTab — table of past promotions with version, operator, reason, agreement_rate, timestamp
+- [x] SecurityMonitor: "Rollback to this version" row-action in Promotion History table — calls rollbackToVersion tRPC procedure
+- [x] server/routers/insiderThreat.ts — rollbackToVersion procedure: POST /ab/rollback with target_version param, offline stub
+- [x] services/python/insider-threat-svc/main.py — POST /ab/rollback accepts optional target_version; loads model_v{N:04d}.pkl instead of backup when specified
+- [x] infra/monitoring/prometheus.yml — add notification-dispatcher scrape job (port 8081, /admin/metrics path)
+- [x] infra/k8s/dapr/servicemonitor.yaml — Prometheus ServiceMonitor CRD for notification-dispatcher admin metrics
+- [x] infra/monitoring/dashboards/notification-dispatcher.json — Grafana dashboard: total_cycles, total_stale, total_purged, last_cycle_at panels
+- [x] services/rust/hs-classifier/ — new Rust crate: Axum HTTP service, POST /classify endpoint, HS code validation logic (regex + WCO chapter lookup table)
+- [x] services/rust/Cargo.toml — add hs-classifier to workspace members
+- [x] services/rust/hs-classifier/Dockerfile — multi-stage Rust build (builder + distroless runtime)
+- [x] services/python/anomaly-detection-svc/main.py — rate-limit middleware (slowapi): 100 req/min per IP on /analyse, 10 req/min on /analyse/batch
+- [x] services/python/anomaly-detection-svc/main.py — POST /analyse/batch: reject payloads > 100 events (was 1000), add per-event timeout guard
+- [x] services/python/anomaly-detection-svc/main.py — GET /metrics endpoint: Prometheus counters for total_analysed, total_alerts, alerts_by_rule, blocked_count
+- [x] server/routers/insiderThreat.ts — classifyHSCode procedure: proxy to Rust hs-classifier POST /classify with offline fallback
+- [x] server/routers/insiderThreat.ts — getAnomalyMetrics procedure: proxy to Python anomaly-detection-svc GET /metrics
+- [x] infra/k8s/polyglot-services.yaml — add hs-classifier Deployment + Service (port 8090)
+- [x] infra/k8s/dapr/components.yaml — add hs-classifier as resiliency target
+- [x] services/python/anomaly-detection-svc/test_anomaly.py — add tests for rate-limit middleware, /metrics endpoint, batch size rejection
+- [x] client/src/pages/app/SecurityMonitor.tsx — HS Code Classifier panel: input field + classify button + result display using classifyHSCode tRPC
+- [x] server/v75.test.ts — 70+ vitest tests covering all 20 sprint items

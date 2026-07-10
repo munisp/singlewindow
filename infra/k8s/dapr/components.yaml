@@ -246,6 +246,10 @@ spec:
         timeout: defaultTimeout
         retry: defaultRetry
         circuitBreaker: defaultCircuitBreaker
+      hs-classifier:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
     components:
       pubsub:
         outbound:

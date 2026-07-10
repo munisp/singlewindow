@@ -21,12 +21,14 @@ import json
 import math
 import os
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Optional
 
 import redis
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 # ─── Configuration ────────────────────────────────────────────────────────────
@@ -87,6 +89,47 @@ app = FastAPI(
     description="Insider threat detection via behavioural analytics",
     version="1.0.0",
 )
+
+# ─── Prometheus-style counters ────────────────────────────────────────────────────────────────────────────────
+
+_metrics_lock = Lock()
+_metrics: dict = {
+    "total_analysed": 0,
+    "total_alerts": 0,
+    "blocked_count": 0,
+    "alerts_by_rule": defaultdict(int),
+}
+
+def _inc(key: str, amount: int = 1) -> None:
+    with _metrics_lock:
+        _metrics[key] += amount
+
+def _inc_rule(rule_id: str) -> None:
+    with _metrics_lock:
+        _metrics["alerts_by_rule"][rule_id] += 1
+
+# ─── Rate-limit state (in-memory, per-IP sliding window) ────────────────────────────────────────────
+
+_rl_lock = Lock()
+_rl_windows: dict = defaultdict(list)
+
+RATE_LIMIT_ANALYSE = int(os.getenv("RATE_LIMIT_ANALYSE", "100"))   # req/min per IP
+RATE_LIMIT_BATCH   = int(os.getenv("RATE_LIMIT_BATCH",   "10"))    # req/min per IP
+BATCH_MAX_EVENTS   = int(os.getenv("BATCH_MAX_EVENTS",   "100"))   # max events per batch
+
+def _check_rate_limit(ip: str, limit: int, window_key: str) -> bool:
+    """Return True if the request is allowed, False if rate-limited."""
+    key = f"{window_key}:{ip}"
+    now = time.monotonic()
+    cutoff = now - 60.0
+    with _rl_lock:
+        timestamps = _rl_windows[key]
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.pop(0)
+        if len(timestamps) >= limit:
+            return False
+        timestamps.append(now)
+        return True
 
 # ─── Redis client ─────────────────────────────────────────────────────────────
 
@@ -322,8 +365,13 @@ def health():
     return {"status": "ok", "service": "anomaly-detection-svc", "version": "1.0.0"}
 
 @app.post("/analyse", response_model=AnalysisResult)
-def analyse_event(event: UserActionEvent):
+def analyse_event(event: UserActionEvent, request: Request):
     """Analyse a single user action event and return anomaly alerts."""
+    # Rate-limit: 100 req/min per IP
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip, RATE_LIMIT_ANALYSE, "rl:analyse"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded: max 100 requests/min per IP on /analyse")
+
     alerts: list[AnomalyAlert] = []
 
     for rule in [
@@ -338,9 +386,15 @@ def analyse_event(event: UserActionEvent):
         if alert:
             alerts.append(alert)
             _publish_alert(alert)
+            _inc_rule(alert.rule_id)
 
     risk_score = compute_risk_score(alerts)
     action = determine_action(risk_score, alerts)
+
+    _inc("total_analysed")
+    _inc("total_alerts", len(alerts))
+    if action == "BLOCKED":
+        _inc("blocked_count")
 
     return AnalysisResult(
         user_id=event.user_id,
@@ -350,11 +404,43 @@ def analyse_event(event: UserActionEvent):
     )
 
 @app.post("/analyse/batch", response_model=list[AnalysisResult])
-def analyse_batch(events: list[UserActionEvent]):
-    """Analyse a batch of user action events."""
-    if len(events) > 1000:
-        raise HTTPException(status_code=400, detail="Batch size exceeds 1000 events")
-    return [analyse_event(event) for event in events]
+def analyse_batch(events: list[UserActionEvent], request: Request):
+    """Analyse a batch of user action events (max BATCH_MAX_EVENTS per request)."""
+    # Rate-limit: 10 req/min per IP
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip, RATE_LIMIT_BATCH, "rl:batch"):
+        raise HTTPException(status_code=429, detail=f"Rate limit exceeded: max {RATE_LIMIT_BATCH} batch requests/min per IP")
+    # Batch size guard (reduced from 1000 to BATCH_MAX_EVENTS=100)
+    if len(events) > BATCH_MAX_EVENTS:
+        raise HTTPException(status_code=400, detail=f"Batch size exceeds {BATCH_MAX_EVENTS} events")
+    return [analyse_event(event, request) for event in events]
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def get_metrics():
+    """Prometheus-compatible text metrics for scraping."""
+    with _metrics_lock:
+        total_analysed = _metrics["total_analysed"]
+        total_alerts = _metrics["total_alerts"]
+        blocked_count = _metrics["blocked_count"]
+        alerts_by_rule = dict(_metrics["alerts_by_rule"])
+
+    lines = [
+        "# HELP anomaly_total_analysed Total events analysed",
+        "# TYPE anomaly_total_analysed counter",
+        f"anomaly_total_analysed {total_analysed}",
+        "# HELP anomaly_total_alerts Total anomaly alerts raised",
+        "# TYPE anomaly_total_alerts counter",
+        f"anomaly_total_alerts {total_alerts}",
+        "# HELP anomaly_blocked_count Total events resulting in BLOCKED action",
+        "# TYPE anomaly_blocked_count counter",
+        f"anomaly_blocked_count {blocked_count}",
+        "# HELP anomaly_alerts_by_rule Alerts broken down by detection rule",
+        "# TYPE anomaly_alerts_by_rule counter",
+    ]
+    for rule_id, count in sorted(alerts_by_rule.items()):
+        lines.append(f'anomaly_alerts_by_rule{{rule="{rule_id}"}} {count}')
+    lines.append("")
+    return "\n".join(lines)
 
 @app.get("/risk/{user_id}")
 def get_user_risk(user_id: str):

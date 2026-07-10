@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import {
   Shield, Users, AlertTriangle, CheckCircle2, XCircle, Clock,
   RefreshCw, LogOut, Eye, Lock, Activity, Database, ChevronLeft, ChevronRight, GitCompare,
-  Download, TrendingUp, Zap, BellRing, RotateCcw,
+  Download, TrendingUp, Zap, BellRing, RotateCcw, Layers, Search,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -794,6 +794,188 @@ function ABModelTab() {
           Shadow model is not currently active. Enable it via the Python service to start A/B comparison.
         </p>
       )}
+
+      {/* Promotion History */}
+      <PromotionHistorySection />
+    </div>
+  );
+}
+
+// ─── Promotion History Section ─────────────────────────────────────────────────────────────────────────────
+
+function PromotionHistorySection() {
+  const { data: historyData, isLoading: historyLoading, refetch: refetchHistory } =
+    trpc.insiderThreat.getPromotionHistory.useQuery({ limit: 20 }, { refetchInterval: 60_000 });
+
+  const rollbackToVersionMutation = trpc.insiderThreat.rollbackToVersion.useMutation({
+    onSuccess: (data) => {
+      if (data.success) {
+        toast.success(`Rolled back to version ${data.restored_version ?? "requested"}.`);
+      } else {
+        toast.warning(data.message ?? "Rollback to version unavailable.");
+      }
+      refetchHistory();
+    },
+    onError: (err) => toast.error(`Version rollback failed: ${err.message}`),
+  });
+
+  if (historyLoading) return <Skeleton className="h-40 w-full" />;
+
+  const records = historyData?.records ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold flex items-center gap-1">
+          <Clock className="h-4 w-4" /> Promotion History
+        </p>
+        <Button variant="ghost" size="sm" onClick={() => refetchHistory()}>
+          <RefreshCw className="h-3 w-3 mr-1" /> Refresh
+        </Button>
+      </div>
+      {records.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-center py-4">
+          No promotions recorded yet.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-1 pr-3 font-medium text-muted-foreground">#</th>
+                <th className="text-left py-1 pr-3 font-medium text-muted-foreground">Version</th>
+                <th className="text-left py-1 pr-3 font-medium text-muted-foreground">Agreement</th>
+                <th className="text-left py-1 pr-3 font-medium text-muted-foreground">Operator</th>
+                <th className="text-left py-1 pr-3 font-medium text-muted-foreground">Reason</th>
+                <th className="text-left py-1 pr-3 font-medium text-muted-foreground">Promoted At</th>
+                <th className="text-left py-1 font-medium text-muted-foreground">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((rec: any) => (
+                <tr key={rec.id} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="py-1.5 pr-3 text-muted-foreground">{rec.id}</td>
+                  <td className="py-1.5 pr-3 font-mono">
+                    {rec.previous_version != null ? `v${rec.previous_version}` : "—"}
+                    {" → "}
+                    {rec.new_version != null ? `v${rec.new_version}` : "—"}
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    <Badge variant={rec.agreement_rate >= 0.85 ? "default" : "destructive"} className="text-xs">
+                      {(rec.agreement_rate * 100).toFixed(1)}%
+                    </Badge>
+                  </td>
+                  <td className="py-1.5 pr-3">{rec.operator}</td>
+                  <td className="py-1.5 pr-3 max-w-[120px] truncate" title={rec.reason}>{rec.reason}</td>
+                  <td className="py-1.5 pr-3 text-muted-foreground">
+                    {new Date(rec.promoted_at).toLocaleString()}
+                  </td>
+                  <td className="py-1.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      disabled={rollbackToVersionMutation.isPending}
+                      onClick={() =>
+                        rollbackToVersionMutation.mutate({
+                          target_version: rec.previous_version ?? 0,
+                          reason: `rollback_to_v${rec.previous_version ?? 0}`,
+                          operator: "admin",
+                        })
+                      }
+                    >
+                      <RotateCcw className="h-3 w-3 mr-1" />
+                      Rollback
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── HS Classifier Panel ────────────────────────────────────────────────────────────────────────────────
+
+function HSClassifierPanel() {
+  const [hsInput, setHsInput] = useState("");
+  const [descInput, setDescInput] = useState("");
+  const [result, setResult] = useState<any>(null);
+
+  const classifyMutation = trpc.insiderThreat.classifyHSCode.useMutation({
+    onSuccess: (data) => setResult(data),
+    onError: (err) => toast.error(`Classification failed: ${err.message}`),
+  });
+
+  const handleClassify = () => {
+    if (!hsInput.trim()) { toast.warning("Enter an HS code to classify."); return; }
+    classifyMutation.mutate({ hs_code: hsInput.trim(), description: descInput.trim() || undefined });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">HS Code</label>
+          <div className="flex gap-2">
+            <input
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm font-mono"
+              placeholder="e.g. 8471.30.00"
+              value={hsInput}
+              onChange={(e) => setHsInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleClassify()}
+            />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Description (optional)</label>
+          <input
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+            placeholder="e.g. laptop computer"
+            value={descInput}
+            onChange={(e) => setDescInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleClassify()}
+          />
+        </div>
+      </div>
+      <Button onClick={handleClassify} disabled={classifyMutation.isPending} size="sm">
+        <Search className="h-4 w-4 mr-1" />
+        {classifyMutation.isPending ? "Classifying…" : "Classify"}
+      </Button>
+
+      {result && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Badge variant={result.valid ? "default" : "destructive"}>
+              {result.valid ? "Valid HS Code" : "Invalid"}
+            </Badge>
+            {result.source && (
+              <span className="text-xs text-muted-foreground">
+                via {result.source}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "Chapter", value: result.chapter || "—" },
+              { label: "Heading", value: result.heading || "—" },
+              { label: "Subheading", value: result.subheading || "—" },
+              { label: "Confidence", value: result.confidence != null ? `${(result.confidence * 100).toFixed(0)}%` : "—" },
+            ].map(({ label, value }) => (
+              <div key={label} className="p-3 rounded-md bg-muted">
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="text-sm font-semibold font-mono">{value}</p>
+              </div>
+            ))}
+          </div>
+          {result.description && (
+            <p className="text-sm text-muted-foreground">{result.description}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -900,6 +1082,9 @@ export default function SecurityMonitor() {
             <TabsTrigger value="abmodel">
               <GitCompare className="h-4 w-4 mr-1" /> A/B Model
             </TabsTrigger>
+            <TabsTrigger value="hsclassifier">
+              <Layers className="h-4 w-4 mr-1" /> HS Classifier
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="sessions" className="mt-4">
@@ -980,6 +1165,21 @@ export default function SecurityMonitor() {
               </CardHeader>
               <CardContent>
                 <ABModelTab />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="hsclassifier" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>HS Code Classifier</CardTitle>
+                <CardDescription>
+                  Validate and classify Harmonised System (HS) codes via the Rust hs-classifier microservice.
+                  Returns chapter, heading, subheading, and confidence score.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <HSClassifierPanel />
               </CardContent>
             </Card>
           </TabsContent>
