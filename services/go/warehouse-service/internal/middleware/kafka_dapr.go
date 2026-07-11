@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for warehouse-service.
 // Kafka topics consumed: cargo.arrived (triggers bonded warehouse deposit), declaration.cleared
 // Kafka topics published: cargo.released (goods released from bonded warehouse after duty payment)
-// Dapr pub/sub: publishes cargo.released to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes cargo.released to pubsub component
 package middleware
 
 import (
@@ -44,7 +44,7 @@ const (
 	TopicCargoArrived       = "cargo.arrived"
 	TopicDeclarationCleared = "declaration.cleared"
 	TopicCargoReleased      = "cargo.released"
-	DaprPubsubName          = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 type CargoArrivedEvent struct {

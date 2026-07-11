@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for asean-sw-service.
 // Kafka topics published: asean.sw.outbound (G2G messages sent to partner countries)
 // Kafka topics consumed: asean.sw.inbound (G2G messages received from partner countries)
-// Dapr pub/sub: publishes asean.sw.outbound to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes asean.sw.outbound to pubsub component
 package middleware
 
 import (
@@ -43,7 +43,7 @@ func daprPort() string {
 const (
 	TopicASEANOutbound = "asean.sw.outbound"
 	TopicASEANInbound  = "asean.sw.inbound"
-	DaprPubsubName     = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 type ASEANMessageEvent struct {

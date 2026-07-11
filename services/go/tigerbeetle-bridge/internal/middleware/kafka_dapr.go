@@ -6,7 +6,7 @@
 // Kafka topics consumed:   payments.confirmed      (confirmed payment — post to ledger)
 //                          payments.refunded       (refund approved — reverse ledger entry)
 //                          declarations.cleared    (clearance — post revenue recognition entry)
-// Dapr pub/sub:            publishes ledger events to dapr-kafka-pubsub
+// Dapr pub/sub:            publishes ledger events to pubsub
 // Fluvio:                  streams real-time revenue counter to executive dashboard
 // OpenTelemetry:           distributed tracing for every ledger operation
 package middleware
@@ -42,7 +42,7 @@ const (
 	TopicPaymentsRefunded   = "payments.refunded"
 	TopicDeclarationCleared = "declarations.cleared"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "tigerbeetle-bridge"
 )
 

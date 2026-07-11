@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for cen-service.
 // Kafka topics published: security.alert (CEN threat alerts), cen.alert.outbound
 // Kafka topics consumed: sanctions.hit (triggers CEN alert dispatch)
-// Dapr pub/sub: publishes security.alert to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes security.alert to pubsub component
 package middleware
 
 import (
@@ -44,7 +44,7 @@ const (
 	TopicSecurityAlert    = "security.alert"
 	TopicCENAlertOutbound = "cen.alert.outbound"
 	TopicSanctionsHit     = "sanctions.hit"
-	DaprPubsubName        = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 type SecurityAlertEvent struct {

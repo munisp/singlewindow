@@ -242,3 +242,103 @@ topics:
     description: "Inbound G2G messages from ASEAN Single Window"
     producers: [asean-connector]
     consumers: [declaration-service, analytics-service]
+
+  # ── v78: New topics added in Kafka & PostgreSQL audit ─────────────────────
+  - name: tradegateway.fraud.case_opened
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when a new fraud case is opened by the compliance team"
+    producers: [tradegateway-api]
+    consumers: [analytics-service, notification-dispatcher, audit-service]
+
+  - name: tradegateway.security.alert
+    partitions: 6
+    replicationFactor: 3
+    retentionMs: 7776000000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when a security alert is detected (Wazuh SIEM, sanctions, anomaly)"
+    producers: [tradegateway-api, wazuh-svc, cen-service]
+    consumers: [analytics-service, notification-dispatcher, opencti-svc]
+
+  - name: tradegateway.security.insider_threat_detected
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when the insider-threat ML model flags a user behaviour anomaly"
+    producers: [tradegateway-api]
+    consumers: [analytics-service, notification-dispatcher, audit-service]
+
+  - name: tradegateway.ledger.bond_deposited
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when a customs bond deposit is recorded in TigerBeetle"
+    producers: [tradegateway-api, payment-service]
+    consumers: [analytics-service, audit-service]
+
+  - name: tradegateway.ledger.bond_released
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when a customs bond is released after successful clearance"
+    producers: [tradegateway-api, payment-service]
+    consumers: [analytics-service, audit-service]
+
+  - name: tradegateway.ledger.penalty_assessed
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 7776000000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when a penalty is assessed against a trader declaration"
+    producers: [tradegateway-api]
+    consumers: [analytics-service, audit-service, notification-dispatcher]
+
+  - name: tradegateway.warehouse.deposit
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when goods are deposited into a bonded warehouse"
+    producers: [tradegateway-api, warehouse-service]
+    consumers: [analytics-service, cargo-tracking-service]
+
+  - name: tradegateway.warehouse.release
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when goods are released from a bonded warehouse"
+    producers: [tradegateway-api, warehouse-service]
+    consumers: [analytics-service, cargo-tracking-service, payment-service]
+
+  - name: tradegateway.cargo.customs_hold
+    partitions: 3
+    replicationFactor: 3
+    retentionMs: 604800000
+    config:
+      cleanup.policy: delete
+      compression.type: lz4
+    description: "Emitted when cargo is placed on customs hold pending inspection"
+    producers: [tradegateway-api, declaration-service]
+    consumers: [analytics-service, notification-dispatcher, port-authority-service]

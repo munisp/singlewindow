@@ -5,7 +5,7 @@
 //                          oga.sla.breach          (SLA timer exceeded — alert)
 // Kafka topics consumed:   declarations.submitted  (new declaration — check OGA requirements)
 //                          workflow.oga.dispatched (workflow engine dispatched OGA request)
-// Dapr pub/sub:            publishes OGA decisions to dapr-kafka-pubsub
+// Dapr pub/sub:            publishes OGA decisions to pubsub
 // Fluvio:                  streams real-time OGA queue status to customs officers
 // OpenTelemetry:           distributed tracing for every OGA permit lifecycle event
 package middleware
@@ -39,7 +39,7 @@ const (
 	TopicDeclarationSubmitted = "declarations.submitted"
 	TopicWorkflowOGADispatched = "workflow.oga.dispatched"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "oga-service"
 )
 

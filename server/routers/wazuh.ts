@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import { securityAlerts } from "../../drizzle/schema";
 import { desc, eq } from "drizzle-orm";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 const WAZUH_SVC_URL = process.env.WAZUH_SVC_URL ?? "http://wazuh-svc:8100";
 const DEMO_MODE = process.env.DEMO_MODE === "true";
@@ -134,7 +135,7 @@ export const wazuhRouter = router({
       // Demo: simple heuristic
       const failedCount = input.events.filter(e => !e.success).length;
       const detected = failedCount >= 3;
-      return {
+      const result = {
         detected,
         anomaly_type: detected ? "brute_force" : "none",
         severity: detected ? "high" : "info",
@@ -143,6 +144,22 @@ export const wazuhRouter = router({
           : "[DEMO] No anomaly detected in provided events",
         score: detected ? 0.85 : 0.12,
       };
+      // Publish Kafka SECURITY_ALERT when anomaly detected (fire-and-forget)
+      if (detected) {
+        publishEvent(TOPICS.SECURITY_ALERT, {
+          eventType: "security.alert",
+          aggregateId: `wazuh-anomaly-${Date.now()}`,
+          payload: {
+            anomalyType: result.anomaly_type,
+            severity: result.severity,
+            description: result.description,
+            score: result.score,
+            eventCount: input.events.length,
+            failedCount,
+          },
+        }).catch(() => {});
+      }
+      return result;
     }),
 
   // Get overall platform security score — DB-derived in demo mode

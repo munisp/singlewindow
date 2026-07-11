@@ -7,7 +7,7 @@
 //                          auth.role.changed       (role assignment changed)
 // Kafka topics consumed:   trader.suspended        (sync suspension to Keycloak)
 //                          trader.verified         (grant verified-trader role)
-// Dapr pub/sub:            publishes auth events to dapr-kafka-pubsub
+// Dapr pub/sub:            publishes auth events to pubsub
 // OpenTelemetry:           distributed tracing for all auth operations
 package middleware
 
@@ -42,7 +42,7 @@ const (
 	TopicTraderSuspended   = "trader.suspended"
 	TopicTraderVerified    = "trader.verified"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "keycloak-svc"
 )
 

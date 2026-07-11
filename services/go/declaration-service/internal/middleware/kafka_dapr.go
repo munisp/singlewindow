@@ -6,7 +6,7 @@
 // Kafka topics consumed:   risk.scored             (risk engine result: score + lane)
 //                          payments.confirmed      (duty payment confirmed by payment-service)
 //                          oga.approved            (OGA permit approved)
-// Dapr pub/sub:            publishes to dapr-kafka-pubsub component
+// Dapr pub/sub:            publishes to pubsub component
 // Fluvio:                  streams real-time declaration status updates to port operators
 // OpenTelemetry:           distributed tracing for every declaration lifecycle event
 package middleware
@@ -42,7 +42,7 @@ const (
 	TopicPaymentsConfirmed    = "payments.confirmed"
 	TopicOGAApproved          = "oga.approved"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "declaration-service"
 )
 

@@ -827,3 +827,37 @@
 - [x] v77-18: Add missing columns to payments, declarations, duty_drawback_claims, post_clearance_audits, tigerbeetle_ledger_entries
 - [x] v77-19: Run pnpm db:push and add db.ts helpers for new tables
 - [x] v77-20: Write server/v77.test.ts vitest suite (80+ tests)
+
+## v78 Sprint — Kafka & PostgreSQL Integration Audit
+
+### Kafka Gaps
+- [x] v78-K1a: Add OGA_PERMIT_REQUESTED/APPROVED/REJECTED topics to kafka.ts TOPICS
+- [x] v78-K1b: Add SECURITY_ALERT, INSIDER_THREAT_DETECTED topics to kafka.ts TOPICS
+- [x] v78-K1c: Add BOND_DEPOSITED, BOND_RELEASED, PENALTY_ASSESSED topics to kafka.ts TOPICS
+- [x] v78-K1d: Add WAREHOUSE_DEPOSIT, WAREHOUSE_RELEASE topics to kafka.ts TOPICS
+- [x] v78-K2a: Wire publishEvent(FRAUD_CASE_OPENED) in fraudCases.ts
+- [x] v78-K2b: Wire publishEvent(OGA_PERMIT_*) in oga.ts
+- [x] v78-K2c: Wire publishEvent(SANCTIONS_HIT) in sanctions.ts
+- [x] v78-K2d: Wire publishEvent(CARGO_ARRIVED/DEPARTED) in cargoTracking.ts
+- [x] v78-K2e: Wire publishEvent(WAREHOUSE_DEPOSIT/RELEASE) in bondedWarehouse.ts
+- [x] v78-K2f: Wire publishEvent(SECURITY_ALERT) in wazuh.ts
+- [x] v78-K2g: Wire publishEvent(INSIDER_THREAT_DETECTED) in insiderThreat.ts
+- [x] v78-K2h: Wire publishEvent(BOND_DEPOSITED/RELEASED/PENALTY_ASSESSED) in ledger.ts
+- [x] v78-K3a: Wire Kafka middleware in oga-service/main.go
+- [x] v78-K3b: Wire Kafka middleware in warehouse-service/cmd/main.go
+- [x] v78-K3c: Wire Kafka middleware in wazuh-svc/cmd/main.go
+- [x] v78-K4a: Add Kafka producer to insider-threat-svc/main.py
+- [x] v78-K4b: Add Kafka producer to kyc-service/main.py
+- [x] v78-K4c: Add Kafka producer to payment-risk-scorer/main.py
+- [x] v78-K5: Add infra/k8s/kafka-topics.yaml (Strimzi KafkaTopic CRDs)
+- [x] v78-K6: Add dapr-kafka-pubsub component to infra/k8s/dapr/components.yaml
+
+### PostgreSQL Gaps
+- [x] v78-P1a: Add PostgreSQL integration to warehouse-service/cmd/main.go
+- [x] v78-P1b: Add PostgreSQL integration to wazuh-svc/cmd/main.go
+- [x] v78-P2a: Add PostgreSQL integration to kyc-service/main.py
+- [x] v78-P2b: Add PostgreSQL integration to payment-risk-scorer/main.py
+- [x] v78-P3a: Add kafka_event_log table to Drizzle schema
+- [x] v78-P3b: Add oga_permit_events table to Drizzle schema
+- [x] v78-P3c: Add warehouse_inventory_snapshots table to Drizzle schema
+- [x] v78-test: Write server/v78.test.ts vitest suite (80+ tests)

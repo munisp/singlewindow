@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for audit-service.
 // Kafka topics consumed: declaration.cleared (triggers post-clearance audit selection)
 // Kafka topics published: audit.event (audit case opened/closed/findings)
-// Dapr pub/sub: publishes audit.event to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes audit.event to pubsub component
 package middleware
 
 import (
@@ -45,7 +45,7 @@ func daprPort() string {
 const (
 	TopicDeclarationCleared = "declaration.cleared"
 	TopicAuditEvent         = "audit.event"
-	DaprPubsubName          = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 // ─── Event Types ──────────────────────────────────────────────────────────────

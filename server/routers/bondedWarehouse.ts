@@ -8,6 +8,7 @@ import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb, getPool } from "../db";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 /** Bond must cover 110% of total goods value (WCO standard). */
 export function calculateBondRequirement(totalInventoryValueUsd: number): number {
@@ -166,6 +167,21 @@ export const bondedWarehouseRouter = router({
         "UPDATE bonded_warehouses SET used_cbm = used_cbm + $1, updated_at = NOW() WHERE id = $2",
         [input.volumeCbm, input.warehouseId]
       );
+      // Publish Kafka WAREHOUSE_DEPOSIT event (fire-and-forget)
+      publishEvent(TOPICS.WAREHOUSE_DEPOSIT, {
+        eventType: "warehouse.deposit",
+        aggregateId: input.ucr,
+        payload: {
+          warehouseId: input.warehouseId,
+          declarationId: input.declarationId ?? null,
+          ucr: input.ucr,
+          hsCode: input.hsCode,
+          quantityKg: input.quantityKg,
+          invoiceValueUsd: input.invoiceValueUsd,
+          dutyLiabilityUsd,
+          expiryDate: expiryDate.toISOString(),
+        },
+      }).catch(() => {});
       return { success: true, dutyLiabilityUsd, expiryDate };
     }),
 
@@ -187,6 +203,17 @@ export const bondedWarehouseRouter = router({
         "UPDATE bonded_warehouses SET used_cbm = GREATEST(0, used_cbm - $1), updated_at = NOW() WHERE id = $2",
         [item.volume_cbm, item.warehouse_id]
       );
+      // Publish Kafka WAREHOUSE_RELEASE event (fire-and-forget)
+      publishEvent(TOPICS.WAREHOUSE_RELEASE, {
+        eventType: "warehouse.release",
+        aggregateId: String(input.inventoryId),
+        payload: {
+          inventoryId: input.inventoryId,
+          exitReason: input.exitReason,
+          warehouseId: item.warehouse_id,
+          volumeCbm: item.volume_cbm,
+        },
+      }).catch(() => {});
       return { success: true, status: input.exitReason };
     }),
 

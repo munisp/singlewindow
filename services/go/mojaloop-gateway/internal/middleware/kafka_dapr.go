@@ -3,7 +3,7 @@
 //                          payments.failed      (payment failed, triggers retry/alert)
 //                          payments.initiated   (payment initiated by trader)
 // Kafka topics consumed:   declarations.cleared (clearance confirmed, payment receipt issued)
-// Dapr pub/sub:            publishes payments.confirmed to dapr-kafka-pubsub component
+// Dapr pub/sub:            publishes payments.confirmed to pubsub component
 // Fluvio:                  streams real-time payment status to port operators
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
 package middleware
@@ -36,7 +36,7 @@ const (
 	TopicPaymentsInitiated  = "payments.initiated"
 	TopicDeclarationsCleared = "declarations.cleared"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "mojaloop-gateway"
 )
 
@@ -136,7 +136,7 @@ type daprPublishRequest struct {
 	DataContentType string `json:"datacontenttype"`
 }
 
-// DaprPublishPayment publishes a payment event to Dapr pub/sub (dapr-kafka-pubsub component).
+// DaprPublishPayment publishes a payment event to Dapr pub/sub (pubsub component).
 // This triggers the Temporal clearance workflow via Dapr subscription.
 func DaprPublishPayment(ctx context.Context, topic string, payload any) error {
 	daprPort := os.Getenv("DAPR_HTTP_PORT")

@@ -7,7 +7,7 @@
 //                          risk.scored             (risk lane determined — route workflow)
 //                          payments.confirmed      (payment received — advance workflow)
 //                          oga.approved            (OGA permit received — advance workflow)
-// Dapr pub/sub:            publishes workflow state changes to dapr-kafka-pubsub
+// Dapr pub/sub:            publishes workflow state changes to pubsub
 // Fluvio:                  streams real-time workflow step progress to operations dashboard
 // OpenTelemetry:           distributed tracing for every workflow activity
 package middleware
@@ -44,7 +44,7 @@ const (
 	TopicPaymentsConfirmed    = "payments.confirmed"
 	TopicOGAApproved          = "oga.approved"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "workflow-service"
 )
 

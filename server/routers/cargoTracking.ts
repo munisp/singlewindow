@@ -5,7 +5,8 @@
  */
 
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -454,6 +455,37 @@ export const cargoTrackingRouter = router({
   /**
    * searchVessels — search by name, MMSI, or IMO number from DB.
    */
+  /**
+   * logCargoEvent — record an arrival or departure event and publish to Kafka
+   */
+  logCargoEvent: protectedProcedure
+    .input(z.object({
+      mmsi: z.string(),
+      vesselName: z.string(),
+      eventType: z.enum(["arrived", "departed"]),
+      portCode: z.string().default("KEMBA"),
+      declarationRef: z.string().optional(),
+      lat: z.number().optional(),
+      lon: z.number().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const topic = input.eventType === "arrived" ? TOPICS.CARGO_ARRIVED : TOPICS.CARGO_DEPARTED;
+      await publishEvent(topic, {
+        eventType: `cargo.${input.eventType}`,
+        aggregateId: input.mmsi,
+        payload: {
+          mmsi: input.mmsi,
+          vesselName: input.vesselName,
+          portCode: input.portCode,
+          declarationRef: input.declarationRef ?? null,
+          lat: input.lat ?? null,
+          lon: input.lon ?? null,
+          loggedBy: ctx.user.id,
+        },
+      }).catch(() => {});
+      return { success: true, eventType: input.eventType, mmsi: input.mmsi };
+    }),
+
   searchVessels: publicProcedure
     .input(z.object({ q: z.string().min(2).max(100) }))
     .query(async ({ input }) => {

@@ -3,7 +3,7 @@
 //                          finops.budget.breach    (monthly budget breached)
 //                          finops.report.generated (daily/weekly cost report ready)
 // Kafka topics consumed:   (none — kubecost-svc is a read/publish-only service)
-// Dapr pub/sub:            publishes FinOps alerts to dapr-kafka-pubsub
+// Dapr pub/sub:            publishes FinOps alerts to pubsub
 // OpenTelemetry:           distributed tracing for all cost query operations
 package middleware
 
@@ -31,7 +31,7 @@ const (
 	TopicFinOpsBudgetBreach    = "finops.budget.breach"
 	TopicFinOpsReportGenerated = "finops.report.generated"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "kubecost-svc"
 )
 

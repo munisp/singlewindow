@@ -2350,3 +2350,86 @@ export const abDivergenceLog = pgTable("ab_divergence_log", {
 ]);
 export type AbDivergenceLog = typeof abDivergenceLog.$inferSelect;
 export type InsertAbDivergenceLog = typeof abDivergenceLog.$inferInsert;
+
+// ─── v78: Kafka & PostgreSQL Audit — New Tables ──────────────────────────────
+
+/**
+ * kyc_events — persists KYC analysis results for audit and compliance.
+ * Populated by the kyc-service after each /api/kyc/analyse call.
+ */
+export const kycEvents = pgTable("kyc_events", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  documentType: varchar("document_type", { length: 64 }).notNull(),
+  extractedData: jsonb("extracted_data").default({}),
+  riskScore: decimal("risk_score", { precision: 5, scale: 4 }),
+  riskLevel: varchar("risk_level", { length: 32 }),
+  anomaliesDetected: jsonb("anomalies_detected").default([]),
+  ocrConfidence: decimal("ocr_confidence", { precision: 5, scale: 4 }),
+  processingMs: integer("processing_ms"),
+  status: varchar("status", { length: 32 }).notNull().default("completed"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kyc_events_declaration").on(t.declarationId),
+  index("idx_kyc_events_user").on(t.userId),
+  index("idx_kyc_events_risk_level").on(t.riskLevel),
+  index("idx_kyc_events_created").on(t.createdAt),
+]);
+export type KycEvent = typeof kycEvents.$inferSelect;
+export type InsertKycEvent = typeof kycEvents.$inferInsert;
+
+/**
+ * kafka_event_log — durable outbox for Kafka domain events.
+ * Enables at-least-once delivery guarantees and replay capability.
+ */
+export const kafkaEventLog = pgTable("kafka_event_log", {
+  id: serial("id").primaryKey(),
+  topic: varchar("topic", { length: 256 }).notNull(),
+  eventType: varchar("event_type", { length: 128 }).notNull(),
+  aggregateId: varchar("aggregate_id", { length: 256 }).notNull(),
+  payload: jsonb("payload").notNull().default({}),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  publishedAt: timestamp("published_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_kafka_log_topic").on(t.topic),
+  index("idx_kafka_log_status").on(t.status),
+  index("idx_kafka_log_aggregate").on(t.aggregateId),
+  index("idx_kafka_log_created").on(t.createdAt),
+]);
+export type KafkaEventLog = typeof kafkaEventLog.$inferSelect;
+export type InsertKafkaEventLog = typeof kafkaEventLog.$inferInsert;
+
+/**
+ * oga_permit_events — event sourcing log for OGA permit state transitions.
+ * Each row records a single state change (requested → approved → rejected → expired).
+ */
+export const ogaPermitEvents = pgTable("oga_permit_events", {
+  id: serial("id").primaryKey(),
+  permitId: integer("permit_id").references(() => ogaPermits.id, { onDelete: "cascade" }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  agencyCode: varchar("agency_code", { length: 32 }).notNull(),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  previousStatus: varchar("previous_status", { length: 32 }),
+  newStatus: varchar("new_status", { length: 32 }).notNull(),
+  actorId: integer("actor_id").references(() => users.id, { onDelete: "set null" }),
+  actorType: varchar("actor_type", { length: 32 }).default("system"),
+  remarks: text("remarks"),
+  metadata: jsonb("metadata").default({}),
+  kafkaOffset: bigint("kafka_offset", { mode: "number" }),
+  kafkaPartition: integer("kafka_partition"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_oga_permit_events_permit").on(t.permitId),
+  index("idx_oga_permit_events_declaration").on(t.declarationId),
+  index("idx_oga_permit_events_agency").on(t.agencyCode),
+  index("idx_oga_permit_events_type").on(t.eventType),
+  index("idx_oga_permit_events_created").on(t.createdAt),
+]);
+export type OgaPermitEvent = typeof ogaPermitEvents.$inferSelect;
+export type InsertOgaPermitEvent = typeof ogaPermitEvents.$inferInsert;

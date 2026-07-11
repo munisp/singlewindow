@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for wazuh-svc.
 // Kafka topics published: security.alert (SIEM-detected threats)
 // Kafka topics consumed: audit.event (correlates audit events with security incidents)
-// Dapr pub/sub: publishes security.alert to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes security.alert to pubsub component
 package middleware
 
 import (
@@ -43,7 +43,7 @@ func daprPort() string {
 const (
 	TopicSecurityAlert = "security.alert"
 	TopicAuditEvent    = "audit.event"
-	DaprPubsubName     = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 type SecurityAlertEvent struct {

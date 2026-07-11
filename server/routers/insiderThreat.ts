@@ -13,6 +13,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { logAuditEvent } from "../db";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 // ─── Admin procedure helper ───────────────────────────────────────────────────
 
@@ -286,6 +287,19 @@ export const insiderThreatRouter = router({
         newState: { approvalId: input.approvalId, decision: input.decision, reason: input.reason },
       });
 
+      // Publish Kafka INSIDER_THREAT_ALERT when a 4-eyes decision is made (fire-and-forget)
+      publishEvent(TOPICS.INSIDER_THREAT_DETECTED, {
+        eventType: `insider_threat.four_eyes_${input.decision}`,
+        aggregateId: input.approvalId,
+        payload: {
+          approvalId: input.approvalId,
+          decision: input.decision,
+          reason: input.reason,
+          originalAction: record.action,
+          requesterId: record.requesterId,
+          approverId: ctx.user.id,
+        },
+      }).catch(() => {});
       return updated;
     }),
 

@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for opencti-svc.
 // Kafka topics published: security.alert (when STIX indicators match declarations)
 // Kafka topics consumed: sanctions.hit (enriches hits with OpenCTI threat graph data)
-// Dapr pub/sub: publishes security.alert to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes security.alert to pubsub component
 package middleware
 
 import (
@@ -43,7 +43,7 @@ func daprPort() string {
 const (
 	TopicSecurityAlert = "security.alert"
 	TopicSanctionsHit  = "sanctions.hit"
-	DaprPubsubName     = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 type SecurityAlertEvent struct {

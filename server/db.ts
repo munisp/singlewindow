@@ -14,6 +14,10 @@ import {
   paymentRiskScores, InsertPaymentRiskScore,
   hsClassificationCache, InsertHsClassificationCache,
   abDivergenceLog, InsertAbDivergenceLog,
+  // v78 new tables
+  kycEvents, InsertKycEvent,
+  kafkaEventLog, InsertKafkaEventLog,
+  ogaPermitEvents, InsertOgaPermitEvent,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1397,4 +1401,88 @@ export async function getAbDivergenceStats(since?: Date) {
   const total = Number(row?.total ?? 0);
   const diverged = Number(row?.diverged ?? 0);
   return { total, diverged, agreeRate: total > 0 ? (total - diverged) / total : 1.0 };
+}
+
+// --- KYC Events (v78) ---
+export async function createKycEvent(data: InsertKycEvent) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(kycEvents).values(data).returning();
+  return row;
+}
+export async function getKycEventsByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(kycEvents)
+    .where(eq(kycEvents.declarationId, declarationId))
+    .orderBy(desc(kycEvents.createdAt));
+}
+export async function getKycEventsByUser(userId: number, limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(kycEvents)
+    .where(eq(kycEvents.userId, userId))
+    .orderBy(desc(kycEvents.createdAt))
+    .limit(limit);
+}
+
+// --- Kafka Event Log / Outbox (v78) ---
+export async function createKafkaEventLogEntry(data: InsertKafkaEventLog) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(kafkaEventLog).values(data).returning();
+  return row;
+}
+export async function getPendingKafkaEvents(limit = 100) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(kafkaEventLog)
+    .where(eq(kafkaEventLog.status, "pending"))
+    .orderBy(kafkaEventLog.createdAt)
+    .limit(limit);
+}
+export async function markKafkaEventPublished(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(kafkaEventLog)
+    .set({ status: "published", publishedAt: new Date() })
+    .where(eq(kafkaEventLog.id, id))
+    .returning();
+  return row;
+}
+export async function markKafkaEventFailed(id: number, errorMessage: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(kafkaEventLog)
+    .set({
+      status: "failed",
+      errorMessage,
+      lastAttemptAt: new Date(),
+      attempts: sql`${kafkaEventLog.attempts} + 1`,
+    })
+    .where(eq(kafkaEventLog.id, id))
+    .returning();
+  return row;
+}
+
+// --- OGA Permit Events / Event Sourcing (v78) ---
+export async function createOgaPermitEvent(data: InsertOgaPermitEvent) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(ogaPermitEvents).values(data).returning();
+  return row;
+}
+export async function getOgaPermitEventsByPermit(permitId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(ogaPermitEvents)
+    .where(eq(ogaPermitEvents.permitId, permitId))
+    .orderBy(ogaPermitEvents.createdAt);
+}
+export async function getOgaPermitEventsByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(ogaPermitEvents)
+    .where(eq(ogaPermitEvents.declarationId, declarationId))
+    .orderBy(ogaPermitEvents.createdAt);
 }

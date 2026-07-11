@@ -246,6 +246,13 @@
       "when": 1783787777771,
       "tag": "0034_little_wilson_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1783789030047,
+      "tag": "0035_fair_miracleman",
+      "breakpoints": true
     }
   ]
 }

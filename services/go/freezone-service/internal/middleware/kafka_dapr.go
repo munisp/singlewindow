@@ -1,7 +1,7 @@
 // Package middleware provides Kafka and Dapr pub/sub integration for freezone-service.
 // Kafka topics consumed: declaration.cleared (triggers free zone admission)
 // Kafka topics published: cargo.released (goods exiting free zone to domestic/re-export)
-// Dapr pub/sub: publishes cargo.released to dapr-kafka-pubsub component
+// Dapr pub/sub: publishes cargo.released to pubsub component
 package middleware
 
 import (
@@ -43,7 +43,7 @@ func daprPort() string {
 const (
 	TopicDeclarationCleared = "declaration.cleared"
 	TopicCargoReleased      = "cargo.released"
-	DaprPubsubName          = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 )
 
 type CargoReleasedEvent struct {

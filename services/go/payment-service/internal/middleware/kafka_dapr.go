@@ -6,7 +6,7 @@
 // Kafka topics consumed:   declarations.submitted  (new declaration — create duty bill)
 //                          declarations.cleared    (clearance — trigger receipt generation)
 //                          drawback.approved       (drawback approved — trigger refund)
-// Dapr pub/sub:            publishes to dapr-kafka-pubsub component
+// Dapr pub/sub:            publishes to pubsub component
 // Fluvio:                  streams real-time payment status to trader dashboard
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
 package middleware
@@ -41,7 +41,7 @@ const (
 	TopicDeclarationCleared  = "declarations.cleared"
 	TopicDrawbackApproved    = "drawback.approved"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "payment-service"
 )
 

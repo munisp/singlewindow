@@ -49,6 +49,20 @@ export const TOPICS = {
   NOTIFICATION_CREATED:    "tradegateway.notifications.created",
   // Webhooks
   WEBHOOK_TRIGGER:         "tradegateway.webhooks.trigger",
+  // OGA permits
+  OGA_PERMIT_REQUESTED:    "tradegateway.oga.permit_requested",
+  OGA_PERMIT_APPROVED:     "tradegateway.oga.permit_approved",
+  OGA_PERMIT_REJECTED:     "tradegateway.oga.permit_rejected",
+  // Security / insider threat
+  SECURITY_ALERT:          "tradegateway.security.alert",
+  INSIDER_THREAT_DETECTED: "tradegateway.security.insider_threat_detected",
+  // TigerBeetle financial events
+  BOND_DEPOSITED:          "tradegateway.ledger.bond_deposited",
+  BOND_RELEASED:           "tradegateway.ledger.bond_released",
+  PENALTY_ASSESSED:        "tradegateway.ledger.penalty_assessed",
+  // Bonded warehouse
+  WAREHOUSE_DEPOSIT:       "tradegateway.warehouse.deposit",
+  WAREHOUSE_RELEASE:       "tradegateway.warehouse.release",
 } as const;
 
 export type KafkaTopic = (typeof TOPICS)[keyof typeof TOPICS];

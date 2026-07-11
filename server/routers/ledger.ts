@@ -21,6 +21,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
+import { publishEvent, TOPICS } from "../_core/kafka";
 import {
   getLedgerEntriesByDeclaration,
   getLedgerEntriesByPayment,
@@ -136,6 +137,21 @@ export const ledgerRouter = router({
           description: input.description,
           postedAt: new Date(),
         }).catch(e => console.warn("[Ledger] DB persist failed:", e));
+        // Publish Kafka PAYMENT_INITIATED event (fire-and-forget)
+        publishEvent(TOPICS.PAYMENT_INITIATED, {
+          eventType: "payment.initiated",
+          aggregateId: (result as any).id ?? input.reference ?? "unknown",
+          payload: {
+            debitAccountId: input.debitAccountId,
+            creditAccountId: input.creditAccountId,
+            amount: input.amount,
+            currency: input.currency,
+            reference: input.reference ?? null,
+            declarationId: input.declarationId ?? null,
+            paymentId: input.paymentId ?? null,
+            initiatedBy: ctx.user.id,
+          },
+        }).catch(() => {});
         return result;
       }
 

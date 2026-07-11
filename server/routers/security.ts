@@ -7,6 +7,7 @@ import {
 } from "../db";
 import { invokeLLM } from "../_core/llm";
 import { nanoid } from "nanoid";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 // Sanctions lists data (real list names, deterministic matching logic)
 const SANCTIONS_LISTS = ["OFAC_SDN", "UN_SC", "EU_CONSOLIDATED", "OFSI"];
@@ -129,7 +130,7 @@ export const securityRouter = router({
         checkedBy: ctx.user.id,
       });
 
-      // If confirmed match, create a security alert
+      // If confirmed match, create a security alert and publish Kafka event
       if (screening.result === "confirmed_match") {
         await createSecurityAlert({
           alertId: `SANCTIONS-${nanoid(12).toUpperCase()}`,
@@ -139,6 +140,19 @@ export const securityRouter = router({
           description: `Entity "${input.entityName}" matched against sanctions lists. Immediate review required.`,
           rawEvent: screening.matchDetails,
         });
+        // Publish Kafka SANCTIONS_HIT event (fire-and-forget)
+        publishEvent(TOPICS.SANCTIONS_HIT, {
+          eventType: "sanctions.hit",
+          aggregateId: input.entityName,
+          payload: {
+            entityName: input.entityName,
+            entityType: input.entityType,
+            declarationId: input.declarationId ?? null,
+            checkResult: screening.result,
+            matchDetails: screening.matchDetails,
+            checkedBy: ctx.user.id,
+          },
+        }).catch(() => {});
       }
 
       return check;

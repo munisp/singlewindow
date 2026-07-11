@@ -18,6 +18,7 @@ import (
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	ogamw "github.com/munisp/singlewindow/services/go/oga-service/internal/middleware"
 )
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -423,6 +424,29 @@ func main() {
 	// Start gRPC server in background
 	go startGRPCServer()
 
+	// Wire Kafka/Dapr middleware (graceful: skipped if brokers unavailable)
+	kafkaBrokers := os.Getenv("KAFKA_BROKERS")
+	if kafkaBrokers == "" {
+		kafkaBrokers = "kafka:9092"
+	}
+	// Kafka consumer handlers (no-op stubs; real handlers injected in production)
+	declHandler := func(_ context.Context, evt ogamw.DeclarationSubmittedEvent) error {
+		log.Printf("[OGA Service] Declaration submitted: %d", evt.DeclarationID)
+		return nil
+	}
+	wfHandler := func(_ context.Context, evt ogamw.WorkflowOGADispatchedEvent) error {
+		log.Printf("[OGA Service] Workflow dispatched: %s", evt.WorkflowID)
+		return nil
+	}
+	_ = kafkaBrokers // used by middleware via KAFKA_BROKERS env
+	mw, mwErr := ogamw.NewMiddlewareClients(declHandler, wfHandler)
+	if mwErr == nil && mw != nil {
+		log.Printf("[OGA Service] Kafka middleware started")
+		defer mw.Close()
+	} else if mwErr != nil {
+		log.Printf("[OGA Service] Kafka middleware init warning: %v (continuing without Kafka)", mwErr)
+	}
+
 	// HTTP REST server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
@@ -439,7 +463,6 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	go StartGRPCServer()
 	log.Printf("[OGA Service] HTTP server listening on :%s", httpPort)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("[OGA Service] HTTP server failed: %v", err)

@@ -12,6 +12,7 @@ import { createUserNotification } from "../db";
 import { ogaPermits, declarations } from "../../drizzle/schema";
 import { and, gte, lte, isNotNull, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 // OGA agencies list
 export const OGA_AGENCIES = [
@@ -88,6 +89,20 @@ export const ogaRouter = router({
         await Promise.all(permits.map(p => p && setOwner("permit", p.id, decl2.traderId)));
       }
 
+      // Publish Kafka event for each permit requested (fire-and-forget)
+      permits.forEach(p => {
+        if (p) publishEvent(TOPICS.OGA_PERMIT_REQUESTED, {
+          eventType: "oga.permit_requested",
+          aggregateId: String(p.id),
+          payload: {
+            permitId: p.id,
+            declarationId: input.declarationId,
+            agencyCode: p.agencyCode,
+            agencyName: p.agencyName,
+          },
+        }).catch(() => {});
+      });
+
       return permits;
     }),
 
@@ -142,6 +157,20 @@ export const ogaRouter = router({
         actorType: "oga_officer",
         newState: { status: "approved", permitNumber: updated.permitNumber },
       });
+
+      // Publish Kafka event (fire-and-forget)
+      publishEvent(TOPICS.OGA_PERMIT_APPROVED, {
+        eventType: "oga.permit_approved",
+        aggregateId: String(input.permitId),
+        payload: {
+          permitId: input.permitId,
+          declarationId: updated.declarationId,
+          agencyCode: updated.agencyCode,
+          agencyName: updated.agencyName,
+          permitNumber: updated.permitNumber,
+          approvedBy: ctx.user.id,
+        },
+      }).catch(() => {});
 
       // Notify trader via legacy notifications + user_notifications + WebSocket push
       const decl = await getDeclarationById(updated.declarationId);
@@ -234,6 +263,20 @@ export const ogaRouter = router({
         previousState: { status: "under_review" },
         newState: { status: "rejected", reason: input.reason },
       });
+
+      // Publish Kafka event (fire-and-forget)
+      publishEvent(TOPICS.OGA_PERMIT_REJECTED, {
+        eventType: "oga.permit_rejected",
+        aggregateId: String(input.permitId),
+        payload: {
+          permitId: input.permitId,
+          declarationId: updated.declarationId,
+          agencyCode: updated.agencyCode,
+          agencyName: updated.agencyName,
+          reason: input.reason,
+          rejectedBy: ctx.user.id,
+        },
+      }).catch(() => {});
 
       return updated;
     }),

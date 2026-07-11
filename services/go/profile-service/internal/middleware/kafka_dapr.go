@@ -5,7 +5,7 @@
 //                          aeo.status.changed      (AEO status granted/revoked)
 // Kafka topics consumed:   kyc.completed           (KYC service completed verification)
 //                          declarations.cleared    (update trader clearance statistics)
-// Dapr pub/sub:            publishes trader events to dapr-kafka-pubsub
+// Dapr pub/sub:            publishes trader events to pubsub
 // Fluvio:                  streams real-time trader scorecard updates
 // OpenTelemetry:           distributed tracing for every profile lifecycle event
 package middleware
@@ -39,7 +39,7 @@ const (
 	TopicKYCCompleted       = "kyc.completed"
 	TopicDeclarationCleared = "declarations.cleared"
 
-	DaprPubsubName = "dapr-kafka-pubsub"
+	DaprPubsubName = "pubsub"
 	ServiceName    = "profile-service"
 )
 

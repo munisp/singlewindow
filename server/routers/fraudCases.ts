@@ -17,6 +17,7 @@ import crypto from 'crypto';
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+import { publishEvent, TOPICS } from "../_core/kafka";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,21 @@ export const fraudCasesRouter = router({
           riskScore: input.riskScore ?? null,
         })
         .returning();
+
+      // Publish Kafka event (fire-and-forget, non-blocking)
+      publishEvent(TOPICS.FRAUD_CASE_OPENED, {
+        eventType: "fraud.case_opened",
+        aggregateId: String(created.id),
+        payload: {
+          caseId: created.id,
+          caseNumber: created.caseNumber,
+          traderId: input.traderId,
+          priority: input.priority,
+          riskScore: input.riskScore ?? null,
+          openedBy: ctx.user.id,
+          linkedDeclarationIds: input.linkedDeclarationIds,
+        },
+      }).catch(() => {});
 
       return created;
     }),
