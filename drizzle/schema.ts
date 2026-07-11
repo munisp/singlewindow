@@ -2593,3 +2593,20 @@ export const lakehouseJobs = pgTable("lakehouse_jobs", {
 ]);
 export type LakehouseJob = typeof lakehouseJobs.$inferSelect;
 export type InsertLakehouseJob = typeof lakehouseJobs.$inferInsert;
+
+// ─── GeoIP Cache (v82) ────────────────────────────────────────────────────────
+export const geoipCache = pgTable("geoip_cache", {
+  id: serial("id").primaryKey(),
+  ip: varchar("ip", { length: 45 }).notNull().unique(),
+  country: varchar("country", { length: 64 }),
+  countryCode: varchar("country_code", { length: 4 }),
+  city: varchar("city", { length: 128 }),
+  asn: varchar("asn", { length: 32 }),
+  asnOrg: varchar("asn_org", { length: 256 }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_geoip_ip").on(t.ip),
+  index("idx_geoip_country").on(t.countryCode),
+]);
+export type GeoipCache = typeof geoipCache.$inferSelect;
+export type InsertGeoipCache = typeof geoipCache.$inferInsert;

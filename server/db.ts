@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, count } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql, count, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -22,6 +22,8 @@ import {
   temporalWorkflowRuns, InsertTemporalWorkflowRun,
   openAppSecEvents, InsertOpenAppSecEvent,
   lakehouseJobs, InsertLakehouseJob,
+  // v82 geoip cache
+  geoipCache, type InsertGeoipCache,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1654,4 +1656,37 @@ export async function getLakehouseJobStats() {
     failed: failed[0]?.count ?? 0,
     pending: pending[0]?.count ?? 0,
   };
+}
+
+// ─── GeoIP Cache helpers (v82) ────────────────────────────────────────────────
+export async function getGeoIp(ip: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(geoipCache).where(eq(geoipCache.ip, ip)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function upsertGeoIp(data: InsertGeoipCache) {
+  const db = await getDb();
+  if (!db) return null;
+  await db.insert(geoipCache).values(data)
+    .onConflictDoUpdate({
+      target: geoipCache.ip,
+      set: {
+        country: data.country,
+        countryCode: data.countryCode,
+        city: data.city,
+        asn: data.asn,
+        asnOrg: data.asnOrg,
+        updatedAt: new Date(),
+      },
+    });
+  return getGeoIp(data.ip);
+}
+
+export async function bulkGetGeoIps(ips: string[]) {
+  if (!ips.length) return [];
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(geoipCache).where(inArray(geoipCache.ip, ips));
 }

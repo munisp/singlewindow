@@ -936,3 +936,23 @@
 
 ### Tests
 - [x] v81-17: Write server/v81.test.ts vitest suite — 3225 tests passing (92 files), TypeScript 0 errors
+
+## v82 Sprint — RetriggerWorkflow Dialog, WAF Geolocation, Lakehouse Cron
+
+### RetriggerWorkflow Confirmation Dialog
+- [x] v82-01: Upgraded Dialog to AlertDialog in TemporalWorkflowRuns.tsx with workflowType + input payload JSON preview
+- [x] v82-02: Confirm button disabled during mutation; destructive variant with warning icon
+
+### WAF Event Source-IP Geolocation
+- [x] v82-03: Added geoip_cache table to drizzle/schema.ts (ip, country, countryCode, city, asn, asnOrg, updatedAt) + migration 0037
+- [x] v82-04: Added db.ts helpers: getGeoIp, upsertGeoIp, bulkGetGeoIps
+- [x] v82-05: Extended openAppSecRouter.getWafEvents to join geoip_cache and return country/ASN/city/countryFlag fields
+- [x] v82-06: Updated WafEvents.tsx source IP column with country flag emoji + ASN badge
+
+### Lakehouse Jobs Nightly Cron
+- [x] v82-07: Created server/scheduled/lakehouseRollup.ts heartbeat handler (POST /api/scheduled/lakehouse-rollup)
+- [x] v82-08: Registered handler in server/_core/index.ts; cron created via manus-heartbeat CLI after deploy
+- [x] v82-09: Added live countdown banner in LakehouseJobs.tsx (next 02:00 UTC + last-run timestamp from jobs table)
+
+### Tests
+- [x] v82-10: Write server/v82.test.ts vitest suite — 3268 tests passing (93 files), TypeScript 0 errors

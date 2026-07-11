@@ -1454,7 +1454,7 @@ async function startServer() {
     app.post("/api/scheduled/bond-expiry-digest", bondExpiryDigestHandler);
   }
 
-  // 4-Eyes Approval Expiry — heartbeat handler + cron
+    // 4-Eyes Approval Expiry — heartbeat handler + cron
   {
     const { fourEyesExpiryHandler, runFourEyesExpiryCron } = await import("../scheduled/fourEyesExpiry");
     app.post("/api/scheduled/four-eyes-expiry", fourEyesExpiryHandler);
@@ -1462,7 +1462,16 @@ async function startServer() {
     cron.schedule("0 */15 * * * *", runFourEyesExpiryCron, { timezone: "UTC" });
     console.log("[Cron] 4-Eyes approval expiry scheduled every 15 minutes");
   }
-
+  // Lakehouse Nightly Trade-Stats Rollup — Heartbeat handler
+  // Cron is created via: manus-heartbeat create --name lakehouse-nightly-rollup
+  //   --cron "0 0 2 * * *" --path /api/scheduled/lakehouse-rollup
+  //   --description "Nightly trade-stats Delta Lake write-back at 02:00 UTC"
+  // Must be run after deploying the site.
+  {
+    const { lakehouseRollupHandler } = await import("../scheduled/lakehouseRollup");
+    app.post("/api/scheduled/lakehouse-rollup", lakehouseRollupHandler);
+    console.log("[Heartbeat] /api/scheduled/lakehouse-rollup registered");
+  }
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

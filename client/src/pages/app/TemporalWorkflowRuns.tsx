@@ -9,7 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -41,7 +50,7 @@ export default function TemporalWorkflowRuns() {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [page, setPage] = useState(0);
-  const [retriggerTarget, setRetriggerTarget] = useState<{ runId: string; workflowType: string } | null>(null);
+  const [retriggerTarget, setRetriggerTarget] = useState<{ runId: string; workflowType: string; input?: Record<string, unknown> } | null>(null);
   const PAGE_SIZE = 20;
 
   const statsQuery = trpc.temporalRuns.getWorkflowStats.useQuery();
@@ -187,8 +196,13 @@ export default function TemporalWorkflowRuns() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => setRetriggerTarget({ runId: run.runId, workflowType: run.workflowType })}
+                          className="h-7 text-xs text-amber-400 hover:text-amber-300"
+                          onClick={() => setRetriggerTarget({
+                            runId: run.runId,
+                            workflowType: run.workflowType,
+                            input: (run as any).input ?? undefined,
+                          })}
+                          disabled={retriggerMutation.isPending}
                         >
                           <Play className="w-3 h-3 mr-1" />
                           Re-trigger
@@ -212,31 +226,60 @@ export default function TemporalWorkflowRuns() {
         </div>
       )}
 
-      {/* Re-trigger Confirmation Dialog */}
-      <Dialog open={!!retriggerTarget} onOpenChange={(open) => !open && setRetriggerTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Re-trigger Workflow</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to re-trigger <strong>{retriggerTarget?.workflowType}</strong>?
-            A new workflow run will be submitted to the task queue.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRetriggerTarget(null)}>Cancel</Button>
-            <Button
+      {/* Re-trigger Confirmation AlertDialog */}
+      <AlertDialog open={!!retriggerTarget} onOpenChange={(open) => !open && setRetriggerTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-400" />
+              Re-trigger Workflow Run?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  This will submit a <strong>new execution</strong> of{" "}
+                  <span className="font-mono text-foreground bg-muted px-1.5 py-0.5 rounded text-xs">
+                    {retriggerTarget?.workflowType}
+                  </span>{" "}
+                  to the Temporal task queue. The original failed run will not be modified.
+                </p>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Original Run ID:</span>{" "}
+                  <span className="font-mono">{retriggerTarget?.runId}</span>
+                </div>
+                {retriggerTarget?.input && Object.keys(retriggerTarget.input).length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-foreground mb-1">Input Payload:</p>
+                    <pre className="text-xs bg-muted rounded p-2 overflow-x-auto max-h-32 text-muted-foreground">
+                      {JSON.stringify(retriggerTarget.input, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                <p className="text-xs text-amber-400 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  Duplicate runs may cause side effects if the workflow is not idempotent.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={retriggerMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-amber-600 hover:bg-amber-700 text-white"
               onClick={() => retriggerTarget && retriggerMutation.mutate({
                 runId: retriggerTarget.runId,
                 workflowType: retriggerTarget.workflowType,
+                input: retriggerTarget.input,
               })}
               disabled={retriggerMutation.isPending}
             >
-              {retriggerMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Play className="w-4 h-4 mr-2" />}
-              Re-trigger
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {retriggerMutation.isPending
+                ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Re-triggering…</>
+                : <><Play className="w-4 h-4 mr-2" />Confirm Re-trigger</>}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

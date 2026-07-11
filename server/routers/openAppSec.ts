@@ -25,15 +25,31 @@ const SOURCE_IPS = [
   "203.0.113.42", "198.51.100.7", "185.220.101.3",
 ];
 
+// Dev-mode GeoIP seed data keyed by IP
+const DEV_GEOIP: Record<string, { country: string; countryCode: string; city: string; asn: string; asnOrg: string }> = {
+  "192.168.1.45":   { country: "Ghana",          countryCode: "GH", city: "Accra",       asn: "AS37055", asnOrg: "Vodafone Ghana" },
+  "10.0.0.123":     { country: "Singapore",       countryCode: "SG", city: "Singapore",   asn: "AS9506",  asnOrg: "Singtel" },
+  "172.16.0.88":    { country: "Rwanda",          countryCode: "RW", city: "Kigali",      asn: "AS37243", asnOrg: "MTN Rwanda" },
+  "203.0.113.42":   { country: "Russia",          countryCode: "RU", city: "Moscow",      asn: "AS49505", asnOrg: "Selectel" },
+  "198.51.100.7":   { country: "China",           countryCode: "CN", city: "Beijing",     asn: "AS4134",  asnOrg: "CHINANET" },
+  "185.220.101.3":  { country: "Netherlands",     countryCode: "NL", city: "Amsterdam",   asn: "AS60729", asnOrg: "Tor Exit Node" },
+};
+
+const COUNTRY_FLAGS: Record<string, string> = {
+  GH: "🇬🇭", SG: "🇸🇬", RW: "🇷🇼", RU: "🇷🇺", CN: "🇨🇳", NL: "🇳🇱", US: "🇺🇸", GB: "🇬🇧",
+};
+
 function makeDevEvent(i: number) {
   const severity = SEVERITIES[i % SEVERITIES.length];
   const attackType = ATTACK_TYPES[i % ATTACK_TYPES.length];
+  const sourceIp = SOURCE_IPS[i % SOURCE_IPS.length];
+  const geo = DEV_GEOIP[sourceIp];
   return {
     id: i + 1,
     eventId: `waf-evt-${(10000 + i).toString(16)}`,
     attackType,
     severity,
-    sourceIp: SOURCE_IPS[i % SOURCE_IPS.length],
+    sourceIp,
     targetPath: `/api/trpc/${["declarations", "payments", "kyc", "oga", "risk"][i % 5]}.${["list", "get", "create", "update"][i % 4]}`,
     requestMethod: ["GET", "POST", "PUT", "DELETE"][i % 4],
     userAgent: i % 2 === 0 ? "Mozilla/5.0 (compatible; Googlebot/2.1)" : "sqlmap/1.7.8",
@@ -43,6 +59,13 @@ function makeDevEvent(i: number) {
     isAcknowledged: i % 5 === 0,
     acknowledgedBy: i % 5 === 0 ? 1 : null,
     createdAt: new Date(Date.now() - i * 900_000),
+    // Geolocation fields
+    country: geo?.country ?? null,
+    countryCode: geo?.countryCode ?? null,
+    countryFlag: geo?.countryCode ? (COUNTRY_FLAGS[geo.countryCode] ?? "🌐") : "🌐",
+    city: geo?.city ?? null,
+    asn: geo?.asn ?? null,
+    asnOrg: geo?.asnOrg ?? null,
   };
 }
 

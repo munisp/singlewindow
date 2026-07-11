@@ -2,7 +2,7 @@
  * Lakehouse Jobs Status Panel — Sprint v81
  * Monitor Delta Lake batch jobs and trigger manual re-runs.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,27 @@ function formatDuration(ms: number | null) {
   return `${(ms / 60_000).toFixed(1)}m`;
 }
 
+/** Compute next 02:00 UTC from now */
+function getNextRollupTime(): Date {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 2, 0, 0, 0));
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
+
+function useCountdown(target: Date) {
+  const [remaining, setRemaining] = useState(() => target.getTime() - Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setRemaining(target.getTime() - Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [target]);
+  const totalSecs = Math.max(0, Math.floor(remaining / 1000));
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 export default function LakehouseJobs() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -45,6 +66,8 @@ export default function LakehouseJobs() {
   const [triggerDialog, setTriggerDialog] = useState(false);
   const [triggerJobType, setTriggerJobType] = useState<string>("");
   const [triggerTable, setTriggerTable] = useState<string>("");
+  const [nextRollup] = useState(() => getNextRollupTime());
+  const countdown = useCountdown(nextRollup);
   const PAGE_SIZE = 20;
 
   const statsQuery = trpc.lakehouse.getLakehouseStats.useQuery();
@@ -94,6 +117,26 @@ export default function LakehouseJobs() {
             Trigger Job
           </Button>
         </div>
+      </div>
+
+      {/* Nightly Rollup Countdown Banner */}
+      <div className="flex items-center gap-3 bg-purple-500/10 border border-purple-500/30 rounded-lg px-4 py-2.5">
+        <Clock className="w-4 h-4 text-purple-400 shrink-0" />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-sm">
+          <span className="text-purple-300 font-medium">Next nightly rollup (TRADE_STATS_ROLLUP)</span>
+          <span className="font-mono text-purple-100 text-base">{countdown}</span>
+          <span className="text-muted-foreground text-xs">Scheduled 02:00 UTC via Heartbeat cron</span>
+        </div>
+        {(() => {
+          const lastRollup = (jobsQuery.data?.jobs ?? []).find(
+            (j) => (j as any).jobType === "TRADE_STATS_ROLLUP" && (j as any).status === "completed"
+          );
+          return lastRollup ? (
+            <span className="ml-auto text-xs text-muted-foreground">
+              Last run: {new Date((lastRollup as any).completedAt).toLocaleString()}
+            </span>
+          ) : null;
+        })()}
       </div>
 
       {/* Stats Cards */}

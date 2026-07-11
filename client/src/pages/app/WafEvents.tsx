@@ -220,7 +220,29 @@ export default function WafEvents() {
                         {evt.severity.toUpperCase()}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{evt.sourceIp}</TableCell>
+                    <TableCell className="text-xs">
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-base leading-none" title={(evt as any).country ?? undefined}>
+                            {(evt as any).countryFlag ?? "🌐"}
+                          </span>
+                          <span className="font-mono text-muted-foreground">{evt.sourceIp}</span>
+                        </div>
+                        {(evt as any).asn && (
+                          <span
+                            className="inline-block font-mono text-[10px] bg-muted text-muted-foreground px-1 py-0.5 rounded"
+                            title={(evt as any).asnOrg ?? undefined}
+                          >
+                            {(evt as any).asn}
+                          </span>
+                        )}
+                        {(evt as any).city && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {(evt as any).city}{(evt as any).country ? `, ${(evt as any).country}` : ""}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate max-w-[160px]" title={evt.targetPath ?? undefined}>
                       {evt.targetPath}
                     </TableCell>
