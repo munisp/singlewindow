@@ -159,4 +159,53 @@ export const openAppSecRouter = router({
     .query(async () => {
       return [...ATTACK_TYPES];
     }),
+
+  /**
+   * getWafTrend — daily event counts by severity for the last N days.
+   */
+  getWafTrend: adminProcedure
+    .input(z.object({ days: z.number().int().min(7).max(90).default(30) }).optional())
+    .query(async ({ input }) => {
+      const days = input?.days ?? 30;
+      if (process.env.NODE_ENV !== "production") {
+        const trend = [];
+        for (let i = days - 1; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          trend.push({
+            date: d.toISOString().split("T")[0],
+            critical: Math.floor(Math.random() * 5),
+            high: Math.floor(Math.random() * 15) + 2,
+            medium: Math.floor(Math.random() * 30) + 5,
+            low: Math.floor(Math.random() * 50) + 10,
+          });
+        }
+        return trend;
+      }
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return [];
+      const { openAppSecEvents } = await import("../../drizzle/schema");
+      const { gte, sql } = await import("drizzle-orm");
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const rows = await db
+        .select({
+          date: sql<string>`DATE(${openAppSecEvents.createdAt})`,
+          severity: openAppSecEvents.severity,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(openAppSecEvents)
+        .where(gte(openAppSecEvents.createdAt, cutoff))
+        .groupBy(sql`DATE(${openAppSecEvents.createdAt})`, openAppSecEvents.severity)
+        .orderBy(sql`DATE(${openAppSecEvents.createdAt})`);
+      const map = new Map<string, { date: string; critical: number; high: number; medium: number; low: number }>();
+      for (const row of rows) {
+        if (!map.has(row.date)) map.set(row.date, { date: row.date, critical: 0, high: 0, medium: 0, low: 0 });
+        const entry = map.get(row.date)!;
+        const sev = (row.severity ?? "").toLowerCase();
+        if (["critical", "high", "medium", "low"].includes(sev)) (entry as unknown as Record<string, number>)[sev] = Number(row.count);
+      }
+      return Array.from(map.values());
+    }),
 });

@@ -3,6 +3,7 @@
  * Triage and acknowledge WAF security events from OpenAppSec.
  */
 import { useState } from "react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, RefreshCw, ShieldAlert, ShieldCheck, Eye, EyeOff, AlertTriangle, MapPin, Network, Globe, Info, Download } from "lucide-react";
+import { Loader2, RefreshCw, ShieldAlert, ShieldCheck, Eye, EyeOff, AlertTriangle, MapPin, Network, Globe, Info, Download, TrendingUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 
@@ -42,6 +43,7 @@ export default function WafEvents() {
   );
 
   const statsQuery = trpc.openAppSec.getWafStats.useQuery();
+  const trendQuery = trpc.openAppSec.getWafTrend.useQuery({ days: 30 });
   const attackTypesQuery = trpc.openAppSec.getAttackTypes.useQuery();
   const eventsQuery = trpc.openAppSec.getWafEvents.useQuery({
     limit: PAGE_SIZE,
@@ -141,6 +143,10 @@ export default function WafEvents() {
             <RefreshCw className={`w-4 h-4 mr-2 ${eventsQuery.isFetching ? "animate-spin" : ""}`} />
             Refresh
           </Button>
+          <Button variant="outline" size="sm" onClick={() => trendQuery.refetch()} disabled={trendQuery.isFetching}>
+            <TrendingUp className="w-4 h-4 mr-2" />
+            Refresh GeoIP
+          </Button>
         </div>
       </div>
 
@@ -164,6 +170,32 @@ export default function WafEvents() {
         ))}
       </div>
 
+      {/* WAF Severity Trend Chart */}
+      {(trendQuery.data ?? []).length > 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="pt-4">
+            <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-muted-foreground" />
+              30-Day Severity Trend
+            </p>
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendQuery.data} margin={{ top: 4, right: 16, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => v.slice(5)} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 6, fontSize: 12 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Line type="monotone" dataKey="critical" stroke="#ef4444" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="high" stroke="#f97316" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="medium" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="low" stroke="#60a5fa" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {/* Filters + Bulk Action */}
       <div className="flex gap-3 flex-wrap items-center">
         <Select value={severityFilter} onValueChange={(v) => { setSeverityFilter(v); setPage(0); }}>
