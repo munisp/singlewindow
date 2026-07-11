@@ -1003,8 +1003,106 @@ export default function DeclarationDetail() {
         {declarationId > 0 && <AttachedDocuments declarationId={declarationId} declarationStatus={decl?.status ?? ""} />}
         {/* Declaration Amendments */}
         {declarationId > 0 && <DeclarationAmendmentsPanel declarationId={declarationId} declarationStatus={decl?.status ?? ""} isOfficer={isOfficer} />}
+        {/* KYC History */}
+        {declarationId > 0 && <KycHistoryPanel declarationId={declarationId} />}
       </div>
     </DashboardLayout>
+  );
+}
+
+// ─── KYC History Panel ───────────────────────────────────────────────────────
+
+const RISK_LEVEL_COLORS: Record<string, string> = {
+  low: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  medium: "bg-amber-100 text-amber-700 border-amber-200",
+  high: "bg-red-100 text-red-700 border-red-200",
+  critical: "bg-red-200 text-red-800 border-red-300",
+};
+
+const KYC_STATUS_COLORS: Record<string, string> = {
+  pending: "bg-slate-100 text-slate-700 border-slate-200",
+  approved: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  rejected: "bg-red-100 text-red-700 border-red-200",
+  flagged: "bg-amber-100 text-amber-700 border-amber-200",
+  more_info: "bg-blue-100 text-blue-700 border-blue-200",
+};
+
+function KycHistoryPanel({ declarationId }: { declarationId: number }) {
+  const { data, isLoading, error } = trpc.kyc.getKycEventsByDeclaration.useQuery(
+    { declarationId },
+    { enabled: declarationId > 0 }
+  );
+
+  if (isLoading) {
+    return (
+      <Card className="mt-6">
+        <CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> KYC History</CardTitle></CardHeader>
+        <CardContent><div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div></CardContent>
+      </Card>
+    );
+  }
+
+  if (error || !data || data.length === 0) {
+    return (
+      <Card className="mt-6">
+        <CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> KYC History</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">{error ? "Failed to load KYC events." : "No KYC events recorded for this declaration."}</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+          KYC History
+          <Badge variant="outline" className="ml-2">{data.length} event{data.length !== 1 ? "s" : ""}</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="relative">
+          {/* Vertical timeline line */}
+          <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-muted" />
+          <div className="space-y-4">
+            {data.map((evt, idx) => (
+              <div key={evt.id ?? idx} className="relative flex gap-4 pl-10">
+                {/* Timeline dot */}
+                <div className="absolute left-2.5 top-2 w-3 h-3 rounded-full border-2 border-primary bg-background" />
+                <div className="flex-1 min-w-0 border rounded-lg p-3 bg-muted/20">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold capitalize">
+                      {(evt.documentType ?? "Unknown").replace(/_/g, " ")}
+                    </span>
+                    {evt.riskLevel && (
+                      <Badge variant="outline" className={`text-xs ${RISK_LEVEL_COLORS[evt.riskLevel] ?? ""}`}>
+                        {evt.riskLevel.toUpperCase()}
+                      </Badge>
+                    )}
+                    {evt.status && (
+                      <Badge variant="outline" className={`text-xs ${KYC_STATUS_COLORS[evt.status] ?? ""}`}>
+                        {evt.status.replace(/_/g, " ")}
+                      </Badge>
+                    )}
+                    {evt.riskScore != null && (
+                      <span className="text-xs text-muted-foreground ml-auto">Risk score: {evt.riskScore}</span>
+                    )}
+                  </div>
+                  {evt.errorMessage && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{evt.errorMessage}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {evt.createdAt ? new Date(evt.createdAt).toLocaleString() : ""}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

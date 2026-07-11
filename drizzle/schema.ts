@@ -2433,3 +2433,163 @@ export const ogaPermitEvents = pgTable("oga_permit_events", {
 ]);
 export type OgaPermitEvent = typeof ogaPermitEvents.$inferSelect;
 export type InsertOgaPermitEvent = typeof ogaPermitEvents.$inferInsert;
+
+// ─── Middleware Audit Tables ──────────────────────────────────────────────────
+
+export const keycloakSessions = pgTable("keycloak_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  sessionId: varchar("session_id", { length: 128 }).unique().notNull(),
+  realmId: varchar("realm_id", { length: 64 }).notNull().default("tradegateway"),
+  clientId: varchar("client_id", { length: 128 }),
+  ipAddress: varchar("ip_address", { length: 64 }),
+  userAgent: text("user_agent"),
+  isActive: boolean("is_active").default(true).notNull(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  lastAccessAt: timestamp("last_access_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_keycloak_sessions_user").on(t.userId),
+  index("idx_keycloak_sessions_session").on(t.sessionId),
+  index("idx_keycloak_sessions_active").on(t.isActive),
+]);
+export type KeycloakSession = typeof keycloakSessions.$inferSelect;
+export type InsertKeycloakSession = typeof keycloakSessions.$inferInsert;
+
+export const permifyAuditLog = pgTable("permify_audit_log", {
+  id: serial("id").primaryKey(),
+  actorId: integer("actor_id").references(() => users.id, { onDelete: "set null" }),
+  operation: varchar("operation", { length: 32 }).notNull(),
+  entity: varchar("entity", { length: 128 }).notNull(),
+  relation: varchar("relation", { length: 128 }).notNull(),
+  subject: varchar("subject", { length: 128 }).notNull(),
+  allowed: boolean("allowed"),
+  schemaVersion: varchar("schema_version", { length: 32 }),
+  snapToken: varchar("snap_token", { length: 128 }),
+  latencyMs: integer("latency_ms"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_permify_audit_actor").on(t.actorId),
+  index("idx_permify_audit_entity").on(t.entity),
+  index("idx_permify_audit_operation").on(t.operation),
+  index("idx_permify_audit_created").on(t.createdAt),
+]);
+export type PermifyAuditLog = typeof permifyAuditLog.$inferSelect;
+export type InsertPermifyAuditLog = typeof permifyAuditLog.$inferInsert;
+
+export const temporalWorkflowRuns = pgTable("temporal_workflow_runs", {
+  id: serial("id").primaryKey(),
+  workflowId: varchar("workflow_id", { length: 256 }).notNull(),
+  runId: varchar("run_id", { length: 128 }).unique().notNull(),
+  workflowType: varchar("workflow_type", { length: 128 }).notNull(),
+  taskQueue: varchar("task_queue", { length: 128 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  input: jsonb("input").default({}),
+  result: jsonb("result"),
+  errorMessage: text("error_message"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  closedAt: timestamp("closed_at"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_temporal_runs_workflow").on(t.workflowId),
+  index("idx_temporal_runs_type").on(t.workflowType),
+  index("idx_temporal_runs_status").on(t.status),
+  index("idx_temporal_runs_declaration").on(t.declarationId),
+  index("idx_temporal_runs_started").on(t.startedAt),
+]);
+export type TemporalWorkflowRun = typeof temporalWorkflowRuns.$inferSelect;
+export type InsertTemporalWorkflowRun = typeof temporalWorkflowRuns.$inferInsert;
+
+export const fluvioTopicOffsets = pgTable("fluvio_topic_offsets", {
+  id: serial("id").primaryKey(),
+  topic: varchar("topic", { length: 128 }).notNull(),
+  partition: integer("partition").notNull().default(0),
+  consumerGroup: varchar("consumer_group", { length: 128 }).notNull(),
+  committedOffset: bigint("committed_offset", { mode: "number" }).notNull().default(0),
+  latestOffset: bigint("latest_offset", { mode: "number" }).notNull().default(0),
+  lagCount: bigint("lag_count", { mode: "number" }).notNull().default(0),
+  isHealthy: boolean("is_healthy").default(true).notNull(),
+  lastUpdatedAt: timestamp("last_updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_fluvio_offsets_topic").on(t.topic),
+  index("idx_fluvio_offsets_group").on(t.consumerGroup),
+  index("idx_fluvio_offsets_lag").on(t.lagCount),
+]);
+export type FluvioTopicOffset = typeof fluvioTopicOffsets.$inferSelect;
+export type InsertFluvioTopicOffset = typeof fluvioTopicOffsets.$inferInsert;
+
+export const apisixRouteAudit = pgTable("apisix_route_audit", {
+  id: serial("id").primaryKey(),
+  routeId: varchar("route_id", { length: 128 }).notNull(),
+  routeName: varchar("route_name", { length: 256 }),
+  operation: varchar("operation", { length: 32 }).notNull(),
+  actorId: integer("actor_id").references(() => users.id, { onDelete: "set null" }),
+  previousConfig: jsonb("previous_config"),
+  newConfig: jsonb("new_config"),
+  changeReason: text("change_reason"),
+  apisixVersion: varchar("apisix_version", { length: 32 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_apisix_audit_route").on(t.routeId),
+  index("idx_apisix_audit_operation").on(t.operation),
+  index("idx_apisix_audit_actor").on(t.actorId),
+  index("idx_apisix_audit_created").on(t.createdAt),
+]);
+export type ApisixRouteAudit = typeof apisixRouteAudit.$inferSelect;
+export type InsertApisixRouteAudit = typeof apisixRouteAudit.$inferInsert;
+
+export const openAppSecEvents = pgTable("open_appsec_events", {
+  id: serial("id").primaryKey(),
+  eventId: varchar("event_id", { length: 128 }).unique(),
+  severity: varchar("severity", { length: 16 }).notNull(),
+  attackType: varchar("attack_type", { length: 64 }).notNull(),
+  sourceIp: varchar("source_ip", { length: 64 }),
+  targetPath: text("target_path"),
+  httpMethod: varchar("http_method", { length: 16 }),
+  requestHeaders: jsonb("request_headers").default({}),
+  requestBody: text("request_body"),
+  action: varchar("action", { length: 32 }).notNull().default("block"),
+  confidence: integer("confidence"),
+  waapVersion: varchar("waap_version", { length: 32 }),
+  isAcknowledged: boolean("is_acknowledged").default(false).notNull(),
+  acknowledgedBy: integer("acknowledged_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_openappsec_severity").on(t.severity),
+  index("idx_openappsec_attack").on(t.attackType),
+  index("idx_openappsec_ip").on(t.sourceIp),
+  index("idx_openappsec_action").on(t.action),
+  index("idx_openappsec_created").on(t.createdAt),
+]);
+export type OpenAppSecEvent = typeof openAppSecEvents.$inferSelect;
+export type InsertOpenAppSecEvent = typeof openAppSecEvents.$inferInsert;
+
+export const lakehouseJobs = pgTable("lakehouse_jobs", {
+  id: serial("id").primaryKey(),
+  jobId: varchar("job_id", { length: 128 }).unique().notNull(),
+  jobType: varchar("job_type", { length: 64 }).notNull(),
+  targetTable: varchar("target_table", { length: 128 }).notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  rowsProcessed: bigint("rows_processed", { mode: "number" }).default(0),
+  rowsWritten: bigint("rows_written", { mode: "number" }).default(0),
+  errorMessage: text("error_message"),
+  sparkJobUrl: text("spark_job_url"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  durationMs: integer("duration_ms"),
+  triggeredBy: varchar("triggered_by", { length: 64 }).default("scheduler"),
+  metadata: jsonb("metadata").default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_lakehouse_jobs_type").on(t.jobType),
+  index("idx_lakehouse_jobs_status").on(t.status),
+  index("idx_lakehouse_jobs_target").on(t.targetTable),
+  index("idx_lakehouse_jobs_created").on(t.createdAt),
+]);
+export type LakehouseJob = typeof lakehouseJobs.$inferSelect;
+export type InsertLakehouseJob = typeof lakehouseJobs.$inferInsert;

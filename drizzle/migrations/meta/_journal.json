@@ -253,6 +253,13 @@
       "when": 1783789030047,
       "tag": "0035_fair_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1783793660094,
+      "tag": "0036_rapid_wong",
+      "breakpoints": true
     }
   ]
 }

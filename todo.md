@@ -894,3 +894,16 @@
 
 ### Tests
 - [x] v79-17: Write server/v79.test.ts vitest suite (80+ tests) — 3108 total tests passing (90 files)
+
+## v80 Sprint — KYC Timeline, Sidebar Nav, DB Push
+
+### KYC Events Timeline in DeclarationDetail
+- [x] v80-01: Add "KYC History" tab to DeclarationDetail.tsx calling trpc.kyc.getKycEventsByDeclaration
+- [x] v80-02: Render vertical timeline of documentType, riskScore, riskLevel, status badges
+### Sidebar Navigation
+- [x] v80-03: Add Kafka Event Log entry to DashboardLayout.tsx sidebar under Admin section
+- [x] v80-04: Add OGA Permit Audit Trail entry to DashboardLayout.tsx sidebar under Admin section
+### Database Migration
+- [x] v80-05: Add 7 middleware audit tables to drizzle/schema.ts + migration 0036_rapid_wong.sql generated (applied on publish)
+### Tests
+- [x] v80-06: Write server/v80.test.ts vitest suite — 3180 tests passing (91 files), TypeScript 0 errors

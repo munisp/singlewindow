@@ -222,6 +222,8 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ShieldX, label: "Security Alerts", path: "/app/security/alerts" },
           { icon: GraduationCap, label: "Onboarding Progress", path: "/app/onboarding/progress" },
           { icon: Database, label: "Batch Account Seed", path: "/app/admin/batch-seed" },
+          { icon: Layers, label: "Kafka Event Log", path: "/app/admin/kafka-event-log" },
+          { icon: ClipboardList, label: "OGA Permit Audit Trail", path: "/app/admin/oga-permit-audit" },
         ],
       },
       common,
