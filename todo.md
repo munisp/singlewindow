@@ -907,3 +907,32 @@
 - [x] v80-05: Add 7 middleware audit tables to drizzle/schema.ts + migration 0036_rapid_wong.sql generated (applied on publish)
 ### Tests
 - [x] v80-06: Write server/v80.test.ts vitest suite — 3180 tests passing (91 files), TypeScript 0 errors
+
+## v81 Sprint — Temporal Runs, WAF Events, Lakehouse Jobs
+
+### Temporal Workflow Runs Admin Page
+- [x] v81-01: Add db.ts helpers for temporalWorkflowRuns (getTemporalRuns, getTemporalRunById, upsertTemporalRun)
+- [x] v81-02: Create server/routers/temporalRuns.ts with getWorkflowRuns, getWorkflowRunById, getWorkflowStats, retriggerWorkflow, getWorkflowTypes procedures
+- [x] v81-03: Register temporalRunsRouter in server/routers.ts appRouter
+- [x] v81-04: Create client/src/pages/app/TemporalWorkflowRuns.tsx admin page
+- [x] v81-05: Add lazy import + route in App.tsx
+
+### OpenAppSec WAF Events Security Page
+- [x] v81-06: Add db.ts helpers for openAppSecEvents (getOpenAppSecEvents, acknowledgeOpenAppSecEvent)
+- [x] v81-07: Create server/routers/openAppSec.ts with getWafEvents, acknowledgeEvent, bulkAcknowledge, getWafStats, getAttackTypes procedures
+- [x] v81-08: Register openAppSecRouter in server/routers.ts appRouter
+- [x] v81-09: Create client/src/pages/app/WafEvents.tsx security page
+- [x] v81-10: Add lazy import + route in App.tsx
+
+### Lakehouse Jobs Status Panel
+- [x] v81-11: Add db.ts helpers for lakehouseJobs (getLakehouseJobs, getLakehouseJobById, upsertLakehouseJob)
+- [x] v81-12: Create server/routers/lakehouse.ts with getLakehouseJobs, getLakehouseJobById, getLakehouseStats, triggerLakehouseJob, getJobTypes, getTargetTables procedures
+- [x] v81-13: Register lakehouseRouter in server/routers.ts appRouter
+- [x] v81-14: Create client/src/pages/app/LakehouseJobs.tsx admin page
+- [x] v81-15: Add lazy import + route in App.tsx
+
+### Sidebar Navigation
+- [x] v81-16: Add Temporal Workflow Runs, WAF Events, Lakehouse Jobs to DashboardLayout.tsx sidebar
+
+### Tests
+- [x] v81-17: Write server/v81.test.ts vitest suite — 3225 tests passing (92 files), TypeScript 0 errors

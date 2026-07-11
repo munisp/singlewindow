@@ -116,6 +116,10 @@ const SecurityMonitor = lazy(() => import('./pages/app/SecurityMonitor'));
 const KafkaEventLog = lazy(() => import('./pages/app/KafkaEventLog'));
 const OGAPermitAuditTrail = lazy(() => import('./pages/app/OGAPermitAuditTrail'));
 const AdminBatchSeed = lazy(() => import('./pages/app/AdminBatchSeed'));
+// v81 — Temporal Runs, WAF Events, Lakehouse Jobs
+const TemporalWorkflowRuns = lazy(() => import('./pages/app/TemporalWorkflowRuns'));
+const WafEvents = lazy(() => import('./pages/app/WafEvents'));
+const LakehouseJobs = lazy(() => import('./pages/app/LakehouseJobs'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -490,6 +494,17 @@ function Router() {
       </Route>
       <Route path="/app/admin/oga-permit-audit">
         <AdminGuard><Suspense fallback={<LazyFallback />}><OGAPermitAuditTrail /></Suspense></AdminGuard>
+      </Route>
+
+      {/* v81 — Temporal Runs, WAF Events, Lakehouse Jobs */}
+      <Route path="/app/admin/temporal-runs">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><TemporalWorkflowRuns /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/waf-events">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><WafEvents /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/lakehouse-jobs">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><LakehouseJobs /></Suspense></AdminGuard>
       </Route>
 
       {/* 404 */}

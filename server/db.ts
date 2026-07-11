@@ -18,6 +18,10 @@ import {
   kycEvents, InsertKycEvent,
   kafkaEventLog, InsertKafkaEventLog,
   ogaPermitEvents, InsertOgaPermitEvent,
+  // v80 middleware audit tables
+  temporalWorkflowRuns, InsertTemporalWorkflowRun,
+  openAppSecEvents, InsertOpenAppSecEvent,
+  lakehouseJobs, InsertLakehouseJob,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1485,4 +1489,169 @@ export async function getOgaPermitEventsByDeclaration(declarationId: number) {
   return db.select().from(ogaPermitEvents)
     .where(eq(ogaPermitEvents.declarationId, declarationId))
     .orderBy(ogaPermitEvents.createdAt);
+}
+
+// ─── TEMPORAL WORKFLOW RUN QUERIES ───────────────────────────────────────────
+
+export async function getTemporalRuns(opts?: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+  workflowType?: string;
+  declarationId?: number;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.status) conditions.push(eq(temporalWorkflowRuns.status, opts.status));
+  if (opts?.workflowType) conditions.push(eq(temporalWorkflowRuns.workflowType, opts.workflowType));
+  if (opts?.declarationId) conditions.push(eq(temporalWorkflowRuns.declarationId, opts.declarationId));
+  const base = db.select().from(temporalWorkflowRuns);
+  const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+  return filtered
+    .orderBy(desc(temporalWorkflowRuns.startedAt))
+    .limit(opts?.limit ?? 50)
+    .offset(opts?.offset ?? 0);
+}
+
+export async function getTemporalRunById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(temporalWorkflowRuns)
+    .where(eq(temporalWorkflowRuns.id, id)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function upsertTemporalRun(data: InsertTemporalWorkflowRun) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(temporalWorkflowRuns).values(data)
+    .onConflictDoUpdate({ target: temporalWorkflowRuns.runId, set: { ...data } })
+    .returning();
+  return row;
+}
+
+export async function getTemporalRunStats() {
+  const db = await getDb();
+  if (!db) return null;
+  const [running, completed, failed, timedOut] = await Promise.all([
+    db.select({ count: count() }).from(temporalWorkflowRuns).where(eq(temporalWorkflowRuns.status, "running")),
+    db.select({ count: count() }).from(temporalWorkflowRuns).where(eq(temporalWorkflowRuns.status, "completed")),
+    db.select({ count: count() }).from(temporalWorkflowRuns).where(eq(temporalWorkflowRuns.status, "failed")),
+    db.select({ count: count() }).from(temporalWorkflowRuns).where(eq(temporalWorkflowRuns.status, "timed_out")),
+  ]);
+  return {
+    running: running[0]?.count ?? 0,
+    completed: completed[0]?.count ?? 0,
+    failed: failed[0]?.count ?? 0,
+    timedOut: timedOut[0]?.count ?? 0,
+  };
+}
+
+// ─── OPENAPPSEC WAF EVENT QUERIES ─────────────────────────────────────────────
+
+export async function getOpenAppSecEvents(opts?: {
+  limit?: number;
+  offset?: number;
+  severity?: string;
+  attackType?: string;
+  isAcknowledged?: boolean;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.severity) conditions.push(eq(openAppSecEvents.severity, opts.severity));
+  if (opts?.attackType) conditions.push(eq(openAppSecEvents.attackType, opts.attackType));
+  if (opts?.isAcknowledged !== undefined) conditions.push(eq(openAppSecEvents.isAcknowledged, opts.isAcknowledged));
+  const base = db.select().from(openAppSecEvents);
+  const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+  return filtered
+    .orderBy(desc(openAppSecEvents.createdAt))
+    .limit(opts?.limit ?? 50)
+    .offset(opts?.offset ?? 0);
+}
+
+export async function acknowledgeOpenAppSecEvent(id: number, acknowledgedBy: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(openAppSecEvents)
+    .set({ isAcknowledged: true, acknowledgedBy })
+    .where(eq(openAppSecEvents.id, id))
+    .returning();
+  return row;
+}
+
+export async function getOpenAppSecEventStats() {
+  const db = await getDb();
+  if (!db) return null;
+  const [critical, high, medium, low, unacked] = await Promise.all([
+    db.select({ count: count() }).from(openAppSecEvents).where(eq(openAppSecEvents.severity, "critical")),
+    db.select({ count: count() }).from(openAppSecEvents).where(eq(openAppSecEvents.severity, "high")),
+    db.select({ count: count() }).from(openAppSecEvents).where(eq(openAppSecEvents.severity, "medium")),
+    db.select({ count: count() }).from(openAppSecEvents).where(eq(openAppSecEvents.severity, "low")),
+    db.select({ count: count() }).from(openAppSecEvents).where(eq(openAppSecEvents.isAcknowledged, false)),
+  ]);
+  return {
+    critical: critical[0]?.count ?? 0,
+    high: high[0]?.count ?? 0,
+    medium: medium[0]?.count ?? 0,
+    low: low[0]?.count ?? 0,
+    unacknowledged: unacked[0]?.count ?? 0,
+  };
+}
+
+// ─── LAKEHOUSE JOB QUERIES ────────────────────────────────────────────────────
+
+export async function getLakehouseJobs(opts?: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+  jobType?: string;
+  targetTable?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.status) conditions.push(eq(lakehouseJobs.status, opts.status));
+  if (opts?.jobType) conditions.push(eq(lakehouseJobs.jobType, opts.jobType));
+  if (opts?.targetTable) conditions.push(eq(lakehouseJobs.targetTable, opts.targetTable));
+  const base = db.select().from(lakehouseJobs);
+  const filtered = conditions.length > 0 ? base.where(and(...conditions)) : base;
+  return filtered
+    .orderBy(desc(lakehouseJobs.createdAt))
+    .limit(opts?.limit ?? 50)
+    .offset(opts?.offset ?? 0);
+}
+
+export async function getLakehouseJobById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(lakehouseJobs).where(eq(lakehouseJobs.id, id)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function upsertLakehouseJob(data: InsertLakehouseJob) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(lakehouseJobs).values(data)
+    .onConflictDoUpdate({ target: lakehouseJobs.jobId, set: { ...data } })
+    .returning();
+  return row;
+}
+
+export async function getLakehouseJobStats() {
+  const db = await getDb();
+  if (!db) return null;
+  const [running, completed, failed, pending] = await Promise.all([
+    db.select({ count: count() }).from(lakehouseJobs).where(eq(lakehouseJobs.status, "running")),
+    db.select({ count: count() }).from(lakehouseJobs).where(eq(lakehouseJobs.status, "completed")),
+    db.select({ count: count() }).from(lakehouseJobs).where(eq(lakehouseJobs.status, "failed")),
+    db.select({ count: count() }).from(lakehouseJobs).where(eq(lakehouseJobs.status, "pending")),
+  ]);
+  return {
+    running: running[0]?.count ?? 0,
+    completed: completed[0]?.count ?? 0,
+    failed: failed[0]?.count ?? 0,
+    pending: pending[0]?.count ?? 0,
+  };
 }

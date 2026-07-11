@@ -77,6 +77,9 @@ import { permifyRouter } from "./routers/permify";
 import { redisRouter } from "./routers/redis";
 import { kafkaEventsRouter } from "./routers/kafkaEvents";
 import { ogaPermitAuditRouter } from "./routers/ogaPermitAudit";
+import { temporalRunsRouter } from "./routers/temporalRuns";
+import { openAppSecRouter } from "./routers/openAppSec";
+import { lakehouseRouter } from "./routers/lakehouse";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -286,6 +289,9 @@ export const appRouter = router({
   redis: redisRouter,
   kafkaEvents: kafkaEventsRouter,
   ogaPermitAudit: ogaPermitAuditRouter,
+  temporalRuns: temporalRunsRouter,
+  openAppSec: openAppSecRouter,
+  lakehouse: lakehouseRouter,
 });
 
 export type AppRouter = typeof appRouter;
