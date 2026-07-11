@@ -69,6 +69,168 @@ upstreams:
         port: 8080
         weight: 100
 
+  - id: "permify"
+    name: "Permify Authorization Engine"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: permify.tradegateway.svc.cluster.local
+        port: 3476
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /healthz
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "temporal-frontend"
+    name: "Temporal Workflow Frontend"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: temporal-frontend.tradegateway.svc.cluster.local
+        port: 7233
+        weight: 100
+
+  - id: "fluvio-sc"
+    name: "Fluvio Streaming Controller"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: fluvio-sc.tradegateway.svc.cluster.local
+        port: 9003
+        weight: 100
+
+  - id: "opensearch"
+    name: "OpenSearch Analytics"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: opensearch-cluster-master.tradegateway.svc.cluster.local
+        port: 9200
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /_cluster/health
+        interval: 30
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "keycloak"
+    name: "Keycloak IAM"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: keycloak.tradegateway.svc.cluster.local
+        port: 8080
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health/ready
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "anomaly-detection"
+    name: "Anomaly Detection Service"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: anomaly-detection-svc.tradegateway.svc.cluster.local
+        port: 8000
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "insider-threat"
+    name: "Insider Threat ML Service"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: insider-threat-svc.tradegateway.svc.cluster.local
+        port: 8000
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "payment-risk-scorer"
+    name: "Payment Risk Scorer"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: payment-risk-scorer.tradegateway.svc.cluster.local
+        port: 8000
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "notification-dispatcher"
+    name: "Notification Dispatcher"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: notification-dispatcher.tradegateway.svc.cluster.local
+        port: 8080
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
+  - id: "warehouse-service"
+    name: "Bonded Warehouse Service"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: warehouse-service.tradegateway.svc.cluster.local
+        port: 8080
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+        timeout: 5
+        healthy:
+          http_statuses: [200]
+          successes: 2
+
 # ─── Global Plugins ───────────────────────────────────────────────────────────
 global_rules:
   - id: "global-observability"
@@ -270,3 +432,188 @@ ssl:
       - "TLSv1.2"
       - "TLSv1.3"
     ssl_ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+
+  # ── Permify Authorization (Internal) ─────────────────────────────────────────
+  - id: "permify-internal"
+    name: "Permify Authorization Engine (Internal)"
+    uri: "/internal/authz/*"
+    methods: ["POST", "GET"]
+    upstream_id: "permify"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 2000
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Keycloak IAM (Public OIDC endpoints) ─────────────────────────────────────
+  - id: "keycloak-oidc"
+    name: "Keycloak OIDC"
+    uri: "/auth/*"
+    methods: ["GET", "POST"]
+    upstream_id: "keycloak"
+    plugins:
+      limit-req:
+        rate: 200
+        burst: 400
+        key: "remote_addr"
+        rejected_code: 429
+
+  # ── Temporal Workflow API (Internal) ─────────────────────────────────────────
+  - id: "temporal-internal"
+    name: "Temporal Workflow Frontend (Internal)"
+    uri: "/internal/temporal/*"
+    methods: ["POST", "GET"]
+    upstream_id: "temporal-frontend"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 500
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Fluvio Streaming (Internal) ───────────────────────────────────────────────
+  - id: "fluvio-internal"
+    name: "Fluvio Streaming Controller (Internal)"
+    uri: "/internal/streams/*"
+    methods: ["POST", "GET", "DELETE"]
+    upstream_id: "fluvio-sc"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 1000
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── OpenSearch Analytics (Internal) ───────────────────────────────────────────
+  - id: "opensearch-internal"
+    name: "OpenSearch Analytics (Internal)"
+    uri: "/internal/search/*"
+    methods: ["POST", "GET", "PUT", "DELETE"]
+    upstream_id: "opensearch"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 500
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Anomaly Detection (Internal) ─────────────────────────────────────────────
+  - id: "anomaly-detection-internal"
+    name: "Anomaly Detection Service (Internal)"
+    uri: "/internal/anomaly/*"
+    methods: ["POST", "GET"]
+    upstream_id: "anomaly-detection"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 300
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Insider Threat ML (Internal) ─────────────────────────────────────────────
+  - id: "insider-threat-internal"
+    name: "Insider Threat ML Service (Internal)"
+    uri: "/internal/insider-threat/*"
+    methods: ["POST", "GET"]
+    upstream_id: "insider-threat"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 200
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Payment Risk Scorer (Internal) ───────────────────────────────────────────
+  - id: "payment-risk-internal"
+    name: "Payment Risk Scorer (Internal)"
+    uri: "/internal/payment-risk/*"
+    methods: ["POST", "GET"]
+    upstream_id: "payment-risk-scorer"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 500
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Notification Dispatcher (Internal) ───────────────────────────────────────
+  - id: "notification-dispatcher-internal"
+    name: "Notification Dispatcher (Internal)"
+    uri: "/internal/notifications/*"
+    methods: ["POST", "GET"]
+    upstream_id: "notification-dispatcher"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 1000
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+
+  # ── Warehouse Service (Internal) ─────────────────────────────────────────────
+  - id: "warehouse-service-internal"
+    name: "Bonded Warehouse Service (Internal)"
+    uri: "/internal/warehouse/*"
+    methods: ["POST", "GET", "PUT", "DELETE"]
+    upstream_id: "warehouse-service"
+    plugins:
+      key-auth:
+        header: "X-API-Key"
+      limit-count:
+        count: 500
+        time_window: 60
+        key: "remote_addr"
+        rejected_code: 429
+      ip-restriction:
+        whitelist:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+

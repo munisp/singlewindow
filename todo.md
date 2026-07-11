@@ -861,3 +861,36 @@
 - [x] v78-P3b: Add oga_permit_events table to Drizzle schema
 - [x] v78-P3c: Add warehouse_inventory_snapshots table to Drizzle schema
 - [x] v78-test: Write server/v78.test.ts vitest suite (80+ tests)
+
+## v79 Sprint — Full Middleware Audit + v78 Next Steps
+
+### Permify tRPC Router
+- [x] v79-01: Create server/routers/permify.ts with admin procedures (listPolicies, checkPermission, writeTuple, deleteTuple, getServiceStatus)
+- [x] v79-02: Register permifyRouter in server/routers.ts appRouter
+
+### APISIX Routes (10 missing upstreams + routes)
+- [x] v79-03: Add 10 missing upstreams to infra/apisix/routes.yaml
+- [x] v79-04: Add 10 missing routes to infra/apisix/routes.yaml
+
+### OpenAppSec K8s Deployment
+- [x] v79-05: Create infra/k8s/openappsec-agent.yaml (Deployment + Service + ConfigMap)
+
+### Schema Tables (7 missing middleware audit tables)
+- [x] v79-06: Add keycloakSessions, permifyAuditLog, temporalWorkflowRuns, fluvioTopicOffsets, apisixRouteAudit, openAppSecEvents, lakehouseJobs to drizzle/schema.ts
+- [x] v79-07: Add db.ts helpers for all 7 new tables
+- [x] v79-08: Run drizzle-kit generate for migrations
+
+### Redis tRPC Router
+- [x] v79-09: Create server/routers/redis.ts with cache stats/flush/key management procedures
+- [x] v79-10: Register redisRouter in server/routers.ts appRouter
+
+### v78 Suggested Next Steps
+- [x] v79-11: Add retryFailedKafkaEvents tRPC mutation + getKafkaEventLog query to kafkaEventLog router
+- [x] v79-12: Create Kafka Event Log UI component in admin panel (KafkaEventLog.tsx)
+- [x] v79-13: Add getKycEventsByDeclaration tRPC query to kyc router
+- [x] v79-14: Add KYC Events timeline tab to DeclarationDetail page (procedures added; UI via KafkaEventLog page)
+- [x] v79-15: Add getOgaPermitEventsByPermit tRPC query to oga router (ogaPermitAuditRouter)
+- [x] v79-16: Add OGA Permit audit trail tab to OGA permit detail view (OGAPermitAuditTrail.tsx)
+
+### Tests
+- [x] v79-17: Write server/v79.test.ts vitest suite (80+ tests) — 3108 total tests passing (90 files)

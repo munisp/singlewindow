@@ -113,6 +113,8 @@ const TenantManagement = lazy(() => import('./pages/app/TenantManagement'));
 const OnboardingProgress = lazy(() => import('./pages/app/OnboardingProgress'));
 // v67 — Insider Threat Prevention & Batch Seed
 const SecurityMonitor = lazy(() => import('./pages/app/SecurityMonitor'));
+const KafkaEventLog = lazy(() => import('./pages/app/KafkaEventLog'));
+const OGAPermitAuditTrail = lazy(() => import('./pages/app/OGAPermitAuditTrail'));
 const AdminBatchSeed = lazy(() => import('./pages/app/AdminBatchSeed'));
 
 const LazyFallback = () => <_PageSkeleton />;
@@ -480,6 +482,14 @@ function Router() {
       </Route>
       <Route path="/app/admin/batch-seed">
         <AdminGuard><Suspense fallback={<LazyFallback />}><AdminBatchSeed /></Suspense></AdminGuard>
+      </Route>
+
+      {/* v79 — Kafka Event Log, KYC Timeline, OGA Audit Trail */}
+      <Route path="/app/admin/kafka-event-log">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><KafkaEventLog /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/oga-permit-audit">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><OGAPermitAuditTrail /></Suspense></AdminGuard>
       </Route>
 
       {/* 404 */}

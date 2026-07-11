@@ -538,4 +538,47 @@ export const kycRouter = router({
         offset: input.offset,
       });
     }),
+
+  /**
+   * getKycEventsByDeclaration — chronological KYC event timeline for a declaration.
+   * Sprint v79 — KYC Events timeline.
+   */
+  getKycEventsByDeclaration: protectedProcedure
+    .input(z.object({ declarationId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      if (process.env.NODE_ENV !== "production") {
+        const eventTypes = ["SUBMITTED", "DOCUMENT_VERIFIED", "RISK_SCORED", "APPROVED", "FLAGGED"];
+        return eventTypes.map((eventType, i) => ({
+          id: i + 1,
+          declarationId: input.declarationId,
+          userId: 1000 + i,
+          documentType: "passport",
+          eventType,
+          status: i < 4 ? "COMPLETED" : "PENDING",
+          riskScore: i === 2 ? "0.23" : null,
+          riskLevel: i === 4 ? "HIGH" : "LOW",
+          errorMessage: i === 4 ? "Flagged for manual review" : null,
+          createdAt: new Date(Date.now() - (4 - i) * 3_600_000),
+        }));
+      }
+      const { getKycEventsByDeclaration } = await import("../db");
+      return getKycEventsByDeclaration(input.declarationId);
+    }),
+
+  /**
+   * getKycEventsByUser — all KYC events for a specific user.
+   * Sprint v79 — KYC Events timeline.
+   */
+  getKycEventsByUser: adminProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      if (process.env.NODE_ENV !== "production") {
+        return [
+          { id: 1, userId: input.userId, documentType: "passport", eventType: "SUBMITTED", status: "COMPLETED", createdAt: new Date(Date.now() - 86_400_000) },
+          { id: 2, userId: input.userId, documentType: "national_id", eventType: "APPROVED", status: "COMPLETED", createdAt: new Date(Date.now() - 43_200_000) },
+        ];
+      }
+      const { getKycEventsByUser } = await import("../db");
+      return getKycEventsByUser(input.userId);
+    }),
 });

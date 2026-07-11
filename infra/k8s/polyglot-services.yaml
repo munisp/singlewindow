@@ -1062,3 +1062,137 @@ spec:
         target:
           type: Utilization
           averageUtilization: 70
+---
+# ── OpenAppSec Agent ──────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openappsec-agent
+  namespace: tradegateway
+  labels:
+    app: openappsec-agent
+    component: security
+    tier: waf
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: openappsec-agent
+  template:
+    metadata:
+      labels:
+        app: openappsec-agent
+        component: security
+      annotations:
+        dapr.io/enabled: "false"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: openappsec-agent
+          image: openappsec/agent:latest
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: POLICY_FILE
+              value: "/etc/openappsec/policy.json"
+            - name: LOG_LEVEL
+              value: "info"
+          volumeMounts:
+            - name: policy-config
+              mountPath: /etc/openappsec
+              readOnly: true
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: policy-config
+          configMap:
+            name: openappsec-policy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openappsec-agent
+  namespace: tradegateway
+spec:
+  selector:
+    app: openappsec-agent
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openappsec-policy
+  namespace: tradegateway
+data:
+  policy.json: |
+    {
+      "policies": {
+        "default": {
+          "mode": "prevent-learn",
+          "practices": [
+            {
+              "name": "tradegateway-waf",
+              "type": "WebApplication",
+              "web-attacks": {
+                "minimum-confidence": "high",
+                "max-body-size-kb": 1024,
+                "max-header-size-bytes": 8192,
+                "max-url-size-bytes": 4096
+              }
+            }
+          ],
+          "triggers": [
+            {
+              "name": "tradegateway-log",
+              "type": "log",
+              "prevent-events-logging": true
+            }
+          ]
+        }
+      }
+    }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: openappsec-agent-hpa
+  namespace: tradegateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: openappsec-agent
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

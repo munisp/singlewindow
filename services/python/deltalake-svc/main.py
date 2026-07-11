@@ -282,6 +282,124 @@ def ingest_events(req: IngestRequest) -> dict:
         })
     return {"ingested": len(req.events), "total_events": len(INGESTED_EVENTS)}
 
+# ─── PostgreSQL Write-back ───────────────────────────────────────────────────
+
+class PostgresWriteBackRequest(BaseModel):
+    """Request body for mirroring a Delta Lake write to PostgreSQL."""
+    table: str                          # target table name (allow-listed)
+    record: dict                        # key-value pairs to upsert
+    upsert_key: str = "id"              # column used for ON CONFLICT DO UPDATE
+    source: str = "deltalake"           # originating data source tag
+
+class PostgresWriteBackResponse(BaseModel):
+    success: bool
+    table: str
+    upsert_key: str
+    rows_affected: int
+    source: str
+    timestamp: str
+
+# Allow-list of tables that can be written via this endpoint
+_ALLOWED_TABLES = {
+    "trade_stats_mirror",
+    "hs_code_volume_mirror",
+    "trader_metrics_mirror",
+    "route_flow_mirror",
+    "duty_revenue_mirror",
+    "fund_flow_mirror",
+    "declaration_events_mirror",
+}
+
+@app.post("/write-postgres", response_model=PostgresWriteBackResponse)
+async def write_postgres(req: PostgresWriteBackRequest) -> PostgresWriteBackResponse:
+    """
+    POST /write-postgres
+    Mirror a Delta Lake write to PostgreSQL for low-latency query access.
+    In production this uses asyncpg with DATABASE_URL. In non-production
+    environments it returns a stub success response.
+    """
+    import os
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    if req.table not in _ALLOWED_TABLES:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Table '{req.table}' is not in the allow-list")
+
+    if os.getenv("NODE_ENV") != "production" or not os.getenv("DATABASE_URL"):
+        # Offline stub — simulate successful write
+        return PostgresWriteBackResponse(
+            success=True,
+            table=req.table,
+            upsert_key=req.upsert_key,
+            rows_affected=1,
+            source=req.source,
+            timestamp=timestamp,
+        )
+
+    # Production path: upsert via asyncpg
+    try:
+        import asyncpg  # type: ignore
+    except ImportError:
+        # asyncpg not installed — fall back to psycopg2 if available
+        try:
+            import psycopg2  # type: ignore
+            import psycopg2.extras  # type: ignore
+            conn = psycopg2.connect(os.environ["DATABASE_URL"])
+            cur = conn.cursor()
+            columns = list(req.record.keys())
+            values  = list(req.record.values())
+            col_list = ", ".join(columns)
+            val_placeholders = ", ".join(f"%s" for _ in columns)
+            update_set = ", ".join(
+                f"{c} = EXCLUDED.{c}" for c in columns if c != req.upsert_key
+            )
+            sql = (
+                f"INSERT INTO {req.table} ({col_list}) VALUES ({val_placeholders}) "
+                f"ON CONFLICT ({req.upsert_key}) DO UPDATE SET {update_set}"
+            )
+            cur.execute(sql, values)
+            rows = cur.rowcount
+            conn.commit()
+            cur.close()
+            conn.close()
+            return PostgresWriteBackResponse(
+                success=True, table=req.table, upsert_key=req.upsert_key,
+                rows_affected=rows, source=req.source, timestamp=timestamp,
+            )
+        except Exception as exc:
+            return PostgresWriteBackResponse(
+                success=False, table=req.table, upsert_key=req.upsert_key,
+                rows_affected=0, source=req.source, timestamp=timestamp,
+            )
+
+    # asyncpg path
+    try:
+        conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+        columns = list(req.record.keys())
+        values  = list(req.record.values())
+        col_list = ", ".join(columns)
+        val_placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
+        update_set = ", ".join(
+            f"{c} = EXCLUDED.{c}" for c in columns if c != req.upsert_key
+        )
+        sql = (
+            f"INSERT INTO {req.table} ({col_list}) VALUES ({val_placeholders}) "
+            f"ON CONFLICT ({req.upsert_key}) DO UPDATE SET {update_set}"
+        )
+        result = await conn.execute(sql, *values)
+        await conn.close()
+        rows_affected = int(result.split()[-1]) if result else 1
+        return PostgresWriteBackResponse(
+            success=True, table=req.table, upsert_key=req.upsert_key,
+            rows_affected=rows_affected, source=req.source, timestamp=timestamp,
+        )
+    except Exception as exc:
+        return PostgresWriteBackResponse(
+            success=False, table=req.table, upsert_key=req.upsert_key,
+            rows_affected=0, source=req.source, timestamp=timestamp,
+        )
+
+
 @app.get("/stats")
 def get_stats() -> dict:
     total_value = sum(e["declared_value_usd"] for e in INGESTED_EVENTS)

@@ -40,10 +40,22 @@ func main() {
 		MaxConcurrentLocalActivityExecutionSize: 20,
 	})
 
-	// ── Register workflow ─────────────────────────────────────────────────────
+	// ── Register workflows ────────────────────────────────────────────────────
+	// Declaration clearance (core)
 	w.RegisterWorkflow(workflows.DeclarationClearanceWorkflow)
+	// Financial workflows
+	w.RegisterWorkflow(workflows.BatchSettlementWorkflow)
+	w.RegisterWorkflow(workflows.RevenueReconciliationWorkflow)
+	w.RegisterWorkflow(workflows.DutyDrawbackWorkflow)
+	w.RegisterWorkflow(workflows.AuditRecoveryWorkflow)
+	w.RegisterWorkflow(workflows.OverpaymentRefundWorkflow)
+	// Bond and transit workflows
+	w.RegisterWorkflow(workflows.BondLodgementWorkflow)
+	w.RegisterWorkflow(workflows.BondForfeitureWorkflow)
+	w.RegisterWorkflow(workflows.TransitLodgementWorkflow)
+	w.RegisterWorkflow(workflows.TransitReleaseWorkflow)
 
-	// ── Register activities ───────────────────────────────────────────────────
+	// ── Register clearance activities ─────────────────────────────────────────
 	w.RegisterActivity(activities.ScreenSanctionsActivity)
 	w.RegisterActivity(activities.ComputeRiskScoreActivity)
 	w.RegisterActivity(activities.RouteToOGAsActivity)
@@ -52,6 +64,29 @@ func main() {
 	w.RegisterActivity(activities.CalculateDutiesActivity)
 	w.RegisterActivity(activities.UpdateDeclarationStatusActivity)
 	w.RegisterActivity(activities.IssueClearancePermitActivity)
+
+	// ── Register fund-flow activities (TigerBeetle, Mojaloop, Kafka, Fluvio, Permify, DeltaLake, Postgres) ──
+	w.RegisterActivity(activities.TigerBeetleCreateAccountActivityImpl)
+	w.RegisterActivity(activities.TigerBeetleTransferActivityImpl)
+	w.RegisterActivity(activities.TigerBeetleReserveActivityImpl)
+	w.RegisterActivity(activities.TigerBeetleCommitActivityImpl)
+	w.RegisterActivity(activities.TigerBeetleVoidReserveActivityImpl)
+	w.RegisterActivity(activities.TigerBeetleBatchTransferActivityImpl)
+	w.RegisterActivity(activities.QueryTigerBeetleBalanceActivityImpl)
+	w.RegisterActivity(activities.QueryPostgresBalanceMirrorActivityImpl)
+	w.RegisterActivity(activities.MojaloopTransferActivityImpl)
+	w.RegisterActivity(activities.PublishKafkaEventActivityImpl)
+	w.RegisterActivity(activities.PublishFluvioStreamEventActivityImpl)
+	w.RegisterActivity(activities.CheckPermifyAuthorizationActivityImpl)
+	w.RegisterActivity(activities.WriteToDeltaLakeActivityImpl)
+	w.RegisterActivity(activities.UpdateBondStatusActivityImpl)
+	// Extra batch/drawback/settlement activities
+	w.RegisterActivity(activities.PublishKafkaBatchEventActivityImpl)
+	w.RegisterActivity(activities.UpdateDrawbackStatusActivityImpl)
+	w.RegisterActivity(activities.FetchBatchPaymentItemsActivityImpl)
+	w.RegisterActivity(activities.ClaimBatchPaymentItemsActivityImpl)
+	w.RegisterActivity(activities.ReleaseBatchPaymentItemsActivityImpl)
+	w.RegisterActivity(activities.MarkBatchPaymentItemsCommittedActivityImpl)
 
 	// ── Start worker ──────────────────────────────────────────────────────────
 	logger.Info("Starting NGSWTP Temporal worker",
