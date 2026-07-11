@@ -21,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen, Save, RotateCcw } from "lucide-react";
+import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen, Save, RotateCcw, Copy, Check } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -172,8 +172,20 @@ function SchemaEditorRow({ schema, onSave }: {
   const [desc, setDesc] = useState(schema.description ?? "");
   const [version, setVersion] = useState(String(schema.version));
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const isDirty = draft !== JSON.stringify(schema.jsonSchema, null, 2) || desc !== (schema.description ?? "") || version !== String(schema.version);
+
+  const handleCopyJson = async () => {
+    try {
+      await navigator.clipboard.writeText(draft);
+      setCopied(true);
+      toast({ title: "Copied!", description: `JSON schema for ${schema.workflowType} copied to clipboard.` });
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ title: "Copy failed", description: "Clipboard access denied.", variant: "destructive" });
+    }
+  };
 
   const upsertMutation = trpc.workflowSchemas.upsertSchema.useMutation({
     onSuccess: () => {
@@ -232,7 +244,19 @@ function SchemaEditorRow({ schema, onSave }: {
           </div>
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">JSON Schema</label>
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-muted-foreground">JSON Schema</label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={handleCopyJson}
+            >
+              {copied ? <Check className="w-3 h-3 mr-1 text-green-400" /> : <Copy className="w-3 h-3 mr-1" />}
+              {copied ? "Copied!" : "Copy JSON"}
+            </Button>
+          </div>
           <Textarea
             className={`font-mono text-xs h-40 ${jsonError ? "border-red-500" : ""}`}
             value={draft}

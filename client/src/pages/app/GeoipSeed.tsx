@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Globe, Upload, RefreshCw, Database, CheckCircle, XCircle, Clock, Loader2 } from "lucide-react";
+import { Globe, Upload, RefreshCw, Database, CheckCircle, XCircle, Clock, Loader2, Activity } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
@@ -24,10 +25,22 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   failed: <XCircle size={12} />,
 };
 
+/** Simulated progress percentage for a job based on status */
+function jobProgress(status: string): number {
+  if (status === "completed") return 100;
+  if (status === "failed") return 100;
+  if (status === "running") return 60; // indeterminate — shown as animated
+  return 10; // pending
+}
+
 export default function GeoipSeed() {
   const { toast } = useToast();
   const [s3Key, setS3Key] = useState("geoip/GeoLite2-City.csv");
   const [filename, setFilename] = useState("GeoLite2-City.csv");
+
+  // Active job being polled after upload
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: statsData, refetch: refetchStats } = trpc.geoip.getGeoipStats.useQuery(undefined, {
     refetchInterval: 15_000,
@@ -38,11 +51,49 @@ export default function GeoipSeed() {
     { refetchInterval: 10_000 }
   );
 
+  // Poll the active job every 2 seconds until terminal state
+  const { data: activeJobData, refetch: refetchActiveJob } = trpc.geoip.getSeedJobById.useQuery(
+    { jobId: activeJobId! },
+    { enabled: !!activeJobId }
+  );
+
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    pollingRef.current = setInterval(async () => {
+      const result = await refetchActiveJob();
+      const status = result.data?.status;
+      if (status === "completed" || status === "failed") {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+        pollingRef.current = null;
+        refetchJobs();
+        refetchStats();
+        if (status === "completed") {
+          toast({
+            title: "Seed job completed",
+            description: `${result.data?.rowsInserted?.toLocaleString() ?? 0} rows inserted successfully.`,
+          });
+        } else {
+          toast({
+            title: "Seed job failed",
+            description: result.data?.errorMessage ?? "Unknown error",
+            variant: "destructive",
+          });
+        }
+        setActiveJobId(null);
+      }
+    }, 2000);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [activeJobId]);
+
   const uploadMutation = trpc.geoip.uploadGeoipCsv.useMutation({
     onSuccess: (data) => {
-      toast({ title: "Seed job queued", description: `Job ID: ${data.jobId} — status: ${data.status}` });
+      toast({ title: "Seed job queued", description: `Job ID: ${data.jobId} — polling for progress…` });
+      setActiveJobId(data.jobId);
       refetchJobs();
-      refetchStats();
     },
     onError: (err) => {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
@@ -59,6 +110,7 @@ export default function GeoipSeed() {
 
   const stats = statsData ?? { totalIps: 0, countriesCount: 249, asnsCount: 72000, seedJobs: { total: 0, completed: 0, failed: 0, pending: 0, totalRowsInserted: 0 }, lastSeedAt: null };
   const jobs = jobsData?.jobs ?? [];
+  const activeJob = activeJobData ?? null;
 
   return (
     <div className="p-6 space-y-6 bg-[#0A1628] min-h-screen text-white">
@@ -89,6 +141,38 @@ export default function GeoipSeed() {
           </Card>
         ))}
       </div>
+
+      {/* Active job progress banner */}
+      {activeJobId && (
+        <Card className="bg-[#0D1F35] border-blue-500/40">
+          <CardContent className="pt-4 pb-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Activity size={16} className="text-blue-400 animate-pulse" />
+              <span className="text-sm font-semibold text-blue-300">Seed job in progress</span>
+              <Badge className="ml-auto bg-blue-500/15 text-blue-400 border-blue-500/30 text-xs">
+                {activeJob?.status ?? "pending"}
+              </Badge>
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-slate-400">
+                <span className="font-mono">{activeJobId}</span>
+                <span>{activeJob?.rowsInserted != null ? `${activeJob.rowsInserted.toLocaleString()} rows inserted` : "Waiting…"}</span>
+              </div>
+              <Progress
+                value={jobProgress(activeJob?.status ?? "pending")}
+                className="h-2 bg-[#1E3A5F]"
+              />
+              <p className="text-xs text-slate-500">
+                {activeJob?.status === "running"
+                  ? "Processing CSV rows — this may take several minutes for large files."
+                  : activeJob?.status === "pending"
+                  ? "Job queued, waiting for worker to pick up…"
+                  : "Finalising…"}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Upload form */}
       <Card className="bg-[#0D1F35] border-[#1E3A5F]">
@@ -125,7 +209,7 @@ export default function GeoipSeed() {
           <div className="flex gap-3">
             <Button
               onClick={handleUpload}
-              disabled={uploadMutation.isPending}
+              disabled={uploadMutation.isPending || !!activeJobId}
               className="bg-[#D4A017] hover:bg-[#b8891a] text-black font-semibold"
             >
               {uploadMutation.isPending ? <Loader2 size={14} className="animate-spin mr-2" /> : <Upload size={14} className="mr-2" />}
@@ -161,6 +245,7 @@ export default function GeoipSeed() {
                 <TableHead className="text-slate-400 text-xs">Job ID</TableHead>
                 <TableHead className="text-slate-400 text-xs">Filename</TableHead>
                 <TableHead className="text-slate-400 text-xs">Status</TableHead>
+                <TableHead className="text-slate-400 text-xs">Progress</TableHead>
                 <TableHead className="text-slate-400 text-xs">Rows Inserted</TableHead>
                 <TableHead className="text-slate-400 text-xs">Triggered By</TableHead>
                 <TableHead className="text-slate-400 text-xs">Created</TableHead>
@@ -169,13 +254,16 @@ export default function GeoipSeed() {
             <TableBody>
               {jobs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-slate-500 py-8">
+                  <TableCell colSpan={7} className="text-center text-slate-500 py-8">
                     No seed jobs yet. Upload a GeoLite2 CSV to get started.
                   </TableCell>
                 </TableRow>
               ) : (
                 jobs.map((job: any) => (
-                  <TableRow key={job.jobId} className="border-[#1E3A5F] hover:bg-[#1E3A5F]/30">
+                  <TableRow
+                    key={job.jobId}
+                    className={`border-[#1E3A5F] hover:bg-[#1E3A5F]/30 ${job.jobId === activeJobId ? "bg-blue-500/5" : ""}`}
+                  >
                     <TableCell className="font-mono text-xs text-slate-300">{job.jobId}</TableCell>
                     <TableCell className="text-sm text-white">{job.filename}</TableCell>
                     <TableCell>
@@ -183,6 +271,12 @@ export default function GeoipSeed() {
                         {STATUS_ICONS[job.status]}
                         {job.status}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="w-28">
+                      <Progress
+                        value={jobProgress(job.status)}
+                        className={`h-1.5 ${job.status === "failed" ? "bg-red-900" : "bg-[#1E3A5F]"}`}
+                      />
                     </TableCell>
                     <TableCell className="text-sm text-slate-300">
                       {job.rowsInserted != null ? job.rowsInserted.toLocaleString() : "—"}

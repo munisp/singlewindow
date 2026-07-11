@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, RefreshCw, ShieldAlert, ShieldCheck, Eye, EyeOff, AlertTriangle, MapPin, Network, Globe, Info } from "lucide-react";
+import { Loader2, RefreshCw, ShieldAlert, ShieldCheck, Eye, EyeOff, AlertTriangle, MapPin, Network, Globe, Info, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 
@@ -85,6 +85,37 @@ export default function WafEvents() {
     });
   };
 
+  const handleExportCsv = () => {
+    if (events.length === 0) return;
+    const headers = ["ID", "Attack Type", "Severity", "Source IP", "Country", "City", "ASN", "Target Path", "HTTP Method", "Action", "Rule ID", "Acknowledged", "Created At"];
+    const rows = events.map((evt) => [
+      evt.id,
+      evt.attackType,
+      evt.severity,
+      evt.sourceIp,
+      (evt as any).country ?? "",
+      (evt as any).city ?? "",
+      (evt as any).asn ?? "",
+      evt.targetPath ?? "",
+      (evt as any).httpMethod ?? "",
+      evt.action,
+      (evt as any).ruleId ?? "",
+      evt.isAcknowledged ? "yes" : "no",
+      new Date(evt.createdAt).toISOString(),
+    ]);
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `waf-events-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "CSV exported", description: `${events.length} events downloaded.` });
+  };
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -96,10 +127,21 @@ export default function WafEvents() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">OpenAppSec AI WAF — attack detection and triage</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => eventsQuery.refetch()} disabled={eventsQuery.isFetching}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${eventsQuery.isFetching ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportCsv}
+            disabled={events.length === 0}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => eventsQuery.refetch()} disabled={eventsQuery.isFetching}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${eventsQuery.isFetching ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}

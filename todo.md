@@ -999,3 +999,22 @@
 
 ### Tests
 - [x] v84-08: Write server/v84.test.ts vitest suite — 3361 tests passing (95 files), TypeScript 0 errors
+
+## v85 Sprint — GeoIP Progress Polling, Copy JSON, WAF CSV Export
+
+### GeoIP Bulk-Import Progress Polling
+- [x] v85-01: After uploadGeoipCsv mutation succeeds in GeoipSeed.tsx, start polling geoip.getSeedJobById every 2s
+- [x] v85-02: Show live progress bar (shadcn Progress) with status label (pending/processing/completed/failed)
+- [x] v85-03: Stop polling when job reaches completed or failed state
+
+### Workflow Schema Copy JSON Button
+- [x] v85-04: Added "Copy JSON" clipboard button to each schema editor row in TemporalWorkflowRuns.tsx Manage Schemas tab
+- [x] v85-05: Shows 2-second "Copied!" feedback state with CheckCircle icon
+
+### WAF Event CSV Export
+- [x] v85-06: Added "Export CSV" button to WafEvents.tsx toolbar
+- [x] v85-07: Exports current filtered events as CSV via URL.createObjectURL + auto-download
+- [x] v85-08: Columns: timestamp, sourceIp, attackType, severity, ruleId, acknowledged, country, asn
+
+### Tests
+- [x] v85-09: Write server/v85.test.ts vitest suite — 3403 tests passing (96 files), TypeScript 0 errors
