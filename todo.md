@@ -801,3 +801,29 @@
 - [x] v76-18: server/routers/insiderThreat.ts — forceTokenRefresh procedure: proxy to Go POST /admin/force-refresh, admin-only
 - [x] v76-19: client/src/pages/app/SecurityMonitor.tsx — Force Refresh button in notification-dispatcher metrics panel
 - [x] v76-20: server/v76.test.ts — 70+ vitest tests covering all 20 sprint v76 deliverables
+
+## v77 Sprint — TigerBeetle Integration Audit + Schema Completeness
+
+### TigerBeetle Fixes
+- [x] v77-01: Fix ledger.ts TB_BRIDGE_URL default from 8086 → 8093
+- [x] v77-02: Fix tigerbeetleSeed.ts TIGERBEETLE_BRIDGE_URL default from 8087 → 8093
+- [x] v77-03: Fix polyglot-services.yaml TIGERBEETLE_BRIDGE_RUST_URL from 50055 → 4600
+- [x] v77-04: Fix asean-sw-service tigerbeetle_lakehouse.go from 8099 → 8093
+- [x] v77-05: Add Rust bridge (8093) endpoints: /bond/deposit, /bond/release, /penalty, /transit-guarantee, /pending, /void-pending
+- [x] v77-06: Add tRPC procedures: ledger.postBondDeposit, ledger.releaseBond, ledger.postPenalty, ledger.postTransitGuarantee
+- [x] v77-07: Fix payment-service: use TIGERBEETLE_BRIDGE_URL (HTTP) not raw TCP addr for recordDoubleEntry
+- [x] v77-08: Add K8s Service for tigerbeetle-bridge-rs port 4600 in polyglot-services.yaml
+- [x] v77-09: Add Dapr resiliency target for tigerbeetle-bridge-rs in components.yaml
+- [x] v77-10: Create Go declaration-engine service with TigerBeetle duty assessment hook
+- [x] v77-11: Create Python payment-risk-scorer microservice
+
+### Schema Fixes
+- [x] v77-12: Add tigerbeetle_bonds table to drizzle/schema.ts
+- [x] v77-13: Add tigerbeetle_penalties table to drizzle/schema.ts
+- [x] v77-14: Add tigerbeetle_transit_guarantees table to drizzle/schema.ts
+- [x] v77-15: Add payment_risk_scores table to drizzle/schema.ts
+- [x] v77-16: Add hs_classification_cache table to drizzle/schema.ts
+- [x] v77-17: Add ab_divergence_log table to drizzle/schema.ts
+- [x] v77-18: Add missing columns to payments, declarations, duty_drawback_claims, post_clearance_audits, tigerbeetle_ledger_entries
+- [x] v77-19: Run pnpm db:push and add db.ts helpers for new tables
+- [x] v77-20: Write server/v77.test.ts vitest suite (80+ tests)

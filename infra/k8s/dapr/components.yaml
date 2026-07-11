@@ -250,6 +250,10 @@ spec:
         timeout: defaultTimeout
         retry: defaultRetry
         circuitBreaker: defaultCircuitBreaker
+      tigerbeetle-bridge-rs:
+        timeout: defaultTimeout
+        retry: defaultRetry
+        circuitBreaker: defaultCircuitBreaker
     components:
       pubsub:
         outbound:

@@ -24,7 +24,7 @@ import { router, protectedProcedure } from "../_core/trpc";
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const TIGERBEETLE_BRIDGE_URL =
-  process.env.TIGERBEETLE_BRIDGE_URL ?? "http://localhost:8087";
+  process.env.TIGERBEETLE_BRIDGE_URL ?? "http://tigerbeetle-bridge:8093";
 
 const SEED_TIMEOUT_MS = 30_000;
 

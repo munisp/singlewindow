@@ -1,7 +1,7 @@
 /**
  * ledger.ts — tRPC router for TigerBeetle double-entry ledger (Sprint 31)
  *
- * Proxies to the Go tigerbeetle-bridge service (port 8086).
+ * Proxies to the Rust tigerbeetle-bridge service (port 8093).
  * Falls back to DB-persisted ledger entries when the bridge is unavailable.
  *
  * Procedures:
@@ -28,7 +28,7 @@ import {
   createLedgerEntry,
 } from "../db";
 
-const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://localhost:8086";
+const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8093";
 const PAYMENT_RISK_URL = process.env.PAYMENT_RISK_URL || "http://localhost:8092";
 
 async function tbBridgeAvailable(): Promise<boolean> {
@@ -321,5 +321,177 @@ export const ledgerRouter = router({
       }
 
       return res.json();
+    }),
+
+  /**
+   * Post a bond/security deposit to TigerBeetle.
+   * Debit: trader liability → Credit: security deposit account.
+   */
+  postBondDeposit: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      traderId: z.number().int().positive(),
+      bondAmount: z.number().positive(),
+      currency: z.string().length(3),
+      bondType: z.enum(["import_bond", "transit_bond", "aeo_bond"]),
+      expiryDate: z.string().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        return await createLedgerEntry({
+          declarationId: input.declarationId,
+          paymentId: null,
+          entryType: "bond_deposit",
+          debitAccountId: `trader-${input.traderId}-liability`,
+          creditAccountId: `bond-${input.traderId}-${input.bondType}`,
+          amountMinorUnits: Math.round(input.bondAmount * 100),
+          tbTransferId: `TB-BOND-DEP-${input.declarationId}-${Date.now()}`,
+          currency: input.currency,
+          reference: `BOND-DEP-${input.declarationId}-${input.bondType}`,
+          status: "posted",
+          metadata: { bondType: input.bondType, expiryDate: input.expiryDate, _source: "offline-stub" },
+        });
+      }
+      return tbFetch<Record<string, unknown>>("/bond/deposit", {
+        method: "POST",
+        body: JSON.stringify({
+          declaration_id: input.declarationId,
+          trader_id: input.traderId,
+          bond_amount: input.bondAmount,
+          currency: input.currency,
+          bond_type: input.bondType,
+          expiry_date: input.expiryDate,
+        }),
+      });
+    }),
+
+  /**
+   * Release a bond/security deposit back to the trader.
+   * Debit: security deposit account → Credit: trader liability.
+   */
+  releaseBond: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      traderId: z.number().int().positive(),
+      bondAmount: z.number().positive(),
+      currency: z.string().length(3),
+      bondType: z.enum(["import_bond", "transit_bond", "aeo_bond"]),
+      releaseReason: z.string().min(1),
+    }))
+    .mutation(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        return await createLedgerEntry({
+          declarationId: input.declarationId,
+          paymentId: null,
+          entryType: "bond_release",
+          debitAccountId: `bond-${input.traderId}-${input.bondType}`,
+          creditAccountId: `trader-${input.traderId}-liability`,
+          amountMinorUnits: Math.round(input.bondAmount * 100),
+          tbTransferId: `TB-BOND-REL-${input.declarationId}-${Date.now()}`,
+          currency: input.currency,
+          reference: `BOND-REL-${input.declarationId}-${input.releaseReason}`,
+          status: "posted",
+          metadata: { bondType: input.bondType, releaseReason: input.releaseReason, _source: "offline-stub" },
+        });
+      }
+      return tbFetch<Record<string, unknown>>("/bond/release", {
+        method: "POST",
+        body: JSON.stringify({
+          declaration_id: input.declarationId,
+          trader_id: input.traderId,
+          bond_amount: input.bondAmount,
+          currency: input.currency,
+          bond_type: input.bondType,
+          release_reason: input.releaseReason,
+        }),
+      });
+    }),
+
+  /**
+   * Post a penalty/fine to TigerBeetle.
+   * Debit: trader liability → Credit: penalty revenue account.
+   */
+  postPenalty: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      traderId: z.number().int().positive(),
+      penaltyAmount: z.number().positive(),
+      currency: z.string().length(3),
+      penaltyCode: z.enum(["UNDER_DECLARATION", "PROHIBITED_GOODS", "LATE_FILING", "MISDESCRIPTION", "SMUGGLING"]),
+      officerId: z.number().int().positive(),
+    }))
+    .mutation(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        return await createLedgerEntry({
+          declarationId: input.declarationId,
+          paymentId: null,
+          entryType: "penalty",
+          debitAccountId: `trader-${input.traderId}-liability`,
+          creditAccountId: `penalty-revenue-${input.penaltyCode}`,
+          amountMinorUnits: Math.round(input.penaltyAmount * 100),
+          tbTransferId: `TB-PENALTY-${input.declarationId}-${Date.now()}`,
+          currency: input.currency,
+          reference: `PENALTY-${input.declarationId}-${input.penaltyCode}`,
+          status: "posted",
+          metadata: { penaltyCode: input.penaltyCode, officerId: input.officerId, _source: "offline-stub" },
+        });
+      }
+      return tbFetch<Record<string, unknown>>("/penalty", {
+        method: "POST",
+        body: JSON.stringify({
+          declaration_id: input.declarationId,
+          trader_id: input.traderId,
+          penalty_amount: input.penaltyAmount,
+          currency: input.currency,
+          penalty_code: input.penaltyCode,
+          officer_id: input.officerId,
+        }),
+      });
+    }),
+
+  /**
+   * Issue a transit guarantee to TigerBeetle (COMESA/ASEAN cross-border).
+   * Debit: trader liability → Credit: transit guarantee account.
+   */
+  postTransitGuarantee: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      traderId: z.number().int().positive(),
+      guaranteeAmount: z.number().positive(),
+      currency: z.string().length(3),
+      destinationCountry: z.string().length(2),
+      transitDays: z.number().int().positive().max(365),
+    }))
+    .mutation(async ({ input }) => {
+      const available = await tbBridgeAvailable();
+      if (!available) {
+        return await createLedgerEntry({
+          declarationId: input.declarationId,
+          paymentId: null,
+          entryType: "adjustment", // closest existing type; schema will add transit_guarantee in v77
+          debitAccountId: `trader-${input.traderId}-liability`,
+          creditAccountId: `transit-guarantee-${input.traderId}-${input.destinationCountry}`,
+          amountMinorUnits: Math.round(input.guaranteeAmount * 100),
+          tbTransferId: `TB-TRANSIT-${input.declarationId}-${Date.now()}`,
+          currency: input.currency,
+          reference: `TRANSIT-${input.declarationId}-${input.destinationCountry}`,
+          status: "posted",
+          metadata: { destinationCountry: input.destinationCountry, transitDays: input.transitDays, _source: "offline-stub" },
+        });
+      }
+      return tbFetch<Record<string, unknown>>("/transit-guarantee", {
+        method: "POST",
+        body: JSON.stringify({
+          declaration_id: input.declarationId,
+          trader_id: input.traderId,
+          guarantee_amount: input.guaranteeAmount,
+          currency: input.currency,
+          destination_country: input.destinationCountry,
+          transit_days: input.transitDays,
+        }),
+      });
     }),
 });

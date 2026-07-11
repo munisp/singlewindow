@@ -486,11 +486,11 @@ spec:
         runAsUser: 1001
       containers:
         - name: tigerbeetle-bridge-rust
-          image: tradegateway/tigerbeetle-bridge:latest
+          image: tradegateway/tigerbeetle-bridge-rs:latest
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 50055
-              name: grpc
+            - containerPort: 4600
+              name: http
             - containerPort: 9090
               name: metrics
           env:
@@ -545,9 +545,9 @@ spec:
   selector:
     app: tigerbeetle-bridge-rust
   ports:
-    - name: grpc
-      port: 50055
-      targetPort: 50055
+    - name: http
+      port: 4600
+      targetPort: 4600
     - name: metrics
       port: 9090
       targetPort: 9090
@@ -941,7 +941,7 @@ data:
   RISK_ENGINE_GO_URL: "http://risk-engine-go:8080"
   OGA_HUB_URL: "http://oga-hub:8080"
   CARGO_TRACKING_GO_URL: "http://cargo-tracking-go:8080"
-  TIGERBEETLE_BRIDGE_RUST_URL: "http://tigerbeetle-bridge-rust:50055"
+  TIGERBEETLE_BRIDGE_RUST_URL: "http://tigerbeetle-bridge-rs:4600"
   KAFKA_CONSUMER_METRICS_URL: "http://kafka-consumer-rust:9090"
   OPENSEARCH_INDEXER_URL: "http://opensearch-indexer:8002"
 

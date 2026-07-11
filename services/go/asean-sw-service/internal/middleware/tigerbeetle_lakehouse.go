@@ -32,7 +32,7 @@ type TigerBeetleClient struct {
 func NewTigerBeetleClient() *TigerBeetleClient {
 	base := os.Getenv("TIGERBEETLE_HTTP_URL")
 	if base == "" {
-		base = "http://tigerbeetle-bridge:8099"
+		base = "http://tigerbeetle-bridge:8093"
 	}
 	return &TigerBeetleClient{
 		baseURL:    base,

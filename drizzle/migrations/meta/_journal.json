@@ -239,6 +239,13 @@
       "when": 1782069006280,
       "tag": "0033_stiff_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1783787777771,
+      "tag": "0034_little_wilson_fisk",
+      "breakpoints": true
     }
   ]
 }

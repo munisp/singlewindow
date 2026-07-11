@@ -7,6 +7,13 @@ import {
   securityAlerts, sanctionsChecks, aeoApplications, notifications,
   kycDocuments, kycVerifications, visionAnalyses,
   portLocations, portCongestionEvents, vesselTrackingEvents,
+  // v77 new tables
+  tigerbeetleBonds, InsertTigerbeetleBond,
+  tigerbeetlePenalties, InsertTigerbeetlePenalty,
+  tigerbeetleTransitGuarantees, InsertTigerbeetleTransitGuarantee,
+  paymentRiskScores, InsertPaymentRiskScore,
+  hsClassificationCache, InsertHsClassificationCache,
+  abDivergenceLog, InsertAbDivergenceLog,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1240,4 +1247,154 @@ export async function withRlsContext<T>(
   } finally {
     client.release();
   }
+}
+
+// ─── v77: DB Helpers for New Tables ──────────────────────────────────────────
+
+// --- TigerBeetle Bonds ---
+export async function createBond(data: InsertTigerbeetleBond) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(tigerbeetleBonds).values(data).returning();
+  return row;
+}
+
+export async function getBondsByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tigerbeetleBonds)
+    .where(eq(tigerbeetleBonds.declarationId, declarationId))
+    .orderBy(desc(tigerbeetleBonds.createdAt));
+}
+
+export async function getBondsByTrader(traderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tigerbeetleBonds)
+    .where(eq(tigerbeetleBonds.traderId, traderId))
+    .orderBy(desc(tigerbeetleBonds.createdAt));
+}
+
+export async function updateBondStatus(bondId: string, status: InsertTigerbeetleBond["status"], extra?: Partial<InsertTigerbeetleBond>) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(tigerbeetleBonds)
+    .set({ status, ...extra, updatedAt: new Date() })
+    .where(eq(tigerbeetleBonds.bondId, bondId))
+    .returning();
+  return row;
+}
+
+// --- TigerBeetle Penalties ---
+export async function createPenalty(data: InsertTigerbeetlePenalty) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(tigerbeetlePenalties).values(data).returning();
+  return row;
+}
+
+export async function getPenaltiesByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tigerbeetlePenalties)
+    .where(eq(tigerbeetlePenalties.declarationId, declarationId))
+    .orderBy(desc(tigerbeetlePenalties.createdAt));
+}
+
+export async function getPenaltiesByTrader(traderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tigerbeetlePenalties)
+    .where(eq(tigerbeetlePenalties.traderId, traderId))
+    .orderBy(desc(tigerbeetlePenalties.createdAt));
+}
+
+// --- TigerBeetle Transit Guarantees ---
+export async function createTransitGuarantee(data: InsertTigerbeetleTransitGuarantee) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(tigerbeetleTransitGuarantees).values(data).returning();
+  return row;
+}
+
+export async function getTransitGuaranteesByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tigerbeetleTransitGuarantees)
+    .where(eq(tigerbeetleTransitGuarantees.declarationId, declarationId))
+    .orderBy(desc(tigerbeetleTransitGuarantees.createdAt));
+}
+
+// --- Payment Risk Scores ---
+export async function createPaymentRiskScore(data: InsertPaymentRiskScore) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(paymentRiskScores).values(data).returning();
+  return row;
+}
+
+export async function getPaymentRiskScoresByDeclaration(declarationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(paymentRiskScores)
+    .where(eq(paymentRiskScores.declarationId, declarationId))
+    .orderBy(desc(paymentRiskScores.scoredAt));
+}
+
+export async function getLatestPaymentRiskScore(declarationId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(paymentRiskScores)
+    .where(eq(paymentRiskScores.declarationId, declarationId))
+    .orderBy(desc(paymentRiskScores.scoredAt))
+    .limit(1);
+  return row ?? null;
+}
+
+// --- HS Classification Cache ---
+export async function upsertHsClassification(data: InsertHsClassificationCache) {
+  const db = await getDb();
+  if (!db) return null;
+  const existing = await db.select().from(hsClassificationCache)
+    .where(eq(hsClassificationCache.hsCode, data.hsCode))
+    .limit(1);
+  if (existing.length > 0) {
+    const [row] = await db.update(hsClassificationCache)
+      .set({ hitCount: sql`${hsClassificationCache.hitCount} + 1`, lastHitAt: new Date() })
+      .where(eq(hsClassificationCache.hsCode, data.hsCode))
+      .returning();
+    return row;
+  }
+  const [row] = await db.insert(hsClassificationCache).values(data).returning();
+  return row;
+}
+
+export async function getHsClassification(hsCode: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(hsClassificationCache)
+    .where(eq(hsClassificationCache.hsCode, hsCode))
+    .limit(1);
+  return row ?? null;
+}
+
+// --- A/B Divergence Log ---
+export async function createAbDivergenceEntry(data: InsertAbDivergenceLog) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(abDivergenceLog).values(data).returning();
+  return row;
+}
+
+export async function getAbDivergenceStats(since?: Date) {
+  const db = await getDb();
+  if (!db) return { total: 0, diverged: 0, agreeRate: 1.0 };
+  const base = db.select({ total: count(), diverged: sql<number>`sum(case when ${abDivergenceLog.diverged} then 1 else 0 end)` })
+    .from(abDivergenceLog);
+  const [row] = since
+    ? await base.where(gte(abDivergenceLog.createdAt, since))
+    : await base;
+  const total = Number(row?.total ?? 0);
+  const diverged = Number(row?.diverged ?? 0);
+  return { total, diverged, agreeRate: total > 0 ? (total - diverged) / total : 1.0 };
 }

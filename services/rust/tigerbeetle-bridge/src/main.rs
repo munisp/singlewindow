@@ -498,6 +498,309 @@ async fn get_transfers_handler(
     }))
 }
 
+// ─── BOND HANDLERS ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct BondDepositRequest {
+    pub declaration_id: i64,
+    pub trader_id: i64,
+    pub bond_amount: f64,
+    pub currency: String,
+    pub bond_type: String, // import_bond | transit_bond | aeo_bond
+    pub expiry_date: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BondDepositResponse {
+    pub bond_id: String,
+    pub declaration_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub bond_type: String,
+    pub transfer_id: String,
+    pub deposited_at: DateTime<Utc>,
+}
+
+async fn bond_deposit_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<BondDepositRequest>,
+) -> Result<Json<BondDepositResponse>, (StatusCode, String)> {
+    let mut ledger = state.ledger.lock().await;
+    let amount_cents = (req.bond_amount * 100.0) as u64;
+    let trader_liability_id = format!("trader-{}-liability", req.trader_id);
+    let security_deposit_id = format!("bond-{}-{}", req.trader_id, req.bond_type);
+    ledger.get_or_create_account(&trader_liability_id, 1001, 1);
+    ledger.get_or_create_account(&security_deposit_id, 6001, 1);
+    let transfer = ledger.post_transfer(
+        &trader_liability_id,
+        &security_deposit_id,
+        amount_cents,
+        TransferType::BondDeposit,
+        Some(req.declaration_id),
+        &format!("BOND-DEP-{}-{}", req.declaration_id, req.bond_type),
+        &req.currency,
+    );
+    info!(declaration_id = req.declaration_id, amount = req.bond_amount, bond_type = %req.bond_type, "Bond deposited");
+    Ok(Json(BondDepositResponse {
+        bond_id: format!("BOND-{}", Uuid::new_v4().simple()),
+        declaration_id: req.declaration_id,
+        amount: req.bond_amount,
+        currency: req.currency,
+        bond_type: req.bond_type,
+        transfer_id: transfer.id,
+        deposited_at: Utc::now(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BondReleaseRequest {
+    pub declaration_id: i64,
+    pub trader_id: i64,
+    pub bond_amount: f64,
+    pub currency: String,
+    pub bond_type: String,
+    pub release_reason: String, // clearance_complete | re_export | cancelled
+}
+
+#[derive(Debug, Serialize)]
+pub struct BondReleaseResponse {
+    pub release_id: String,
+    pub declaration_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub transfer_id: String,
+    pub released_at: DateTime<Utc>,
+}
+
+async fn bond_release_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<BondReleaseRequest>,
+) -> Result<Json<BondReleaseResponse>, (StatusCode, String)> {
+    let mut ledger = state.ledger.lock().await;
+    let amount_cents = (req.bond_amount * 100.0) as u64;
+    let security_deposit_id = format!("bond-{}-{}", req.trader_id, req.bond_type);
+    let trader_liability_id = format!("trader-{}-liability", req.trader_id);
+    ledger.get_or_create_account(&security_deposit_id, 6001, 1);
+    ledger.get_or_create_account(&trader_liability_id, 1001, 1);
+    let transfer = ledger.post_transfer(
+        &security_deposit_id,
+        &trader_liability_id,
+        amount_cents,
+        TransferType::BondRelease,
+        Some(req.declaration_id),
+        &format!("BOND-REL-{}-{}", req.declaration_id, req.release_reason),
+        &req.currency,
+    );
+    info!(declaration_id = req.declaration_id, amount = req.bond_amount, reason = %req.release_reason, "Bond released");
+    Ok(Json(BondReleaseResponse {
+        release_id: format!("BREL-{}", Uuid::new_v4().simple()),
+        declaration_id: req.declaration_id,
+        amount: req.bond_amount,
+        currency: req.currency,
+        transfer_id: transfer.id,
+        released_at: Utc::now(),
+    }))
+}
+
+// ─── PENALTY HANDLER ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct PenaltyRequest {
+    pub declaration_id: i64,
+    pub trader_id: i64,
+    pub penalty_amount: f64,
+    pub currency: String,
+    pub penalty_code: String, // UNDER_DECLARATION | PROHIBITED_GOODS | LATE_FILING
+    pub officer_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PenaltyResponse {
+    pub penalty_id: String,
+    pub declaration_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub penalty_code: String,
+    pub transfer_id: String,
+    pub assessed_at: DateTime<Utc>,
+}
+
+async fn penalty_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PenaltyRequest>,
+) -> Result<Json<PenaltyResponse>, (StatusCode, String)> {
+    let mut ledger = state.ledger.lock().await;
+    let amount_cents = (req.penalty_amount * 100.0) as u64;
+    let trader_liability_id = format!("trader-{}-liability", req.trader_id);
+    let penalty_revenue_id = format!("penalty-revenue-{}", req.penalty_code);
+    ledger.get_or_create_account(&trader_liability_id, 1001, 1);
+    ledger.get_or_create_account(&penalty_revenue_id, 5001, 1);
+    let transfer = ledger.post_transfer(
+        &trader_liability_id,
+        &penalty_revenue_id,
+        amount_cents,
+        TransferType::PenaltyAssessment,
+        Some(req.declaration_id),
+        &format!("PENALTY-{}-{}", req.declaration_id, req.penalty_code),
+        &req.currency,
+    );
+    info!(declaration_id = req.declaration_id, amount = req.penalty_amount, code = %req.penalty_code, officer = req.officer_id, "Penalty assessed");
+    Ok(Json(PenaltyResponse {
+        penalty_id: format!("PEN-{}", Uuid::new_v4().simple()),
+        declaration_id: req.declaration_id,
+        amount: req.penalty_amount,
+        currency: req.currency,
+        penalty_code: req.penalty_code,
+        transfer_id: transfer.id,
+        assessed_at: Utc::now(),
+    }))
+}
+
+// ─── TRANSIT GUARANTEE HANDLER ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TransitGuaranteeRequest {
+    pub declaration_id: i64,
+    pub trader_id: i64,
+    pub guarantee_amount: f64,
+    pub currency: String,
+    pub destination_country: String,
+    pub transit_days: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TransitGuaranteeResponse {
+    pub guarantee_id: String,
+    pub declaration_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub destination_country: String,
+    pub transfer_id: String,
+    pub valid_until: DateTime<Utc>,
+    pub issued_at: DateTime<Utc>,
+}
+
+async fn transit_guarantee_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<TransitGuaranteeRequest>,
+) -> Result<Json<TransitGuaranteeResponse>, (StatusCode, String)> {
+    let mut ledger = state.ledger.lock().await;
+    let amount_cents = (req.guarantee_amount * 100.0) as u64;
+    let trader_liability_id = format!("trader-{}-liability", req.trader_id);
+    let transit_guarantee_id = format!("transit-guarantee-{}-{}", req.trader_id, req.destination_country);
+    ledger.get_or_create_account(&trader_liability_id, 1001, 1);
+    ledger.get_or_create_account(&transit_guarantee_id, 7001, 1);
+    let transfer = ledger.post_transfer(
+        &trader_liability_id,
+        &transit_guarantee_id,
+        amount_cents,
+        TransferType::TransitGuarantee,
+        Some(req.declaration_id),
+        &format!("TRANSIT-{}-{}", req.declaration_id, req.destination_country),
+        &req.currency,
+    );
+    let valid_until = Utc::now() + chrono::Duration::days(req.transit_days as i64);
+    info!(declaration_id = req.declaration_id, amount = req.guarantee_amount, dest = %req.destination_country, "Transit guarantee issued");
+    Ok(Json(TransitGuaranteeResponse {
+        guarantee_id: format!("TG-{}", Uuid::new_v4().simple()),
+        declaration_id: req.declaration_id,
+        amount: req.guarantee_amount,
+        currency: req.currency,
+        destination_country: req.destination_country,
+        transfer_id: transfer.id,
+        valid_until,
+        issued_at: Utc::now(),
+    }))
+}
+
+// ─── PENDING / VOID-PENDING HANDLERS ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct PendingTransferRequest {
+    pub declaration_id: i64,
+    pub trader_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub transfer_type: String, // duty | bond | penalty
+}
+
+#[derive(Debug, Serialize)]
+pub struct PendingTransferResponse {
+    pub pending_id: String,
+    pub declaration_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+async fn pending_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PendingTransferRequest>,
+) -> Result<Json<PendingTransferResponse>, (StatusCode, String)> {
+    let mut ledger = state.ledger.lock().await;
+    let amount_cents = (req.amount * 100.0) as u64;
+    let trader_liability_id = format!("trader-{}-liability", req.trader_id);
+    let pending_id = format!("PEND-{}", Uuid::new_v4().simple());
+    // Mark as pending in the debit account
+    if let Some(acct) = ledger.accounts.get_mut(&trader_liability_id) {
+        acct.debits_pending += amount_cents;
+    } else {
+        ledger.get_or_create_account(&trader_liability_id, 1001, 1);
+        if let Some(acct) = ledger.accounts.get_mut(&trader_liability_id) {
+            acct.debits_pending += amount_cents;
+        }
+    }
+    info!(declaration_id = req.declaration_id, amount = req.amount, transfer_type = %req.transfer_type, "Pending transfer created");
+    Ok(Json(PendingTransferResponse {
+        pending_id,
+        declaration_id: req.declaration_id,
+        amount: req.amount,
+        currency: req.currency,
+        status: "pending".to_string(),
+        created_at: Utc::now(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VoidPendingRequest {
+    pub pending_id: String,
+    pub declaration_id: i64,
+    pub trader_id: i64,
+    pub amount: f64,
+    pub currency: String,
+    pub void_reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VoidPendingResponse {
+    pub void_id: String,
+    pub pending_id: String,
+    pub declaration_id: i64,
+    pub status: String,
+    pub voided_at: DateTime<Utc>,
+}
+
+async fn void_pending_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<VoidPendingRequest>,
+) -> Result<Json<VoidPendingResponse>, (StatusCode, String)> {
+    let mut ledger = state.ledger.lock().await;
+    let amount_cents = (req.amount * 100.0) as u64;
+    let trader_liability_id = format!("trader-{}-liability", req.trader_id);
+    if let Some(acct) = ledger.accounts.get_mut(&trader_liability_id) {
+        acct.debits_pending = acct.debits_pending.saturating_sub(amount_cents);
+    }
+    info!(pending_id = %req.pending_id, declaration_id = req.declaration_id, reason = %req.void_reason, "Pending transfer voided");
+    Ok(Json(VoidPendingResponse {
+        void_id: format!("VOID-{}", Uuid::new_v4().simple()),
+        pending_id: req.pending_id,
+        declaration_id: req.declaration_id,
+        status: "voided".to_string(),
+        voided_at: Utc::now(),
+    }))
+}
+
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -525,6 +828,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/drawback", post(duty_drawback_handler))
         .route("/balance", post(get_balance_handler))
         .route("/transfers", get(get_transfers_handler))
+        // Bond management
+        .route("/bond/deposit", post(bond_deposit_handler))
+        .route("/bond/release", post(bond_release_handler))
+        // Penalty accounting
+        .route("/penalty", post(penalty_handler))
+        // Transit guarantees (COMESA/ASEAN)
+        .route("/transit-guarantee", post(transit_guarantee_handler))
+        // Two-phase pending transfers
+        .route("/pending", post(pending_handler))
+        .route("/void-pending", post(void_pending_handler))
         .layer(CorsLayer::permissive())
         .with_state(state);
 

@@ -2185,3 +2185,168 @@ export const anomalyDetections = pgTable("anomaly_detections", {
   index("idx_anomaly_created").on(t.createdAt),
 ]);
 export type AnomalyDetection = typeof anomalyDetections.$inferSelect;
+
+// ─── v77: Missing Schema Tables ──────────────────────────────────────────────
+
+// 1. TigerBeetle bond ledger (import_bond | transit_bond | aeo_bond)
+export const bondTypeEnum = pgEnum("bond_type", [
+  "import_bond", "transit_bond", "aeo_bond",
+]);
+export const bondStatusEnum = pgEnum("bond_status", [
+  "active", "released", "forfeited", "expired",
+]);
+export const tigerbeetleBonds = pgTable("tigerbeetle_bonds", {
+  id: serial("id").primaryKey(),
+  bondId: varchar("bond_id", { length: 40 }).notNull().unique(),
+  tbTransferId: varchar("tb_transfer_id", { length: 40 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  traderId: integer("trader_id").references(() => users.id, { onDelete: "set null" }),
+  bondType: bondTypeEnum("bond_type").notNull(),
+  bondAmount: decimal("bond_amount", { precision: 18, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("GHS").notNull(),
+  status: bondStatusEnum("status").default("active").notNull(),
+  expiryDate: timestamp("expiry_date"),
+  releasedAt: timestamp("released_at"),
+  releaseReason: varchar("release_reason", { length: 128 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tb_bonds_declaration").on(t.declarationId),
+  index("idx_tb_bonds_trader").on(t.traderId),
+  index("idx_tb_bonds_status").on(t.status),
+  index("idx_tb_bonds_type").on(t.bondType),
+]);
+export type TigerbeetleBond = typeof tigerbeetleBonds.$inferSelect;
+export type InsertTigerbeetleBond = typeof tigerbeetleBonds.$inferInsert;
+
+// 2. TigerBeetle penalty ledger
+export const penaltyCodeEnum = pgEnum("penalty_code", [
+  "UNDER_DECLARATION", "PROHIBITED_GOODS", "LATE_FILING", "MISDESCRIPTION", "SMUGGLING",
+]);
+export const penaltyStatusEnum = pgEnum("penalty_status", [
+  "assessed", "paid", "appealed", "waived", "written_off",
+]);
+export const tigerbeetlePenalties = pgTable("tigerbeetle_penalties", {
+  id: serial("id").primaryKey(),
+  penaltyId: varchar("penalty_id", { length: 40 }).notNull().unique(),
+  tbTransferId: varchar("tb_transfer_id", { length: 40 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  traderId: integer("trader_id").references(() => users.id, { onDelete: "set null" }),
+  officerId: integer("officer_id").references(() => users.id, { onDelete: "set null" }),
+  penaltyCode: penaltyCodeEnum("penalty_code").notNull(),
+  penaltyAmount: decimal("penalty_amount", { precision: 18, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("GHS").notNull(),
+  status: penaltyStatusEnum("status").default("assessed").notNull(),
+  appealDeadline: timestamp("appeal_deadline"),
+  paidAt: timestamp("paid_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tb_penalties_declaration").on(t.declarationId),
+  index("idx_tb_penalties_trader").on(t.traderId),
+  index("idx_tb_penalties_code").on(t.penaltyCode),
+  index("idx_tb_penalties_status").on(t.status),
+]);
+export type TigerbeetlePenalty = typeof tigerbeetlePenalties.$inferSelect;
+export type InsertTigerbeetlePenalty = typeof tigerbeetlePenalties.$inferInsert;
+
+// 3. Transit guarantees (COMESA / ASEAN cross-border)
+export const transitGuaranteeStatusEnum = pgEnum("transit_guarantee_status", [
+  "active", "discharged", "forfeited", "expired",
+]);
+export const tigerbeetleTransitGuarantees = pgTable("tigerbeetle_transit_guarantees", {
+  id: serial("id").primaryKey(),
+  guaranteeId: varchar("guarantee_id", { length: 40 }).notNull().unique(),
+  tbTransferId: varchar("tb_transfer_id", { length: 40 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "set null" }),
+  traderId: integer("trader_id").references(() => users.id, { onDelete: "set null" }),
+  guaranteeAmount: decimal("guarantee_amount", { precision: 18, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).default("GHS").notNull(),
+  destinationCountry: varchar("destination_country", { length: 2 }).notNull(),
+  transitDays: integer("transit_days").notNull(),
+  status: transitGuaranteeStatusEnum("status").default("active").notNull(),
+  validUntil: timestamp("valid_until").notNull(),
+  dischargedAt: timestamp("discharged_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tb_tg_declaration").on(t.declarationId),
+  index("idx_tb_tg_trader").on(t.traderId),
+  index("idx_tb_tg_status").on(t.status),
+  index("idx_tb_tg_valid_until").on(t.validUntil),
+]);
+export type TigerbeetleTransitGuarantee = typeof tigerbeetleTransitGuarantees.$inferSelect;
+export type InsertTigerbeetleTransitGuarantee = typeof tigerbeetleTransitGuarantees.$inferInsert;
+
+// 4. Payment risk scores (from Python payment-risk-scorer)
+export const riskTierEnum = pgEnum("risk_tier", ["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+export const paymentRiskScores = pgTable("payment_risk_scores", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").references(() => declarations.id, { onDelete: "cascade" }),
+  traderId: integer("trader_id").references(() => users.id, { onDelete: "set null" }),
+  riskScore: decimal("risk_score", { precision: 5, scale: 4 }).notNull(),
+  riskTier: riskTierEnum("risk_tier").notNull(),
+  recommendedAction: varchar("recommended_action", { length: 32 }).notNull(), // APPROVE | REVIEW | BLOCK
+  flags: jsonb("flags").default([]),
+  modelVersion: varchar("model_version", { length: 64 }),
+  fspId: varchar("fsp_id", { length: 64 }),
+  fspType: varchar("fsp_type", { length: 32 }),
+  amount: decimal("amount", { precision: 18, scale: 2 }),
+  currency: varchar("currency", { length: 3 }),
+  scoredAt: timestamp("scored_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_prs_declaration").on(t.declarationId),
+  index("idx_prs_trader").on(t.traderId),
+  index("idx_prs_tier").on(t.riskTier),
+  index("idx_prs_scored_at").on(t.scoredAt),
+]);
+export type PaymentRiskScore = typeof paymentRiskScores.$inferSelect;
+export type InsertPaymentRiskScore = typeof paymentRiskScores.$inferInsert;
+
+// 5. HS code classification cache (from Rust hs-classifier)
+export const hsClassificationCache = pgTable("hs_classification_cache", {
+  id: serial("id").primaryKey(),
+  hsCode: varchar("hs_code", { length: 10 }).notNull(),
+  description: text("description").notNull(),
+  chapter: varchar("chapter", { length: 2 }).notNull(),
+  heading: varchar("heading", { length: 4 }).notNull(),
+  subheading: varchar("subheading", { length: 6 }).notNull(),
+  confidence: decimal("confidence", { precision: 5, scale: 4 }).notNull(),
+  classifiedBy: varchar("classified_by", { length: 32 }).default("hs-classifier-rust").notNull(),
+  modelVersion: varchar("model_version", { length: 64 }),
+  validFrom: timestamp("valid_from").defaultNow().notNull(),
+  validUntil: timestamp("valid_until"),
+  hitCount: integer("hit_count").default(0).notNull(),
+  lastHitAt: timestamp("last_hit_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_hs_cache_code").on(t.hsCode),
+  index("idx_hs_cache_chapter").on(t.chapter),
+  index("idx_hs_cache_confidence").on(t.confidence),
+]);
+export type HsClassificationCache = typeof hsClassificationCache.$inferSelect;
+export type InsertHsClassificationCache = typeof hsClassificationCache.$inferInsert;
+
+// 6. A/B model divergence log (from Python insider-threat-svc)
+export const abDivergenceLog = pgTable("ab_divergence_log", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 128 }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  productionDecision: varchar("production_decision", { length: 32 }).notNull(), // ALLOW | BLOCK | REVIEW
+  shadowDecision: varchar("shadow_decision", { length: 32 }).notNull(),
+  productionScore: decimal("production_score", { precision: 5, scale: 4 }),
+  shadowScore: decimal("shadow_score", { precision: 5, scale: 4 }),
+  diverged: boolean("diverged").notNull(),
+  featureVector: jsonb("feature_vector").default({}),
+  modelVersionProduction: varchar("model_version_production", { length: 64 }),
+  modelVersionShadow: varchar("model_version_shadow", { length: 64 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ab_div_user").on(t.userId),
+  index("idx_ab_div_diverged").on(t.diverged),
+  index("idx_ab_div_created").on(t.createdAt),
+]);
+export type AbDivergenceLog = typeof abDivergenceLog.$inferSelect;
+export type InsertAbDivergenceLog = typeof abDivergenceLog.$inferInsert;
