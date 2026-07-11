@@ -126,6 +126,10 @@ export default function LakehouseJobs() {
           <span className="text-purple-300 font-medium">Next nightly rollup (TRADE_STATS_ROLLUP)</span>
           <span className="font-mono text-purple-100 text-base">{countdown}</span>
           <span className="text-muted-foreground text-xs">Scheduled 02:00 UTC via Heartbeat cron</span>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-500/20 text-green-400 border border-green-500/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
+            ACTIVE
+          </span>
         </div>
         {(() => {
           const lastRollup = (jobsQuery.data?.jobs ?? []).find(

@@ -267,6 +267,13 @@
       "when": 1783795672794,
       "tag": "0037_amusing_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1783796466836,
+      "tag": "0038_previous_outlaw_kid",
+      "breakpoints": true
     }
   ]
 }

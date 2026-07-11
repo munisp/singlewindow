@@ -1,14 +1,16 @@
 /**
- * Temporal Workflow Runs Admin Page — Sprint v81
+ * Temporal Workflow Runs Admin Page — Sprint v83
  * Monitor, filter, and re-trigger Temporal workflow runs.
+ * v83: Typed retrigger form driven by workflow_input_schemas registry.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +21,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity } from "lucide-react";
+import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -45,12 +47,127 @@ function formatDuration(ms: number | null) {
   return `${(ms / 60_000).toFixed(1)}m`;
 }
 
+/** Render a simple typed form from a JSON Schema object */
+function SchemaForm({
+  schema,
+  value,
+  onChange,
+}: {
+  schema: Record<string, unknown>;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const props = (schema.properties as Record<string, { type?: string; description?: string; default?: unknown; enum?: string[] }>) ?? {};
+  const required = (schema.required as string[]) ?? [];
+
+  // If schema has no properties, fall back to raw textarea
+  if (Object.keys(props).length === 0) {
+    return (
+      <Textarea
+        className="font-mono text-xs h-32"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="{}"
+      />
+    );
+  }
+
+  // Parse current value into an object for field binding
+  let parsed: Record<string, unknown> = {};
+  try { parsed = JSON.parse(value || "{}"); } catch { /* ignore */ }
+
+  const update = (key: string, val: unknown) => {
+    const next = { ...parsed, [key]: val };
+    onChange(JSON.stringify(next, null, 2));
+  };
+
+  return (
+    <div className="space-y-3">
+      {Object.entries(props).map(([key, def]) => {
+        const isRequired = required.includes(key);
+        const currentVal = parsed[key] ?? def.default ?? "";
+        return (
+          <div key={key} className="space-y-1">
+            <label className="text-xs font-medium text-foreground flex items-center gap-1">
+              {key}
+              {isRequired && <span className="text-red-400">*</span>}
+              {def.type && <span className="text-muted-foreground font-normal">({def.type})</span>}
+            </label>
+            {def.description && <p className="text-xs text-muted-foreground">{def.description}</p>}
+            {def.enum ? (
+              <Select
+                value={String(currentVal)}
+                onValueChange={(v) => update(key, v)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {def.enum.map((opt) => (
+                    <SelectItem key={opt} value={opt} className="text-xs">{opt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : def.type === "boolean" ? (
+              <Select
+                value={String(currentVal)}
+                onValueChange={(v) => update(key, v === "true")}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true" className="text-xs">true</SelectItem>
+                  <SelectItem value="false" className="text-xs">false</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : def.type === "integer" || def.type === "number" ? (
+              <input
+                type="number"
+                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm"
+                value={String(currentVal)}
+                onChange={(e) => update(key, def.type === "integer" ? parseInt(e.target.value) : parseFloat(e.target.value))}
+              />
+            ) : def.type === "array" ? (
+              <Textarea
+                className="font-mono text-xs h-16"
+                value={Array.isArray(currentVal) ? JSON.stringify(currentVal) : String(currentVal)}
+                onChange={(e) => {
+                  try { update(key, JSON.parse(e.target.value)); } catch { update(key, e.target.value); }
+                }}
+                placeholder="[]"
+              />
+            ) : (
+              <input
+                type="text"
+                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm"
+                value={String(currentVal)}
+                onChange={(e) => update(key, e.target.value)}
+              />
+            )}
+          </div>
+        );
+      })}
+      <details className="text-xs">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Raw JSON</summary>
+        <Textarea
+          className="font-mono text-xs h-24 mt-1"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </details>
+    </div>
+  );
+}
+
 export default function TemporalWorkflowRuns() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [page, setPage] = useState(0);
   const [retriggerTarget, setRetriggerTarget] = useState<{ runId: string; workflowType: string; input?: Record<string, unknown> } | null>(null);
+  const [editedInput, setEditedInput] = useState<string>("");
+  const [inputError, setInputError] = useState<string | null>(null);
   const PAGE_SIZE = 20;
 
   const statsQuery = trpc.temporalRuns.getWorkflowStats.useQuery();
@@ -62,16 +179,47 @@ export default function TemporalWorkflowRuns() {
     workflowType: typeFilter !== "ALL" ? typeFilter : undefined,
   });
 
+  const schemaQuery = trpc.workflowSchemas.getSchemaForType.useQuery(
+    { workflowType: retriggerTarget?.workflowType ?? "" },
+    { enabled: !!retriggerTarget?.workflowType }
+  );
+
+  // Initialise editedInput when dialog opens
+  useEffect(() => {
+    if (retriggerTarget) {
+      setEditedInput(JSON.stringify(retriggerTarget.input ?? {}, null, 2));
+      setInputError(null);
+    }
+  }, [retriggerTarget?.runId]);
+
   const retriggerMutation = trpc.temporalRuns.retriggerWorkflow.useMutation({
     onSuccess: (data) => {
       toast({ title: "Workflow re-triggered", description: data.message });
       setRetriggerTarget(null);
+      setEditedInput("");
       runsQuery.refetch();
     },
     onError: (err) => {
       toast({ title: "Re-trigger failed", description: err.message, variant: "destructive" });
     },
   });
+
+  const handleConfirmRetrigger = () => {
+    if (!retriggerTarget) return;
+    let parsedInput: Record<string, unknown> | undefined;
+    try {
+      parsedInput = editedInput.trim() ? JSON.parse(editedInput) : undefined;
+      setInputError(null);
+    } catch {
+      setInputError("Invalid JSON — please fix the input before re-triggering.");
+      return;
+    }
+    retriggerMutation.mutate({
+      runId: retriggerTarget.runId,
+      workflowType: retriggerTarget.workflowType,
+      input: parsedInput,
+    });
+  };
 
   const stats = statsQuery.data;
   const runs = runsQuery.data?.runs ?? [];
@@ -226,9 +374,12 @@ export default function TemporalWorkflowRuns() {
         </div>
       )}
 
-      {/* Re-trigger Confirmation AlertDialog */}
-      <AlertDialog open={!!retriggerTarget} onOpenChange={(open) => !open && setRetriggerTarget(null)}>
-        <AlertDialogContent>
+      {/* Re-trigger Confirmation AlertDialog — typed form from schema registry */}
+      <AlertDialog
+        open={!!retriggerTarget}
+        onOpenChange={(open) => { if (!open) { setRetriggerTarget(null); setEditedInput(""); setInputError(null); } }}
+      >
+        <AlertDialogContent className="max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-400" />
@@ -247,14 +398,42 @@ export default function TemporalWorkflowRuns() {
                   <span className="font-medium text-foreground">Original Run ID:</span>{" "}
                   <span className="font-mono">{retriggerTarget?.runId}</span>
                 </div>
-                {retriggerTarget?.input && Object.keys(retriggerTarget.input).length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-foreground mb-1">Input Payload:</p>
-                    <pre className="text-xs bg-muted rounded p-2 overflow-x-auto max-h-32 text-muted-foreground">
-                      {JSON.stringify(retriggerTarget.input, null, 2)}
-                    </pre>
+
+                {/* Schema description */}
+                {schemaQuery.data?.description && (
+                  <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/50 rounded p-2">
+                    <BookOpen className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-400" />
+                    <span>{schemaQuery.data.description}</span>
                   </div>
                 )}
+
+                {/* Typed input form */}
+                <div>
+                  <p className="text-xs font-medium text-foreground mb-2">
+                    Input Payload
+                    {schemaQuery.isLoading && <Loader2 className="w-3 h-3 animate-spin inline ml-1" />}
+                  </p>
+                  {schemaQuery.data?.jsonSchema ? (
+                    <SchemaForm
+                      schema={schemaQuery.data.jsonSchema as Record<string, unknown>}
+                      value={editedInput}
+                      onChange={(v) => { setEditedInput(v); setInputError(null); }}
+                    />
+                  ) : (
+                    <Textarea
+                      className="font-mono text-xs h-32"
+                      value={editedInput}
+                      onChange={(e) => { setEditedInput(e.target.value); setInputError(null); }}
+                      placeholder="{}"
+                    />
+                  )}
+                  {inputError && (
+                    <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                      <XCircle className="w-3 h-3" /> {inputError}
+                    </p>
+                  )}
+                </div>
+
                 <p className="text-xs text-amber-400 flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" />
                   Duplicate runs may cause side effects if the workflow is not idempotent.
@@ -266,12 +445,8 @@ export default function TemporalWorkflowRuns() {
             <AlertDialogCancel disabled={retriggerMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-amber-600 hover:bg-amber-700 text-white"
-              onClick={() => retriggerTarget && retriggerMutation.mutate({
-                runId: retriggerTarget.runId,
-                workflowType: retriggerTarget.workflowType,
-                input: retriggerTarget.input,
-              })}
-              disabled={retriggerMutation.isPending}
+              onClick={handleConfirmRetrigger}
+              disabled={retriggerMutation.isPending || !!inputError}
             >
               {retriggerMutation.isPending
                 ? <><Loader2 className="w-4 h-4 animate-spin mr-2" />Re-triggering…</>

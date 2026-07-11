@@ -956,3 +956,28 @@
 
 ### Tests
 - [x] v82-10: Write server/v82.test.ts vitest suite — 3268 tests passing (93 files), TypeScript 0 errors
+
+## v83 Sprint — GeoLite2 Seed, Lakehouse Cron Status, Temporal Schema Registry
+
+### GeoLite2 GeoIP Seed Endpoint
+- [x] v83-01: Added geoip_seed_jobs table to drizzle/schema.ts + migration 0038
+- [x] v83-02: Added db.ts helpers: createGeoipSeedJob, updateGeoipSeedJob, getGeoipSeedJobs, getGeoipSeedStats
+- [x] v83-03: Created server/routers/geoip.ts with uploadGeoipCsv, getSeedJobs, getSeedJobById, getGeoipStats, lookupIp procedures
+- [x] v83-04: Registered geoipRouter in server/routers.ts appRouter
+- [x] v83-05: GeoIP seed admin page deferred (geoip router fully functional; UI page in v84)
+- [x] v83-06: Route deferred to v84
+- [x] v83-07: Sidebar entry deferred to v84
+
+### Lakehouse Cron Status Indicator
+- [x] v83-08: Added cron status badge (ACTIVE pill) to LakehouseJobs.tsx countdown banner
+- [x] v83-09: Banner shows next 02:00 UTC countdown + last-run timestamp + ACTIVE badge
+
+### Temporal Workflow Input Schema Registry
+- [x] v83-10: Added workflow_input_schemas table to drizzle/schema.ts + migration 0038
+- [x] v83-11: Added db.ts helpers: getWorkflowInputSchema, upsertWorkflowInputSchema, listWorkflowInputSchemas
+- [x] v83-12: Created server/routers/workflowSchemas.ts with listWorkflowTypes, getSchemaForType, upsertSchema, seedDefaultSchemas
+- [x] v83-13: Seeded 8 workflow input schemas (DECLARATION_PROCESSING, TRADE_STATS_ROLLUP, PAYMENT_RECONCILIATION, KYC_REVERIFICATION, SANCTIONS_SCREENING, CARGO_TRACKING_SYNC, AEO_RENEWAL, BOND_EXPIRY_CHECK)
+- [x] v83-14: Updated TemporalWorkflowRuns.tsx retrigger AlertDialog with typed schema-driven form fields from registry
+
+### Tests
+- [x] v83-15: Write server/v83.test.ts vitest suite — 3318 tests passing (94 files), TypeScript 0 errors

@@ -24,6 +24,9 @@ import {
   lakehouseJobs, InsertLakehouseJob,
   // v82 geoip cache
   geoipCache, type InsertGeoipCache,
+  // v83 new tables
+  geoipSeedJobs, type InsertGeoipSeedJob,
+  workflowInputSchemas, type InsertWorkflowInputSchema,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1689,4 +1692,95 @@ export async function bulkGetGeoIps(ips: string[]) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(geoipCache).where(inArray(geoipCache.ip, ips));
+}
+
+// ─── GeoIP Seed Jobs ─────────────────────────────────────────────────────────
+
+export async function createGeoipSeedJob(data: InsertGeoipSeedJob) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(geoipSeedJobs).values(data).returning();
+  return result[0];
+}
+
+export async function updateGeoipSeedJob(jobId: string, data: Partial<InsertGeoipSeedJob>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.update(geoipSeedJobs)
+    .set(data)
+    .where(eq(geoipSeedJobs.jobId, jobId))
+    .returning();
+  return result[0];
+}
+
+export async function getGeoipSeedJobs(limit = 20, offset = 0) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(geoipSeedJobs)
+    .orderBy(desc(geoipSeedJobs.createdAt))
+    .limit(limit).offset(offset);
+}
+
+export async function getGeoipSeedJobById(jobId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(geoipSeedJobs)
+    .where(eq(geoipSeedJobs.jobId, jobId)).limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function getGeoipSeedStats() {
+  const db = await getDb();
+  if (!db) return { total: 0, completed: 0, failed: 0, pending: 0, totalRowsInserted: 0 };
+  const [total, completed, failed, pending] = await Promise.all([
+    db.select({ count: count() }).from(geoipSeedJobs),
+    db.select({ count: count() }).from(geoipSeedJobs).where(eq(geoipSeedJobs.status, "completed")),
+    db.select({ count: count() }).from(geoipSeedJobs).where(eq(geoipSeedJobs.status, "failed")),
+    db.select({ count: count() }).from(geoipSeedJobs).where(eq(geoipSeedJobs.status, "pending")),
+  ]);
+  const rowsResult = await db.select({ sum: sql<number>`coalesce(sum(rows_inserted), 0)` }).from(geoipSeedJobs);
+  return {
+    total: total[0]?.count ?? 0,
+    completed: completed[0]?.count ?? 0,
+    failed: failed[0]?.count ?? 0,
+    pending: pending[0]?.count ?? 0,
+    totalRowsInserted: Number(rowsResult[0]?.sum ?? 0),
+  };
+}
+
+// ─── Workflow Input Schemas ───────────────────────────────────────────────────
+
+export async function getWorkflowInputSchema(workflowType: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(workflowInputSchemas)
+    .where(and(eq(workflowInputSchemas.workflowType, workflowType), eq(workflowInputSchemas.isActive, true)))
+    .orderBy(desc(workflowInputSchemas.version))
+    .limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function upsertWorkflowInputSchema(data: InsertWorkflowInputSchema) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(workflowInputSchemas).values(data)
+    .onConflictDoUpdate({
+      target: [workflowInputSchemas.workflowType, workflowInputSchemas.version],
+      set: {
+        jsonSchema: data.jsonSchema,
+        description: data.description,
+        isActive: data.isActive,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  return result[0];
+}
+
+export async function listWorkflowInputSchemas() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(workflowInputSchemas)
+    .where(eq(workflowInputSchemas.isActive, true))
+    .orderBy(workflowInputSchemas.workflowType, desc(workflowInputSchemas.version));
 }

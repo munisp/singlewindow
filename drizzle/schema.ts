@@ -2610,3 +2610,44 @@ export const geoipCache = pgTable("geoip_cache", {
 ]);
 export type GeoipCache = typeof geoipCache.$inferSelect;
 export type InsertGeoipCache = typeof geoipCache.$inferInsert;
+
+// ─── GeoIP Seed Jobs ─────────────────────────────────────────────────────────
+export const geoipSeedJobs = pgTable("geoip_seed_jobs", {
+  id: serial("id").primaryKey(),
+  jobId: varchar("job_id", { length: 128 }).unique().notNull(),
+  filename: varchar("filename", { length: 256 }).notNull(),
+  s3Key: text("s3_key"),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  rowsInserted: integer("rows_inserted").default(0),
+  rowsSkipped: integer("rows_skipped").default(0),
+  rowsTotal: integer("rows_total").default(0),
+  errorMessage: text("error_message"),
+  triggeredBy: varchar("triggered_by", { length: 64 }),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_geoip_seed_status").on(t.status),
+  index("idx_geoip_seed_created").on(t.createdAt),
+]);
+export type GeoipSeedJob = typeof geoipSeedJobs.$inferSelect;
+export type InsertGeoipSeedJob = typeof geoipSeedJobs.$inferInsert;
+
+// ─── Workflow Input Schemas ───────────────────────────────────────────────────
+export const workflowInputSchemas = pgTable("workflow_input_schemas", {
+  id: serial("id").primaryKey(),
+  workflowType: varchar("workflow_type", { length: 128 }).notNull(),
+  version: integer("version").notNull().default(1),
+  jsonSchema: jsonb("json_schema").notNull().default({}),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_workflow_schemas_type").on(t.workflowType),
+  index("idx_workflow_schemas_active").on(t.isActive),
+  unique("uq_workflow_schema_type_version").on(t.workflowType, t.version),
+]);
+export type WorkflowInputSchema = typeof workflowInputSchemas.$inferSelect;
+export type InsertWorkflowInputSchema = typeof workflowInputSchemas.$inferInsert;
