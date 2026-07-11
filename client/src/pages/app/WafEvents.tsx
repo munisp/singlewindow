@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, RefreshCw, ShieldAlert, ShieldCheck, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { Loader2, RefreshCw, ShieldAlert, ShieldCheck, Eye, EyeOff, AlertTriangle, MapPin, Network, Globe, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: "bg-red-600/20 text-red-400 border-red-600/40",
@@ -32,7 +33,13 @@ export default function WafEvents() {
   const [ackedFilter, setAckedFilter] = useState<string>("ALL");
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [detailEvent, setDetailEvent] = useState<(typeof events)[0] | null>(null);
   const PAGE_SIZE = 25;
+
+  const geoLookupQuery = trpc.geoip.lookupIp.useQuery(
+    { ip: detailEvent?.sourceIp ?? "" },
+    { enabled: !!detailEvent?.sourceIp }
+  );
 
   const statsQuery = trpc.openAppSec.getWafStats.useQuery();
   const attackTypesQuery = trpc.openAppSec.getAttackTypes.useQuery();
@@ -204,7 +211,8 @@ export default function WafEvents() {
                 events.map((evt) => (
                   <TableRow
                     key={evt.id}
-                    className={`border-border hover:bg-muted/30 ${evt.isAcknowledged ? "opacity-50" : ""}`}
+                    className={`border-border hover:bg-muted/30 cursor-pointer ${evt.isAcknowledged ? "opacity-50" : ""}`}
+                    onClick={() => setDetailEvent(evt)}
                   >
                     <TableCell>
                       {!evt.isAcknowledged && (
@@ -287,6 +295,117 @@ export default function WafEvents() {
           <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
       )}
+      {/* WAF Event Detail Sheet */}
+      <Sheet open={!!detailEvent} onOpenChange={(open) => { if (!open) setDetailEvent(null); }}>
+        <SheetContent className="w-[420px] sm:w-[480px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-red-400" />
+              WAF Event Detail
+            </SheetTitle>
+            <SheetDescription>
+              Full geolocation and attack metadata for this event.
+            </SheetDescription>
+          </SheetHeader>
+
+          {detailEvent && (
+            <div className="mt-6 space-y-6">
+              {/* Attack Info */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400" /> Attack Details
+                </h3>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    { label: "Attack Type", value: detailEvent.attackType.replace(/_/g, " ") },
+                    { label: "Severity", value: (
+                      <Badge variant="outline" className={`text-xs ${SEVERITY_COLORS[detailEvent.severity] ?? ""}`}>
+                        {detailEvent.severity.toUpperCase()}
+                      </Badge>
+                    )},
+                    { label: "Action", value: (
+                      <span className={`font-medium px-1.5 py-0.5 rounded ${ACTION_COLORS[detailEvent.action] ?? ""}`}>
+                        {detailEvent.action}
+                      </span>
+                    )},
+                    { label: "Rule ID", value: <span className="font-mono">{(detailEvent as any).ruleId ?? "—"}</span> },
+                    { label: "Target Path", value: <span className="font-mono break-all">{detailEvent.targetPath ?? "—"}</span> },
+                    { label: "Timestamp", value: new Date(detailEvent.createdAt).toLocaleString() },
+                    { label: "Acknowledged", value: detailEvent.isAcknowledged ? "Yes" : "No" },
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <p className="text-muted-foreground">{label}</p>
+                      <div className="font-medium text-foreground mt-0.5">{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Source IP */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Network className="w-4 h-4 text-blue-400" /> Source IP
+                </h3>
+                <p className="font-mono text-sm text-foreground">{detailEvent.sourceIp}</p>
+              </div>
+
+              {/* Geolocation */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-green-400" /> Geolocation
+                  {geoLookupQuery.isFetching && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+                </h3>
+                {geoLookupQuery.data ? (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    {[
+                      { label: "Country", value: geoLookupQuery.data.country
+                        ? `${(geoLookupQuery.data as any).countryFlag ?? ""} ${geoLookupQuery.data.country}`
+                        : "Unknown" },
+                      { label: "Country Code", value: geoLookupQuery.data.countryCode ?? "—" },
+                      { label: "City", value: geoLookupQuery.data.city ?? "—" },
+                      { label: "ASN", value: geoLookupQuery.data.asn
+                        ? <span className="font-mono">{geoLookupQuery.data.asn}</span>
+                        : "—" },
+                      { label: "ASN Org", value: geoLookupQuery.data.asnOrg ?? "—" },
+                      { label: "Last Updated", value: (geoLookupQuery.data as any).updatedAt
+                        ? new Date((geoLookupQuery.data as any).updatedAt).toLocaleDateString()
+                        : "—" },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <p className="text-muted-foreground">{label}</p>
+                        <div className="font-medium text-foreground mt-0.5">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : geoLookupQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading geolocation…</p>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Info className="w-3.5 h-3.5" />
+                    No geolocation data cached for this IP. Seed the GeoIP database to enable lookups.
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              {!detailEvent.isAcknowledged && (
+                <Button
+                  className="w-full"
+                  variant="outline"
+                  onClick={() => {
+                    ackMutation.mutate({ id: detailEvent.id });
+                    setDetailEvent(null);
+                  }}
+                  disabled={ackMutation.isPending}
+                >
+                  <ShieldCheck className="w-4 h-4 mr-2" />
+                  Acknowledge Event
+                </Button>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

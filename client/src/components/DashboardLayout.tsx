@@ -227,6 +227,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Activity, label: "Temporal Workflow Runs", path: "/app/admin/temporal-runs" },
           { icon: ShieldAlert, label: "WAF Security Events", path: "/app/admin/waf-events" },
           { icon: Database, label: "Lakehouse Jobs", path: "/app/admin/lakehouse-jobs" },
+          { icon: Globe, label: "GeoIP Seed", path: "/app/admin/geoip-seed" },
         ],
       },
       common,

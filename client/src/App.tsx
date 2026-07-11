@@ -120,6 +120,7 @@ const AdminBatchSeed = lazy(() => import('./pages/app/AdminBatchSeed'));
 const TemporalWorkflowRuns = lazy(() => import('./pages/app/TemporalWorkflowRuns'));
 const WafEvents = lazy(() => import('./pages/app/WafEvents'));
 const LakehouseJobs = lazy(() => import('./pages/app/LakehouseJobs'));
+const GeoipSeed = lazy(() => import('./pages/app/GeoipSeed'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -505,6 +506,9 @@ function Router() {
       </Route>
       <Route path="/app/admin/lakehouse-jobs">
         <AdminGuard><Suspense fallback={<LazyFallback />}><LakehouseJobs /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/geoip-seed">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><GeoipSeed /></Suspense></AdminGuard>
       </Route>
 
       {/* 404 */}

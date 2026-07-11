@@ -21,7 +21,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen } from "lucide-react";
+import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen, Save, RotateCcw } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -160,8 +162,92 @@ function SchemaForm({
   );
 }
 
+/** Schema editor state for a single workflow type */
+function SchemaEditorRow({ schema, onSave }: {
+  schema: { workflowType: string; description?: string | null; jsonSchema: unknown; version: number; isActive: boolean };
+  onSave: () => void;
+}) {
+  const { toast } = useToast();
+  const [draft, setDraft] = useState(JSON.stringify(schema.jsonSchema, null, 2));
+  const [desc, setDesc] = useState(schema.description ?? "");
+  const [version, setVersion] = useState(String(schema.version));
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  const isDirty = draft !== JSON.stringify(schema.jsonSchema, null, 2) || desc !== (schema.description ?? "") || version !== String(schema.version);
+
+  const upsertMutation = trpc.workflowSchemas.upsertSchema.useMutation({
+    onSuccess: () => {
+      toast({ title: "Schema saved", description: `${schema.workflowType} v${version} updated.` });
+      onSave();
+    },
+    onError: (err) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
+  });
+
+  const handleSave = () => {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(draft);
+      setJsonError(null);
+    } catch {
+      setJsonError("Invalid JSON");
+      return;
+    }
+    upsertMutation.mutate({
+      workflowType: schema.workflowType,
+      jsonSchema: parsed,
+      description: desc || undefined,
+      version: parseInt(version) || schema.version,
+      isActive: schema.isActive,
+    });
+  };
+
+  return (
+    <Card className="bg-card border-border">
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-mono text-sm font-semibold text-foreground">{schema.workflowType}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{desc || "No description"}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs">
+              v{schema.version}
+            </Badge>
+            {isDirty && (
+              <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={upsertMutation.isPending}>
+                {upsertMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
+                Save
+              </Button>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Description</label>
+            <Input className="h-8 text-xs" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Version (new version = new row)</label>
+            <Input className="h-8 text-xs" type="number" value={version} onChange={(e) => setVersion(e.target.value)} />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">JSON Schema</label>
+          <Textarea
+            className={`font-mono text-xs h-40 ${jsonError ? "border-red-500" : ""}`}
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); setJsonError(null); }}
+          />
+          {jsonError && <p className="text-xs text-red-400">{jsonError}</p>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function TemporalWorkflowRuns() {
   const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState("runs");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [page, setPage] = useState(0);
@@ -221,6 +307,10 @@ export default function TemporalWorkflowRuns() {
     });
   };
 
+  const schemasQuery = trpc.workflowSchemas.listWorkflowTypes.useQuery(undefined, {
+    enabled: activeTab === "schemas",
+  });
+
   const stats = statsQuery.data;
   const runs = runsQuery.data?.runs ?? [];
   const total = runsQuery.data?.total ?? 0;
@@ -240,6 +330,13 @@ export default function TemporalWorkflowRuns() {
         </Button>
       </div>
 
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="runs">Workflow Runs</TabsTrigger>
+          <TabsTrigger value="schemas">Manage Schemas</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="runs" className="space-y-4 mt-4">
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
@@ -373,6 +470,41 @@ export default function TemporalWorkflowRuns() {
           <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</Button>
         </div>
       )}
+
+        </TabsContent>
+
+        <TabsContent value="schemas" className="space-y-4 mt-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Workflow Input Schema Registry</h2>
+              <p className="text-sm text-muted-foreground">Edit JSON schemas that drive the typed retrigger form. Increment version to create a new revision.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => schemasQuery.refetch()} disabled={schemasQuery.isFetching}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${schemasQuery.isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
+          {schemasQuery.isLoading ? (
+            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
+          ) : (schemasQuery.data ?? []).length === 0 ? (
+            <Card className="bg-card border-border">
+              <CardContent className="py-12 text-center text-muted-foreground">
+                No schemas registered. Schemas are seeded automatically on first use.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-4">
+              {(schemasQuery.data ?? []).map((s) => (
+                <SchemaEditorRow
+                  key={s.workflowType}
+                  schema={s}
+                  onSave={() => schemasQuery.refetch()}
+                />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Re-trigger Confirmation AlertDialog — typed form from schema registry */}
       <AlertDialog

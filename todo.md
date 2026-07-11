@@ -981,3 +981,21 @@
 
 ### Tests
 - [x] v83-15: Write server/v83.test.ts vitest suite — 3318 tests passing (94 files), TypeScript 0 errors
+
+## v84 Sprint — GeoIP Seed UI, Workflow Schema Editor, WAF Detail Drawer
+
+### GeoIP Seed Admin UI Page
+- [x] v84-01: Created client/src/pages/app/GeoipSeed.tsx (S3 key input + uploadGeoipCsv mutation + seed-jobs table)
+- [x] v84-02: Added lazy import + route /app/admin/geoip-seed in App.tsx
+- [x] v84-03: Added "GeoIP Seed" sidebar entry to DashboardLayout.tsx
+
+### Workflow Schema Editor Tab
+- [x] v84-04: Added "Manage Schemas" tab to TemporalWorkflowRuns.tsx with schema list + JSON textarea editor
+- [x] v84-05: Wired upsertSchema mutation with save/cancel actions and validation
+
+### WAF Event Detail Drawer with GeoIP Lookup
+- [x] v84-06: Added click-row Sheet drawer to WafEvents.tsx showing full attack details + source IP
+- [x] v84-07: Fetches geoip.lookupIp in drawer and displays country flag, city, ASN, org, last-updated
+
+### Tests
+- [x] v84-08: Write server/v84.test.ts vitest suite — 3361 tests passing (95 files), TypeScript 0 errors
