@@ -42,7 +42,19 @@ import {
   CheckCircle,
   Clock,
   BarChart2,
+  Download,
+  Link2,
+  GitMerge,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -133,6 +145,32 @@ export default function FraudNetwork() {
   const [filterType, setFilterType] = useState<NodeType | "all">("all");
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Export graph state
+  const [exportFormat, setExportFormat] = useState<"json" | "graphml" | "gexf">("json");
+  const [exportDepth, setExportDepth] = useState(2);
+  const utils = trpc.useUtils();
+
+  // Link cases state
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkCaseId, setLinkCaseId] = useState("");
+  const [linkLinkedCaseId, setLinkLinkedCaseId] = useState("");
+  const [linkType, setLinkType] = useState<"same_trader" | "same_vessel" | "same_route" | "same_method" | "related_network">("same_trader");
+  const [linkConfidence, setLinkConfidence] = useState(0.8);
+  const [linkNotes, setLinkNotes] = useState("");
+
+  const linkCasesMutation = trpc.fraudCases.linkCases.useMutation({
+    onSuccess: (result) => {
+      toast.success(result.created ? "Cases linked successfully" : "Case link updated", {
+        description: `Link type: ${result.link.linkType.replace(/_/g, " ")} · Confidence: ${((result.link.confidence ?? 0) * 100).toFixed(0)}%`,
+      });
+      setLinkDialogOpen(false);
+      setLinkCaseId("");
+      setLinkLinkedCaseId("");
+      setLinkNotes("");
+    },
+    onError: (err: { message: string }) => toast.error("Failed to link cases", { description: err.message }),
+  });
 
   // Investigation data from tRPC
   const investigationQuery = trpc.knowledgeGraph.getTraderInvestigation.useQuery(
@@ -387,6 +425,34 @@ export default function FraudNetwork() {
     }
   };
 
+  const handleExportGraph = async () => {
+    try {
+      const selectedCaseId = selectedNode?.id.startsWith("case-") ? parseInt(selectedNode.id.replace("case-", ""), 10) : undefined;
+      const selectedTraderId = selectedNode?.type === "trader" ? parseInt(selectedNode.id, 10) : undefined;
+      const result = await utils.fraudCases.exportNetworkGraph.fetch({
+        caseId: selectedCaseId,
+        traderId: selectedTraderId,
+        depth: exportDepth,
+        format: exportFormat,
+      });
+      const content = exportFormat === "json"
+        ? JSON.stringify(result, null, 2)
+        : (result as { formatHint?: string }).formatHint ?? JSON.stringify(result, null, 2);
+      const blob = new Blob([content], { type: exportFormat === "json" ? "application/json" : "text/xml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fraud-network-${Date.now()}.${exportFormat}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Graph exported as ${exportFormat.toUpperCase()}`, {
+        description: `${(result as { nodes: unknown[] }).nodes?.length ?? 0} nodes, ${(result as { edges: unknown[] }).edges?.length ?? 0} edges`,
+      });
+    } catch (err: unknown) {
+      toast.error("Export failed", { description: (err as { message: string }).message });
+    }
+  };
+
   const handleFit = () => {
     if (svgRef.current && zoomRef.current && containerRef.current) {
       const width = containerRef.current.clientWidth;
@@ -420,16 +486,57 @@ export default function FraudNetwork() {
                 Showing sample data — live data service offline
               </Badge>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="gap-2"
-            >
-              <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
-              Refresh
-            </Button>
+            <div className="flex items-center gap-2">
+              {/* Export controls */}
+              <Select value={exportFormat} onValueChange={(v) => setExportFormat(v as "json" | "graphml" | "gexf")}>
+                <SelectTrigger className="h-8 w-24 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="json">JSON</SelectItem>
+                  <SelectItem value="graphml">GraphML</SelectItem>
+                  <SelectItem value="gexf">GEXF</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={String(exportDepth)} onValueChange={(v) => setExportDepth(Number(v))}>
+                <SelectTrigger className="h-8 w-24 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Depth 1</SelectItem>
+                  <SelectItem value="2">Depth 2</SelectItem>
+                  <SelectItem value="3">Depth 3</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportGraph}
+                className="gap-2"
+              >
+                <Download size={14} />
+                Export
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLinkDialogOpen(true)}
+                className="gap-2"
+              >
+                <Link2 size={14} />
+                Link Cases
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="gap-2"
+              >
+                <RefreshCw size={14} className={isFetching ? "animate-spin" : ""} />
+                Refresh
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -922,6 +1029,106 @@ export default function FraudNetwork() {
           </div>
         </div>
       </div>
+      {/* Link Cases Dialog */}
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitMerge size={18} className="text-primary" />
+              Link Fraud Cases
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Case ID</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 42"
+                  value={linkCaseId}
+                  onChange={(e) => setLinkCaseId(e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Linked Case ID</Label>
+                <Input
+                  type="number"
+                  placeholder="e.g. 87"
+                  value={linkLinkedCaseId}
+                  onChange={(e) => setLinkLinkedCaseId(e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Relationship Type</Label>
+              <Select value={linkType} onValueChange={(v) => setLinkType(v as typeof linkType)}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="same_trader">Same Trader</SelectItem>
+                  <SelectItem value="same_vessel">Same Vessel</SelectItem>
+                  <SelectItem value="same_route">Same Route</SelectItem>
+                  <SelectItem value="same_method">Same Method</SelectItem>
+                  <SelectItem value="related_network">Related Network</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Confidence: {(linkConfidence * 100).toFixed(0)}%</Label>
+              <Slider
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={[linkConfidence]}
+                onValueChange={([v]) => setLinkConfidence(v)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Notes (optional)</Label>
+              <Textarea
+                placeholder="Analyst notes about this connection…"
+                value={linkNotes}
+                onChange={(e) => setLinkNotes(e.target.value)}
+                className="text-sm resize-none"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setLinkDialogOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={!linkCaseId || !linkLinkedCaseId || linkCasesMutation.isPending}
+              onClick={() => {
+                const caseIdNum = parseInt(linkCaseId, 10);
+                const linkedCaseIdNum = parseInt(linkLinkedCaseId, 10);
+                if (isNaN(caseIdNum) || isNaN(linkedCaseIdNum)) {
+                  toast.error("Please enter valid numeric case IDs");
+                  return;
+                }
+                if (caseIdNum === linkedCaseIdNum) {
+                  toast.error("A case cannot be linked to itself");
+                  return;
+                }
+                linkCasesMutation.mutate({
+                  caseId: caseIdNum,
+                  linkedCaseId: linkedCaseIdNum,
+                  linkType,
+                  confidence: linkConfidence,
+                  notes: linkNotes || undefined,
+                });
+              }}
+              className="gap-1"
+            >
+              {linkCasesMutation.isPending ? <RefreshCw size={12} className="animate-spin" /> : <Link2 size={12} />}
+              Link Cases
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

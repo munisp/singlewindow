@@ -83,6 +83,10 @@ import {
   Building,
   GraduationCap,
   Database,
+  Lock,
+  HeartPulse,
+  Palette,
+  ArrowLeftRight,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -217,6 +221,8 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ClipboardList, label: "Audit Log", path: "/app/admin/audit-log" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
           { icon: Building, label: "Tenant Management", path: "/app/admin/tenants-mgmt" },
+          { icon: Palette, label: "Tenant Branding", path: "/app/admin/tenant-branding" },
+          { icon: ArrowLeftRight, label: "Workload Rebalancer", path: "/app/admin/workload-rebalancer" },
           { icon: Download, label: "Bulk Data Export", path: "/app/admin/bulk-export" },
           { icon: Webhook, label: "Webhook Logs", path: "/app/developer/webhooks" },
           { icon: ShieldX, label: "Security Alerts", path: "/app/security/alerts" },
@@ -228,6 +234,11 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ShieldAlert, label: "WAF Security Events", path: "/app/admin/waf-events" },
           { icon: Database, label: "Lakehouse Jobs", path: "/app/admin/lakehouse-jobs" },
           { icon: Globe, label: "GeoIP Seed", path: "/app/admin/geoip-seed" },
+          { icon: Zap, label: "Fluvio Topic Offsets", path: "/app/admin/fluvio-offsets" },
+          { icon: Shield, label: "APISIX Route Audit", path: "/app/admin/apisix-audit" },
+          { icon: Users, label: "Keycloak Sessions", path: "/app/admin/keycloak-sessions" },
+          { icon: Lock, label: "Permify Audit Log", path: "/app/admin/permify-audit" },
+          { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
         ],
       },
       common,

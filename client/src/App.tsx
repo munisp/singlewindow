@@ -110,6 +110,8 @@ const BulkExport = lazy(() => import('./pages/app/BulkExport'));
 const WebhookLogs = lazy(() => import('./pages/app/WebhookLogs'));
 const SecurityAlerts = lazy(() => import('./pages/app/SecurityAlerts'));
 const TenantManagement = lazy(() => import('./pages/app/TenantManagement'));
+const TenantBranding = lazy(() => import('./pages/app/TenantBranding'));
+const OfficerWorkloadRebalancer = lazy(() => import('./pages/app/OfficerWorkloadRebalancer'));
 const OnboardingProgress = lazy(() => import('./pages/app/OnboardingProgress'));
 // v67 — Insider Threat Prevention & Batch Seed
 const SecurityMonitor = lazy(() => import('./pages/app/SecurityMonitor'));
@@ -121,6 +123,12 @@ const TemporalWorkflowRuns = lazy(() => import('./pages/app/TemporalWorkflowRuns
 const WafEvents = lazy(() => import('./pages/app/WafEvents'));
 const LakehouseJobs = lazy(() => import('./pages/app/LakehouseJobs'));
 const GeoipSeed = lazy(() => import('./pages/app/GeoipSeed'));
+// v88-v91, v104 — Middleware & Platform pages
+const FluvioTopicOffsets = lazy(() => import('./pages/FluvioTopicOffsets'));
+const ApisixRouteAudit = lazy(() => import('./pages/ApisixRouteAudit'));
+const KeycloakSessions = lazy(() => import('./pages/KeycloakSessions'));
+const PermifyAuditLog = lazy(() => import('./pages/PermifyAuditLog'));
+const PlatformHealthScorecard = lazy(() => import('./pages/PlatformHealthScorecard'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -477,6 +485,12 @@ function Router() {
       <Route path="/app/admin/tenants-mgmt">
         <Suspense fallback={<LazyFallback />}><TenantManagement /></Suspense>
       </Route>
+      <Route path="/app/admin/tenant-branding">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><TenantBranding /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/workload-rebalancer">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><OfficerWorkloadRebalancer /></Suspense></AdminGuard>
+      </Route>
       <Route path="/app/onboarding/progress">
         <Suspense fallback={<LazyFallback />}><OnboardingProgress /></Suspense>
       </Route>
@@ -509,6 +523,21 @@ function Router() {
       </Route>
       <Route path="/app/admin/geoip-seed">
         <AdminGuard><Suspense fallback={<LazyFallback />}><GeoipSeed /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/fluvio-offsets">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><FluvioTopicOffsets /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/apisix-audit">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><ApisixRouteAudit /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/keycloak-sessions">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><KeycloakSessions /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/permify-audit">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><PermifyAuditLog /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/platform-health">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><PlatformHealthScorecard /></Suspense></AdminGuard>
       </Route>
 
       {/* 404 */}
