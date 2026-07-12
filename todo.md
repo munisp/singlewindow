@@ -1362,3 +1362,25 @@
 - [x] v126-3: Enhance OfficerWorkload.tsx with getTeamSummary + autoRebalanceWorkload integration
 - [x] v126-4: Add TenantBranding route to App.tsx and sidebar entry to DashboardLayout.tsx
 - [x] v126-5: Run TypeScript check, tests, checkpoint, push to GitHub
+
+## v127 Sprint — Heartbeat Cron Wiring
+- [x] v127-1: Create server/scheduled/slaBreachEscalation.ts handler (escalates open SLA breaches > 30 min overdue)
+- [x] v127-2: Create server/scheduled/documentVaultExpiry.ts handler (alerts on docs expiring within 30 days)
+- [x] v127-3: Register both handlers as POST routes in server/_core/index.ts
+- [x] v127-4: Add taskUid field to manusTypes.ts GetUserInfoWithJwtResponse for cron context support
+- [x] v127-5: Create heartbeatJobs router with registerJob, registerAllJobs, toggleJob, deleteJob, triggerBondExpiryAlerts, triggerPostAuditReminders, triggerSlaAutoEscalation, getJobDefinitions procedures
+## v128 Sprint — Risk Model A/B Test Management Tab
+- [x] v128-1: Add A/B Test tab to RiskModelDashboard.tsx listing active experiments
+- [x] v128-2: Display champion vs. challenger accuracy metrics in A/B test tab
+- [x] v128-3: Wire concludeAbTest mutation to promote challenger to champion
+- [x] v128-4: Verify getAbTests, createAbTest, concludeAbTest, getAbTestResults procedures in riskModel router
+## v129 Sprint — Vision Batch Analysis Tracker
+- [x] v129-1: Create VisionBatchAnalysis.tsx page with job submission form (multi-image URLs, priority selector)
+- [x] v129-2: Add polling for batch job status with per-image results table
+- [x] v129-3: Add route /app/vision-batch to App.tsx
+- [x] v129-4: Add ScanLine sidebar entry to DashboardLayout.tsx
+## v127-v129 Completion
+- [x] v129-5: Fix TypeScript error in OfficerWorkloadRebalancer.tsx (useEffect before declaration)
+- [x] v129-6: Write server/v127-v129.test.ts vitest suite (28 tests)
+- [x] v129-7: Run full test suite — 3,572 tests pass across 100 files
+- [x] v129-8: Save checkpoint and push to GitHub

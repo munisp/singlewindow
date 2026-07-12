@@ -129,6 +129,7 @@ const ApisixRouteAudit = lazy(() => import('./pages/ApisixRouteAudit'));
 const KeycloakSessions = lazy(() => import('./pages/KeycloakSessions'));
 const PermifyAuditLog = lazy(() => import('./pages/PermifyAuditLog'));
 const PlatformHealthScorecard = lazy(() => import('./pages/PlatformHealthScorecard'));
+const VisionBatchAnalysis = lazy(() => import('./pages/app/VisionBatchAnalysis'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -184,6 +185,9 @@ function Router() {
       <Route path="/app/customs/queue"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
       <Route path="/app/customs/declarations/:id"><CustomsGuard><DeclarationDetail /></CustomsGuard></Route>
       <Route path="/app/customs/vision"><CustomsGuard><VisionAnalysis /></CustomsGuard></Route>
+      <Route path="/app/customs/vision-batch">
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><VisionBatchAnalysis /></Suspense></CustomsGuard>
+      </Route>
       <Route path="/app/customs/risk">
         <CustomsGuard><Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense></CustomsGuard>
       </Route>

@@ -151,6 +151,14 @@ export default function FraudNetwork() {
   const [exportDepth, setExportDepth] = useState(2);
   const utils = trpc.useUtils();
 
+  // Hover tooltip state
+  const [tooltip, setTooltip] = useState<{
+    x: number;
+    y: number;
+    node?: GraphNode;
+    edge?: { type: string; weight: number; sourceLabel: string; targetLabel: string; properties: Record<string, unknown> };
+  } | null>(null);
+
   // Link cases state
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkCaseId, setLinkCaseId] = useState("");
@@ -285,9 +293,28 @@ export default function FraudNetwork() {
       .style("cursor", "pointer")
       .on("mouseover", function (event, d) {
         d3.select(this).attr("stroke-opacity", 1).attr("stroke-width", (d.weight ?? 0) * 6 + 1);
+        const rect = container.getBoundingClientRect();
+        const srcNode = typeof d.source === "string" ? filteredNodes.find(n => n.id === d.source) : d.source as GraphNode;
+        const tgtNode = typeof d.target === "string" ? filteredNodes.find(n => n.id === d.target) : d.target as GraphNode;
+        setTooltip({
+          x: event.clientX - rect.left + 12,
+          y: event.clientY - rect.top - 8,
+          edge: {
+            type: d.type,
+            weight: d.weight ?? 0,
+            sourceLabel: srcNode?.label ?? String(d.source),
+            targetLabel: tgtNode?.label ?? String(d.target),
+            properties: d.properties ?? {},
+          },
+        });
+      })
+      .on("mousemove", function (event) {
+        const rect = container.getBoundingClientRect();
+        setTooltip(prev => prev ? { ...prev, x: event.clientX - rect.left + 12, y: event.clientY - rect.top - 8 } : null);
       })
       .on("mouseout", function (event, d) {
         d3.select(this).attr("stroke-opacity", 0.6).attr("stroke-width", Math.max(1, (d.weight ?? 0) * 4));
+        setTooltip(null);
       });
 
     // Edge labels
@@ -313,10 +340,28 @@ export default function FraudNetwork() {
       .on("click", (event, d) => {
         event.stopPropagation();
         setSelectedNode(d);
+        setTooltip(null);
         // Open investigation panel for trader nodes
         if (d.type === "trader") {
           setInvestigationTraderId(d.id);
         }
+      })
+      .on("mouseover", function (event, d) {
+        d3.select(this).select("circle").attr("stroke", "#f8fafc").attr("stroke-width", 3);
+        const rect = container.getBoundingClientRect();
+        setTooltip({
+          x: event.clientX - rect.left + 14,
+          y: event.clientY - rect.top - 14,
+          node: d,
+        });
+      })
+      .on("mousemove", function (event) {
+        const rect = container.getBoundingClientRect();
+        setTooltip(prev => prev ? { ...prev, x: event.clientX - rect.left + 14, y: event.clientY - rect.top - 14 } : null);
+      })
+      .on("mouseout", function () {
+        d3.select(this).select("circle").attr("stroke", "#1e293b").attr("stroke-width", 2);
+        setTooltip(null);
       })
       .call(
         d3
@@ -396,7 +441,7 @@ export default function FraudNetwork() {
     simulationRef.current = simulation;
 
     // Deselect on background click
-    svg.on("click", () => setSelectedNode(null));
+    svg.on("click", () => { setSelectedNode(null); setTooltip(null); });
   }, [data, filterType]);
 
   useEffect(() => {
@@ -694,6 +739,72 @@ export default function FraudNetwork() {
                   </div>
                 )}
                 <svg ref={svgRef} className="w-full h-full" />
+
+                {/* Hover Tooltip */}
+                {tooltip && (
+                  <div
+                    className="absolute z-20 pointer-events-none"
+                    style={{ left: tooltip.x, top: tooltip.y, maxWidth: 260 }}
+                  >
+                    <div className="bg-slate-900/95 border border-slate-600 rounded-lg shadow-xl p-3 text-xs space-y-2">
+                      {tooltip.node && (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground">{TYPE_ICONS[tooltip.node.type]}</span>
+                            <span className="font-semibold text-foreground truncate max-w-[160px]">{tooltip.node.label}</span>
+                            <span
+                              className="ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold"
+                              style={{ backgroundColor: riskColor(tooltip.node.riskScore) + "33", color: riskColor(tooltip.node.riskScore) }}
+                            >
+                              {riskLabel(tooltip.node.riskScore)}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                            <div className="text-muted-foreground">Type</div>
+                            <div className="text-foreground font-medium">{TYPE_LABELS[tooltip.node.type]}</div>
+                            <div className="text-muted-foreground">Risk Score</div>
+                            <div className="font-mono" style={{ color: riskColor(tooltip.node.riskScore) }}>
+                              {(tooltip.node.riskScore * 100).toFixed(1)}%
+                            </div>
+                            {Object.entries(tooltip.node.properties).slice(0, 4).map(([k, v]) => (
+                              <>
+                                <div key={k + "k"} className="text-muted-foreground capitalize truncate">{k.replace(/_/g, " ")}</div>
+                                <div key={k + "v"} className="text-foreground truncate">{String(v)}</div>
+                              </>
+                            ))}
+                          </div>
+                          <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-700">
+                            Click to select · Drag to reposition
+                          </div>
+                        </>
+                      )}
+                      {tooltip.edge && (
+                        <>
+                          <div className="font-semibold text-foreground">
+                            Connection: <span className="text-primary">{tooltip.edge.type.replace(/_/g, " ")}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                            <div className="text-muted-foreground">From</div>
+                            <div className="text-foreground truncate max-w-[120px]">{tooltip.edge.sourceLabel}</div>
+                            <div className="text-muted-foreground">To</div>
+                            <div className="text-foreground truncate max-w-[120px]">{tooltip.edge.targetLabel}</div>
+                            <div className="text-muted-foreground">Weight</div>
+                            <div className="font-mono" style={{ color: riskColor(tooltip.edge.weight) }}>
+                              {(tooltip.edge.weight * 100).toFixed(1)}%
+                            </div>
+                            {Object.entries(tooltip.edge.properties).slice(0, 3).map(([k, v]) => (
+                              <>
+                                <div key={k + "k"} className="text-muted-foreground capitalize truncate">{k.replace(/_/g, " ")}</div>
+                                <div key={k + "v"} className="text-foreground truncate">{String(v)}</div>
+                              </>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="absolute bottom-3 right-3 text-xs text-slate-500">
                   Zoom: {(zoom * 100).toFixed(0)}% · Drag nodes to explore · Click for details
                 </div>
