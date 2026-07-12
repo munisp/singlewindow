@@ -85,6 +85,8 @@ import {
   Database,
   Lock,
   HeartPulse,
+  Palette,
+  ArrowLeftRight,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -219,6 +221,8 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ClipboardList, label: "Audit Log", path: "/app/admin/audit-log" },
           { icon: BookOpen, label: "Platform Specification", path: "/specification" },
           { icon: Building, label: "Tenant Management", path: "/app/admin/tenants-mgmt" },
+          { icon: Palette, label: "Tenant Branding", path: "/app/admin/tenant-branding" },
+          { icon: ArrowLeftRight, label: "Workload Rebalancer", path: "/app/admin/workload-rebalancer" },
           { icon: Download, label: "Bulk Data Export", path: "/app/admin/bulk-export" },
           { icon: Webhook, label: "Webhook Logs", path: "/app/developer/webhooks" },
           { icon: ShieldX, label: "Security Alerts", path: "/app/security/alerts" },

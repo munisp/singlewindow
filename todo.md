@@ -1357,8 +1357,8 @@
 - [x] v125-04: Save checkpoint and push to GitHub
 
 ## v126 Sprint — Frontend Pages (Fraud Network Graph, Tenant Branding, Officer Workload)
-- [ ] v126-1: Enhance FraudNetwork.tsx with exportNetworkGraph + linkCases integration
-- [ ] v126-2: Create TenantBranding.tsx page with live preview and color picker
-- [ ] v126-3: Enhance OfficerWorkload.tsx with getTeamSummary + autoRebalanceWorkload integration
-- [ ] v126-4: Add TenantBranding route to App.tsx and sidebar entry to DashboardLayout.tsx
-- [ ] v126-5: Run TypeScript check, tests, checkpoint, push to GitHub
+- [x] v126-1: Enhance FraudNetwork.tsx with exportNetworkGraph + linkCases integration
+- [x] v126-2: Create TenantBranding.tsx page with live preview and color picker
+- [x] v126-3: Enhance OfficerWorkload.tsx with getTeamSummary + autoRebalanceWorkload integration
+- [x] v126-4: Add TenantBranding route to App.tsx and sidebar entry to DashboardLayout.tsx
+- [x] v126-5: Run TypeScript check, tests, checkpoint, push to GitHub
