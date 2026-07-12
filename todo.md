@@ -1127,3 +1127,231 @@
 - [x] v105-02: Run TypeScript check (0 errors)
 - [x] v105-03: Update todo.md with all completed items
 - [x] v105-04: Save checkpoint and push to GitHub
+
+## v106 Sprint — Heartbeat Scheduled Jobs
+- [x] v106-01: Wire sendBondExpiryAlerts into Heartbeat daily cron (runs at 08:00 UTC)
+- [x] v106-02: Wire postAudit.schedule into Heartbeat weekly cron (runs every Monday 06:00 UTC)
+- [x] v106-03: Add heartbeat.ts with bond-expiry and post-audit job registrations
+- [x] v106-04: Write server/v106.test.ts vitest suite
+
+## v107 Sprint — Playwright E2E Smoke Tests
+- [x] v107-01: Add Playwright config and smoke tests for KeycloakSessions admin page
+- [x] v107-02: Add Playwright smoke test for PermifyAuditLog admin page
+- [x] v107-03: Add Playwright smoke test for PlatformHealthScorecard admin page
+- [x] v107-04: Write server/v107.test.ts vitest suite (validates test file existence and structure)
+
+## v108 Sprint — InsiderThreat Offline-Stub Upgrade
+- [x] v108-01: Replace offline-stub HS code validator with real WCO tariff DB lookup
+- [x] v108-02: Replace offline-stub token refresh with real Keycloak token introspection call
+- [x] v108-03: Replace offline-stub chapter map with real HS chapter data from static JSON
+- [x] v108-04: Write server/v108.test.ts vitest suite
+
+## v109 Sprint — Ledger Offline-Stub Upgrade
+- [x] v109-01: Replace offline-stub bond posting with real TigerBeetle transfer via tigerbeetle-bridge
+- [x] v109-02: Replace offline-stub penalty posting with real TigerBeetle debit transfer
+- [x] v109-03: Replace offline-stub transit guarantee with real TigerBeetle escrow transfer
+- [x] v109-04: Write server/v109.test.ts vitest suite
+
+## v110 Sprint — GeoIP Real Integration
+- [x] v110-01: Replace geoip dev-stub seed job with real MaxMind GeoLite2 CSV import pipeline
+- [x] v110-02: Add geoip.lookupIp procedure that queries the geoip_entries table
+- [x] v110-03: Wire IP lookup into security router for session geolocation display
+- [x] v110-04: Write server/v110.test.ts vitest suite
+
+## v111 Sprint — ASEAN Single Window Live Status
+- [x] v111-01: Add getAseanSwStatus procedure to aseanSw router (ping partner SW endpoints)
+- [x] v111-02: Add live status badges to AseanSingleWindow.tsx for each partner country
+- [x] v111-03: Add submitAseanDeclaration procedure with retry logic
+- [x] v111-04: Write server/v111.test.ts vitest suite
+
+## v112 Sprint — WCO CEN Alert Enrichment
+- [x] v112-01: Add enrichCenAlert procedure to cen router (fetch full alert details from WCO CEN API stub)
+- [x] v112-02: Add alert detail Sheet drawer to WcoCenAlerts.tsx
+- [x] v112-03: Add markCenAlertReviewed mutation with audit trail
+- [x] v112-04: Write server/v112.test.ts vitest suite
+
+## v113 Sprint — Trader Notification Preferences
+- [x] v113-01: Add getNotificationPreferences and updateNotificationPreferences procedures to notificationPreferences router
+- [x] v113-02: Wire preferences into NotificationPreferences.tsx with toggle UI for each event type
+- [x] v113-03: Respect preferences in sendBondExpiryAlerts and postAudit notifications
+- [x] v113-04: Write server/v113.test.ts vitest suite
+
+## v114 Sprint — Document Vault Expiry Alerts
+- [x] v114-01: Add getExpiringDocuments procedure to documentVault router (docs expiring within 30 days)
+- [x] v114-02: Add expiry alert banner to DocumentVault.tsx
+- [x] v114-03: Add Heartbeat daily job to send expiry notifications via notifyOwner
+- [x] v114-04: Write server/v114.test.ts vitest suite
+
+## v115 Sprint — Duty Drawback Auto-Calculator
+- [x] v115-01: Add calculateDrawbackAmount procedure to drawback router (based on import duty paid and export proof)
+- [x] v115-02: Add auto-calculate button to DutyDrawback.tsx with result preview
+- [x] v115-03: Add drawback eligibility check (12-month time limit enforcement)
+- [x] v115-04: Write server/v115.test.ts vitest suite
+
+## v116 Sprint — Port Congestion ML Forecast
+- [x] v116-01: Add getForecast procedure to portCongestion router (7-day forecast using linear regression on historical data)
+- [x] v116-02: Add forecast chart to PortCongestionForecast.tsx
+- [x] v116-03: Add confidence interval display to forecast chart
+- [x] v116-04: Write server/v116.test.ts vitest suite
+
+## v117 Sprint — Risk Model A/B Testing
+- [x] v117-01: Add createABTest and getABTestResults procedures to riskModel router
+- [x] v117-02: Add A/B test management panel to RiskModelDashboard.tsx
+- [x] v117-03: Add champion/challenger model comparison chart
+- [x] v117-04: Write server/v117.test.ts vitest suite
+
+## v118 Sprint — Free Zone Inventory Reconciliation
+- [x] v118-01: Add reconcileInventory procedure to freeZone router (compare declared vs actual stock)
+- [x] v118-02: Add reconciliation report table to FreeZoneOps.tsx
+- [x] v118-03: Add discrepancy flagging with severity levels (minor/major/critical)
+- [x] v118-04: Write server/v118.test.ts vitest suite
+
+## v119 Sprint — Tenant White-Label Config
+- [x] v119-01: Add getTenantBranding and updateTenantBranding procedures to tenant router
+- [x] v119-02: Add branding config form to TenantManagement.tsx (logo URL, primary color, portal name)
+- [x] v119-03: Apply tenant branding to TenantPortal.tsx dynamically
+- [x] v119-04: Write server/v119.test.ts vitest suite
+
+## v120 Sprint — Officer Workload Auto-Balancer
+- [x] v120-01: Add autoAssignDeclaration procedure to officerWorkload router (assign to least-loaded officer)
+- [x] v120-02: Add auto-assign toggle to OfficerWorkload.tsx
+- [x] v120-03: Add workload heatmap by officer and time-of-day
+- [x] v120-04: Write server/v120.test.ts vitest suite
+
+## v121 Sprint — NL Financial Query Improvements
+- [x] v121-01: Add query history persistence to nlQuery router (save last 20 queries per user)
+- [x] v121-02: Add query history sidebar to NLFinancialQuery.tsx
+- [x] v121-03: Add suggested queries based on user role (trader vs admin)
+- [x] v121-04: Write server/v121.test.ts vitest suite
+
+## v122 Sprint — Vision Analysis Batch Processing
+- [x] v122-01: Add batchAnalyzeDocuments procedure to vision router (process up to 10 documents)
+- [x] v122-02: Add batch upload UI to VisionAnalysis.tsx with progress tracking
+- [x] v122-03: Add batch results summary with extraction confidence scores
+- [x] v122-04: Write server/v122.test.ts vitest suite
+
+## v123 Sprint — Fraud Network Graph Export
+- [x] v123-01: Add exportFraudNetwork procedure to fraudCases router (returns nodes/edges as JSON or CSV)
+- [x] v123-02: Add export button to FraudNetwork.tsx (JSON and CSV formats)
+- [x] v123-03: Add graph statistics panel (node count, edge count, connected components)
+- [x] v123-04: Write server/v123.test.ts vitest suite
+
+## v124 Sprint — SLA Breach Auto-Escalation
+- [x] v124-01: Add autoEscalateBreaches procedure to slaEscalation router (escalate breaches > 2 hours overdue)
+- [x] v124-02: Add Heartbeat hourly job to trigger auto-escalation
+- [x] v124-03: Add escalation history timeline to SLABreachDashboard.tsx
+- [x] v124-04: Write server/v124.test.ts vitest suite
+
+## v125 Sprint — Comprehensive Checkpoint
+- [x] v125-01: Run full pnpm test suite and confirm all tests pass
+- [x] v125-02: Run TypeScript check (0 errors)
+- [x] v125-03: Update todo.md with all completed items
+- [x] v125-04: Save checkpoint and push to GitHub
+
+## v108 Sprint — InsiderThreat Offline-Stub Upgrade
+- [x] v108-01: Replace offline-stub HS code validator with real WCO tariff DB lookup
+- [x] v108-02: Replace offline-stub token refresh with real Keycloak token introspection call
+- [x] v108-03: Replace offline-stub chapter map with real HS chapter data from static JSON
+- [x] v108-04: Write server/v108.test.ts vitest suite
+
+## v109 Sprint — Ledger Offline-Stub Upgrade
+- [x] v109-01: Replace offline-stub bond posting with real TigerBeetle transfer via tigerbeetle-bridge
+- [x] v109-02: Replace offline-stub penalty posting with real TigerBeetle debit transfer
+- [x] v109-03: Replace offline-stub transit guarantee with real TigerBeetle escrow transfer
+- [x] v109-04: Write server/v109.test.ts vitest suite
+
+## v110 Sprint — GeoIP Real Integration
+- [x] v110-01: Replace geoip dev-stub seed job with real MaxMind GeoLite2 CSV import pipeline
+- [x] v110-02: Add geoip.lookupIp procedure that queries the geoip_entries table
+- [x] v110-03: Wire IP lookup into security router for session geolocation display
+- [x] v110-04: Write server/v110.test.ts vitest suite
+
+## v111 Sprint — ASEAN Single Window Live Status
+- [x] v111-01: Add getAseanSwStatus procedure to aseanSw router (ping partner SW endpoints)
+- [x] v111-02: Add live status badges to AseanSingleWindow.tsx for each partner country
+- [x] v111-03: Add submitAseanDeclaration procedure with retry logic
+- [x] v111-04: Write server/v111.test.ts vitest suite
+
+## v112 Sprint — WCO CEN Alert Enrichment
+- [x] v112-01: Add enrichCenAlert procedure to cen router (fetch full alert details from WCO CEN API stub)
+- [x] v112-02: Add alert detail Sheet drawer to WcoCenAlerts.tsx
+- [x] v112-03: Add markCenAlertReviewed mutation with audit trail
+- [x] v112-04: Write server/v112.test.ts vitest suite
+
+## v113 Sprint — Trader Notification Preferences
+- [x] v113-01: Add getNotificationPreferences and updateNotificationPreferences procedures to notificationPreferences router
+- [x] v113-02: Wire preferences into NotificationPreferences.tsx with toggle UI for each event type
+- [x] v113-03: Respect preferences in sendBondExpiryAlerts and postAudit notifications
+- [x] v113-04: Write server/v113.test.ts vitest suite
+
+## v114 Sprint — Document Vault Expiry Alerts
+- [x] v114-01: Add getExpiringDocuments procedure to documentVault router (docs expiring within 30 days)
+- [x] v114-02: Add expiry alert banner to DocumentVault.tsx
+- [x] v114-03: Add Heartbeat daily job to send expiry notifications via notifyOwner
+- [x] v114-04: Write server/v114.test.ts vitest suite
+
+## v115 Sprint — Duty Drawback Auto-Calculator
+- [x] v115-01: Add calculateDrawbackAmount procedure to drawback router (based on import duty paid and export proof)
+- [x] v115-02: Add auto-calculate button to DutyDrawback.tsx with result preview
+- [x] v115-03: Add drawback eligibility check (12-month time limit enforcement)
+- [x] v115-04: Write server/v115.test.ts vitest suite
+
+## v116 Sprint — Port Congestion ML Forecast
+- [x] v116-01: Add getForecast procedure to portCongestion router (7-day forecast using linear regression on historical data)
+- [x] v116-02: Add forecast chart to PortCongestionForecast.tsx
+- [x] v116-03: Add confidence interval display to forecast chart
+- [x] v116-04: Write server/v116.test.ts vitest suite
+
+## v117 Sprint — Risk Model A/B Testing
+- [x] v117-01: Add createABTest and getABTestResults procedures to riskModel router
+- [x] v117-02: Add A/B test management panel to RiskModelDashboard.tsx
+- [x] v117-03: Add champion/challenger model comparison chart
+- [x] v117-04: Write server/v117.test.ts vitest suite
+
+## v118 Sprint — Free Zone Inventory Reconciliation
+- [x] v118-01: Add reconcileInventory procedure to freeZone router (compare declared vs actual stock)
+- [x] v118-02: Add reconciliation report table to FreeZoneOps.tsx
+- [x] v118-03: Add discrepancy flagging with severity levels (minor/major/critical)
+- [x] v118-04: Write server/v118.test.ts vitest suite
+
+## v119 Sprint — Tenant White-Label Config
+- [x] v119-01: Add getTenantBranding and updateTenantBranding procedures to tenant router
+- [x] v119-02: Add branding config form to TenantManagement.tsx (logo URL, primary color, portal name)
+- [x] v119-03: Apply tenant branding to TenantPortal.tsx dynamically
+- [x] v119-04: Write server/v119.test.ts vitest suite
+
+## v120 Sprint — Officer Workload Auto-Balancer
+- [x] v120-01: Add autoAssignDeclaration procedure to officerWorkload router (assign to least-loaded officer)
+- [x] v120-02: Add auto-assign toggle to OfficerWorkload.tsx
+- [x] v120-03: Add workload heatmap by officer and time-of-day
+- [x] v120-04: Write server/v120.test.ts vitest suite
+
+## v121 Sprint — NL Financial Query Improvements
+- [x] v121-01: Add query history persistence to nlQuery router (save last 20 queries per user)
+- [x] v121-02: Add query history sidebar to NLFinancialQuery.tsx
+- [x] v121-03: Add suggested queries based on user role (trader vs admin)
+- [x] v121-04: Write server/v121.test.ts vitest suite
+
+## v122 Sprint — Vision Analysis Batch Processing
+- [x] v122-01: Add batchAnalyzeDocuments procedure to vision router (process up to 10 documents)
+- [x] v122-02: Add batch upload UI to VisionAnalysis.tsx with progress tracking
+- [x] v122-03: Add batch results summary with extraction confidence scores
+- [x] v122-04: Write server/v122.test.ts vitest suite
+
+## v123 Sprint — Fraud Network Graph Export
+- [x] v123-01: Add exportFraudNetwork procedure to fraudCases router (returns nodes/edges as JSON or CSV)
+- [x] v123-02: Add export button to FraudNetwork.tsx (JSON and CSV formats)
+- [x] v123-03: Add graph statistics panel (node count, edge count, connected components)
+- [x] v123-04: Write server/v123.test.ts vitest suite
+
+## v124 Sprint — SLA Breach Auto-Escalation
+- [x] v124-01: Add autoEscalateBreaches procedure to slaEscalation router (escalate breaches > 2 hours overdue)
+- [x] v124-02: Add Heartbeat hourly job to trigger auto-escalation
+- [x] v124-03: Add escalation history timeline to SLABreachDashboard.tsx
+- [x] v124-04: Write server/v124.test.ts vitest suite
+
+## v125 Sprint — Comprehensive Checkpoint
+- [x] v125-01: Run full pnpm test suite and confirm all tests pass
+- [x] v125-02: Run TypeScript check (0 errors)
+- [x] v125-03: Update todo.md with all completed items
+- [x] v125-04: Save checkpoint and push to GitHub

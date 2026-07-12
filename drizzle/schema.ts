@@ -441,6 +441,32 @@ export const visionAnalyses = pgTable("vision_analyses", {
   index("idx_va_requested_by").on(t.requestedBy),
 ]);
 
+
+// --- VISION BATCH JOBS (v122) ---
+export const visionBatchJobStatusEnum = pgEnum("vision_batch_job_status", [
+  "queued", "processing", "completed", "failed", "cancelled"
+]);
+export const visionBatchJobs = pgTable("vision_batch_jobs", {
+  id: serial("id").primaryKey(),
+  batchId: varchar("batch_id", { length: 64 }).notNull().unique(),
+  submittedBy: integer("submitted_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  totalDocuments: integer("total_documents").default(0).notNull(),
+  processedDocuments: integer("processed_documents").default(0).notNull(),
+  status: visionBatchJobStatusEnum("status").default("queued").notNull(),
+  priority: varchar("priority", { length: 16 }).default("normal").notNull(),
+  documents: json("documents"),
+  results: json("results"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_vbj_submitted_by").on(t.submittedBy),
+  index("idx_vbj_status").on(t.status),
+  index("idx_vbj_batch_id").on(t.batchId),
+]);
+export type VisionBatchJob = typeof visionBatchJobs.$inferSelect;
+export type InsertVisionBatchJob = typeof visionBatchJobs.$inferInsert;
+
 // ─── GEOSPATIAL DATA ─────────────────────────────────────────────────────────
 
 export const portCongestionStatusEnum = pgEnum("port_congestion_status", [
@@ -604,6 +630,8 @@ export const fraudCases = pgTable("fraud_cases", {
   createdBy: integer("created_by").notNull(),
   linkedDeclarationIds: json("linked_declaration_ids").$type<number[]>().default([]),
   riskScore: real("risk_score"),
+  severity: varchar("severity", { length: 16 }).default("medium"),
+  estimatedLoss: decimal("estimated_loss", { precision: 15, scale: 2 }),
   closureReason: text("closure_reason"),
   closedAt: timestamp("closed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -641,6 +669,26 @@ export const fraudCaseEvidence = pgTable("fraud_case_evidence", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("idx_fce_case_id").on(t.caseId)]);
 export type FraudCaseEvidence = typeof fraudCaseEvidence.$inferSelect;
+
+// --- FRAUD CASE LINKS (v123) ---
+export const fraudCaseLinkTypeEnum = pgEnum("fraud_case_link_type", [
+  "same_trader", "same_vessel", "same_route", "same_method", "related_network"
+]);
+export const fraudCaseLinks = pgTable("fraud_case_links", {
+  id: serial("id").primaryKey(),
+  caseId: integer("case_id").notNull().references(() => fraudCases.id, { onDelete: "cascade" }),
+  linkedCaseId: integer("linked_case_id").notNull().references(() => fraudCases.id, { onDelete: "cascade" }),
+  linkType: fraudCaseLinkTypeEnum("link_type").notNull(),
+  confidence: real("confidence").default(0.8),
+  notes: text("notes"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_fcl_case_id").on(t.caseId),
+  index("idx_fcl_linked_case_id").on(t.linkedCaseId),
+]);
+export type FraudCaseLink = typeof fraudCaseLinks.$inferSelect;
+export type InsertFraudCaseLink = typeof fraudCaseLinks.$inferInsert;
 
 // ─── NIGHTLY RISK SCAN RESULTS ────────────────────────────────────────────────
 
@@ -727,6 +775,25 @@ export const notificationDigestSettings = pgTable("notification_digest_settings"
 ]);
 export type NotificationDigestSettings = typeof notificationDigestSettings.$inferSelect;
 
+// ─── NOTIFICATION CHANNEL PREFERENCES ────────────────────────────────────────
+// v113: Per-user, per-notification-type channel preferences.
+// Allows users to select which delivery channels (email, sms, push, webhook)
+// they want for each notification type. Missing rows default to email-only.
+export const notificationChannelEnum = pgEnum("notification_channel", ["email", "sms", "push", "webhook", "in_app"]);
+export const notificationChannelPreferences = pgTable("notification_channel_preferences", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  notificationType: notificationTypeEnum("notification_type").notNull(),
+  channel: notificationChannelEnum("channel").notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ncp_user_id").on(t.userId),
+  index("idx_ncp_type_channel").on(t.notificationType, t.channel),
+]);
+export type NotificationChannelPreference = typeof notificationChannelPreferences.$inferSelect;
+export type InsertNotificationChannelPreference = typeof notificationChannelPreferences.$inferInsert;
+
 // ─── PORT CONGESTION ALERT TRACKING ───────────────────────────────────────────
 // Tracks the last-notified congestion status per port to avoid duplicate alerts.
 // When a port transitions to "critical" and the last-notified status was not
@@ -780,6 +847,8 @@ export const documentVault = pgTable("document_vault", {
   description: text("description"),
   revokedBy: integer("revoked_by").references(() => users.id),
   revokedAt: timestamp("revoked_at"),
+  expiresAt: timestamp("expires_at"),
+  expiryNotifiedAt: timestamp("expiry_notified_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -788,6 +857,7 @@ export const documentVault = pgTable("document_vault", {
   index("idx_dv_status").on(t.status),
   index("idx_dv_category").on(t.category),
   index("idx_dv_owner_status").on(t.ownerId, t.status),
+  index("idx_dv_expires_at").on(t.expiresAt),
 ]);
 
 export type DocumentVault = typeof documentVault.$inferSelect;
@@ -1036,6 +1106,28 @@ export const tenantUsers = pgTable("tenant_users", {
 ]);
 export type TenantUser = typeof tenantUsers.$inferSelect;
 export type InsertTenantUser = typeof tenantUsers.$inferInsert;
+
+// ─── TENANT WHITE-LABEL BRANDING (v119) ─────────────────────────────────────
+export const tenantBranding = pgTable("tenant_branding", {
+  id: serial("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull().unique().references(() => tenants.id),
+  platformName: varchar("platform_name", { length: 128 }).default("TradeGateway").notNull(),
+  logoUrl: text("logo_url"),
+  faviconUrl: text("favicon_url"),
+  primaryColor: varchar("primary_color", { length: 16 }).default("#0A1628"),
+  accentColor: varchar("accent_color", { length: 16 }).default("#D4A017"),
+  supportEmail: varchar("support_email", { length: 255 }),
+  supportPhone: varchar("support_phone", { length: 64 }),
+  footerText: text("footer_text"),
+  customCss: text("custom_css"),
+  loginBannerUrl: text("login_banner_url"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: integer("updated_by").references(() => users.id),
+}, (t) => [
+  index("idx_tenant_branding_tenant_id").on(t.tenantId),
+]);
+export type TenantBranding = typeof tenantBranding.$inferSelect;
+export type InsertTenantBranding = typeof tenantBranding.$inferInsert;
 
 // ─── TRADER ONBOARDING WIZARD (Sprint 67) ────────────────────────────────────
 export const onboardingStepEnum = pgEnum("onboarding_step", [
@@ -1846,6 +1938,25 @@ export const nlQueryHistory = pgTable("nl_query_history", {
 ]);
 export type NlQueryHistory = typeof nlQueryHistory.$inferSelect;
 
+// ─── NL QUERY TEMPLATES (v121) ───────────────────────────────────────────────
+export const nlQueryTemplates = pgTable("nl_query_templates", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  question: text("question").notNull(),
+  category: varchar("category", { length: 64 }).default("custom").notNull(),
+  useCount: integer("use_count").default(0).notNull(),
+  isShared: boolean("is_shared").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_nl_query_templates_user_id").on(t.userId),
+  index("idx_nl_query_templates_shared").on(t.isShared),
+]);
+export type NlQueryTemplate = typeof nlQueryTemplates.$inferSelect;
+export type InsertNlQueryTemplate = typeof nlQueryTemplates.$inferInsert;
+
 // ─── OFFICER WORKLOAD SNAPSHOTS (v56) ─────────────────────────────────────────
 export const officerWorkloadSnapshots = pgTable("officer_workload_snapshots", {
   id: serial("id").primaryKey(),
@@ -1876,13 +1987,23 @@ export const slaEscalations = pgTable("sla_escalations", {
   status: slaEscalationStatusEnum("status").default("open").notNull(),
   assignedTo: integer("assigned_to").references(() => users.id, { onDelete: "set null" }),
   resolvedAt: timestamp("resolved_at"),
+  resolvedBy: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
+  resolutionNote: text("resolution_note"),
   notes: text("notes"),
+  // v124 additions
+  reason: text("reason"),
+  lane: varchar("lane", { length: 16 }),
+  elapsedMs: bigint("elapsed_ms", { mode: "number" }),
+  thresholdMs: bigint("threshold_ms", { mode: "number" }),
+  resolved: boolean("resolved").default(false).notNull(),
+  escalatedBy: integer("escalated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_sla_esc_status").on(t.status),
   index("idx_sla_esc_decl").on(t.declarationId),
   index("idx_sla_esc_created").on(t.createdAt),
+  index("idx_sla_esc_resolved").on(t.resolved),
 ]);
 export type SlaEscalation = typeof slaEscalations.$inferSelect;
 

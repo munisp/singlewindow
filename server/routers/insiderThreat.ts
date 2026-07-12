@@ -736,17 +736,20 @@ export const insiderThreatRouter = router({
       if (!resp.ok) throw new Error(`hs-classifier chapters returned ${resp.status}`);
       return await resp.json();
     } catch {
-      // offline stub — return a minimal chapter map
-      return {
-        chapters: {
-          "01": "Live animals",
-          "02": "Meat and edible meat offal",
-          "84": "Nuclear reactors, boilers, machinery and mechanical appliances",
-          "85": "Electrical machinery and equipment",
-          "87": "Vehicles other than railway or tramway rolling stock",
-        },
-        source: "offline-stub",
-      };
+      // v108: offline-stub upgraded to static-wco-hs2022 (bundled WCO HS-2022 chapter data)
+      const { readFileSync } = await import("fs");
+      const { join } = await import("path");
+      try {
+        const dataPath = join(process.cwd(), "server", "data", "hsChapters.json");
+        const raw = readFileSync(dataPath, "utf-8");
+        return { ...JSON.parse(raw), source: "static-wco-hs2022" };
+      } catch {
+        // Final fallback if file is missing
+        return {
+          chapters: { "84": "Machinery", "85": "Electrical equipment", "87": "Vehicles" },
+          source: "fallback-stub",
+        };
+      }
     }
   }),
 

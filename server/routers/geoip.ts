@@ -135,6 +135,11 @@ export const geoipRouter = router({
   lookupIp: adminProcedure
     .input(z.object({ ip: z.string().min(7).max(45) }))
     .query(async ({ input }) => {
+      // v110: Query DB in all environments; fall back to dev stub only if no data found
+      const { getGeoIp } = await import("../db");
+      const geo = await getGeoIp(input.ip);
+      if (geo) return geo;
+      // Fallback: return a stub result when no GeoLite2 data has been seeded yet
       if (process.env.NODE_ENV !== "production") {
         return {
           ip: input.ip,
@@ -146,9 +151,6 @@ export const geoipRouter = router({
           countryFlag: "🇸🇬",
         };
       }
-      const { getGeoIp } = await import("../db");
-      const geo = await getGeoIp(input.ip);
-      if (!geo) throw new TRPCError({ code: "NOT_FOUND", message: `No geolocation data for ${input.ip}` });
-      return geo;
+      throw new TRPCError({ code: "NOT_FOUND", message: `No geolocation data for ${input.ip}` });
     }),
 });

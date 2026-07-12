@@ -435,4 +435,144 @@ export const fraudCasesRouter = router({
 
       return officers;
     }),
+
+  /**
+   * v123: exportNetworkGraph — export the fraud network graph for a given case
+   * or trader as a JSON structure suitable for graph visualization (nodes + edges).
+   */
+  exportNetworkGraph: protectedProcedure
+    .input(z.object({
+      caseId: z.number().int().positive().optional(),
+      traderId: z.number().int().positive().optional(),
+      depth: z.number().int().min(1).max(3).default(2),
+      format: z.enum(["json", "graphml", "gexf"]).default("json"),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return { nodes: [], edges: [], metadata: {} };
+
+      const { fraudCases, fraudCaseLinks, declarations, users } = await import("../../drizzle/schema");
+      const { eq, or, and, inArray } = await import("drizzle-orm");
+
+      // Gather seed nodes
+      const nodes: Array<{ id: string; type: string; label: string; properties: Record<string, unknown> }> = [];
+      const edges: Array<{ source: string; target: string; type: string; weight: number }> = [];
+      const seen = new Set<string>();
+
+      if (input.caseId) {
+        const [caseRow] = await db.select().from(fraudCases)
+          .where(eq(fraudCases.id, input.caseId)).limit(1);
+        if (caseRow) {
+          const nodeId = `case-${caseRow.id}`;
+          if (!seen.has(nodeId)) {
+            seen.add(nodeId);
+            nodes.push({
+              id: nodeId,
+              type: "fraud_case",
+              label: caseRow.caseNumber,
+              properties: {
+                status: caseRow.status,
+                severity: caseRow.severity,
+                estimatedLoss: caseRow.estimatedLoss,
+              },
+            });
+          }
+
+          // Find linked cases
+          const links = await db.select().from(fraudCaseLinks)
+            .where(or(
+              eq(fraudCaseLinks.caseId, input.caseId),
+              eq(fraudCaseLinks.linkedCaseId, input.caseId),
+            ));
+
+          for (const link of links) {
+            const otherId = link.caseId === input.caseId ? link.linkedCaseId : link.caseId;
+            const [otherCase] = await db.select().from(fraudCases)
+              .where(eq(fraudCases.id, otherId)).limit(1);
+            if (otherCase) {
+              const otherNodeId = `case-${otherCase.id}`;
+              if (!seen.has(otherNodeId)) {
+                seen.add(otherNodeId);
+                nodes.push({
+                  id: otherNodeId,
+                  type: "fraud_case",
+                  label: otherCase.caseNumber,
+                  properties: { status: otherCase.status, severity: otherCase.severity },
+                });
+              }
+              edges.push({
+                source: nodeId,
+                target: otherNodeId,
+                type: link.linkType,
+                weight: link.confidence ?? 1.0,
+              });
+            }
+          }
+        }
+      }
+
+      const metadata = {
+        exportedAt: new Date().toISOString(),
+        exportedBy: ctx.user.id,
+        nodeCount: nodes.length,
+        edgeCount: edges.length,
+        depth: input.depth,
+        format: input.format,
+      };
+
+      if (input.format === "json") {
+        return { nodes, edges, metadata };
+      }
+
+      // For graphml/gexf, return JSON with format hint (actual conversion handled client-side)
+      return { nodes, edges, metadata, formatHint: input.format };
+    }),
+
+  /**
+   * v123: linkCases — create a link between two fraud cases with a relationship type.
+   */
+  linkCases: protectedProcedure
+    .input(z.object({
+      caseId: z.number().int().positive(),
+      linkedCaseId: z.number().int().positive(),
+      linkType: z.enum(["same_trader", "same_vessel", "same_route", "same_method", "related_network"]),
+      confidence: z.number().min(0).max(1).default(0.8),
+      notes: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { fraudCaseLinks } = await import("../../drizzle/schema");
+      const { and, eq, or } = await import("drizzle-orm");
+
+      // Check for existing link
+      const [existing] = await db.select().from(fraudCaseLinks)
+        .where(or(
+          and(eq(fraudCaseLinks.caseId, input.caseId), eq(fraudCaseLinks.linkedCaseId, input.linkedCaseId)),
+          and(eq(fraudCaseLinks.caseId, input.linkedCaseId), eq(fraudCaseLinks.linkedCaseId, input.caseId)),
+        )).limit(1);
+
+      if (existing) {
+        const [updated] = await db.update(fraudCaseLinks)
+          .set({ linkType: input.linkType, confidence: input.confidence, notes: input.notes ?? null })
+          .where(eq(fraudCaseLinks.id, existing.id))
+          .returning();
+        return { link: updated, created: false };
+      }
+
+      const [link] = await db.insert(fraudCaseLinks).values({
+        caseId: input.caseId,
+        linkedCaseId: input.linkedCaseId,
+        linkType: input.linkType,
+        confidence: input.confidence,
+        notes: input.notes ?? null,
+        createdBy: ctx.user.id,
+        createdAt: new Date(),
+      }).returning();
+
+      return { link, created: true };
+    }),
 });

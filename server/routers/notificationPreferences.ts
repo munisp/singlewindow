@@ -6,9 +6,20 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { notificationPreferences, notificationDigestSettings, userNotifications } from "../../drizzle/schema";
+import { notificationPreferences, notificationDigestSettings, userNotifications, notificationChannelPreferences } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import type { NotificationPreference } from "../../drizzle/schema";
+
+const NOTIFICATION_CHANNELS = ["email", "sms", "push", "webhook", "in_app"] as const;
+type NotificationChannel = typeof NOTIFICATION_CHANNELS[number];
+
+const CHANNEL_LABELS: Record<NotificationChannel, { label: string; description: string }> = {
+  email: { label: "Email", description: "Receive notifications via email" },
+  sms: { label: "SMS", description: "Receive notifications via SMS text message" },
+  push: { label: "Push Notification", description: "Receive browser or mobile push notifications" },
+  webhook: { label: "Webhook", description: "POST notifications to your configured webhook URL" },
+  in_app: { label: "In-App", description: "Receive notifications in the platform notification centre" },
+};
 
 // All valid notification types (mirrors the notificationTypeEnum in schema)
 const NOTIFICATION_TYPES = [
@@ -247,4 +258,98 @@ export const notificationPreferencesRouter = router({
       nextDigestLabel,
     };
   }),
+
+  /**
+   * v113: getChannelPreferences — get per-channel delivery preferences for the current user.
+   * Returns a matrix of notification type x channel with enabled/disabled status.
+   */
+  getChannelPreferences: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    const rows = db
+      ? await db.select().from(notificationChannelPreferences).where(eq(notificationChannelPreferences.userId, ctx.user.id))
+      : [];
+
+    const map: Record<string, Record<string, boolean>> = {};
+    for (const row of rows) {
+      if (!map[row.notificationType]) map[row.notificationType] = {};
+      map[row.notificationType][row.channel] = row.enabled;
+    }
+
+    const CRITICAL_TYPES = ["security_alert", "sla_breach", "fraud_case_opened"] as const;
+    return NOTIFICATION_TYPES.map((type) => ({
+      notificationType: type,
+      label: TYPE_LABELS[type].label,
+      category: TYPE_LABELS[type].category,
+      channels: NOTIFICATION_CHANNELS.map((channel) => ({
+        channel,
+        label: CHANNEL_LABELS[channel].label,
+        enabled: map[type]?.[channel] ?? (
+          channel === "email" ? true :
+          channel === "in_app" ? true :
+          (CRITICAL_TYPES as readonly string[]).includes(type) && channel === "push" ? true :
+          false
+        ),
+      })),
+    }));
+  }),
+
+  /**
+   * v113: updateChannelPreference — enable or disable a specific channel for a notification type.
+   */
+  updateChannelPreference: protectedProcedure
+    .input(z.object({
+      notificationType: z.enum(NOTIFICATION_TYPES),
+      channel: z.enum(NOTIFICATION_CHANNELS),
+      enabled: z.boolean(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return { success: false, reason: "Database unavailable" };
+
+      await db.insert(notificationChannelPreferences)
+        .values({
+          userId: ctx.user.id,
+          notificationType: input.notificationType,
+          channel: input.channel,
+          enabled: input.enabled,
+        })
+        .onConflictDoUpdate({
+          target: [notificationChannelPreferences.userId, notificationChannelPreferences.notificationType, notificationChannelPreferences.channel],
+          set: { enabled: input.enabled, updatedAt: new Date() },
+        });
+
+      return { success: true, notificationType: input.notificationType, channel: input.channel, enabled: input.enabled };
+    }),
+
+  /**
+   * v113: bulkUpdateChannelPreferences — update multiple channel preferences at once.
+   */
+  bulkUpdateChannelPreferences: protectedProcedure
+    .input(z.object({
+      updates: z.array(z.object({
+        notificationType: z.enum(NOTIFICATION_TYPES),
+        channel: z.enum(NOTIFICATION_CHANNELS),
+        enabled: z.boolean(),
+      })).min(1).max(100),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return { success: false, updated: 0, reason: "Database unavailable" };
+
+      for (const update of input.updates) {
+        await db.insert(notificationChannelPreferences)
+          .values({
+            userId: ctx.user.id,
+            notificationType: update.notificationType,
+            channel: update.channel,
+            enabled: update.enabled,
+          })
+          .onConflictDoUpdate({
+            target: [notificationChannelPreferences.userId, notificationChannelPreferences.notificationType, notificationChannelPreferences.channel],
+            set: { enabled: update.enabled, updatedAt: new Date() },
+          });
+      }
+
+      return { success: true, updated: input.updates.length };
+    }),
 });

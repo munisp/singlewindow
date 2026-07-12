@@ -134,4 +134,93 @@ export const cenRouter = router({
         activePartners: 0, totalPartners: 0,
       };
     }),
+
+  /**
+   * v112: enrichDeclaration — cross-reference a declaration against WCO CEN intelligence.
+   * Returns any matching alerts, risk flags, and a composite enrichment score.
+   */
+  enrichDeclaration: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      ucr: z.string().optional(),
+      traderId: z.string().optional(),
+      hsCode: z.string().optional(),
+      originCountry: z.string().length(2).optional(),
+    }))
+    .query(async ({ input }) => {
+      const data = await cenFetch("/enrich/declaration", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      if (data) return data;
+      // Offline fallback: return empty enrichment
+      return {
+        declarationId: input.declarationId,
+        matchedAlerts: [] as string[],
+        riskFlags: [] as string[],
+        enrichmentScore: 0,
+        source: "offline",
+        enrichedAt: new Date().toISOString(),
+      };
+    }),
+
+  /**
+   * v112: getTraderRiskProfile — fetch the WCO CEN risk profile for a specific trader.
+   * Aggregates all inbound/outbound alerts linked to this trader reference.
+   */
+  getTraderRiskProfile: protectedProcedure
+    .input(z.object({
+      traderRef: z.string().min(1),
+      includeHistory: z.boolean().default(false),
+    }))
+    .query(async ({ input }) => {
+      const params = new URLSearchParams({ traderRef: input.traderRef });
+      if (input.includeHistory) params.set("includeHistory", "true");
+      const data = await cenFetch(`/risk/trader?${params}`);
+      if (data) return data;
+      return {
+        traderRef: input.traderRef,
+        riskLevel: "UNKNOWN" as string,
+        alertCount: 0,
+        highPriorityCount: 0,
+        lastAlertAt: null as string | null,
+        history: [] as unknown[],
+        source: "offline",
+      };
+    }),
+
+  /**
+   * v112: bulkEnrich — batch-enrich up to 50 declarations against CEN intelligence in one call.
+   * Returns an array of enrichment results in the same order as the input.
+   */
+  bulkEnrich: adminProcedure
+    .input(z.object({
+      declarations: z.array(z.object({
+        declarationId: z.number().int().positive(),
+        ucr: z.string().optional(),
+        traderId: z.string().optional(),
+        hsCode: z.string().optional(),
+        originCountry: z.string().length(2).optional(),
+      })).min(1).max(50),
+    }))
+    .mutation(async ({ input }) => {
+      const data = await cenFetch("/enrich/bulk", {
+        method: "POST",
+        body: JSON.stringify({ declarations: input.declarations }),
+      });
+      if (data) return data;
+      // Offline fallback: return empty enrichment for each declaration
+      return {
+        results: input.declarations.map((d) => ({
+          declarationId: d.declarationId,
+          matchedAlerts: [] as string[],
+          riskFlags: [] as string[],
+          enrichmentScore: 0,
+          source: "offline",
+          enrichedAt: new Date().toISOString(),
+        })),
+        processedAt: new Date().toISOString(),
+        source: "offline",
+      };
+    }),
 });

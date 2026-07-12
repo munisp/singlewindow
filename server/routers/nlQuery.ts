@@ -374,4 +374,90 @@ export const nlQueryRouter = router({
         return { history: [] };
       }
     }),
+
+  /**
+   * v121: saveQueryTemplate — save a frequently-used NL query as a named template
+   * so users can re-run it with a single click from the query bar.
+   */
+  saveQueryTemplate: protectedProcedure
+    .input(z.object({
+      name: z.string().min(1).max(128),
+      description: z.string().max(500).optional(),
+      question: z.string().min(1).max(2000),
+      category: z.enum(["revenue", "declarations", "risk", "performance", "compliance", "custom"]).default("custom"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+        const { nlQueryTemplates } = await import("../../drizzle/schema");
+        const [row] = await db.insert(nlQueryTemplates).values({
+          userId: ctx.user.id,
+          name: input.name,
+          description: input.description ?? null,
+          question: input.question,
+          category: input.category,
+          useCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }).returning();
+        return row;
+      } catch (e: any) {
+        if (e?.code === "FORBIDDEN") throw e;
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: e?.message ?? "Failed to save template" });
+      }
+    }),
+
+  /**
+   * v121: listQueryTemplates — list saved NL query templates for the current user
+   * plus any system-wide templates marked as shared.
+   */
+  listQueryTemplates: protectedProcedure
+    .input(z.object({
+      category: z.enum(["revenue", "declarations", "risk", "performance", "compliance", "custom", "all"]).default("all"),
+    }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (!db) return { templates: [] };
+        const { nlQueryTemplates } = await import("../../drizzle/schema");
+        const { eq, or, desc } = await import("drizzle-orm");
+        const rows = await db.select().from(nlQueryTemplates)
+          .where(or(
+            eq(nlQueryTemplates.userId, ctx.user.id),
+            eq(nlQueryTemplates.isShared, true),
+          ))
+          .orderBy(desc(nlQueryTemplates.useCount))
+          .limit(50);
+        const filtered = input.category === "all"
+          ? rows
+          : rows.filter(r => r.category === input.category);
+        return { templates: filtered };
+      } catch {
+        return { templates: [] };
+      }
+    }),
+
+  /**
+   * v121: deleteQueryTemplate — delete a saved NL query template.
+   */
+  deleteQueryTemplate: protectedProcedure
+    .input(z.object({ templateId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { nlQueryTemplates } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const [deleted] = await db.delete(nlQueryTemplates)
+        .where(and(
+          eq(nlQueryTemplates.id, input.templateId),
+          eq(nlQueryTemplates.userId, ctx.user.id),
+        ))
+        .returning({ id: nlQueryTemplates.id });
+      if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Template not found or not owned by you" });
+      return { success: true };
+    }),
 });
