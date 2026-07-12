@@ -10,8 +10,8 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb, withRlsContext } from "../db";
-import { documentVault, documentShares, documentVersions } from "../../drizzle/schema";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { documentVault, documentShares, documentVersions, userNotifications } from "../../drizzle/schema";
+import { eq, and, desc, count, sql, lte, gte, asc } from "drizzle-orm";
 import { rustfsUpload, rustfsPresign, rustfsDelete, rustfsHealthCheck, rustfsScan } from "../rustfsSvcClient";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
@@ -573,5 +573,96 @@ export const documentVaultRouter = router({
         .from(documentVersions)
         .where(eq(documentVersions.originalDocumentId, input.documentId))
         .orderBy(desc(documentVersions.replacedAt));
+    }),
+
+  /**
+   * v114: getExpiringDocuments — list documents whose share links or vault entries
+   * are expiring within the next N days. Used by the expiry-alert Heartbeat job.
+   */
+  getExpiringDocuments: protectedProcedure
+    .input(z.object({
+      daysAhead: z.number().int().min(1).max(90).default(7),
+      includeExpired: z.boolean().default(false),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return { documents: [], total: 0 };
+
+      const isPrivileged = ["admin", "customs_officer"].includes(ctx.user.role);
+      const cutoff = new Date(Date.now() + input.daysAhead * 24 * 60 * 60 * 1000);
+      const now = new Date();
+
+      const rows = await db
+        .select({
+          id: documentVault.id,
+          filename: documentVault.filename,
+          category: documentVault.category,
+          ownerId: documentVault.ownerId,
+          expiresAt: documentVault.expiresAt,
+          status: documentVault.status,
+        })
+        .from(documentVault)
+        .where(
+          and(
+            isPrivileged ? undefined : eq(documentVault.ownerId, ctx.user.id),
+            lte(documentVault.expiresAt, cutoff),
+            input.includeExpired ? undefined : gte(documentVault.expiresAt, now),
+          )
+        )
+        .orderBy(asc(documentVault.expiresAt))
+        .limit(200);
+
+      return {
+        documents: rows.filter((r) => r.expiresAt !== null),
+        total: rows.filter((r) => r.expiresAt !== null).length,
+        cutoffDate: cutoff.toISOString(),
+      };
+    }),
+
+  /**
+   * v114: sendExpiryAlerts — admin/heartbeat job that scans for documents expiring
+   * within the configured window and sends in-app notifications to document owners.
+   * Returns the count of alerts dispatched.
+   */
+  sendExpiryAlerts: protectedProcedure
+    .input(z.object({
+      daysAhead: z.number().int().min(1).max(30).default(7),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const isPrivileged = ["admin", "customs_officer"].includes(ctx.user.role);
+      if (!isPrivileged) throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
+
+      const db = await getDb();
+      if (!db) return { dispatched: 0, reason: "Database unavailable" };
+
+      const cutoff = new Date(Date.now() + input.daysAhead * 24 * 60 * 60 * 1000);
+      const now = new Date();
+
+      const expiring = await db
+        .select({
+          id: documentVault.id,
+          filename: documentVault.filename,
+          ownerId: documentVault.ownerId,
+          expiresAt: documentVault.expiresAt,
+        })
+        .from(documentVault)
+        .where(and(lte(documentVault.expiresAt, cutoff), gte(documentVault.expiresAt, now)))
+        .limit(500);
+
+      let dispatched = 0;
+      for (const doc of expiring) {
+        if (!doc.expiresAt) continue;
+        const daysLeft = Math.ceil((doc.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+        await db.insert(userNotifications).values({
+          userId: doc.ownerId,
+          type: "document_required",
+          title: `Document expiring in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}`,
+          body: `Your document "${doc.filename}" (ID: ${doc.id}) will expire on ${doc.expiresAt.toLocaleDateString("en-GB")}. Please renew or re-upload it to avoid disruption.`,
+          isRead: false,
+        }).catch(() => {/* ignore duplicate notification errors */});
+        dispatched++;
+      }
+
+      return { dispatched, daysAhead: input.daysAhead, scannedAt: new Date().toISOString() };
     }),
 });

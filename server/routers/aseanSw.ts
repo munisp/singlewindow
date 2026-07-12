@@ -235,4 +235,115 @@ export const aseanSwRouter = router({
       return { total: 0, by_status: {}, _offline: true };
     }
   }),
+
+  /**
+   * v111: getAseanSwStatus — ping each ASEAN member state SW endpoint and return live status.
+   * Returns per-country connectivity status with latency in milliseconds.
+   */
+  getAseanSwStatus: protectedProcedure.query(async () => {
+    const MEMBER_ENDPOINTS = [
+      { code: "SG", name: "Singapore",   url: process.env.ASEAN_SW_SG_URL ?? "" },
+      { code: "MY", name: "Malaysia",    url: process.env.ASEAN_SW_MY_URL ?? "" },
+      { code: "TH", name: "Thailand",    url: process.env.ASEAN_SW_TH_URL ?? "" },
+      { code: "ID", name: "Indonesia",   url: process.env.ASEAN_SW_ID_URL ?? "" },
+      { code: "PH", name: "Philippines", url: process.env.ASEAN_SW_PH_URL ?? "" },
+      { code: "VN", name: "Vietnam",     url: process.env.ASEAN_SW_VN_URL ?? "" },
+      { code: "MM", name: "Myanmar",     url: process.env.ASEAN_SW_MM_URL ?? "" },
+      { code: "KH", name: "Cambodia",    url: process.env.ASEAN_SW_KH_URL ?? "" },
+      { code: "LA", name: "Laos",        url: process.env.ASEAN_SW_LA_URL ?? "" },
+      { code: "BN", name: "Brunei",      url: process.env.ASEAN_SW_BN_URL ?? "" },
+    ];
+
+    const results = await Promise.allSettled(
+      MEMBER_ENDPOINTS.map(async (m) => {
+        if (!m.url) {
+          // No endpoint configured — use static data from ASEAN_MEMBERS
+          const staticMember = ASEAN_MEMBERS.find((s) => s.code === m.code);
+          return {
+            code: m.code,
+            name: m.name,
+            status: (staticMember?.status === "active" ? "online" : "maintenance") as string,
+            latencyMs: staticMember?.latency_ms ?? null,
+            httpStatus: null as number | null,
+            checkedAt: new Date().toISOString(),
+            source: "static",
+          };
+        }
+        const start = Date.now();
+        try {
+          const resp = await fetch(m.url, { signal: AbortSignal.timeout(5_000) });
+          return {
+            code: m.code,
+            name: m.name,
+            status: resp.ok ? "online" : "degraded",
+            latencyMs: Date.now() - start,
+            httpStatus: resp.status,
+            checkedAt: new Date().toISOString(),
+            source: "live",
+          };
+        } catch {
+          return {
+            code: m.code,
+            name: m.name,
+            status: "offline",
+            latencyMs: null,
+            httpStatus: null,
+            checkedAt: new Date().toISOString(),
+            source: "live",
+          };
+        }
+      })
+    );
+
+    return results.map((r) =>
+      r.status === "fulfilled"
+        ? r.value
+        : { code: "??", name: "Unknown", status: "offline", latencyMs: null, httpStatus: null, checkedAt: new Date().toISOString(), source: "error" }
+    );
+  }),
+
+  /**
+   * v111: submitAseanDeclaration — submit a declaration to a specific ASEAN member state SW.
+   * Includes retry logic (up to 3 attempts with exponential back-off).
+   */
+  submitAseanDeclaration: protectedProcedure
+    .input(z.object({
+      destinationCountry: z.enum(["SG", "MY", "TH", "ID", "PH", "VN", "MM", "KH", "LA", "BN"]),
+      declarationId: z.number().int().positive(),
+      messageType: z.enum(["CUSCAR", "CUSRES", "CUSDEC", "CUSRSP", "ACDD", "SSTC", "ATIGA"]).default("CUSDEC"),
+      payload: z.record(z.string(), z.unknown()).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const MAX_RETRIES = 3;
+      let lastError = "Unknown error";
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const result = await aseanFetch("/api/asean/submit", {
+            method: "POST",
+            body: JSON.stringify({
+              destination_country: input.destinationCountry,
+              declaration_id: input.declarationId,
+              message_type: input.messageType,
+              payload: input.payload ?? {},
+            }),
+          });
+          return { ...result, attempt, success: true };
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err);
+          if (attempt < MAX_RETRIES) {
+            await new Promise((resolve) => setTimeout(resolve, 500 * Math.pow(2, attempt - 1)));
+          }
+        }
+      }
+
+      return {
+        success: false,
+        attempt: MAX_RETRIES,
+        error: lastError,
+        declarationId: input.declarationId,
+        destinationCountry: input.destinationCountry,
+        submittedAt: new Date().toISOString(),
+      };
+    }),
 });

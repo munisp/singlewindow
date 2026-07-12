@@ -1472,6 +1472,12 @@ async function startServer() {
     app.post("/api/scheduled/lakehouse-rollup", lakehouseRollupHandler);
     console.log("[Heartbeat] /api/scheduled/lakehouse-rollup registered");
   }
+  // v106: Post-Clearance Audit Weekly Reminder — Heartbeat handler (Monday 06:00 UTC)
+  {
+    const { postAuditReminderHandler } = await import("../scheduled/postAuditReminder");
+    app.post("/api/scheduled/post-audit-reminder", postAuditReminderHandler);
+    console.log("[Heartbeat] /api/scheduled/post-audit-reminder registered");
+  }
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

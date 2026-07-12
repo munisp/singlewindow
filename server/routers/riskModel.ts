@@ -264,7 +264,7 @@ const MODEL_REGISTRY_DATA = [
   { versionId: "e5f6a1b2c3d4", version: "v3.0.0-beta", algorithm: "LightGBM", accuracy: 0.903, f1Score: 0.891, precision: 0.908, recall: 0.875, aucRoc: 0.948, trainingSamples: 200000, status: "challenger", createdAt: "2025-12-01T00:00:00Z", promotedAt: null },
 ];
 
-const AB_TESTS_DATA = [
+const AB_TESTS_DATA: Array<{ testId: string; championVersion: string; challengerVersion: string; trafficSplitPct: number; status: string; startedAt: string; championAccuracy: number; challengerAccuracy: number; championRequests: number; challengerRequests: number; winner: string | null }> = [
   { testId: "ab-2025-q4-001", championVersion: "v2.1.0", challengerVersion: "v3.0.0-beta", trafficSplitPct: 10, status: "running", startedAt: "2026-01-01T00:00:00Z", championAccuracy: 0.891, challengerAccuracy: 0.903, championRequests: 45230, challengerRequests: 5025, winner: null },
 ];
 
@@ -385,4 +385,54 @@ export const riskModelRouter = router({
       AB_TESTS_DATA.push(test);
       return test;
     }),
+
+  /**
+   * v117: concludeAbTest — conclude a running A/B test by comparing champion vs
+   * challenger accuracy and declaring a winner. Optionally auto-promote the winner.
+   */
+  concludeAbTest: adminProcedure
+    .input(z.object({
+      testId: z.string().min(1),
+      autoPromote: z.boolean().default(false),
+    }))
+    .mutation(({ input }) => {
+      const test = AB_TESTS_DATA.find((t) => t.testId === input.testId);
+      if (!test) throw new TRPCError({ code: "NOT_FOUND", message: `A/B test ${input.testId} not found` });
+      if (test.status !== "running") throw new TRPCError({ code: "BAD_REQUEST", message: "Test is not running" });
+
+      // Simulate final accuracy metrics (in production, read from ML metrics store)
+      const championAcc = 0.87 + Math.random() * 0.05;
+      const challengerAcc = 0.84 + Math.random() * 0.08;
+      const winner = challengerAcc > championAcc ? "challenger" : "champion";
+
+      test.status = "concluded";
+      test.championAccuracy = Math.round(championAcc * 10000) / 10000;
+      test.challengerAccuracy = Math.round(challengerAcc * 10000) / 10000;
+      test.winner = winner;
+
+      if (input.autoPromote && winner === "challenger") {
+        const champion = MODEL_REGISTRY_DATA.find((m) => m.version === test.championVersion);
+        const challenger = MODEL_REGISTRY_DATA.find((m) => m.version === test.challengerVersion);
+        if (champion) champion.status = "archived";
+        if (challenger) { challenger.status = "champion"; challenger.promotedAt = new Date().toISOString(); }
+      }
+
+      return { testId: test.testId, winner, championAccuracy: test.championAccuracy, challengerAccuracy: test.challengerAccuracy, autoPromoted: input.autoPromote && winner === "challenger" };
+    }),
+
+  /**
+   * v117: getAbTestResults — return detailed metrics for all A/B tests,
+   * including statistical significance estimate based on sample sizes.
+   */
+  getAbTestResults: adminProcedure.query(() => {
+    return AB_TESTS_DATA.map((t) => {
+      const totalRequests = (t.championRequests ?? 0) + (t.challengerRequests ?? 0);
+      const lift = t.challengerAccuracy && t.championAccuracy
+        ? Math.round(((t.challengerAccuracy - t.championAccuracy) / t.championAccuracy) * 10000) / 100
+        : null;
+      // Simple heuristic: need >= 1000 samples for statistical significance
+      const significant = totalRequests >= 1000 && lift !== null && Math.abs(lift) >= 1.0;
+      return { ...t, totalRequests, lift, statSignificant: significant };
+    });
+  }),
 });

@@ -531,4 +531,119 @@ export const visionRouter = router({
         isMock: !!(analysis.mock),
       };
     }),
+
+  /**
+   * v122: batchAnalyzeDocuments — submit a batch of document images for
+   * parallel OCR and vision analysis. Returns a batch job ID that can be
+   * polled for completion status.
+   */
+  batchAnalyzeDocuments: protectedProcedure
+    .input(z.object({
+      documents: z.array(z.object({
+        documentId: z.number().int().positive(),
+        imageUrl: z.string().url(),
+        documentType: z.enum(["commercial_invoice", "bill_of_lading", "packing_list",
+          "certificate_of_origin", "phytosanitary_cert", "import_permit",
+          "export_permit", "insurance_cert", "customs_bond", "other"]),
+      })).min(1).max(50),
+      declarationId: z.number().int().positive().optional(),
+      priority: z.enum(["normal", "high", "critical"]).default("normal"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const { visionBatchJobs } = await import("../../drizzle/schema");
+      const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const [job] = await db.insert(visionBatchJobs).values({
+        batchId,
+        submittedBy: ctx.user.id,
+        declarationId: input.declarationId ?? null,
+        totalDocuments: input.documents.length,
+        processedDocuments: 0,
+        status: "queued",
+        priority: input.priority,
+        documents: JSON.stringify(input.documents),
+        results: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }).returning();
+
+      return {
+        batchId: job.batchId,
+        status: "queued",
+        totalDocuments: input.documents.length,
+        estimatedCompletionSeconds: input.documents.length * 3,
+        message: `Batch job ${batchId} queued for ${input.documents.length} documents`,
+      };
+    }),
+
+  /**
+   * v122: getBatchJobStatus — poll the status of a batch document analysis job.
+   */
+  getBatchJobStatus: protectedProcedure
+    .input(z.object({ batchId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { visionBatchJobs } = await import("../../drizzle/schema");
+      const { eq, and } = await import("drizzle-orm");
+
+      const [job] = await db.select().from(visionBatchJobs)
+        .where(and(
+          eq(visionBatchJobs.batchId, input.batchId),
+          eq(visionBatchJobs.submittedBy, ctx.user.id),
+        ))
+        .limit(1);
+
+      if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Batch job not found" });
+
+      const results = job.results ? JSON.parse(job.results as string) : null;
+      return {
+        batchId: job.batchId,
+        status: job.status,
+        totalDocuments: job.totalDocuments,
+        processedDocuments: job.processedDocuments,
+        progressPct: job.totalDocuments > 0
+          ? Math.round((job.processedDocuments / job.totalDocuments) * 100)
+          : 0,
+        results,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
+      };
+    }),
+
+  /**
+   * v122: listBatchJobs — list recent batch analysis jobs for the current user.
+   */
+  listBatchJobs: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(50).default(20) }))
+    .query(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return { jobs: [] };
+
+      const { visionBatchJobs } = await import("../../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+
+      const jobs = await db.select({
+        batchId: visionBatchJobs.batchId,
+        status: visionBatchJobs.status,
+        totalDocuments: visionBatchJobs.totalDocuments,
+        processedDocuments: visionBatchJobs.processedDocuments,
+        priority: visionBatchJobs.priority,
+        createdAt: visionBatchJobs.createdAt,
+        updatedAt: visionBatchJobs.updatedAt,
+      })
+        .from(visionBatchJobs)
+        .where(eq(visionBatchJobs.submittedBy, ctx.user.id))
+        .orderBy(desc(visionBatchJobs.createdAt))
+        .limit(input.limit);
+
+      return { jobs };
+    }),
 });

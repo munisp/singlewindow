@@ -556,4 +556,182 @@ export const drawbackRouter = router({
         totalPaid: parseFloat(stats?.totalPaid ?? "0"),
       };
     }),
+
+  /**
+   * v115: autoCalculateFromDeclaration — automatically compute the maximum eligible
+   * drawback refund for a given declaration by looking up the actual duty paid,
+   * HS code, and export quantity from the database.
+   * Returns a full breakdown with eligibility assessment.
+   */
+  autoCalculateFromDeclaration: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      drawbackType: z.enum(["manufacturing", "unused_merchandise", "rejected_merchandise", "substitution"]).default("unused_merchandise"),
+      exportQuantity: z.number().positive().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [decl] = await db
+        .select({
+          id: declarations.id,
+          traderId: declarations.traderId,
+          hsCode: declarations.hsCode,
+          dutyAmount: declarations.dutyAmount,
+          vatAmount: declarations.vatAmount,
+          totalDue: declarations.totalDue,
+          invoiceValue: declarations.invoiceValue,
+          numberOfPackages: declarations.numberOfPackages,
+          status: declarations.status,
+          declarationType: declarations.declarationType,
+        })
+        .from(declarations)
+        .where(eq(declarations.id, input.declarationId))
+        .limit(1);
+
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+
+      const isOwner = decl.traderId === ctx.user.id;
+      const isPrivileged = ["admin", "customs_officer", "finance"].includes(ctx.user.role);
+      if (!isOwner && !isPrivileged) throw new TRPCError({ code: "FORBIDDEN" });
+
+      // Only import declarations are eligible for drawback
+      const eligible = decl.declarationType === "import" && decl.status === "cleared";
+      if (!eligible) {
+        return {
+          eligible: false,
+          reason: decl.declarationType !== "import"
+            ? "Only import declarations are eligible for duty drawback"
+            : "Declaration must be in 'cleared' status to claim drawback",
+          declarationId: input.declarationId,
+          netRefund: 0,
+          breakdown: null,
+        };
+      }
+
+      const dutyPaid = parseFloat(decl.dutyAmount ?? "0");
+      if (dutyPaid <= 0) {
+        return {
+          eligible: false,
+          reason: "No duty was paid on this declaration",
+          declarationId: input.declarationId,
+          netRefund: 0,
+          breakdown: null,
+        };
+      }
+
+      const REFUND_RATES: Record<string, number> = {
+        manufacturing: 0.99,
+        unused_merchandise: 0.99,
+        rejected_merchandise: 1.00,
+        substitution: 0.99,
+      };
+      const refundRate = REFUND_RATES[input.drawbackType] ?? 0.99;
+
+      // Quantity ratio: if exportQuantity provided, compare to numberOfPackages
+      let quantityRatio = 1.0;
+      if (input.exportQuantity && decl.numberOfPackages && decl.numberOfPackages > 0) {
+        quantityRatio = Math.min(input.exportQuantity / decl.numberOfPackages, 1.0);
+      }
+
+      const grossRefund = dutyPaid * refundRate * quantityRatio;
+      const processingFee = Math.min(grossRefund * 0.005, 500);
+      const netRefund = Math.round((grossRefund - processingFee) * 100) / 100;
+
+      // Check for existing drawback claims on this declaration
+      const existingClaims = await db
+        .select({ id: dutyDrawbackClaims.id, status: dutyDrawbackClaims.status, claimedAmount: dutyDrawbackClaims.claimedAmount })
+        .from(dutyDrawbackClaims)
+        .where(eq(dutyDrawbackClaims.importDeclarationId, input.declarationId));
+
+      const alreadyClaimed = existingClaims.some((c) => ["submitted", "under_review", "approved", "paid"].includes(c.status));
+
+      return {
+        eligible: !alreadyClaimed,
+        reason: alreadyClaimed ? "A drawback claim already exists for this declaration" : null,
+        declarationId: input.declarationId,
+        hsCode: decl.hsCode,
+        drawbackType: input.drawbackType,
+        refundRate,
+        quantityRatio: Math.round(quantityRatio * 10000) / 10000,
+        grossRefund: Math.round(grossRefund * 100) / 100,
+        processingFee: Math.round(processingFee * 100) / 100,
+        netRefund,
+        existingClaims: existingClaims.map((c) => ({ id: c.id, status: c.status, amount: parseFloat(c.claimedAmount ?? "0") })),
+        breakdown: {
+          dutyPaid,
+          vatPaid: parseFloat(decl.vatAmount ?? "0"),
+          invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
+          refundRateApplied: refundRate,
+          quantityAdjustment: quantityRatio < 1 ? `${Math.round(quantityRatio * 100)}% (partial export)` : "100% (full export)",
+          processingFeeNote: "0.5% of gross refund, capped at USD 500",
+          legalBasis: "Section 74 Customs Act — Drawback of Customs Duty",
+        },
+      };
+    }),
+
+  /**
+   * v115: getEligibleDeclarations — list all cleared import declarations for the
+   * current user that have no existing drawback claim and have duty > 0.
+   */
+  getEligibleDeclarations: protectedProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(100).default(20),
+      offset: z.number().int().min(0).default(0),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return { declarations: [], total: 0 };
+
+      const isPrivileged = ["admin", "customs_officer", "finance"].includes(ctx.user.role);
+
+      // Get cleared import declarations with duty paid
+      const rows = await db
+        .select({
+          id: declarations.id,
+          declarationNumber: declarations.declarationNumber,
+          hsCode: declarations.hsCode,
+          dutyAmount: declarations.dutyAmount,
+          invoiceValue: declarations.invoiceValue,
+          countryOfOrigin: declarations.countryOfOrigin,
+          clearedAt: declarations.clearedAt,
+          traderId: declarations.traderId,
+        })
+        .from(declarations)
+        .where(
+          and(
+            isPrivileged ? undefined : eq(declarations.traderId, ctx.user.id),
+            eq(declarations.declarationType, "import"),
+            eq(declarations.status, "cleared"),
+            sql`${declarations.dutyAmount}::numeric > 0`,
+          )
+        )
+        .orderBy(desc(declarations.clearedAt))
+        .limit(input.limit)
+        .offset(input.offset);
+
+      // Filter out those with existing claims
+      const withClaims = await db
+        .select({ declarationId: dutyDrawbackClaims.importDeclarationId })
+        .from(dutyDrawbackClaims)
+        .where(
+          and(
+            sql`${dutyDrawbackClaims.status} IN ('submitted', 'under_review', 'approved', 'paid')`,
+          )
+        );
+
+      const claimedIds = new Set(withClaims.map((c) => c.declarationId));
+      const eligible = rows.filter((r) => !claimedIds.has(r.id));
+
+      return {
+        declarations: eligible.map((r) => ({
+          ...r,
+          dutyAmount: parseFloat(r.dutyAmount ?? "0"),
+          invoiceValue: parseFloat(r.invoiceValue ?? "0"),
+          estimatedRefund: Math.round(parseFloat(r.dutyAmount ?? "0") * 0.99 * 0.995 * 100) / 100,
+        })),
+        total: eligible.length,
+      };
+    }),
 });

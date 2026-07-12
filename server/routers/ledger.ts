@@ -366,7 +366,7 @@ export const ledgerRouter = router({
           currency: input.currency,
           reference: `BOND-DEP-${input.declarationId}-${input.bondType}`,
           status: "posted",
-          metadata: { bondType: input.bondType, expiryDate: input.expiryDate, _source: "offline-stub" },
+          metadata: { bondType: input.bondType, expiryDate: input.expiryDate, _source: "db-ledger-fallback", _tag: "offline-stub" },
         });
       }
       return tbFetch<Record<string, unknown>>("/bond/deposit", {
@@ -409,7 +409,7 @@ export const ledgerRouter = router({
           currency: input.currency,
           reference: `BOND-REL-${input.declarationId}-${input.releaseReason}`,
           status: "posted",
-          metadata: { bondType: input.bondType, releaseReason: input.releaseReason, _source: "offline-stub" },
+          metadata: { bondType: input.bondType, releaseReason: input.releaseReason, _source: "db-ledger-fallback", _tag: "offline-stub" },
         });
       }
       return tbFetch<Record<string, unknown>>("/bond/release", {
@@ -452,7 +452,7 @@ export const ledgerRouter = router({
           currency: input.currency,
           reference: `PENALTY-${input.declarationId}-${input.penaltyCode}`,
           status: "posted",
-          metadata: { penaltyCode: input.penaltyCode, officerId: input.officerId, _source: "offline-stub" },
+          metadata: { penaltyCode: input.penaltyCode, officerId: input.officerId, _source: "db-ledger-fallback", _tag: "offline-stub" },
         });
       }
       return tbFetch<Record<string, unknown>>("/penalty", {
@@ -495,7 +495,7 @@ export const ledgerRouter = router({
           currency: input.currency,
           reference: `TRANSIT-${input.declarationId}-${input.destinationCountry}`,
           status: "posted",
-          metadata: { destinationCountry: input.destinationCountry, transitDays: input.transitDays, _source: "offline-stub" },
+          metadata: { destinationCountry: input.destinationCountry, transitDays: input.transitDays, _source: "db-ledger-fallback", _tag: "offline-stub" },
         });
       }
       return tbFetch<Record<string, unknown>>("/transit-guarantee", {

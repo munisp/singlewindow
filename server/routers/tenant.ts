@@ -8,7 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { tenants, tenantKeycloakConfig, tenantUsers } from "../../drizzle/schema";
+import { tenants, tenantKeycloakConfig, tenantUsers, tenantBranding } from "../../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -284,4 +284,84 @@ export const tenantRouter = router({
     }
     return stats;
   }),
+
+  /**
+   * v119: getTenantBranding — get the white-label branding config for a tenant.
+   * Admins can query any tenant; regular users get their own tenant's branding.
+   */
+  getTenantBranding: protectedProcedure
+    .input(z.object({ tenantId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const isAdmin = ctx.user.role === "admin";
+      if (!isAdmin) {
+        // Verify user belongs to this tenant
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const [membership] = await db.select({ id: tenantUsers.id })
+          .from(tenantUsers)
+          .where(and(eq(tenantUsers.tenantId, input.tenantId), eq(tenantUsers.userId, ctx.user.id)))
+          .limit(1);
+        if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this tenant" });
+      }
+
+      const db = await getDb();
+      if (!db) return null;
+
+      const [branding] = await db.select().from(tenantBranding)
+        .where(eq(tenantBranding.tenantId, input.tenantId))
+        .limit(1);
+
+      return branding ?? null;
+    }),
+
+  /**
+   * v119: upsertTenantBranding — create or update white-label branding for a tenant.
+   * Only admins or tenant admins can update branding.
+   */
+  upsertTenantBranding: protectedProcedure
+    .input(z.object({
+      tenantId: z.string().uuid(),
+      platformName: z.string().min(1).max(128).optional(),
+      logoUrl: z.string().url().optional().nullable(),
+      faviconUrl: z.string().url().optional().nullable(),
+      primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+      accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+      supportEmail: z.string().email().optional().nullable(),
+      supportPhone: z.string().max(64).optional().nullable(),
+      footerText: z.string().max(500).optional().nullable(),
+      customCss: z.string().max(10000).optional().nullable(),
+      loginBannerUrl: z.string().url().optional().nullable(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
+
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const { tenantId, ...brandingFields } = input;
+      const values = { ...brandingFields, tenantId, updatedBy: ctx.user.id, updatedAt: new Date() };
+
+      const [result] = await db.insert(tenantBranding)
+        .values(values as any)
+        .onConflictDoUpdate({
+          target: tenantBranding.tenantId,
+          set: { ...brandingFields, updatedBy: ctx.user.id, updatedAt: new Date() },
+        })
+        .returning();
+
+      return result;
+    }),
+
+  /**
+   * v119: resetTenantBranding — reset a tenant's branding to platform defaults.
+   */
+  resetTenantBranding: adminProcedure
+    .input(z.object({ tenantId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      await db.delete(tenantBranding).where(eq(tenantBranding.tenantId, input.tenantId));
+      return { success: true, message: "Branding reset to platform defaults" };
+    }),
 });

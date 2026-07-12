@@ -388,4 +388,191 @@ export const slaEscalationRouter = router({
       generatedAt: new Date().toISOString(),
     };
   }),
+
+  /**
+   * v124: autoEscalate — scan all breached SLA declarations and automatically
+   * create escalation records, notify supervisors, and update declaration status.
+   * Designed to be called by the Heartbeat scheduled job.
+   */
+  autoEscalate: protectedProcedure
+    .input(z.object({
+      dryRun: z.boolean().default(false),
+      notifySupervisor: z.boolean().default(true),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { declarations, slaEscalations, userNotifications } = await import("../../drizzle/schema");
+      const { eq, and, lt, isNull, inArray, not } = await import("drizzle-orm");
+
+      const now = Date.now();
+      const SLA_THRESHOLDS: Record<string, number> = {
+        GREEN: 4 * 60 * 60 * 1000,
+        YELLOW: 24 * 60 * 60 * 1000,
+        RED: 72 * 60 * 60 * 1000,
+        BLUE: 48 * 60 * 60 * 1000,
+      };
+
+      // Find submitted declarations not yet cleared
+      const pending = await db.select({
+        id: declarations.id,
+        declarationNumber: declarations.declarationNumber,
+        riskLane: declarations.riskLane,
+        submittedAt: declarations.submittedAt,
+        assignedOfficerId: declarations.assignedOfficerId,
+      })
+        .from(declarations)
+        .where(
+          and(
+            eq(declarations.status, "submitted"),
+            not(isNull(declarations.submittedAt)),
+          )
+        )
+        .limit(500);
+
+      const escalated: Array<{ declarationId: number; declarationNumber: string; lane: string; elapsedHours: number }> = [];
+      const skipped: number[] = [];
+
+      for (const decl of pending) {
+        const lane = (decl.riskLane ?? "YELLOW").toUpperCase();
+        const threshold = SLA_THRESHOLDS[lane] ?? SLA_THRESHOLDS.YELLOW;
+        const elapsed = now - new Date(decl.submittedAt!).getTime();
+
+        if (elapsed < threshold) {
+          skipped.push(decl.id);
+          continue;
+        }
+
+        // Check if already escalated
+        const [existing] = await db.select({ id: slaEscalations.id })
+          .from(slaEscalations)
+          .where(and(
+            eq(slaEscalations.declarationId, decl.id),
+            eq(slaEscalations.resolved, false),
+          ))
+          .limit(1);
+
+        if (existing) {
+          skipped.push(decl.id);
+          continue;
+        }
+
+        if (!input.dryRun) {
+          await db.insert(slaEscalations).values({
+            declarationId: decl.id,
+            breachType: `${lane}_sla_breach`,
+            escalationLevel: 1,
+            escalatedBy: ctx.user.id,
+            reason: `SLA breach: ${lane} lane exceeded ${Math.round(threshold / 3600000)}h threshold`,
+            lane,
+            elapsedMs: elapsed,
+            thresholdMs: threshold,
+            resolved: false,
+            createdAt: new Date(),
+          });
+
+          // Notify supervisor if requested
+          if (input.notifySupervisor) {
+            await db.insert(userNotifications).values({
+              userId: decl.assignedOfficerId ?? ctx.user.id,
+              title: "SLA Breach Auto-Escalation",
+              body: `Declaration ${decl.declarationNumber} (${lane} lane) has breached its SLA. Elapsed: ${Math.round(elapsed / 3600000)}h`,
+              type: "sla_breach",
+              isRead: false,
+              createdAt: new Date(),
+            });
+          }
+        }
+
+        escalated.push({
+          declarationId: decl.id,
+          declarationNumber: decl.declarationNumber,
+          lane,
+          elapsedHours: Math.round(elapsed / 3600000 * 10) / 10,
+        });
+      }
+
+      return {
+        escalated,
+        escalatedCount: escalated.length,
+        skippedCount: skipped.length,
+        dryRun: input.dryRun,
+        processedAt: new Date().toISOString(),
+      };
+    }),
+
+  /**
+   * v124: resolveEscalation — mark an SLA escalation as resolved.
+   */
+  resolveEscalation: protectedProcedure
+    .input(z.object({
+      escalationId: z.number().int().positive(),
+      resolutionNote: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+      const { slaEscalations } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const [updated] = await db.update(slaEscalations)
+        .set({
+          resolved: true,
+          resolvedBy: ctx.user.id,
+          resolvedAt: new Date(),
+          resolutionNote: input.resolutionNote ?? null,
+        })
+        .where(eq(slaEscalations.id, input.escalationId))
+        .returning();
+
+      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "Escalation not found" });
+      return { escalation: updated };
+    }),
+
+  /**
+   * v124: getEscalationHistory — list recent SLA escalations with resolution status.
+   */
+  getEscalationHistory: protectedProcedure
+    .input(z.object({
+      resolved: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).default(50),
+    }))
+    .query(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return { escalations: [] };
+
+      const { slaEscalations, declarations } = await import("../../drizzle/schema");
+      const { eq, and, desc } = await import("drizzle-orm");
+
+      const conditions = [];
+      if (input.resolved !== undefined) {
+        conditions.push(eq(slaEscalations.resolved, input.resolved));
+      }
+
+      const rows = await db.select({
+        id: slaEscalations.id,
+        declarationId: slaEscalations.declarationId,
+        declarationNumber: declarations.declarationNumber,
+        lane: slaEscalations.lane,
+        elapsedMs: slaEscalations.elapsedMs,
+        thresholdMs: slaEscalations.thresholdMs,
+        reason: slaEscalations.reason,
+        resolved: slaEscalations.resolved,
+        resolvedAt: slaEscalations.resolvedAt,
+        resolutionNote: slaEscalations.resolutionNote,
+        createdAt: slaEscalations.createdAt,
+      })
+        .from(slaEscalations)
+        .innerJoin(declarations, eq(slaEscalations.declarationId, declarations.id))
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(slaEscalations.createdAt))
+        .limit(input.limit);
+
+      return { escalations: rows };
+    }),
 });
