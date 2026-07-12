@@ -110,6 +110,8 @@ const BulkExport = lazy(() => import('./pages/app/BulkExport'));
 const WebhookLogs = lazy(() => import('./pages/app/WebhookLogs'));
 const SecurityAlerts = lazy(() => import('./pages/app/SecurityAlerts'));
 const TenantManagement = lazy(() => import('./pages/app/TenantManagement'));
+const TenantBranding = lazy(() => import('./pages/app/TenantBranding'));
+const OfficerWorkloadRebalancer = lazy(() => import('./pages/app/OfficerWorkloadRebalancer'));
 const OnboardingProgress = lazy(() => import('./pages/app/OnboardingProgress'));
 // v67 — Insider Threat Prevention & Batch Seed
 const SecurityMonitor = lazy(() => import('./pages/app/SecurityMonitor'));
@@ -482,6 +484,12 @@ function Router() {
       </Route>
       <Route path="/app/admin/tenants-mgmt">
         <Suspense fallback={<LazyFallback />}><TenantManagement /></Suspense>
+      </Route>
+      <Route path="/app/admin/tenant-branding">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><TenantBranding /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/workload-rebalancer">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><OfficerWorkloadRebalancer /></Suspense></AdminGuard>
       </Route>
       <Route path="/app/onboarding/progress">
         <Suspense fallback={<LazyFallback />}><OnboardingProgress /></Suspense>

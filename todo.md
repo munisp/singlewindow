@@ -1355,3 +1355,10 @@
 - [x] v125-02: Run TypeScript check (0 errors)
 - [x] v125-03: Update todo.md with all completed items
 - [x] v125-04: Save checkpoint and push to GitHub
+
+## v126 Sprint — Frontend Pages (Fraud Network Graph, Tenant Branding, Officer Workload)
+- [ ] v126-1: Enhance FraudNetwork.tsx with exportNetworkGraph + linkCases integration
+- [ ] v126-2: Create TenantBranding.tsx page with live preview and color picker
+- [ ] v126-3: Enhance OfficerWorkload.tsx with getTeamSummary + autoRebalanceWorkload integration
+- [ ] v126-4: Add TenantBranding route to App.tsx and sidebar entry to DashboardLayout.tsx
+- [ ] v126-5: Run TypeScript check, tests, checkpoint, push to GitHub
