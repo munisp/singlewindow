@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Globe, Search, AlertTriangle, CheckCircle, Shield, RefreshCw, Clock, XCircle } from "lucide-react";
+import { Globe, Search, AlertTriangle, CheckCircle, Shield, RefreshCw, Clock, XCircle, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 const RESULT_CFG: Record<string, { label: string; color: string; bg: string; border: string; Icon: React.ComponentType<any> }> = {
@@ -55,6 +55,43 @@ export default function SanctionsScreening() {
   const complianceAlerts = (alerts ?? []).filter((a: any) =>
     a.category === "compliance" || a.title?.toLowerCase().includes("sanction")
   );
+
+  const batchScreenMutation = trpc.security.batchScreenEntities.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Batch screening complete: ${data.results.length} entities processed`);
+    },
+    onError: (err) => {
+      toast.error(`Batch screening failed: ${err.message}`);
+    },
+  });
+
+  const handleBatchCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      // Expect CSV: name,type (header optional)
+      const entities = lines
+        .filter(l => !l.toLowerCase().startsWith('name'))
+        .map(l => {
+          const [name, type] = l.split(',');
+          const rawType = type?.trim() || 'individual';
+          const entityType = (['individual', 'company', 'vessel'].includes(rawType) ? rawType : 'individual') as 'individual' | 'company' | 'vessel';
+          return { name: name?.trim() || '', entityType };
+        })
+        .filter(e => e.name);
+      if (entities.length === 0) {
+        toast.error("No valid entities found in CSV");
+        return;
+      }
+      batchScreenMutation.mutate({ entities });
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const confirmedHits = complianceAlerts.filter((a: any) => a.severity === "critical" || a.severity === "high").length;
   const pendingReview = complianceAlerts.filter((a: any) => !a.acknowledgedAt).length;
 
@@ -70,9 +107,22 @@ export default function SanctionsScreening() {
               OFAC SDN · UN Security Council · EU Consolidated · OFSI · INTERPOL
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
-            <RefreshCw className="h-4 w-4" />Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer">
+              <input type="file" accept=".csv" className="hidden" onChange={handleBatchCsvUpload} />
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors">
+                {batchScreenMutation.isPending ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                Batch CSV
+              </span>
+            </label>
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5">
+              <RefreshCw className="h-4 w-4" />Refresh
+            </Button>
+          </div>
         </div>
 
         {/* KPI cards */}

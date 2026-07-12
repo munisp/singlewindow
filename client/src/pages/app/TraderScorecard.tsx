@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useEffect as useQrEffect, useRef as useQrRef } from "react";
 import QRCode from "qrcode";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X, Link } from "lucide-react";
+import { Award, TrendingDown, TrendingUp, Clock, FileText, CheckCircle, AlertTriangle, Target, Settings, X, Link, Download } from "lucide-react";
 
 const TIER_COLORS: Record<string, string> = {
   gold: "#D4A017",
@@ -75,6 +75,30 @@ export default function TraderScorecard() {
   const [aeoDialogOpen, setAeoDialogOpen] = useState(false);
   const [aeoTierInput, setAeoTierInput] = useState<"standard" | "silver" | "gold">("standard");
 
+  const utils = trpc.useUtils();
+  const [isExporting, setIsExporting] = useState(false);
+  const handleExportScorecard = async () => {
+    setIsExporting(true);
+    try {
+      const rows = await utils.traderScorecard.exportScorecard.fetch({ format: 'csv' });
+      if (!rows || rows.length === 0) { toast.error('No data to export'); return; }
+      const headers = Object.keys(rows[0] as object).join(',');
+      const csvRows = (rows as any[]).map((r: any) => Object.values(r).map((v: any) => JSON.stringify(v ?? '')).join(','));
+      const csv = [headers, ...csvRows].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `scorecard-${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Scorecard exported');
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setIsExporting(false);
+    }
+  };
   const updateScorecardMutation = trpc.traderScorecard.updateScorecard.useMutation({
     onSuccess: () => {
       toast.success("AEO tier updated successfully");
@@ -184,6 +208,16 @@ export default function TraderScorecard() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportScorecard}
+              disabled={isExporting}
+            >
+              {isExporting
+                ? <><Download className="w-4 h-4 mr-2 animate-pulse" />Exporting…</>
+                : <><Download className="w-4 h-4 mr-2" />Export CSV</>}
+            </Button>
             <Badge
               className="px-4 py-2 text-base font-semibold"
               style={{ backgroundColor: tierColor, color: "#fff" }}

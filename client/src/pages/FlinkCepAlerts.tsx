@@ -54,6 +54,7 @@ import {
   Download,
   Settings,
   ChevronDown,
+  Upload,
 } from "lucide-react";
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -243,6 +244,33 @@ export default function FlinkCepAlerts() {
     { page: suppLogPage, pageSize: 20 },
     { enabled: showSuppressionHistory && user?.role === "admin" }
   );
+
+  const cepUtils = trpc.useUtils();
+  const [isExportingPatterns, setIsExportingPatterns] = useState(false);
+  const handleExportPatterns = async () => {
+    setIsExportingPatterns(true);
+    try {
+      const data = await cepUtils.cep.exportCepPatterns.fetch();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cep-patterns-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast.error(`Export failed: ${err.message}`);
+    } finally {
+      setIsExportingPatterns(false);
+    }
+  };
+  const importPatternsMutation = trpc.cep.importCepPatterns.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Imported ${data.imported} pattern(s) successfully`);
+      patternsQuery.refetch();
+    },
+    onError: (err: any) => toast.error(`Import failed: ${err.message}`),
+  });
 
   const [createPatternDialog, setCreatePatternDialog] = useState(false);
   const [newPatternName, setNewPatternName] = useState("");
@@ -661,13 +689,55 @@ export default function FlinkCepAlerts() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Registered CEP Patterns</CardTitle>
               {user?.role === "admin" && (
-                <Button
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setCreatePatternDialog(true)}
-                >
-                  + Add Pattern
-                </Button>
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          try {
+                            const patterns = JSON.parse(ev.target?.result as string);
+                            importPatternsMutation.mutate({ patterns });
+                          } catch {
+                            toast.error("Invalid JSON file");
+                          }
+                        };
+                        reader.readAsText(file);
+                        e.target.value = '';
+                      }}
+                    />
+                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-input bg-background hover:bg-accent transition-colors h-7">
+                      {importPatternsMutation.isPending ? (
+                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      ) : (
+                        <Upload className="h-3 w-3" />
+                      )}
+                      Import
+                    </span>
+                  </label>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1"
+                    onClick={handleExportPatterns}
+                    disabled={isExportingPatterns}
+                  >
+                    <Download className="h-3 w-3" />
+                    Export
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => setCreatePatternDialog(true)}
+                  >
+                    + Add Pattern
+                  </Button>
+                </div>
               )}
             </div>
           </CardHeader>

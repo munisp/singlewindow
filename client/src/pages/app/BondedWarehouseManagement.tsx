@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw, Download, Search,
+  Warehouse, AlertTriangle, Package, FileText, ChevronRight, Shield, RefreshCw, Download, Search, Bell,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -183,6 +183,12 @@ export default function BondedWarehouseManagement() {
   // Cached scan results merged into the alerts banner
   const [lastScanItems, setLastScanItems] = useState<Array<Record<string, unknown> & { flag: string }>>([]);
 
+  const sendSmsMutation = trpc.bondedWarehouse.sendBondExpiryAlerts.useMutation({
+    onSuccess: (res: any) => {
+      toast.success(`SMS alerts sent to ${res.sent} warehouse operator(s)`);
+    },
+    onError: (err: any) => toast.error(err.message),
+  });
   const runExpiryCheckMutation = trpc.bondedWarehouse.runExpiryCheck.useMutation({
     onSuccess: (result) => {
       setExpiryCheckDialog(result as any);
@@ -368,6 +374,17 @@ export default function BondedWarehouseManagement() {
                     <Download className="h-3 w-3" />
                     Export CSV
                   </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => sendSmsMutation.mutate({ daysAhead: 30 })}
+                      disabled={sendSmsMutation.isPending}
+                      className="flex items-center gap-1 text-xs text-orange-700 hover:text-orange-900 font-medium border border-orange-300 rounded px-2 py-0.5 bg-white/60 hover:bg-white/90 transition-colors disabled:opacity-50"
+                      title="Send SMS alerts to warehouse operators with expiring bonds"
+                    >
+                      <Bell className="h-3 w-3" />
+                      {sendSmsMutation.isPending ? "Sending…" : "Send SMS Alerts"}
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="space-y-1">

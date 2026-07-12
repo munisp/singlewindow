@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import {
   TrendingUp, DollarSign, FileText, Users, Shield, CheckCircle,
@@ -69,6 +70,13 @@ export default function ExecutiveDashboard() {
     onError: (e) => toast.error(e.message),
   });
 
+
+  const [drilldownKpi, setDrilldownKpi] = useState<"declarations" | "clearance_time" | "revenue" | "compliance" | "oga_approvals" | null>(null);
+  const { data: drilldownData, isLoading: drilldownLoading } = trpc.executiveDashboard.getKpiDrillDown.useQuery(
+    { metric: drilldownKpi! },
+    { enabled: !!drilldownKpi }
+  );
+
   const exportCsvMutation = trpc.executiveDashboard.exportRevenueCsv.useMutation({
     onSuccess: (data) => {
       const blob = new Blob([data.csv], { type: "text/csv" });
@@ -102,6 +110,50 @@ export default function ExecutiveDashboard() {
           Loading executive dashboard...
         </div>
       </div>
+
+      {/* v103: KPI Drill-Down Sheet */}
+      <Sheet open={!!drilldownKpi} onOpenChange={(open) => !open && setDrilldownKpi(null)}>
+        <SheetContent className="w-[480px] sm:w-[540px]">
+          <SheetHeader>
+            <SheetTitle>{drilldownKpi} — Detail</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-3">
+            {drilldownLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-10 bg-muted/30 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : drilldownData ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(drilldownData.summary ?? {}).map(([k, v]) => (
+                    <div key={k} className="p-3 rounded-lg border bg-muted/20">
+                      <p className="text-xs text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</p>
+                      <p className="text-lg font-bold">{String(v)}</p>
+                    </div>
+                  ))}
+                </div>
+                {drilldownData.data && drilldownData.data.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-sm font-medium mb-2">Breakdown</p>
+                    <div className="divide-y rounded-lg border overflow-hidden">
+                      {drilldownData.data.map((row: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/20">
+                          <span className="text-muted-foreground">{row.label}</span>
+                          <span className="font-semibold">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No drill-down data available.</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </DashboardLayout>
   );
 
@@ -239,14 +291,14 @@ export default function ExecutiveDashboard() {
         {kpi && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
-              { label: "Total Declarations", value: kpi.totalDeclarations.toLocaleString(), icon: <FileText className="h-4 w-4 text-blue-500" /> },
-              { label: "Cleared", value: kpi.clearedDeclarations.toLocaleString(), icon: <CheckCircle className="h-4 w-4 text-green-500" /> },
-              { label: "Clearance Rate", value: `${kpi.clearanceRate}%`, icon: <TrendingUp className="h-4 w-4 text-emerald-500" /> },
-              { label: "Registered Traders", value: kpi.registeredTraders.toLocaleString(), icon: <Users className="h-4 w-4 text-purple-500" /> },
-              { label: "AEO Operators", value: kpi.aeoOperators.toLocaleString(), icon: <Shield className="h-4 w-4 text-teal-500" /> },
-              { label: "Sanctions Hits", value: kpi.sanctionsHitsThisMonth.toLocaleString(), icon: <AlertTriangle className="h-4 w-4 text-red-500" /> },
+              { label: "Total Declarations", value: kpi.totalDeclarations.toLocaleString(), icon: <FileText className="h-4 w-4 text-blue-500" />, drilldownKey: "declarations" as const },
+              { label: "Cleared", value: kpi.clearedDeclarations.toLocaleString(), icon: <CheckCircle className="h-4 w-4 text-green-500" />, drilldownKey: "declarations" as const },
+              { label: "Clearance Rate", value: `${kpi.clearanceRate}%`, icon: <TrendingUp className="h-4 w-4 text-emerald-500" />, drilldownKey: "clearance_time" as const },
+              { label: "Registered Traders", value: kpi.registeredTraders.toLocaleString(), icon: <Users className="h-4 w-4 text-purple-500" />, drilldownKey: "compliance" as const },
+              { label: "AEO Operators", value: kpi.aeoOperators.toLocaleString(), icon: <Shield className="h-4 w-4 text-teal-500" />, drilldownKey: "compliance" as const },
+              { label: "Sanctions Hits", value: kpi.sanctionsHitsThisMonth.toLocaleString(), icon: <AlertTriangle className="h-4 w-4 text-red-500" />, drilldownKey: "compliance" as const },
             ].map(item => (
-              <Card key={item.label}>
+              <Card key={item.label} className="cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all" onClick={() => setDrilldownKpi(item.drilldownKey)}>
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-2 mb-1">
                     {item.icon}
@@ -621,6 +673,50 @@ export default function ExecutiveDashboard() {
           </p>
         )}
       </div>
+
+      {/* v103: KPI Drill-Down Sheet */}
+      <Sheet open={!!drilldownKpi} onOpenChange={(open) => !open && setDrilldownKpi(null)}>
+        <SheetContent className="w-[480px] sm:w-[540px]">
+          <SheetHeader>
+            <SheetTitle>{drilldownKpi} — Detail</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-3">
+            {drilldownLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-10 bg-muted/30 rounded animate-pulse" />
+                ))}
+              </div>
+            ) : drilldownData ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.entries(drilldownData.summary ?? {}).map(([k, v]) => (
+                    <div key={k} className="p-3 rounded-lg border bg-muted/20">
+                      <p className="text-xs text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</p>
+                      <p className="text-lg font-bold">{String(v)}</p>
+                    </div>
+                  ))}
+                </div>
+                {drilldownData.data && drilldownData.data.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-sm font-medium mb-2">Breakdown</p>
+                    <div className="divide-y rounded-lg border overflow-hidden">
+                      {drilldownData.data.map((row: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/20">
+                          <span className="text-muted-foreground">{row.label}</span>
+                          <span className="font-semibold">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No drill-down data available.</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </DashboardLayout>
   );
 }

@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Anchor, Ship, Navigation, AlertTriangle, RefreshCw,
   Clock, MapPin, Gauge, Compass, Package, Radio,
-  TrendingUp, Filter, X, ChevronRight, Activity, Wifi, WifiOff,
+  TrendingUp, Filter, X, ChevronRight, Activity, Wifi, WifiOff, Layers,
 } from "lucide-react";
 import { useVesselWebSocket } from "@/hooks/useVesselWebSocket";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -110,6 +110,8 @@ export default function CargoTrackingMap() {
   const [statusFilter, setStatusFilter] = useState<"all" | "underway" | "moored" | "anchored">("all");
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [mapReady, setMapReady] = useState(false);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const heatmapLayerRef = useRef<any>(null);
 
   // ─── SPRINT 70: WebSocket real-time push ─────────────────────────────────────
 
@@ -136,6 +138,10 @@ export default function CargoTrackingMap() {
   const { data: routeData } = trpc.cargoTracking.getVesselRoute.useQuery(
     { mmsi: selectedVessel?.mmsi ?? "" },
     { enabled: !!selectedVessel }
+  );
+  const { data: heatmapData } = trpc.cargoTracking.getCargoHeatmapData.useQuery(
+    { hours: 24, limit: 500 },
+    { enabled: showHeatmap, staleTime: 120000 }
   );
 
   // ─── MAP INITIALISATION ─────────────────────────────────────────────────────
@@ -290,6 +296,28 @@ export default function CargoTrackingMap() {
   // ─── RENDER ─────────────────────────────────────────────────────────────────
 
   const vessels = (vesselData?.vessels ?? []) as Vessel[];
+
+  // v100: Apply/remove heatmap layer when toggle changes
+  useEffect(() => {
+    if (!mapReady || typeof google === 'undefined') return;
+    if (showHeatmap && heatmapData && heatmapData.length > 0) {
+      if (heatmapLayerRef.current) {
+        heatmapLayerRef.current.setMap(null);
+      }
+      const points = heatmapData.map((p: { lat: number; lng: number; weight: number }) =>
+        new google.maps.LatLng(p.lat, p.lng)
+      );
+      heatmapLayerRef.current = new (google.maps.visualization as any).HeatmapLayer({
+        data: points,
+        radius: 40,
+      });
+      heatmapLayerRef.current.setMap((window as any).__map__);
+    } else if (!showHeatmap && heatmapLayerRef.current) {
+      heatmapLayerRef.current.setMap(null);
+      heatmapLayerRef.current = null;
+    }
+  }, [showHeatmap, heatmapData, mapReady]);
+
 
   return (
     <DashboardLayout title="Cargo Tracking — Live AIS Map">
