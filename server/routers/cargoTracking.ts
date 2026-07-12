@@ -520,6 +520,45 @@ export const cargoTrackingRouter = router({
         };
       });
     }),
+  /**
+   * v100: Get cargo vessel tracking events as heatmap data points (lat/lng/weight).
+   */
+  getCargoHeatmapData: protectedProcedure
+    .input(z.object({
+      hours: z.number().int().min(1).max(168).default(24),
+      limit: z.number().int().min(1).max(2000).default(500),
+    }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return [];
+      const { vesselTrackingEvents } = await import("../../drizzle/schema");
+      const { gte, desc, isNotNull, and } = await import("drizzle-orm");
+      const since = new Date(Date.now() - input.hours * 60 * 60 * 1000);
+      const rows = await db.select({
+        lat: vesselTrackingEvents.latitude,
+        lng: vesselTrackingEvents.longitude,
+        speed: vesselTrackingEvents.speed,
+        recordedAt: vesselTrackingEvents.recordedAt,
+        mmsi: vesselTrackingEvents.mmsi,
+      })
+        .from(vesselTrackingEvents)
+        .where(and(
+          gte(vesselTrackingEvents.recordedAt, since),
+          isNotNull(vesselTrackingEvents.latitude),
+          isNotNull(vesselTrackingEvents.longitude),
+        ))
+        .orderBy(desc(vesselTrackingEvents.recordedAt))
+        .limit(input.limit);
+      return rows.map(r => ({
+        lat: Number(r.lat),
+        lng: Number(r.lng),
+        weight: r.speed ? Math.min(Number(r.speed) / 30, 1) : 0.5,
+        vesselId: r.mmsi,
+        timestamp: r.recordedAt,
+      }));
+    }),
+
 });
 
 // ─── Sync shim for WebSocket broadcaster and legacy tests ────────────────────
@@ -585,7 +624,6 @@ async function _refreshVesselCache(): Promise<void> {
     // Silently keep existing cache on DB error
   }
 }
-
 // Schedule background refresh every 30 seconds
 if (typeof setInterval !== "undefined") {
   setInterval(() => { void _refreshVesselCache(); }, 30_000);

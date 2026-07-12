@@ -83,6 +83,8 @@ import {
   Building,
   GraduationCap,
   Database,
+  Lock,
+  HeartPulse,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -228,6 +230,11 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: ShieldAlert, label: "WAF Security Events", path: "/app/admin/waf-events" },
           { icon: Database, label: "Lakehouse Jobs", path: "/app/admin/lakehouse-jobs" },
           { icon: Globe, label: "GeoIP Seed", path: "/app/admin/geoip-seed" },
+          { icon: Zap, label: "Fluvio Topic Offsets", path: "/app/admin/fluvio-offsets" },
+          { icon: Shield, label: "APISIX Route Audit", path: "/app/admin/apisix-audit" },
+          { icon: Users, label: "Keycloak Sessions", path: "/app/admin/keycloak-sessions" },
+          { icon: Lock, label: "Permify Audit Log", path: "/app/admin/permify-audit" },
+          { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
         ],
       },
       common,

@@ -270,4 +270,62 @@ export const executiveDashboardRouter = router({
       );
       return { csv: header + lines.join("\n"), rowCount: rows.length };
     }),
+
+  /**
+   * v103: Get drill-down data for a specific KPI metric.
+   */
+  getKpiDrillDown: protectedProcedure
+    .input(z.object({
+      metric: z.enum(["declarations", "clearance_time", "revenue", "compliance", "oga_approvals"]),
+      period: z.enum(["7d", "30d", "90d", "1y"]).default("30d"),
+    }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return { metric: input.metric, data: [], summary: {} };
+      const { declarations, payments, ogaPermits } = await import("../../drizzle/schema");
+      const { gte, desc, sql, count, avg } = await import("drizzle-orm");
+      const days = input.period === "7d" ? 7 : input.period === "30d" ? 30 : input.period === "90d" ? 90 : 365;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      if (input.metric === "declarations") {
+        const rows = await db.select({
+          date: sql<string>`DATE(${declarations.submittedAt})`,
+          count: count(),
+        })
+          .from(declarations)
+          .where(gte(declarations.submittedAt, since))
+          .groupBy(sql`DATE(${declarations.submittedAt})`)
+          .orderBy(sql`DATE(${declarations.submittedAt})`);
+        return { metric: input.metric, data: rows, summary: { total: rows.reduce((s, r) => s + r.count, 0) } };
+      }
+
+      if (input.metric === "revenue") {
+        const rows = await db.select({
+          date: sql<string>`DATE(${payments.createdAt})`,
+          total: sql<string>`SUM(${payments.amount})`,
+          count: count(),
+        })
+          .from(payments)
+          .where(gte(payments.createdAt, since))
+          .groupBy(sql`DATE(${payments.createdAt})`)
+          .orderBy(sql`DATE(${payments.createdAt})`);
+        return { metric: input.metric, data: rows, summary: { totalRevenue: rows.reduce((s, r) => s + Number(r.total), 0) } };
+      }
+
+      if (input.metric === "oga_approvals") {
+        const rows = await db.select({
+          date: sql<string>`DATE(${ogaPermits.respondedAt})`,
+          approved: sql<number>`COUNT(*) FILTER (WHERE ${ogaPermits.status} = 'approved')`,
+          rejected: sql<number>`COUNT(*) FILTER (WHERE ${ogaPermits.status} = 'rejected')`,
+        })
+          .from(ogaPermits)
+          .where(gte(ogaPermits.createdAt, since))
+          .groupBy(sql`DATE(${ogaPermits.respondedAt})`)
+          .orderBy(sql`DATE(${ogaPermits.respondedAt})`);
+        return { metric: input.metric, data: rows, summary: {} };
+      }
+
+      return { metric: input.metric, data: [], summary: {} };
+    }),
 });

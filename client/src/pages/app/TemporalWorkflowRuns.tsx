@@ -21,7 +21,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen, Save, RotateCcw, Copy, Check } from "lucide-react";
+import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, AlertTriangle, Activity, BookOpen, Save, RotateCcw, Copy, Check, History, Undo2 } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -173,6 +174,15 @@ function SchemaEditorRow({ schema, onSave }: {
   const [version, setVersion] = useState(String(schema.version));
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const historyQuery = trpc.workflowSchemas.getVersionHistory.useQuery(
+    { workflowType: schema.workflowType },
+    { enabled: historyOpen }
+  );
+  const restoreMutation = trpc.workflowSchemas.restoreVersion.useMutation({
+    onSuccess: () => { toast({ title: "Version restored" }); onSave(); setHistoryOpen(false); },
+    onError: (err) => toast({ title: "Restore failed", description: err.message, variant: "destructive" }),
+  });
 
   const isDirty = draft !== JSON.stringify(schema.jsonSchema, null, 2) || desc !== (schema.description ?? "") || version !== String(schema.version);
 
@@ -214,6 +224,7 @@ function SchemaEditorRow({ schema, onSave }: {
   };
 
   return (
+    <>
     <Card className="bg-card border-border">
       <CardContent className="pt-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -225,6 +236,10 @@ function SchemaEditorRow({ schema, onSave }: {
             <Badge variant="outline" className="text-xs">
               v{schema.version}
             </Badge>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setHistoryOpen(true)}>
+              <History className="w-3 h-3 mr-1" />
+              History
+            </Button>
             {isDirty && (
               <Button size="sm" className="h-7 text-xs" onClick={handleSave} disabled={upsertMutation.isPending}>
                 {upsertMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />}
@@ -266,6 +281,45 @@ function SchemaEditorRow({ schema, onSave }: {
         </div>
       </CardContent>
     </Card>
+    <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+      <SheetContent className="w-[480px] sm:w-[540px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle className="text-sm">Version History — {schema.workflowType}</SheetTitle>
+        </SheetHeader>
+        <div className="mt-4 space-y-3">
+          {historyQuery.isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+          ) : (historyQuery.data ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No version history available.</p>
+          ) : (
+            (historyQuery.data ?? []).map((v) => (
+              <div key={v.id} className="border border-border rounded-md p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-semibold text-foreground">v{v.version}</span>
+                    {v.description && <span className="ml-2 text-xs text-muted-foreground">{v.description}</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{new Date(v.updatedAt).toLocaleString()}</span>
+                    {v.version !== schema.version ? (
+                      <Button size="sm" variant="outline" className="h-6 text-xs"
+                        onClick={() => restoreMutation.mutate({ workflowType: schema.workflowType, version: v.version })}
+                        disabled={restoreMutation.isPending}>
+                        <Undo2 className="w-3 h-3 mr-1" />Restore
+                      </Button>
+                    ) : (
+                      <Badge variant="outline" className="text-xs h-6">Current</Badge>
+                    )}
+                  </div>
+                </div>
+                <pre className="text-xs bg-muted/50 rounded p-2 overflow-x-auto max-h-32">{JSON.stringify(v.jsonSchema, null, 2)}</pre>
+              </div>
+            ))
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+    </>
   );
 }
 
@@ -278,6 +332,7 @@ export default function TemporalWorkflowRuns() {
   const [retriggerTarget, setRetriggerTarget] = useState<{ runId: string; workflowType: string; input?: Record<string, unknown> } | null>(null);
   const [editedInput, setEditedInput] = useState<string>("");
   const [inputError, setInputError] = useState<string | null>(null);
+  const [showInputHistory, setShowInputHistory] = useState(false);
   const PAGE_SIZE = 20;
 
   const statsQuery = trpc.temporalRuns.getWorkflowStats.useQuery();
@@ -289,6 +344,10 @@ export default function TemporalWorkflowRuns() {
     workflowType: typeFilter !== "ALL" ? typeFilter : undefined,
   });
 
+  const inputHistoryQuery = trpc.temporalRuns.getWorkflowInputHistory.useQuery(
+    { workflowType: retriggerTarget?.workflowType ?? "", limit: 5 },
+    { enabled: !!retriggerTarget?.workflowType && showInputHistory }
+  );
   const schemaQuery = trpc.workflowSchemas.getSchemaForType.useQuery(
     { workflowType: retriggerTarget?.workflowType ?? "" },
     { enabled: !!retriggerTarget?.workflowType }
@@ -590,6 +649,37 @@ export default function TemporalWorkflowRuns() {
                   )}
                 </div>
 
+                {/* Input History */}
+                <div>
+                  <button
+                    type="button"
+                    className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                    onClick={() => setShowInputHistory((v) => !v)}
+                  >
+                    <History className="w-3 h-3" />
+                    {showInputHistory ? "Hide" : "Show"} recent input history
+                  </button>
+                  {showInputHistory && (
+                    <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                      {inputHistoryQuery.isLoading ? (
+                        <p className="text-xs text-muted-foreground">Loading…</p>
+                      ) : (inputHistoryQuery.data ?? []).length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No previous inputs found.</p>
+                      ) : (
+                        (inputHistoryQuery.data ?? []).map((h: any, i: number) => (
+                          <div key={i} className="flex items-start gap-2 bg-muted/40 rounded p-2">
+                            <pre className="text-xs font-mono text-muted-foreground flex-1 whitespace-pre-wrap">{JSON.stringify(h.input, null, 2)}</pre>
+                            <button
+                              type="button"
+                              className="text-xs text-primary hover:underline shrink-0"
+                              onClick={() => { setEditedInput(JSON.stringify(h.input, null, 2)); setInputError(null); }}
+                            >Use</button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
                 <p className="text-xs text-amber-400 flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" />
                   Duplicate runs may cause side effects if the workflow is not idempotent.

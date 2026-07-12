@@ -20,8 +20,9 @@ import DashboardLayout from "@/components/DashboardLayout";
 
 import {
   Shield, RefreshCw, Search, CheckCircle, AlertTriangle,
-  Plus, Award, Star, TrendingUp,
+  Plus, Award, Star, TrendingUp, RotateCcw,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700 border-gray-200",
@@ -87,6 +88,18 @@ export default function AEOApplications() {
     onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const [renewalDialogId, setRenewalDialogId] = useState<number | null>(null);
+  const [renewalNote, setRenewalNote] = useState("");
+  const renewalMutation = trpc.aeo.initiateAeoRenewal.useMutation({
+    onSuccess: () => {
+      toast({ title: "Renewal Initiated", description: "Your AEO renewal request has been submitted." });
+      utils.aeo.myApplication.invalidate();
+      utils.aeo.all.invalidate();
+      setRenewalDialogId(null);
+      setRenewalNote("");
+    },
+    onError: (err) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
   const rejectMutation = trpc.aeo.reject.useMutation({
     onSuccess: () => {
       toast({ title: "Application Rejected" });
@@ -260,9 +273,14 @@ export default function AEOApplications() {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(a.createdAt)}</td>
                   <td className="px-4 py-3">
-                    <Button variant="ghost" size="sm" onClick={() => setShowDetailId(a.id)}>
-                      View
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setShowDetailId(a.id)}>View</Button>
+                      {a.status === "approved" && (
+                        <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => { setRenewalDialogId(a.id); setRenewalNote(""); }}>
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" />Renew
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -270,6 +288,28 @@ export default function AEOApplications() {
           </table>
         </div>
       )}
+
+      {/* Renewal Dialog */}
+      <Dialog open={renewalDialogId !== null} onOpenChange={(open) => { if (!open) setRenewalDialogId(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><RotateCcw className="w-4 h-4 text-amber-600" />Initiate AEO Renewal</DialogTitle>
+          </DialogHeader>
+          <div className="py-3 space-y-3">
+            <p className="text-sm text-muted-foreground">Submit a renewal request for this AEO certificate. Our team will review your continued compliance.</p>
+            <div>
+              <label className="text-sm font-medium">Notes (optional)</label>
+              <Textarea className="mt-1" rows={3} placeholder="Any changes to your business since last certification…" value={renewalNote} onChange={(e) => setRenewalNote(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenewalDialogId(null)}>Cancel</Button>
+            <Button onClick={() => renewalMutation.mutate({ applicationId: renewalDialogId!, renewalNotes: renewalNote })} disabled={renewalMutation.isPending}>
+              {renewalMutation.isPending ? "Submitting…" : "Submit Renewal"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Apply Dialog */}
       <Dialog open={showApplyDialog} onOpenChange={setShowApplyDialog}>

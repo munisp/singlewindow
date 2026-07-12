@@ -3,7 +3,7 @@
  * Admin procedures for Delta Lake batch job monitoring and manual triggering.
  */
 import { z } from "zod";
-import { router, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 
 const JOB_TYPES = [
@@ -173,5 +173,46 @@ export const lakehouseRouter = router({
   getTargetTables: adminProcedure
     .query(async () => {
       return [...TARGET_TABLES];
+    }),
+
+  /**
+   * v93: Get a single lakehouse job by ID (for detail drawer).
+   */
+  getJobById: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return null;
+      const { lakehouseJobs } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db.select().from(lakehouseJobs).where(eq(lakehouseJobs.id, input.id)).limit(1);
+      return row ?? null;
+    }),
+
+  /**
+   * v93: Re-trigger a failed or completed lakehouse job (creates a new pending copy).
+   */
+  retriggerJob: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { lakehouseJobs } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const [original] = await db.select().from(lakehouseJobs).where(eq(lakehouseJobs.id, input.id)).limit(1);
+      if (!original) throw new TRPCError({ code: "NOT_FOUND" });
+      const [newJob] = await db.insert(lakehouseJobs).values({
+        jobId: `${original.jobId}-retry-${Date.now()}`,
+        jobType: original.jobType,
+        targetTable: original.targetTable,
+        status: "pending",
+        metadata: { ...((original.metadata as any) ?? {}), retriggeredFrom: original.id },
+        triggeredBy: String(ctx.user.id),
+      }).returning();
+      return newJob;
     }),
 });

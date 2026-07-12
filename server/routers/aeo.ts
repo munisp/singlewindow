@@ -529,4 +529,70 @@ export const aeoRouter = router({
       });
       return points;
     }),
+
+  /**
+   * v97: Initiate an AEO renewal request for the authenticated trader.
+   */
+  initiateAeoRenewal: protectedProcedure
+    .input(z.object({
+      applicationId: z.number().int().positive(),
+      renewalNotes: z.string().max(1000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { aeoRenewalRequests } = await import("../../drizzle/schema");
+      const [row] = await db.insert(aeoRenewalRequests).values({
+        applicationId: input.applicationId,
+        traderId: ctx.user.id,
+        notes: input.renewalNotes,
+        status: "pending",
+        requestedAt: new Date(),
+      }).returning();
+      return row;
+    }),
+
+  /**
+   * v97: Get AEO renewal status for a given application.
+   */
+  getAeoRenewalStatus: protectedProcedure
+    .input(z.object({ applicationId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return null;
+      const { aeoRenewalRequests } = await import("../../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      const [row] = await db.select().from(aeoRenewalRequests)
+        .where(eq(aeoRenewalRequests.applicationId, input.applicationId))
+        .orderBy(desc(aeoRenewalRequests.requestedAt))
+        .limit(1);
+      return row ?? null;
+    }),
+
+  /**
+   * v97: Admin: process (approve/reject) an AEO renewal request.
+   */
+  processAeoRenewal: protectedProcedure
+    .input(z.object({
+      renewalId: z.number().int().positive(),
+      decision: z.enum(["approved", "rejected"]),
+      reviewNotes: z.string().max(1000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { aeoRenewalRequests } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db.update(aeoRenewalRequests)
+        .set({ status: input.decision, notes: input.reviewNotes, processedBy: ctx.user.id, processedAt: new Date() })
+        .where(eq(aeoRenewalRequests.id, input.renewalId))
+        .returning();
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      return row;
+    }),
 });

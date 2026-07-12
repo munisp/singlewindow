@@ -433,6 +433,11 @@ export default function DeclarationDetail() {
     { enabled: !!declarationId && !isNaN(declarationId) }
   );
 
+  const { data: riskHistory } = trpc.declarations.getRiskScoreHistory.useQuery(
+    { declarationId },
+    { enabled: !!declarationId && !isNaN(declarationId) }
+  );
+
   // Sprint 112: List officers for assignment dropdown
   const { data: officerList } = trpc.declarations.listOfficers.useQuery(undefined, {
     enabled: isOfficer,
@@ -810,6 +815,25 @@ export default function DeclarationDetail() {
                     </CardHeader>
                     <CardContent className="flex flex-col items-center gap-4">
                       <RiskScoreGauge score={decl.riskScore} lane={decl.lane} />
+                      {riskHistory && riskHistory.length > 1 && (
+                        <div className="w-full">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Score History</p>
+                          <div className="flex items-end gap-1 h-12">
+                            {riskHistory.map((pt: any, i: number) => (
+                              <div key={i} className="flex-1 flex flex-col items-center gap-0.5" title={`${pt.score} — ${new Date(pt.changedAt).toLocaleString()}`}>
+                                <div
+                                  className="w-full rounded-sm"
+                                  style={{
+                                    height: `${Math.max(4, (pt.score / 100) * 40)}px`,
+                                    background: pt.score >= 70 ? '#ef4444' : pt.score >= 40 ? '#f59e0b' : '#22c55e',
+                                  }}
+                                />
+                                <span className="text-[9px] text-muted-foreground">{pt.score}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {decl.riskFactors && Array.isArray(decl.riskFactors) && decl.riskFactors.length > 0 && (
                         <div className="w-full space-y-2">
                           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Risk Factors</p>

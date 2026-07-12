@@ -279,4 +279,21 @@ export const postAuditRouter = router({
         complianceRate: completedCount > 0 ? Math.round((compliant / completedCount) * 100) : 0,
       };
     }),
+
+  /**
+   * v99: Get upcoming scheduled post-clearance audits.
+   */
+  getScheduledAudits: protectedProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }).optional())
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return [];
+      const { postClearanceAudits } = await import("../../drizzle/schema");
+      const { eq, gte, desc } = await import("drizzle-orm");
+      return db.select().from(postClearanceAudits)
+        .where(eq(postClearanceAudits.status, "scheduled"))
+        .orderBy(desc(postClearanceAudits.scheduledDate))
+        .limit(input?.limit ?? 20);
+    }),
 });

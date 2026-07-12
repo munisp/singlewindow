@@ -82,6 +82,9 @@ import { openAppSecRouter } from "./routers/openAppSec";
 import { lakehouseRouter } from "./routers/lakehouse";
 import { geoipRouter } from "./routers/geoip";
 import { workflowSchemasRouter } from "./routers/workflowSchemas";
+import { fluvioRouter } from "./routers/fluvio";
+import { apisixAuditRouter } from "./routers/apisixAudit";
+import { healthRouter } from "./routers/health";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -296,6 +299,9 @@ export const appRouter = router({
   lakehouse: lakehouseRouter,
   geoip: geoipRouter,
   workflowSchemas: workflowSchemasRouter,
+  fluvio: fluvioRouter,
+  apisixAudit: apisixAuditRouter,
+  health: healthRouter,
 });
 
 export type AppRouter = typeof appRouter;

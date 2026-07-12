@@ -1026,104 +1026,104 @@
 - [x] v86-04: Write server/v86.test.ts vitest suite
 
 ## v87 Sprint — Schema Version History
-- [ ] v87-01: Add version history support to workflowSchemas (store previous versions, getVersionHistory procedure)
-- [ ] v87-02: Add "Version history" dropdown to Workflow Schema editor in TemporalWorkflowRuns.tsx
-- [ ] v87-03: Add restore-version mutation (upsertSchema with incremented version)
-- [ ] v87-04: Write server/v87.test.ts vitest suite
+- [x] v87-01: Add version history support to workflowSchemas (store previous versions, getVersionHistory procedure)
+- [x] v87-02: Add "Version history" dropdown to Workflow Schema editor in TemporalWorkflowRuns.tsx
+- [x] v87-03: Add restore-version mutation (upsertSchema with incremented version)
+- [x] v87-04: Write server/v87.test.ts vitest suite
 
 ## v88 Sprint — Fluvio Topic Offsets Dashboard
-- [ ] v88-01: Add getFluvioTopicOffsets and recordFluvioOffset procedures to a new fluvioRouter
-- [ ] v88-02: Create FluvioTopicOffsets.tsx admin page with topic lag chart
-- [ ] v88-03: Add sidebar nav entry and route
-- [ ] v88-04: Write server/v88.test.ts vitest suite
+- [x] v88-01: Add getFluvioTopicOffsets and recordFluvioOffset procedures to a new fluvioRouter
+- [x] v88-02: Create FluvioTopicOffsets.tsx admin page with topic lag chart
+- [x] v88-03: Add sidebar nav entry and route
+- [x] v88-04: Write server/v88.test.ts vitest suite
 
 ## v89 Sprint — APISIX Route Audit Viewer
-- [ ] v89-01: Add getApisixRouteAudit and recordApisixRouteAudit procedures to a new apisixAuditRouter
-- [ ] v89-02: Create ApisixRouteAudit.tsx admin page with route audit table
-- [ ] v89-03: Add sidebar nav entry and route
-- [ ] v89-04: Write server/v89.test.ts vitest suite
+- [x] v89-01: Add getApisixRouteAudit and recordApisixRouteAudit procedures to a new apisixAuditRouter
+- [x] v89-02: Create ApisixRouteAudit.tsx admin page with route audit table
+- [x] v89-03: Add sidebar nav entry and route
+- [x] v89-04: Write server/v89.test.ts vitest suite
 
 ## v90 Sprint — Keycloak Sessions Manager
-- [ ] v90-01: Add getKeycloakSessions, revokeKeycloakSession, and getSessionStats procedures to a new keycloakRouter
-- [ ] v90-02: Create KeycloakSessions.tsx admin page with session table and revoke action
-- [ ] v90-03: Add sidebar nav entry and route
-- [ ] v90-04: Write server/v90.test.ts vitest suite
+- [x] v90-01: Add getKeycloakSessions, revokeKeycloakSession, and getSessionStats procedures to a new keycloakRouter
+- [x] v90-02: Create KeycloakSessions.tsx admin page with session table and revoke action
+- [x] v90-03: Add sidebar nav entry and route
+- [x] v90-04: Write server/v90.test.ts vitest suite
 
 ## v91 Sprint — Permify Audit Log Viewer
-- [ ] v91-01: Add getPermifyAuditLog and getPermifyAuditStats procedures to permifyRouter
-- [ ] v91-02: Create PermifyAuditLog.tsx admin page with audit log table
-- [ ] v91-03: Add sidebar nav entry and route
-- [ ] v91-04: Write server/v91.test.ts vitest suite
+- [x] v91-01: Add getPermifyAuditLog and getPermifyAuditStats procedures to permifyRouter
+- [x] v91-02: Create PermifyAuditLog.tsx admin page with audit log table
+- [x] v91-03: Add sidebar nav entry and route
+- [x] v91-04: Write server/v91.test.ts vitest suite
 
 ## v92 Sprint — Lakehouse Job Detail Drawer
-- [ ] v92-01: Add getLakehouseJobById procedure to lakehouseRouter (already exists — wire into UI)
-- [ ] v92-02: Add click-row Sheet drawer to LakehouseJobs.tsx with full job metadata
-- [ ] v92-03: Add re-trigger button inside drawer
-- [ ] v92-04: Write server/v92.test.ts vitest suite
+- [x] v92-01: Add getLakehouseJobById procedure to lakehouseRouter (already exists — wire into UI)
+- [x] v92-02: Add click-row Sheet drawer to LakehouseJobs.tsx with full job metadata
+- [x] v92-03: Add re-trigger button inside drawer
+- [x] v92-04: Write server/v92.test.ts vitest suite
 
 ## v93 Sprint — Temporal Workflow Input History
-- [ ] v93-01: Add getWorkflowInputHistory procedure to temporalRunsRouter (last 10 inputs per workflow type)
-- [ ] v93-02: Add "Input history" dropdown to retrigger AlertDialog in TemporalWorkflowRuns.tsx
-- [ ] v93-03: Write server/v93.test.ts vitest suite
+- [x] v93-01: Add getWorkflowInputHistory procedure to temporalRunsRouter (last 10 inputs per workflow type)
+- [x] v93-02: Add "Input history" dropdown to retrigger AlertDialog in TemporalWorkflowRuns.tsx
+- [x] v93-03: Write server/v93.test.ts vitest suite
 
 ## v94 Sprint — OGA Permit Bulk-Approve
-- [ ] v94-01: Add bulkApprovePermits mutation to ogaPermitAuditRouter
-- [ ] v94-02: Add checkbox selection + bulk-approve toolbar to OGAPermitAuditTrail.tsx
-- [ ] v94-03: Write server/v94.test.ts vitest suite
+- [x] v94-01: Add bulkApprovePermits mutation to ogaPermitAuditRouter
+- [x] v94-02: Add checkbox selection + bulk-approve toolbar to OGAPermitAuditTrail.tsx
+- [x] v94-03: Write server/v94.test.ts vitest suite
 
 ## v95 Sprint — Declaration Risk Score Timeline
-- [ ] v95-01: Add getRiskScoreHistory procedure to a riskRouter (query riskAssessments by declarationId)
-- [ ] v95-02: Add RiskScoreTimeline component to DeclarationDetail.tsx
-- [ ] v95-03: Write server/v95.test.ts vitest suite
+- [x] v95-01: Add getRiskScoreHistory procedure to a riskRouter (query riskAssessments by declarationId)
+- [x] v95-02: Add RiskScoreTimeline component to DeclarationDetail.tsx
+- [x] v95-03: Write server/v95.test.ts vitest suite
 
 ## v96 Sprint — Trader Scorecard Export
-- [ ] v96-01: Add exportTraderScorecard procedure to traderScorecardRouter (returns CSV-ready data)
-- [ ] v96-02: Add "Export CSV" button to TraderScorecard.tsx
-- [ ] v96-03: Write server/v96.test.ts vitest suite
+- [x] v96-01: Add exportTraderScorecard procedure to traderScorecardRouter (returns CSV-ready data)
+- [x] v96-02: Add "Export CSV" button to TraderScorecard.tsx
+- [x] v96-03: Write server/v96.test.ts vitest suite
 
 ## v97 Sprint — AEO Renewal Workflow
-- [ ] v97-01: Add initiateAeoRenewal and getAeoRenewalStatus procedures to aeoRouter
-- [ ] v97-02: Add "Initiate Renewal" button + status badge to AEO management page
-- [ ] v97-03: Write server/v97.test.ts vitest suite
+- [x] v97-01: Add initiateAeoRenewal and getAeoRenewalStatus procedures to aeoRouter
+- [x] v97-02: Add "Initiate Renewal" button + status badge to AEO management page
+- [x] v97-03: Write server/v97.test.ts vitest suite
 
 ## v98 Sprint — Bond Expiry SMS Alerts
-- [ ] v98-01: Add sendBondExpirySms procedure to bondedWarehouseRouter (stub with notifyOwner)
-- [ ] v98-02: Wire SMS alert toggle to BondedWarehouseManagement.tsx expiry banner
-- [ ] v98-03: Write server/v98.test.ts vitest suite
+- [x] v98-01: Add sendBondExpirySms procedure to bondedWarehouseRouter (stub with notifyOwner)
+- [x] v98-02: Wire SMS alert toggle to BondedWarehouseManagement.tsx expiry banner
+- [x] v98-03: Write server/v98.test.ts vitest suite
 
 ## v99 Sprint — Post-Clearance Audit Scheduler
-- [ ] v99-01: Add schedulePostAudit and getScheduledAudits procedures to postAuditRouter
-- [ ] v99-02: Add "Schedule Audit" dialog to PostClearanceAudit.tsx
-- [ ] v99-03: Write server/v99.test.ts vitest suite
+- [x] v99-01: Add schedulePostAudit and getScheduledAudits procedures to postAuditRouter
+- [x] v99-02: Add "Schedule Audit" dialog to PostClearanceAudit.tsx
+- [x] v99-03: Write server/v99.test.ts vitest suite
 
 ## v100 Sprint — Cargo Tracking Heatmap
-- [ ] v100-01: Add getCargoHeatmapData procedure to cargoTrackingRouter (aggregated lat/lng counts)
-- [ ] v100-02: Add CargoHeatmap tab to CargoTracking.tsx using Google Maps heatmap layer
-- [ ] v100-03: Write server/v100.test.ts vitest suite
+- [x] v100-01: Add getCargoHeatmapData procedure to cargoTrackingRouter (aggregated lat/lng counts)
+- [x] v100-02: Add CargoHeatmap tab to CargoTracking.tsx using Google Maps heatmap layer
+- [x] v100-03: Write server/v100.test.ts vitest suite
 
 ## v101 Sprint — Sanctions Screening Batch Upload
-- [ ] v101-01: Add batchScreenEntities procedure to sanctionsRouter (accepts array of entity names)
-- [ ] v101-02: Add CSV upload + batch results table to SanctionsScreening.tsx
-- [ ] v101-03: Write server/v101.test.ts vitest suite
+- [x] v101-01: Add batchScreenEntities procedure to sanctionsRouter (accepts array of entity names)
+- [x] v101-02: Add CSV upload + batch results table to SanctionsScreening.tsx
+- [x] v101-03: Write server/v101.test.ts vitest suite
 
 ## v102 Sprint — CEP Pattern Import/Export
-- [ ] v102-01: Add exportCepPatterns and importCepPatterns procedures to cepRouter
-- [ ] v102-02: Add Import/Export buttons to FlinkCepAlerts.tsx pattern management panel
-- [ ] v102-03: Write server/v102.test.ts vitest suite
+- [x] v102-01: Add exportCepPatterns and importCepPatterns procedures to cepRouter
+- [x] v102-02: Add Import/Export buttons to FlinkCepAlerts.tsx pattern management panel
+- [x] v102-03: Write server/v102.test.ts vitest suite
 
 ## v103 Sprint — Executive Dashboard KPI Drill-Down
-- [ ] v103-01: Add getKpiDrillDown procedure to executiveDashboardRouter (returns time-series for a KPI)
-- [ ] v103-02: Add KPI drill-down Sheet drawer to ExecutiveDashboard.tsx (click KPI card to open chart)
-- [ ] v103-03: Write server/v103.test.ts vitest suite
+- [x] v103-01: Add getKpiDrillDown procedure to executiveDashboardRouter (returns time-series for a KPI)
+- [x] v103-02: Add KPI drill-down Sheet drawer to ExecutiveDashboard.tsx (click KPI card to open chart)
+- [x] v103-03: Write server/v103.test.ts vitest suite
 
 ## v104 Sprint — Platform Health Scorecard
-- [ ] v104-01: Add getPlatformHealthScore procedure to healthRouter (aggregate score 0-100 from all service checks)
-- [ ] v104-02: Create PlatformHealthScorecard.tsx page with score gauge + per-service breakdown
-- [ ] v104-03: Add sidebar nav entry and route
-- [ ] v104-04: Write server/v104.test.ts vitest suite
+- [x] v104-01: Add getPlatformHealthScore procedure to healthRouter (aggregate score 0-100 from all service checks)
+- [x] v104-02: Create PlatformHealthScorecard.tsx page with score gauge + per-service breakdown
+- [x] v104-03: Add sidebar nav entry and route
+- [x] v104-04: Write server/v104.test.ts vitest suite
 
 ## v105 Sprint — Comprehensive Checkpoint
-- [ ] v105-01: Run full pnpm test suite and confirm all tests pass
-- [ ] v105-02: Run TypeScript check (0 errors)
-- [ ] v105-03: Update todo.md with all completed items
-- [ ] v105-04: Save checkpoint and push to GitHub
+- [x] v105-01: Run full pnpm test suite and confirm all tests pass
+- [x] v105-02: Run TypeScript check (0 errors)
+- [x] v105-03: Update todo.md with all completed items
+- [x] v105-04: Save checkpoint and push to GitHub
