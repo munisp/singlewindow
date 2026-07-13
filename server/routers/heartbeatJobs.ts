@@ -167,4 +167,75 @@ export const heartbeatJobsRouter = router({
       description: j.description,
     }));
   }),
+
+  /**
+   * v131: manualTrigger — unified dispatcher that fires any well-known job by name.
+   * Invokes the handler function directly (same code path as the real cron trigger)
+   * and returns a structured result with timing information.
+   */
+  manualTrigger: protectedProcedure
+    .input(
+      z.object({
+        jobName: z.enum([
+          "bond-expiry-digest",
+          "post-audit-reminder",
+          "sla-breach-escalation",
+          "document-vault-expiry",
+        ]),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireAdmin(ctx.user.role);
+      const startedAt = Date.now();
+
+      // Minimal mock req/res so handlers can be called directly
+      const mockReq = { headers: {} } as any;
+      let capturedResult: unknown = {};
+      const mockRes = {
+        json: (d: unknown) => { capturedResult = d; return d; },
+        status: () => ({ json: (d: unknown) => { capturedResult = d; return d; } }),
+      } as any;
+
+      try {
+        switch (input.jobName) {
+          case "bond-expiry-digest": {
+            const { bondExpiryDigestHandler } = await import("../scheduled/bondExpiryDigest");
+            await bondExpiryDigestHandler(mockReq, mockRes);
+            break;
+          }
+          case "post-audit-reminder": {
+            const { postAuditReminderHandler } = await import("../scheduled/postAuditReminder");
+            await postAuditReminderHandler(mockReq, mockRes);
+            break;
+          }
+          case "sla-breach-escalation": {
+            const { slaBreachEscalationHandler } = await import("../scheduled/slaBreachEscalation");
+            await slaBreachEscalationHandler(mockReq, mockRes);
+            break;
+          }
+          case "document-vault-expiry": {
+            const { documentVaultExpiryHandler } = await import("../scheduled/documentVaultExpiry");
+            await documentVaultExpiryHandler(mockReq, mockRes);
+            break;
+          }
+        }
+        const durationMs = Date.now() - startedAt;
+        return {
+          triggered: true,
+          jobName: input.jobName,
+          durationMs,
+          triggeredAt: new Date().toISOString(),
+          result: capturedResult,
+        };
+      } catch (err) {
+        const durationMs = Date.now() - startedAt;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Manual trigger failed for ${input.jobName}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          cause: { jobName: input.jobName, durationMs },
+        });
+      }
+    }),
 });

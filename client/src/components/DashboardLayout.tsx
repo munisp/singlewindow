@@ -241,6 +241,8 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Users, label: "Keycloak Sessions", path: "/app/admin/keycloak-sessions" },
           { icon: Lock, label: "Permify Audit Log", path: "/app/admin/permify-audit" },
           { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
+          { icon: CalendarClock, label: "Cron Job Manager", path: "/app/admin/cron-jobs" },
+          { icon: Activity, label: "System Status", path: "/app/admin/system-status" },
         ],
       },
       common,

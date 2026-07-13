@@ -130,6 +130,8 @@ const KeycloakSessions = lazy(() => import('./pages/KeycloakSessions'));
 const PermifyAuditLog = lazy(() => import('./pages/PermifyAuditLog'));
 const PlatformHealthScorecard = lazy(() => import('./pages/PlatformHealthScorecard'));
 const VisionBatchAnalysis = lazy(() => import('./pages/app/VisionBatchAnalysis'));
+const CronJobManager = lazy(() => import('./pages/admin/CronJobManager'));
+const AdminSystemStatus = lazy(() => import('./pages/admin/SystemStatus'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -542,6 +544,13 @@ function Router() {
       </Route>
       <Route path="/app/admin/platform-health">
         <AdminGuard><Suspense fallback={<LazyFallback />}><PlatformHealthScorecard /></Suspense></AdminGuard>
+      </Route>
+      {/* v131 — Cron Job Manager & System Status */}
+      <Route path="/app/admin/cron-jobs">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><CronJobManager /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/system-status">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminSystemStatus /></Suspense></AdminGuard>
       </Route>
 
       {/* 404 */}
