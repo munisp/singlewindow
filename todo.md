@@ -1406,3 +1406,11 @@
 - [x] Register postAuditReminders cron job (daily 08:00 UTC) via Heartbeat SDK — task_uid: ERF5kMiLXehFCTwiQQkUNN
 - [x] Write vitest tests for health endpoint and cron registration (28 tests in server/v130.test.ts)
 - [x] Run full test suite (3616/3616 passing, 102 files), save checkpoint, push to GitHub
+
+## v131 — Cron Management & System Status Dashboard
+- [x] Add tRPC procedures: heartbeatJobs.list, heartbeatJobs.toggle, heartbeatJobs.manualTrigger
+- [x] Build /admin/cron-jobs page (list jobs, toggle enable/disable, manual trigger with status)
+- [x] Build /admin/system-status page (real-time health polling, component status, uptime)
+- [x] Wire /admin/cron-jobs and /admin/system-status routes in App.tsx with adminProcedure guard
+- [x] Write vitest tests for new tRPC procedures
+- [x] Run full test suite, save checkpoint, push to GitHub

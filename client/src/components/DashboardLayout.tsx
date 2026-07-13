@@ -87,6 +87,7 @@ import {
   HeartPulse,
   Palette,
   ArrowLeftRight,
+  ScanLine,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -138,6 +139,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: FileText, label: "Pending Declarations", path: "/app/customs" },
           { icon: AlertTriangle, label: "Risk Screening", path: "/app/customs/risk" },
           { icon: Camera, label: "Cargo Inspection", path: "/app/customs/vision" },
+          { icon: ScanLine, label: "Vision Batch Analysis", path: "/app/customs/vision-batch" },
           { icon: CreditCard, label: "Duty Payments", path: "/app/customs/payments" },
           { icon: CreditCard, label: "Payments Dashboard", path: "/app/payments" },
           { icon: Workflow, label: "Clearance Workflows", path: "/app/customs/workflows" },
@@ -239,6 +241,8 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Users, label: "Keycloak Sessions", path: "/app/admin/keycloak-sessions" },
           { icon: Lock, label: "Permify Audit Log", path: "/app/admin/permify-audit" },
           { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
+          { icon: CalendarClock, label: "Cron Job Manager", path: "/app/admin/cron-jobs" },
+          { icon: Activity, label: "System Status", path: "/app/admin/system-status" },
         ],
       },
       common,
@@ -253,6 +257,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: FileText, label: "Declaration Queue", path: "/app/customs/queue" },
           { icon: AlertTriangle, label: "Risk Screening", path: "/app/customs/risk" },
           { icon: Camera, label: "Cargo Inspection", path: "/app/customs/vision" },
+          { icon: ScanLine, label: "Vision Batch Analysis", path: "/app/customs/vision-batch" },
           { icon: Package, label: "Agency Permits", path: "/app/oga" },
           { icon: ClipboardCheck, label: "Post-Clearance Review", path: "/app/customs/audit" },
         ],
