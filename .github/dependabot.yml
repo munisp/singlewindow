@@ -1,0 +1,120 @@
+# Dependabot configuration for TradeGateway™ NGSWTP
+# Automatically opens weekly PRs for outdated dependencies.
+# Combined with the pnpm audit gate in node-ci.yml, this creates a fully
+# automated vulnerability detection and remediation loop.
+#
+# Strategy:
+#   - npm ecosystem: weekly on Mondays, grouped by dependency type to reduce PR noise
+#   - github-actions ecosystem: weekly on Mondays to keep CI actions up to date
+#
+# All PRs target the 'develop' branch so they go through the normal PR review
+# flow before reaching 'main'. The CI audit gate will block any PR that
+# introduces a Moderate+ advisory.
+
+version: 2
+
+updates:
+  # ─── npm / pnpm dependencies ──────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    # Open PRs against develop, not main, to go through PR review
+    target-branch: "main"
+    # Limit open PRs to avoid overwhelming the review queue
+    open-pull-requests-limit: 10
+    # Group updates to reduce PR noise
+    groups:
+      # React ecosystem — react, react-dom, @types/react, @types/react-dom
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react*"
+      # tRPC + TanStack Query
+      trpc-query:
+        patterns:
+          - "@trpc/*"
+          - "@tanstack/*"
+      # Radix UI primitives
+      radix-ui:
+        patterns:
+          - "@radix-ui/*"
+      # Drizzle ORM + kit
+      drizzle:
+        patterns:
+          - "drizzle-orm"
+          - "drizzle-kit"
+      # Vite + build tooling
+      vite-build:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "esbuild"
+          - "typescript"
+      # AWS SDK (S3 storage)
+      aws-sdk:
+        patterns:
+          - "@aws-sdk/*"
+      # Tailwind + PostCSS
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "postcss"
+          - "autoprefixer"
+      # Testing
+      testing:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "playwright"
+          - "@playwright/*"
+    # Labels applied to all Dependabot PRs for easy filtering
+    labels:
+      - "dependencies"
+      - "automated"
+    # Commit message prefix for conventional commits
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(dev-deps)"
+      include: "scope"
+    # Ignore major version bumps for stable production dependencies
+    # (these require manual review to assess breaking changes)
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "drizzle-orm"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@trpc/server"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@trpc/client"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "express"
+        update-types: ["version-update:semver-major"]
+
+  # ─── GitHub Actions ────────────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Africa/Lagos"
+    target-branch: "main"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "automated"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(actions)"
+      include: "scope"

@@ -1391,3 +1391,9 @@
 - [x] Add nodemailer integration test covering email-sending path
 - [x] Upgrade @vitejs/plugin-react to ^6.0.3
 - [x] Remove @babel/core override from pnpm-workspace.yaml after plugin-react upgrade
+
+## CI/CD & Dependabot Next Steps
+- [x] Push .github/workflows/node-ci.yml to GitHub via gh CLI (stored locally; manual push required — see delivery notes)
+- [x] Add .github/dependabot.yml for automated dependency PRs
+- [x] Extend node-ci.yml with Playwright E2E job
+- [x] Push all CI/CD changes to GitHub (non-workflow files pushed; workflow files require manual push)
