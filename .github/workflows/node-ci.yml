@@ -1,0 +1,190 @@
+# GitHub Actions CI Pipeline for Node.js / TypeScript application
+# Runs on every push and PR to main/develop.
+# Enforces: pnpm audit (moderate+), TypeScript check, and full vitest suite.
+name: Node.js CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.12.0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Security audit gate ──────────────────────────────────────────────────
+  # Fails the build if any Moderate, High, or Critical advisory is introduced.
+  # This prevents new vulnerable packages from reaching main.
+  security-audit:
+    name: Security Audit (pnpm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run security audit (fail on moderate+)
+        # --audit-level=moderate causes a non-zero exit on Moderate, High, or Critical.
+        # Low advisories are reported but do not fail the build.
+        run: pnpm audit --audit-level=moderate
+
+  # ─── TypeScript type check ────────────────────────────────────────────────
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type check
+        run: pnpm check
+
+  # ─── Unit / integration tests ─────────────────────────────────────────────
+  test:
+    name: Vitest Suite
+    runs-on: ubuntu-latest
+    env:
+      # Provide stub values so server modules that read env vars at import time
+      # do not crash during test collection. Real DB/Redis are not needed because
+      # all tests mock external services.
+      DATABASE_URL: mysql://test:test@localhost:3306/testdb
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-test-secret-not-for-production
+      BUILT_IN_FORGE_API_URL: https://api.manus.im
+      BUILT_IN_FORGE_API_KEY: ci-placeholder
+      VITE_APP_ID: ci-app-id
+      OAUTH_SERVER_URL: https://api.manus.im
+      VITE_OAUTH_PORTAL_URL: https://login.manus.im
+      OWNER_OPEN_ID: ci-owner
+      OWNER_NAME: CI
+      VITE_ANALYTICS_ENDPOINT: ""
+      VITE_ANALYTICS_WEBSITE_ID: ""
+      VITE_FRONTEND_FORGE_API_KEY: ci-placeholder
+      VITE_FRONTEND_FORGE_API_URL: https://api.manus.im
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run vitest suite
+        run: pnpm test
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-coverage
+          path: coverage/
+          retention-days: 14
+
+  # ─── Production build smoke test ─────────────────────────────────────────
+  build:
+    name: Production Build
+    runs-on: ubuntu-latest
+    needs: [typecheck, test]
+    env:
+      DATABASE_URL: mysql://test:test@localhost:3306/testdb
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-test-secret-not-for-production
+      BUILT_IN_FORGE_API_URL: https://api.manus.im
+      BUILT_IN_FORGE_API_KEY: ci-placeholder
+      VITE_APP_ID: ci-app-id
+      OAUTH_SERVER_URL: https://api.manus.im
+      VITE_OAUTH_PORTAL_URL: https://login.manus.im
+      OWNER_OPEN_ID: ci-owner
+      OWNER_NAME: CI
+      VITE_ANALYTICS_ENDPOINT: ""
+      VITE_ANALYTICS_WEBSITE_ID: ""
+      VITE_FRONTEND_FORGE_API_KEY: ci-placeholder
+      VITE_FRONTEND_FORGE_API_URL: https://api.manus.im
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production bundle
+        run: pnpm build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ─── Summary gate ─────────────────────────────────────────────────────────
+  # All required jobs must pass before a PR can be merged.
+  summary:
+    name: CI Summary
+    needs:
+      - security-audit
+      - typecheck
+      - test
+      - build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs passed
+        run: |
+          FAILED=""
+          [[ "${{ needs.security-audit.result }}" == "failure" ]] && FAILED="$FAILED security-audit"
+          [[ "${{ needs.typecheck.result }}"      == "failure" ]] && FAILED="$FAILED typecheck"
+          [[ "${{ needs.test.result }}"           == "failure" ]] && FAILED="$FAILED test"
+          [[ "${{ needs.build.result }}"          == "failure" ]] && FAILED="$FAILED build"
+          if [[ -n "$FAILED" ]]; then
+            echo "The following jobs failed:$FAILED"
+            exit 1
+          fi
+          echo "All CI jobs passed."
