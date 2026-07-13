@@ -1397,3 +1397,12 @@
 - [x] Add .github/dependabot.yml for automated dependency PRs
 - [x] Extend node-ci.yml with Playwright E2E job
 - [x] Push all CI/CD changes to GitHub (non-workflow files pushed; workflow files require manual push)
+
+## v130 — Production Readiness Finalization
+- [x] Add branch protection rules for main via gh CLI (require CI Summary status check)
+- [x] Implement GET /api/health endpoint — already fully implemented in server/routes/health.ts (confirmed)
+- [x] Register slaBreachEscalation cron job (every 30 min) via Heartbeat SDK — task_uid: Yi5La6LK32hf2XRTtTTwz5
+- [x] Register bondExpiryAlerts cron job (daily 06:00 UTC) via Heartbeat SDK — task_uid: 4BbYSg5dZm9W74yX984jjD
+- [x] Register postAuditReminders cron job (daily 08:00 UTC) via Heartbeat SDK — task_uid: ERF5kMiLXehFCTwiQQkUNN
+- [x] Write vitest tests for health endpoint and cron registration (28 tests in server/v130.test.ts)
+- [x] Run full test suite (3616/3616 passing, 102 files), save checkpoint, push to GitHub
