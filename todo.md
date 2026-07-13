@@ -1384,3 +1384,10 @@
 - [x] v129-6: Write server/v127-v129.test.ts vitest suite (28 tests)
 - [x] v129-7: Run full test suite — 3,572 tests pass across 100 files
 - [x] v129-8: Save checkpoint and push to GitHub
+
+## Post-Security Remediation Next Steps
+- [x] Add pnpm audit CI/CD gate to GitHub Actions workflow (fail on moderate+)
+- [x] Audit nodemailer v9 API compatibility across all call sites
+- [x] Add nodemailer integration test covering email-sending path
+- [x] Upgrade @vitejs/plugin-react to ^6.0.3
+- [x] Remove @babel/core override from pnpm-workspace.yaml after plugin-react upgrade
