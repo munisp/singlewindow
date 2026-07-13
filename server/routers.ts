@@ -86,6 +86,7 @@ import { fluvioRouter } from "./routers/fluvio";
 import { apisixAuditRouter } from "./routers/apisixAudit";
 import { healthRouter } from "./routers/health";
 import { heartbeatJobsRouter } from "./routers/heartbeatJobs";
+import { healthThresholdsRouter } from "./routers/healthThresholds";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -304,6 +305,7 @@ export const appRouter = router({
   apisixAudit: apisixAuditRouter,
   health: healthRouter,
   heartbeatJobs: heartbeatJobsRouter,
+  healthThresholds: healthThresholdsRouter,
 });
 
 export type AppRouter = typeof appRouter;

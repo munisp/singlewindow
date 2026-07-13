@@ -6,15 +6,21 @@
  * sends in-app notifications to document owners, and marks expired docs.
  */
 import type { Request, Response } from "express";
+import { logCronRun } from "./cronLogger";
 import { getDb } from "../db";
 import { documentVault, userNotifications } from "../../drizzle/schema";
 import { and, isNull, lt, gte } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
 
 export async function documentVaultExpiryHandler(req: Request, res: Response) {
+  const start = Date.now();
+  const triggeredBy: "scheduler" | "manual" = req.headers["x-heartbeat-task-uid"] ? "scheduler" : "manual";
+  const taskUid = req.headers["x-heartbeat-task-uid"] as string | undefined;
+
   try {
     const db = await getDb();
     if (!db) {
+      await logCronRun({ jobName: "document-vault-expiry", taskUid, triggeredBy, status: "error", durationMs: Date.now() - start, errorMessage: "DB unavailable" });
       return res.json({ ok: true, processed: 0, message: "DB unavailable" });
     }
 
@@ -82,6 +88,7 @@ export async function documentVaultExpiryHandler(req: Request, res: Response) {
       });
     }
 
+    await logCronRun({ jobName: "document-vault-expiry", taskUid, triggeredBy, status: "success", durationMs: Date.now() - start, resultSummary: `${notified} expiring soon, ${markedExpired} marked expired` });
     return res.json({
       ok: true,
       expiringSoon: notified,
@@ -90,6 +97,7 @@ export async function documentVaultExpiryHandler(req: Request, res: Response) {
     });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    await logCronRun({ jobName: "document-vault-expiry", taskUid, triggeredBy, status: "error", durationMs: Date.now() - start, errorMessage: error });
     return res.status(500).json({
       error,
       context: { url: req.url, handler: "documentVaultExpiry" },

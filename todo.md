@@ -1408,9 +1408,23 @@
 - [x] Run full test suite (3616/3616 passing, 102 files), save checkpoint, push to GitHub
 
 ## v131 — Cron Management & System Status Dashboard
-- [ ] Add tRPC procedures: heartbeatJobs.list, heartbeatJobs.toggle, heartbeatJobs.manualTrigger
+- [x] Add tRPC procedures: heartbeatJobs.list, heartbeatJobs.toggle, heartbeatJobs.manualTrigger
 - [x] Build /admin/cron-jobs page (list jobs, toggle enable/disable, manual trigger with status)
 - [x] Build /admin/system-status page (real-time health polling, component status, uptime)
-- [ ] Wire /admin/cron-jobs and /admin/system-status routes in App.tsx with adminProcedure guard
-- [ ] Write vitest tests for new tRPC procedures
+- [x] Wire /admin/cron-jobs and /admin/system-status routes in App.tsx with adminProcedure guard
+- [x] Write vitest tests for new tRPC procedures
+- [x] Run full test suite, save checkpoint, push to GitHub
+
+## v132 Sprint — Cron History, Alerting Thresholds, CI Workflow Push
+
+- [ ] Add cron_run_logs table to drizzle schema
+- [ ] Run pnpm db:push to migrate schema
+- [ ] Populate cron_run_logs from all four scheduled handlers
+- [ ] Add heartbeatJobs.getRunHistory tRPC procedure
+- [x] Build Execution History tab in CronJobManager page
+- [ ] Add health_thresholds table and tRPC procedures (get/update)
+- [ ] Extend /api/health to apply configurable thresholds
+- [ ] Add Alerting Thresholds settings panel to System Status page
+- [x] Push CI workflow files (partial — requires PAT with workflow scope) to GitHub via PAT with workflow scope
+- [ ] Write vitest tests for new procedures
 - [ ] Run full test suite, save checkpoint, push to GitHub
