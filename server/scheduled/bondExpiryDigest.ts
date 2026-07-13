@@ -10,11 +10,17 @@
 import type { Request, Response } from "express";
 import { getPool } from "../db";
 import { notifyOwner } from "../_core/notification";
+import { logCronRun } from "./cronLogger";
 
 export async function bondExpiryDigestHandler(req: Request, res: Response) {
+  const start = Date.now();
+  const triggeredBy: "scheduler" | "manual" = req.headers["x-heartbeat-task-uid"] ? "scheduler" : "manual";
+  const taskUid = req.headers["x-heartbeat-task-uid"] as string | undefined;
+
   try {
     const pool = getPool();
     if (!pool) {
+      await logCronRun({ jobName: "bond-expiry-digest", taskUid, triggeredBy, status: "error", durationMs: Date.now() - start, errorMessage: "Database unavailable" });
       return res.status(500).json({ error: "Database unavailable" });
     }
 
@@ -65,6 +71,7 @@ export async function bondExpiryDigestHandler(req: Request, res: Response) {
     const totalFlagged = inventoryRows.length + warehouseRows.length;
 
     if (totalFlagged === 0) {
+      await logCronRun({ jobName: "bond-expiry-digest", taskUid, triggeredBy, status: "success", durationMs: Date.now() - start, resultSummary: "No expiring bonds found — no digest sent" });
       return res.json({
         ok: true,
         scanned: { inventory: inventoryRows.length, warehouses: warehouseRows.length },
@@ -112,6 +119,7 @@ export async function bondExpiryDigestHandler(req: Request, res: Response) {
       content: digestContent,
     });
 
+    await logCronRun({ jobName: "bond-expiry-digest", taskUid, triggeredBy, status: "success", durationMs: Date.now() - start, resultSummary: `Flagged ${totalFlagged} item(s); notified=${notified}` });
     return res.json({
       ok: true,
       scanned: { inventory: inventoryRows.length, warehouses: warehouseRows.length },
@@ -121,6 +129,7 @@ export async function bondExpiryDigestHandler(req: Request, res: Response) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
+    await logCronRun({ jobName: "bond-expiry-digest", taskUid, triggeredBy, status: "error", durationMs: Date.now() - start, errorMessage: message });
     return res.status(500).json({
       error: message,
       stack,

@@ -4,6 +4,11 @@
  * Visualises component health, uptime, response latencies, and DEMO_MODE state.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -38,7 +43,11 @@ import {
   Loader2,
   Wifi,
   WifiOff,
+  Settings2,
+  RotateCcw,
+  Save,
 } from "lucide-react";
+import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -171,6 +180,188 @@ function Sparkline({ history }: { history: HistoryPoint[] }) {
     <svg width={W} height={H} className="overflow-visible">
       <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} />
     </svg>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+// ─── Threshold Settings Panel ────────────────────────────────────────────────
+
+function ThresholdSettings() {
+  const { user } = useAuth();
+  const utils = trpc.useUtils();
+  const { data: thresholds, isLoading } = trpc.healthThresholds.list.useQuery();
+  const [edits, setEdits] = useState<Record<string, { degradedMs: number; unhealthyMs: number }>>({});
+
+  const updateMutation = trpc.healthThresholds.update.useMutation({
+    onSuccess: (d) => {
+      toast.success(`Threshold saved for ${d.componentName}`);
+      utils.healthThresholds.list.invalidate();
+    },
+    onError: (e) => toast.error(`Save failed: ${e.message}`),
+  });
+
+  const resetMutation = trpc.healthThresholds.reset.useMutation({
+    onSuccess: (d) => {
+      toast.success(`Reset to defaults for ${d.componentName}`);
+      setEdits((prev) => { const n = { ...prev }; delete n[d.componentName]; return n; });
+      utils.healthThresholds.list.invalidate();
+    },
+    onError: (e) => toast.error(`Reset failed: ${e.message}`),
+  });
+
+  const resetAllMutation = trpc.healthThresholds.resetAll.useMutation({
+    onSuccess: () => {
+      toast.success("All thresholds reset to defaults");
+      setEdits({});
+      utils.healthThresholds.list.invalidate();
+    },
+    onError: (e) => toast.error(`Reset all failed: ${e.message}`),
+  });
+
+  const isAdmin = user?.role === "admin";
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span>Loading thresholds…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Configure per-component latency thresholds. Components exceeding the
+          <strong> Degraded</strong> threshold are shown in amber;
+          exceeding <strong>Unhealthy</strong> in red.
+        </p>
+        {isAdmin && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => resetAllMutation.mutate()}
+            disabled={resetAllMutation.isPending}
+            className="gap-1.5 shrink-0"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset All
+          </Button>
+        )}
+      </div>
+
+      {!isAdmin && (
+        <div className="rounded-md border border-amber-200 bg-amber-50/40 px-4 py-3 text-sm text-amber-800">
+          <AlertTriangle className="inline h-4 w-4 mr-1.5" />
+          Threshold editing requires admin role. You can view current values below.
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {(thresholds ?? []).map((t) => {
+          const local = edits[t.componentName];
+          const degradedVal = local?.degradedMs ?? t.degradedMs;
+          const unhealthyVal = local?.unhealthyMs ?? t.unhealthyMs;
+          const isDirty = !!local;
+
+          return (
+            <Card key={t.componentName}>
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm truncate">{t.componentName}</p>
+                    {t.isCustomised && (
+                      <p className="text-xs text-muted-foreground">
+                        Last edited by {t.updatedBy} ·{" "}
+                        {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : ""}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs text-amber-700 w-20">Degraded (ms)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={60000}
+                        value={degradedVal}
+                        disabled={!isAdmin}
+                        onChange={(e) =>
+                          setEdits((prev) => ({
+                            ...prev,
+                            [t.componentName]: {
+                              degradedMs: Number(e.target.value),
+                              unhealthyMs: prev[t.componentName]?.unhealthyMs ?? t.unhealthyMs,
+                            },
+                          }))
+                        }
+                        className="w-24 h-7 text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Label className="text-xs text-red-700 w-22">Unhealthy (ms)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={60000}
+                        value={unhealthyVal}
+                        disabled={!isAdmin}
+                        onChange={(e) =>
+                          setEdits((prev) => ({
+                            ...prev,
+                            [t.componentName]: {
+                              degradedMs: prev[t.componentName]?.degradedMs ?? t.degradedMs,
+                              unhealthyMs: Number(e.target.value),
+                            },
+                          }))
+                        }
+                        className="w-24 h-7 text-xs"
+                      />
+                    </div>
+
+                    {isAdmin && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant={isDirty ? "default" : "outline"}
+                          disabled={!isDirty || updateMutation.isPending}
+                          onClick={() =>
+                            updateMutation.mutate({
+                              componentName: t.componentName,
+                              degradedMs: degradedVal,
+                              unhealthyMs: unhealthyVal,
+                            })
+                          }
+                          className="h-7 px-2 gap-1 text-xs"
+                        >
+                          <Save className="h-3 w-3" />
+                          Save
+                        </Button>
+                        {t.isCustomised && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={resetMutation.isPending}
+                            onClick={() => resetMutation.mutate({ componentName: t.componentName })}
+                            className="h-7 px-2 gap-1 text-xs text-muted-foreground"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            Reset
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -551,6 +742,31 @@ export default function SystemStatus() {
             </div>
           </>
         )}
+
+        {/* Threshold Settings Tab */}
+        <div className="mt-8">
+          <Tabs defaultValue="status">
+            <TabsList>
+              <TabsTrigger value="status" className="gap-2">
+                <Activity className="h-4 w-4" />
+                Live Status
+              </TabsTrigger>
+              <TabsTrigger value="thresholds" className="gap-2">
+                <Settings2 className="h-4 w-4" />
+                Alert Thresholds
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="status">
+              <p className="text-sm text-muted-foreground py-4">
+                Live status is shown in the dashboard above. Switch to the Alert Thresholds tab
+                to configure per-component latency limits.
+              </p>
+            </TabsContent>
+            <TabsContent value="thresholds" className="pt-4">
+              <ThresholdSettings />
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </TooltipProvider>
   );

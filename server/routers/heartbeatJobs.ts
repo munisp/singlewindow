@@ -16,6 +16,9 @@ import {
   deleteHeartbeatJob,
   listHeartbeatJobs,
 } from "../_core/heartbeat";
+import { getDb } from "../db";
+import { cronRunLogs } from "../../drizzle/schema";
+import { eq, desc } from "drizzle-orm";
 
 /** Well-known job definitions */
 const JOBS = {
@@ -237,5 +240,34 @@ export const heartbeatJobsRouter = router({
           cause: { jobName: input.jobName, durationMs },
         });
       }
+    }),
+
+  /**
+   * v132: listRunHistory — return the last N cron run log entries (all jobs or filtered by name).
+   */
+  listRunHistory: protectedProcedure
+    .input(
+      z.object({
+        jobName: z.string().optional(),
+        limit: z.number().int().min(1).max(100).default(20),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      requireAdmin(ctx.user.role);
+      const db = await getDb();
+      if (!db) return { runs: [], total: 0 };
+      const rows = input.jobName
+        ? await db
+            .select()
+            .from(cronRunLogs)
+            .where(eq(cronRunLogs.jobName, input.jobName))
+            .orderBy(desc(cronRunLogs.triggeredAt))
+            .limit(input.limit)
+        : await db
+            .select()
+            .from(cronRunLogs)
+            .orderBy(desc(cronRunLogs.triggeredAt))
+            .limit(input.limit);
+      return { runs: rows, total: rows.length };
     }),
 });
