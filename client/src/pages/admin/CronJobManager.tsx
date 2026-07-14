@@ -4,8 +4,6 @@
  * Heartbeat cron jobs registered on the Manus platform.
  */
 import { useState } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
@@ -47,9 +45,6 @@ import {
   AlertTriangle,
   Info,
   Zap,
-  History,
-  CheckCheck,
-  Ban,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -65,7 +60,7 @@ interface TriggerResult {
   jobName: string;
   durationMs: number;
   triggeredAt: string;
-  result: unknown;
+  result: Record<string, unknown> | string | number | boolean | null | undefined;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,7 +116,6 @@ export default function CronJobManager() {
   const [triggerResult, setTriggerResult] = useState<TriggerResult | null>(null);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [togglingUid, setTogglingUid] = useState<string | null>(null);
-  const [historyFilter, setHistoryFilter] = useState<string>("all");
 
   // Queries
   const { data: jobsData, isLoading: jobsLoading, refetch: refetchJobs } =
@@ -130,12 +124,6 @@ export default function CronJobManager() {
     });
 
   const { data: definitions } = trpc.heartbeatJobs.getJobDefinitions.useQuery();
-
-  const { data: historyData, isLoading: historyLoading, refetch: refetchHistory } =
-    trpc.heartbeatJobs.listRunHistory.useQuery(
-      { jobName: historyFilter === "all" ? undefined : historyFilter, limit: 50 },
-      { refetchInterval: 60_000 }
-    );
 
   // Mutations
   const toggleMutation = trpc.heartbeatJobs.toggleJob.useMutation({
@@ -218,8 +206,6 @@ export default function CronJobManager() {
     setTriggerError(null);
   }
 
-  const runs = historyData?.runs ?? [];
-
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       {/* Header */}
@@ -271,22 +257,6 @@ export default function CronJobManager() {
           </CardHeader>
         </Card>
       </div>
-
-      {/* Tabs: Jobs / History */}
-      <Tabs defaultValue="jobs">
-        <TabsList className="mb-4">
-          <TabsTrigger value="jobs" className="gap-2">
-            <CalendarClock className="h-4 w-4" />
-            Scheduled Jobs
-          </TabsTrigger>
-          <TabsTrigger value="history" className="gap-2">
-            <History className="h-4 w-4" />
-            Execution History
-          </TabsTrigger>
-        </TabsList>
-
-        {/* ── Jobs tab ── */}
-        <TabsContent value="jobs" className="space-y-6">
 
       {/* Jobs table */}
       <Card>
@@ -390,105 +360,6 @@ export default function CronJobManager() {
         </CardContent>
       </Card>
 
-        </TabsContent>
-
-        {/* ── History tab ── */}
-        <TabsContent value="history" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base">Execution History</CardTitle>
-                  <CardDescription>
-                    Last 50 cron run log entries. Populated automatically after each scheduled or
-                    manual trigger once the app is deployed.
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Select value={historyFilter} onValueChange={setHistoryFilter}>
-                    <SelectTrigger className="w-52 h-8 text-xs">
-                      <SelectValue placeholder="All jobs" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All jobs</SelectItem>
-                      <SelectItem value="bond-expiry-digest">Bond Expiry Digest</SelectItem>
-                      <SelectItem value="post-audit-reminder">Post-Audit Reminder</SelectItem>
-                      <SelectItem value="sla-breach-escalation">SLA Breach Escalation</SelectItem>
-                      <SelectItem value="document-vault-expiry">Document Vault Expiry</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button variant="outline" size="sm" onClick={() => refetchHistory()} disabled={historyLoading} className="gap-1.5">
-                    <RefreshCw className={`h-3.5 w-3.5 ${historyLoading ? "animate-spin" : ""}`} />
-                    Refresh
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {historyLoading ? (
-                <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span>Loading history…</span>
-                </div>
-              ) : runs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
-                  <History className="h-10 w-10 opacity-30" />
-                  <p className="text-sm">No execution records yet.</p>
-                  <p className="text-xs opacity-60">Records appear here after the first scheduled or manual run.</p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Job</TableHead>
-                      <TableHead>Triggered By</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead>Summary</TableHead>
-                      <TableHead>Triggered At</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {runs.map((run) => (
-                      <TableRow key={run.id}>
-                        <TableCell className="font-medium text-sm">{jobLabel(run.jobName)}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">
-                            {run.triggeredBy === "heartbeat" ? "Scheduled" : "Manual"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {run.status === "success" ? (
-                            <Badge className="bg-green-100 text-green-800 border-green-200 gap-1 text-xs">
-                              <CheckCheck className="h-3 w-3" />
-                              Success
-                            </Badge>
-                          ) : (
-                            <Badge variant="destructive" className="gap-1 text-xs">
-                              <Ban className="h-3 w-3" />
-                              Failed
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {run.durationMs != null ? `${run.durationMs}ms` : "—"}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground max-w-xs truncate">
-                          {run.resultSummary ?? run.errorMessage ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-xs">
-                          {run.triggeredAt ? new Date(run.triggeredAt).toLocaleString() : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
       {/* Unregistered definitions */}
       {unregisteredDefs.length > 0 && (
         <Card className="border-amber-200 bg-amber-50/30">
@@ -588,11 +459,11 @@ export default function CronJobManager() {
                   </p>
                 </div>
               </div>
-              {(triggerResult.result !== undefined && triggerResult.result !== null) && (
+              {triggerResult.result && (
                 <div className="rounded-md bg-muted/50 p-3">
                   <p className="text-xs text-muted-foreground mb-1">Handler Response</p>
                   <pre className="text-xs font-mono overflow-auto max-h-32 whitespace-pre-wrap">
-                    {String(JSON.stringify(triggerResult.result as Record<string, unknown>, null, 2))}
+                    {String(JSON.stringify(triggerResult.result, null, 2))}
                   </pre>
                 </div>
               )}
