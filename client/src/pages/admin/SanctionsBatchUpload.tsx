@@ -8,7 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ShieldAlert, Upload, RefreshCw } from "lucide-react";
+import { ShieldAlert, Upload, RefreshCw, AlertTriangle, CheckCircle, SkipForward, GitMerge, Eye } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -22,6 +26,8 @@ export default function SanctionsBatchUpload() {
   const utils = trpc.useUtils();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [conflictBatchId, setConflictBatchId] = useState<number | null>(null);
+  const [conflictResolutions, setConflictResolutions] = useState<Record<number, "overwrite" | "skip" | "merge">>({});
 
   const { data: jobs, isLoading, refetch } = trpc.sanctionsBatch.list.useQuery();
 
@@ -33,6 +39,46 @@ export default function SanctionsBatchUpload() {
     },
     onError: (e) => { toast.error(e.message); setUploading(false); },
   });
+
+  const { data: conflicts } = trpc.sanctionsBatch.listConflicts.useQuery(
+    { batchId: conflictBatchId! },
+    { enabled: conflictBatchId !== null }
+  );
+
+  const resolveConflictMutation = trpc.sanctionsBatch.bulkResolveConflicts.useMutation({
+    onSuccess: () => {
+      utils.sanctionsBatch.list.invalidate();
+      setConflictBatchId(null);
+      setConflictResolutions({});
+      toast.success("All conflicts resolved");
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  function setAllResolution(action: "overwrite" | "skip" | "merge") {
+    if (!conflicts) return;
+    const all: Record<number, "overwrite" | "skip" | "merge"> = {};
+    conflicts.forEach(c => { all[c.id] = action; });
+    setConflictResolutions(all);
+  }
+
+  const singleResolveMutation = trpc.sanctionsBatch.resolveConflict.useMutation();
+
+  async function handleResolve() {
+    if (!conflictBatchId || !conflicts) return;
+    try {
+      for (const c of conflicts) {
+        const resolution = conflictResolutions[c.id] ?? "skip";
+        await singleResolveMutation.mutateAsync({ conflictId: c.id, resolution });
+      }
+      utils.sanctionsBatch.list.invalidate();
+      setConflictBatchId(null);
+      setConflictResolutions({});
+      toast.success(`${conflicts.length} conflict(s) resolved`);
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to resolve conflicts");
+    }
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -111,6 +157,7 @@ export default function SanctionsBatchUpload() {
                     <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Matches</th>
                     <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Submitted</th>
                     <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Completed</th>
+                    <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Conflicts</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -153,6 +200,17 @@ export default function SanctionsBatchUpload() {
                         <td className="px-4 py-3 text-right text-xs text-muted-foreground">
                           {job.completedAt ? new Date(job.completedAt).toLocaleString() : "—"}
                         </td>
+                        <td className="px-4 py-3 text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs h-7 text-amber-600 border-amber-500/40 hover:bg-amber-500/10 gap-1"
+                              onClick={() => { setConflictBatchId(job.id); setConflictResolutions({}); }}
+                            >
+                              <AlertTriangle size={12} />
+                              Conflicts
+                            </Button>
+                          </td>
                       </tr>
                     );
                   })}
@@ -162,6 +220,93 @@ export default function SanctionsBatchUpload() {
           )}
         </CardContent>
       </Card>
+
+      {/* Conflict Resolution Dialog */}
+      <Dialog open={conflictBatchId !== null} onOpenChange={() => { setConflictBatchId(null); setConflictResolutions({}); }}>
+        <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle size={16} className="text-amber-500" />
+              Resolve Sanctions Conflicts
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto space-y-3 py-2">
+            {/* Bulk action bar */}
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 border border-border">
+              <span className="text-xs text-muted-foreground font-medium mr-1">Apply to all:</span>
+              <Button size="sm" variant="outline" className="text-xs h-7 gap-1 text-emerald-600 border-emerald-500/40" onClick={() => setAllResolution("overwrite")}>
+                <CheckCircle size={11} /> Overwrite All
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs h-7 gap-1 text-slate-500" onClick={() => setAllResolution("skip")}>
+                <SkipForward size={11} /> Skip All
+              </Button>
+              <Button size="sm" variant="outline" className="text-xs h-7 gap-1 text-blue-600 border-blue-500/40" onClick={() => setAllResolution("merge")}>
+                <GitMerge size={11} /> Merge All
+              </Button>
+            </div>
+            {/* Conflict rows */}
+            {(conflicts ?? []).map((c) => {
+              const chosen = conflictResolutions[c.id] ?? "skip";
+              return (
+                <div key={c.id} className="border border-border rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 bg-muted/20 border-b border-border">
+                    <span className="text-xs font-semibold text-foreground">{c.entityName}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">#{c.id}</span>
+                  </div>
+                  <Tabs value={chosen} onValueChange={v => setConflictResolutions(prev => ({ ...prev, [c.id]: v as any }))}>
+                    <div className="px-3 pt-2">
+                      <TabsList className="h-7 text-xs">
+                        <TabsTrigger value="overwrite" className="text-xs h-6 gap-1"><CheckCircle size={10} />Overwrite</TabsTrigger>
+                        <TabsTrigger value="skip" className="text-xs h-6 gap-1"><SkipForward size={10} />Skip</TabsTrigger>
+                        <TabsTrigger value="merge" className="text-xs h-6 gap-1"><GitMerge size={10} />Merge</TabsTrigger>
+                      </TabsList>
+                    </div>
+                    <TabsContent value="overwrite" className="px-3 pb-3 pt-1">
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <p className="text-muted-foreground font-medium mb-1">Existing Record</p>
+                          <pre className="bg-muted/30 rounded p-2 text-[10px] overflow-auto max-h-20">{JSON.stringify(c.existingData, null, 2)}</pre>
+                        </div>
+                        <div>
+                          <p className="text-emerald-600 font-medium mb-1">Incoming (will replace)</p>
+                          <pre className="bg-emerald-500/5 border border-emerald-500/20 rounded p-2 text-[10px] overflow-auto max-h-20">{JSON.stringify(c.incomingData, null, 2)}</pre>
+                        </div>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="skip" className="px-3 pb-3 pt-1">
+                      <p className="text-xs text-muted-foreground">The existing record will be kept unchanged. The incoming entry will be discarded.</p>
+                    </TabsContent>
+                    <TabsContent value="merge" className="px-3 pb-3 pt-1">
+                      <p className="text-xs text-muted-foreground mb-2">Non-null fields from the incoming record will be merged into the existing record. Existing values are preserved where the incoming field is null.</p>
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <p className="text-muted-foreground font-medium mb-1">Existing</p>
+                          <pre className="bg-muted/30 rounded p-2 text-[10px] overflow-auto max-h-20">{JSON.stringify(c.existingData, null, 2)}</pre>
+                        </div>
+                        <div>
+                          <p className="text-blue-600 font-medium mb-1">Incoming (merge source)</p>
+                          <pre className="bg-blue-500/5 border border-blue-500/20 rounded p-2 text-[10px] overflow-auto max-h-20">{JSON.stringify(c.incomingData, null, 2)}</pre>
+                        </div>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter className="border-t border-border pt-3">
+            <Button variant="outline" size="sm" onClick={() => { setConflictBatchId(null); setConflictResolutions({}); }}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-[#D4A017] hover:bg-[#B8860B] text-black"
+              disabled={resolveConflictMutation.isPending || !conflicts || conflicts.length === 0}
+              onClick={handleResolve}
+            >
+              {resolveConflictMutation.isPending ? "Resolving…" : `Apply ${(conflicts ?? []).length} Resolutions`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

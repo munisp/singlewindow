@@ -2959,3 +2959,62 @@ export const ogaBulkActions = pgTable("oga_bulk_actions", {
 ]);
 export type OgaBulkAction = typeof ogaBulkActions.$inferSelect;
 export type InsertOgaBulkAction = typeof ogaBulkActions.$inferInsert;
+
+// ─── AEO Renewal Documents ────────────────────────────────────────────────────
+export const aeoRenewalDocuments = pgTable("aeo_renewal_documents", {
+  id: serial("id").primaryKey(),
+  renewalId: integer("renewal_id").notNull(),
+  docType: varchar("doc_type", { length: 64 }).notNull(),
+  label: varchar("label", { length: 255 }).notNull(),
+  required: boolean("required").notNull().default(true),
+  uploadedAt: timestamp("uploaded_at"),
+  fileUrl: text("file_url"),
+  fileKey: text("file_key"),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ard_renewal").on(t.renewalId),
+  index("idx_ard_status").on(t.status),
+]);
+export type AeoRenewalDocument = typeof aeoRenewalDocuments.$inferSelect;
+export type InsertAeoRenewalDocument = typeof aeoRenewalDocuments.$inferInsert;
+
+// ─── Export Schedule Deliveries ───────────────────────────────────────────────
+export const exportScheduleDeliveries = pgTable("export_schedule_deliveries", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull(),
+  deliveredAt: timestamp("delivered_at").defaultNow().notNull(),
+  rowCount: integer("row_count").notNull().default(0),
+  fileSizeBytes: integer("file_size_bytes").notNull().default(0),
+  status: varchar("status", { length: 32 }).notNull().default("success"),
+  errorMessage: text("error_message"),
+  notificationId: integer("notification_id"),
+}, (t) => [
+  index("idx_esd_schedule").on(t.scheduleId),
+  index("idx_esd_delivered_at").on(t.deliveredAt),
+]);
+export type ExportScheduleDelivery = typeof exportScheduleDeliveries.$inferSelect;
+export type InsertExportScheduleDelivery = typeof exportScheduleDeliveries.$inferInsert;
+
+// ─── Sanctions Batch Conflicts ────────────────────────────────────────────────
+export const sanctionsBatchConflicts = pgTable("sanctions_batch_conflicts", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").notNull(),
+  rowIndex: integer("row_index").notNull(),
+  entityName: varchar("entity_name", { length: 255 }).notNull(),
+  entityType: varchar("entity_type", { length: 64 }),
+  existingId: integer("existing_id"),
+  incomingData: json("incoming_data").notNull(),
+  existingData: json("existing_data"),
+  resolution: varchar("resolution", { length: 32 }),
+  resolvedBy: integer("resolved_by"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_sbc_batch").on(t.batchId),
+  index("idx_sbc_resolution").on(t.resolution),
+]);
+export type SanctionsBatchConflict = typeof sanctionsBatchConflicts.$inferSelect;
+export type InsertSanctionsBatchConflict = typeof sanctionsBatchConflicts.$inferInsert;

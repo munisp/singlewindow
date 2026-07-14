@@ -10,12 +10,76 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { CalendarClock, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Plus, Trash2, History, CheckCircle2, XCircle, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 const CADENCE_LABELS: Record<string, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 const PRESET_LABELS: Record<string, string> = { "7": "Last 7 days", "30": "Last 30 days", "90": "Last 90 days", year: "Year-to-date", all: "All time" };
 const EXPORT_TYPE_LABELS: Record<string, string> = { ledger: "Ledger Entries", payments: "Payment History" };
+
+// ─── Delivery Receipt Panel ──────────────────────────────────────────────────
+function DeliveryReceiptPanel({ scheduleId, lastDelivery }: {
+  scheduleId: number;
+  lastDelivery: { deliveredAt: Date | null; rowCount: number; fileSizeBytes: number; status: string; errorMessage?: string | null } | null;
+}) {
+  const { data: deliveries, isLoading } = trpc.exportSchedules.listDeliveries.useQuery({ scheduleId, limit: 10 });
+
+  function formatBytes(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  return (
+    <div className="mx-4 mb-3 border border-border/60 rounded-lg bg-muted/10 overflow-hidden">
+      <div className="px-3 py-2 border-b border-border/40 flex items-center gap-2">
+        <History size={12} className="text-muted-foreground" />
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Delivery History</span>
+        {lastDelivery && (
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            Last: {new Date(lastDelivery.deliveredAt!).toLocaleString()}
+          </span>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="p-4 text-xs text-muted-foreground text-center">Loading…</div>
+      ) : !deliveries || deliveries.length === 0 ? (
+        <div className="p-4 text-xs text-muted-foreground text-center">No deliveries yet. The schedule will run at the next configured time.</div>
+      ) : (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border/40 bg-muted/20">
+              <th className="text-left px-3 py-2 font-medium text-muted-foreground">Delivered At</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">Rows</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">Size</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {deliveries.map((d) => (
+              <tr key={d.id} className="border-b border-border/30 last:border-0 hover:bg-muted/20">
+                <td className="px-3 py-2 text-muted-foreground">{new Date(d.deliveredAt!).toLocaleString()}</td>
+                <td className="px-3 py-2 text-right font-mono">{d.rowCount.toLocaleString()}</td>
+                <td className="px-3 py-2 text-right font-mono text-muted-foreground">{formatBytes(d.fileSizeBytes)}</td>
+                <td className="px-3 py-2 text-right">
+                  {d.status === "success" ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-600">
+                      <CheckCircle2 size={11} /> Success
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-red-500" title={d.errorMessage ?? ""}>
+                      <XCircle size={11} /> Failed
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 export default function ExportScheduleManager() {
   const utils = trpc.useUtils();
@@ -25,6 +89,8 @@ export default function ExportScheduleManager() {
   const [newCadence, setNewCadence] = useState<"daily" | "weekly" | "monthly">("weekly");
   const [newPreset, setNewPreset] = useState<"7" | "30" | "90" | "year" | "all">("30");
   const [adding, setAdding] = useState(false);
+  const [expandedDeliveries, setExpandedDeliveries] = useState<number | null>(null);
+  const { data: lastDeliveries } = trpc.exportSchedules.lastDeliveries.useQuery();
 
   const upsertMutation = trpc.exportSchedules.upsert.useMutation({
     onSuccess: () => {
@@ -141,6 +207,7 @@ export default function ExportScheduleManager() {
           ) : (
             <div className="divide-y divide-border">
               {schedules.map((s) => (
+                <>
                 <div key={s.id} className="flex items-center justify-between px-4 py-3">
                   <div className="flex items-center gap-3">
                     <Switch
@@ -166,6 +233,15 @@ export default function ExportScheduleManager() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      onClick={() => setExpandedDeliveries(expandedDeliveries === s.id ? null : s.id)}
+                      title="Delivery history"
+                    >
+                      {expandedDeliveries === s.id ? <ChevronDown size={14} /> : <History size={14} />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       className="h-7 w-7 text-destructive hover:text-destructive"
                       onClick={() => deleteMutation.mutate({ id: s.id })}
                     >
@@ -173,6 +249,10 @@ export default function ExportScheduleManager() {
                     </Button>
                   </div>
                 </div>
+                {expandedDeliveries === s.id && (
+                  <DeliveryReceiptPanel scheduleId={s.id} lastDelivery={lastDeliveries?.[s.id] ?? null} />
+                )}
+                </>
               ))}
             </div>
           )}

@@ -4,7 +4,20 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { aeoRenewals, aeoApplications } from "../../drizzle/schema";
+import { aeoRenewals, aeoApplications, aeoRenewalDocuments } from "../../drizzle/schema";
+import { storagePut } from "../storage";
+
+// Required document types for AEO renewal
+export const AEO_REQUIRED_DOCS = [
+  { docType: "financial_statements", label: "Audited Financial Statements (last 2 years)", required: true },
+  { docType: "compliance_record",    label: "Customs Compliance Record / No-Objection Certificate", required: true },
+  { docType: "certificate_of_origin", label: "Certificate of Origin (sample)", required: true },
+  { docType: "insurance_cert",       label: "Current Cargo Insurance Certificate", required: true },
+  { docType: "tax_clearance",        label: "Tax Clearance Certificate", required: true },
+  { docType: "company_registration", label: "Company Registration / Business Licence", required: true },
+  { docType: "security_assessment",  label: "Premises Security Assessment Report", required: false },
+  { docType: "training_records",     label: "Staff Customs Training Records", required: false },
+];
 import { eq, and, lte, desc } from "drizzle-orm";
 import { createUserNotification } from "../db";
 
@@ -51,6 +64,16 @@ export const aeoRenewalsRouter = router({
           renewalDueDate: new Date(input.renewalDueDate),
         })
         .returning({ id: aeoRenewals.id });
+      // Seed document checklist for this renewal
+      await db.insert(aeoRenewalDocuments).values(
+        AEO_REQUIRED_DOCS.map(d => ({
+          renewalId: created.id,
+          docType: d.docType,
+          label: d.label,
+          required: d.required,
+          status: "pending",
+        }))
+      );
       return { id: created.id };
     }),
 
@@ -85,6 +108,120 @@ export const aeoRenewalsRouter = router({
         body: input.reviewNotes ?? `Your AEO renewal has been ${input.decision}.`,
       });
       return { success: true };
+    }),
+
+  // ─── Document Checklist ────────────────────────────────────────────────────
+
+  /** Get document checklist for a renewal (trader or admin) */
+  listDocuments: protectedProcedure
+    .input(z.object({ renewalId: z.number().int() }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      if (ctx.user.role !== "admin") {
+        const [renewal] = await db.select().from(aeoRenewals)
+          .where(and(eq(aeoRenewals.id, input.renewalId), eq(aeoRenewals.traderId, ctx.user.id)))
+          .limit(1);
+        if (!renewal) throw new Error("Renewal not found or access denied");
+      }
+      const docs = await db.select().from(aeoRenewalDocuments)
+        .where(eq(aeoRenewalDocuments.renewalId, input.renewalId))
+        .orderBy(aeoRenewalDocuments.required, aeoRenewalDocuments.docType);
+      if (docs.length === 0) {
+        const seeded = await db.insert(aeoRenewalDocuments).values(
+          AEO_REQUIRED_DOCS.map(d => ({
+            renewalId: input.renewalId,
+            docType: d.docType,
+            label: d.label,
+            required: d.required,
+            status: "pending",
+          }))
+        ).returning();
+        return seeded;
+      }
+      return docs;
+    }),
+
+  /** Trader: upload a document for a renewal checklist item */
+  uploadDocument: protectedProcedure
+    .input(z.object({
+      renewalId: z.number().int(),
+      docType: z.string(),
+      fileName: z.string(),
+      fileBase64: z.string(),
+      mimeType: z.string().default("application/pdf"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const [renewal] = await db.select().from(aeoRenewals)
+        .where(and(eq(aeoRenewals.id, input.renewalId), eq(aeoRenewals.traderId, ctx.user.id)))
+        .limit(1);
+      if (!renewal) throw new Error("Renewal not found or access denied");
+      const buf = Buffer.from(input.fileBase64, "base64");
+      const key = `aeo-renewal-docs/${ctx.user.id}/${input.renewalId}/${input.docType}-${Date.now()}-${input.fileName}`;
+      const { url } = await storagePut(key, buf, input.mimeType);
+      const [existing] = await db.select().from(aeoRenewalDocuments)
+        .where(and(eq(aeoRenewalDocuments.renewalId, input.renewalId), eq(aeoRenewalDocuments.docType, input.docType)))
+        .limit(1);
+      if (existing) {
+        await db.update(aeoRenewalDocuments)
+          .set({ fileUrl: url, fileKey: key, uploadedAt: new Date(), status: "uploaded", updatedAt: new Date() })
+          .where(eq(aeoRenewalDocuments.id, existing.id));
+        return { id: existing.id, fileUrl: url };
+      }
+      const [created] = await db.insert(aeoRenewalDocuments).values({
+        renewalId: input.renewalId,
+        docType: input.docType,
+        label: input.docType.replace(/_/g, " "),
+        required: false,
+        fileUrl: url,
+        fileKey: key,
+        uploadedAt: new Date(),
+        status: "uploaded",
+      }).returning({ id: aeoRenewalDocuments.id });
+      return { id: created.id, fileUrl: url };
+    }),
+
+  /** Admin: mark a document as accepted or rejected */
+  reviewDocument: adminProcedure
+    .input(z.object({
+      documentId: z.number().int(),
+      status: z.enum(["accepted", "rejected"]),
+      reviewNotes: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      await db.update(aeoRenewalDocuments)
+        .set({ status: input.status, reviewNotes: input.reviewNotes ?? null, updatedAt: new Date() })
+        .where(eq(aeoRenewalDocuments.id, input.documentId));
+      return { success: true };
+    }),
+
+  /** Get checklist completion summary for a renewal */
+  checklistSummary: protectedProcedure
+    .input(z.object({ renewalId: z.number().int() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      const docs = await db.select().from(aeoRenewalDocuments)
+        .where(eq(aeoRenewalDocuments.renewalId, input.renewalId));
+      const required = docs.filter(d => d.required);
+      const uploaded = docs.filter(d => d.status === "uploaded" || d.status === "accepted");
+      const accepted = docs.filter(d => d.status === "accepted");
+      const rejected = docs.filter(d => d.status === "rejected");
+      const requiredUploaded = required.filter(d => d.status === "uploaded" || d.status === "accepted");
+      return {
+        total: docs.length,
+        required: required.length,
+        uploaded: uploaded.length,
+        accepted: accepted.length,
+        rejected: rejected.length,
+        requiredUploaded: requiredUploaded.length,
+        completionPct: required.length > 0 ? Math.round((requiredUploaded.length / required.length) * 100) : 100,
+        isReadyToSubmit: requiredUploaded.length >= required.length,
+      };
     }),
 
   /** List renewals due within N days (for heartbeat alert job) */

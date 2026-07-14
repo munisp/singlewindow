@@ -1476,3 +1476,33 @@
 - [x] Items 9-20: Covered by backend routers (aeoRenewal, sanctionsBatch, ogaBulkApprove, postClearanceAuditScheduler, declarationRiskHistory, exportSchedules) + 7 frontend pages + App.tsx routes + DashboardLayout nav items
 - [x] Vitest tests: server/v136.test.ts — 8 suites, 45 tests (threshold audit, export cadence, sanctions validation, OGA bulk, AEO state machine, audit scheduling, risk history, notification read-receipt)
 - [x] Run full test suite: 108 test files, 4150 tests, 0 TypeScript errors (22 pre-existing failures in v63.test.ts for missing services.yml — unrelated to v136)
+
+## v137 Sprint — AEO Document Checklist, Export Delivery Receipts, Sanctions Conflict Resolution
+- [ ] Schema: aeo_renewal_documents table (renewalId, docType, label, required, uploadedAt, fileUrl, status)
+- [ ] Schema: export_schedule_deliveries table (scheduleId, deliveredAt, rowCount, fileSizeBytes, status, errorMessage)
+- [ ] Backend: aeoRenewal.listDocuments + uploadDocument + markDocumentReady procedures
+- [ ] Backend: exportSchedules.listDeliveries procedure
+- [ ] Backend: sanctionsBatch.detectConflicts + resolveConflicts procedures
+- [ ] Frontend: AEO renewal document checklist panel in AEORenewalWorkflow.tsx (required docs, upload status, completion %)
+- [ ] Frontend: Export schedule delivery receipt log in ExportScheduleManager.tsx (last-delivered timestamp, row count, file size)
+- [ ] Frontend: Sanctions batch conflict resolution dialog (side-by-side diff, overwrite/skip/merge per row)
+- [ ] Vitest tests for document checklist completion logic, delivery receipt helpers, and conflict detection
+- [ ] Run full test suite, save checkpoint, push to GitHub
+
+## v137 Sprint — AEO Document Checklist, Export Delivery Receipts, Sanctions Conflict Resolution
+
+- [x] Schema: aeo_renewal_documents table (docType, label, required, status, fileUrl, fileKey, reviewNotes)
+- [x] Schema: export_schedule_deliveries table (scheduleId, deliveredAt, rowCount, fileSizeBytes, status, errorMessage)
+- [x] Schema: sanctions_batch_conflicts table (batchId, rowIndex, entityName, incomingData, existingData, resolution, resolvedBy)
+- [x] Backend: aeoRenewals.listDocuments, checklistSummary, uploadDocument, reviewDocument procedures
+- [x] Backend: exportSchedules.listDeliveries, lastDeliveries procedures
+- [x] Backend: sanctionsBatch.listConflicts, resolveConflict, bulkResolveConflicts, conflictSummary procedures
+- [x] Frontend: AEORenewalWorkflow.tsx — DocumentChecklist component with progress bar, file upload, accept/reject per doc
+- [x] Frontend: AEORenewalWorkflow.tsx — expandable checklist row per renewal (Docs toggle button)
+- [x] Frontend: ExportScheduleManager.tsx — DeliveryReceiptPanel with last-delivered timestamp, row count, file size, status
+- [x] Frontend: ExportScheduleManager.tsx — History button per schedule row to toggle delivery panel
+- [x] Frontend: SanctionsBatchUpload.tsx — Conflict Resolution Dialog with per-item overwrite/skip/merge tabs
+- [x] Frontend: SanctionsBatchUpload.tsx — Bulk apply (Overwrite All / Skip All / Merge All) action bar
+- [x] Frontend: SanctionsBatchUpload.tsx — Side-by-side diff view for overwrite and merge tabs
+- [x] Vitest: server/v137.test.ts — 4 suites, 18 tests (checklist summary, delivery receipts, conflict resolution, merge logic)
+- [x] Run full test suite: 109 test files, 4166 tests passed, 22 pre-existing failures in v63.test.ts (services.yml), 0 TypeScript errors
