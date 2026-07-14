@@ -372,6 +372,55 @@ export default function FinanceLedger() {
       {/* CSV Export Filters */}
       <Card className="bg-[#0D1F3C] border-[#1E3A5F]">
         <CardContent className="p-4">
+          <div className="space-y-3">
+            {/* Quick-preset date range buttons */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-gray-400 text-xs font-medium">Quick range:</span>
+              {[
+                { label: "Last 7d",  days: 7 },
+                { label: "Last 30d", days: 30 },
+                { label: "Last 90d", days: 90 },
+                { label: "This Year", days: null },
+              ].map((preset) => {
+                const isActive = (() => {
+                  if (preset.days === null) {
+                    const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().split("T")[0];
+                    return exportStartDate === yearStart && exportEndDate === "";
+                  }
+                  const expected = new Date(Date.now() - preset.days * 86400_000).toISOString().split("T")[0];
+                  return exportStartDate === expected && exportEndDate === "";
+                })();
+                return (
+                  <button
+                    key={preset.label}
+                    onClick={() => {
+                      if (preset.days === null) {
+                        setExportStartDate(new Date(new Date().getFullYear(), 0, 1).toISOString().split("T")[0]);
+                      } else {
+                        setExportStartDate(new Date(Date.now() - preset.days * 86400_000).toISOString().split("T")[0]);
+                      }
+                      setExportEndDate("");
+                    }}
+                    className={`px-2.5 py-1 rounded text-xs font-medium border transition-all ${
+                      isActive
+                        ? "bg-[#D4A017] text-[#0A1628] border-[#D4A017]"
+                        : "bg-transparent text-[#D4A017] border-[#D4A017]/40 hover:bg-[#D4A017]/10"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              {(exportStartDate || exportEndDate) && (
+                <button
+                  onClick={() => { setExportStartDate(""); setExportEndDate(""); }}
+                  className="px-2.5 py-1 rounded text-xs font-medium border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-all"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
               <Label className="text-gray-400 text-xs">From Date</Label>
@@ -417,6 +466,7 @@ export default function FinanceLedger() {
               {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
               Download Ledger CSV
             </Button>
+          </div>
           </div>
         </CardContent>
       </Card>

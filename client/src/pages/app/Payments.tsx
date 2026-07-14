@@ -70,22 +70,32 @@ export default function Payments() {
   const isFinance = user?.role === "finance";
   const canExportAll = isAdmin || isFinance;
   const [exportLoading, setExportLoading] = useState(false);
+  const [exportPreset, setExportPreset] = useState<"7" | "30" | "90" | "year" | "all">("30");
 
   const exportMyHistoryMutation = trpc.payments.exportMyHistory.useMutation();
   const exportAllMutation = trpc.finance.exportCSV.useMutation();
+
+  function getPresetDates(preset: string): { startDate?: string; endDate?: string } {
+    const now = new Date();
+    if (preset === "7")    return { startDate: new Date(now.getTime() - 7  * 86400_000).toISOString(), endDate: now.toISOString() };
+    if (preset === "30")   return { startDate: new Date(now.getTime() - 30 * 86400_000).toISOString(), endDate: now.toISOString() };
+    if (preset === "90")   return { startDate: new Date(now.getTime() - 90 * 86400_000).toISOString(), endDate: now.toISOString() };
+    if (preset === "year") return { startDate: new Date(now.getFullYear(), 0, 1).toISOString(), endDate: now.toISOString() };
+    return {}; // "all" — no date filter
+  }
 
   const handleExportCSV = async () => {
     setExportLoading(true);
     try {
       let result: { csv: string; rowCount: number; filename: string };
+      const dates = getPresetDates(exportPreset);
       if (canExportAll) {
         result = await exportAllMutation.mutateAsync({
-          startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-          endDate: new Date().toISOString(),
+          ...dates,
           limit: 5000,
         });
       } else {
-        result = await exportMyHistoryMutation.mutateAsync({ limit: 2000 });
+        result = await exportMyHistoryMutation.mutateAsync({ ...dates, limit: 2000 });
       }
       const blob = new Blob([result.csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
@@ -182,7 +192,29 @@ export default function Payments() {
             Manage duty payments, track transactions, and reconcile ledger entries
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Quick date-range presets */}
+          <div className="flex items-center gap-1 bg-muted/40 rounded-md p-1">
+            {([
+              { key: "7",    label: "7d" },
+              { key: "30",   label: "30d" },
+              { key: "90",   label: "90d" },
+              { key: "year", label: "YTD" },
+              { key: "all",  label: "All" },
+            ] as const).map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setExportPreset(p.key)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-all ${
+                  exportPreset === p.key
+                    ? "bg-accent text-white"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <Button
             variant="outline"
             size="sm"

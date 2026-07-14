@@ -1443,3 +1443,12 @@
 - [x] Admin: Cron job success rate donut charts
 - [x] Admin: Cron execution timeline on System Status dashboard (CronExecutionCharts component)
 - [x] Vitest tests for CSV export procedures and filter logic (server/csv-export.test.ts — 105 test files, 4086 tests)
+
+## v134 Sprint — CSV Presets, Cron Threshold Alerts, Sidebar Badges
+- [x] FinanceLedger: Add "Last 7d / 30d / 90d / This Year" quick-preset buttons to CSV export filter panel
+- [x] Payments: Add "7d / 30d / 90d / YTD / All" quick-preset pill bar to CSV export section
+- [x] SystemStatus CronExecutionCharts: Load health_thresholds and highlight bars where error rate exceeds threshold (red bars)
+- [x] SystemStatus CronExecutionCharts: Show amber alert banner listing jobs above their error-rate threshold
+- [x] DashboardLayout sidebar: Add live gold count badge for in-progress declarations (submitted + pending) for trader role
+- [x] Vitest tests: server/v134.test.ts — getPresetDates, buildJobThresholdMap, computeJobRatesWithThresholds, computeInProgressCount (106 test files, 4105 tests, 0 TS errors)
+- [x] Run full test suite, save checkpoint, push to GitHub

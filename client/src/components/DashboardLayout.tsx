@@ -466,6 +466,17 @@ function DashboardLayoutContent({
   const [liveUnreadCount, setLiveUnreadCount] = useState<number | null>(null);
   const unreadCount = liveUnreadCount ?? unreadData?.count ?? 0;
 
+  // Live in-progress declaration count badge (submitted + under_review) for trader role
+  // The "user" role is the default trader role in this system
+  const isTrader = user?.role === "user";
+  const { data: declStats } = trpc.declarations.stats.useQuery(
+    undefined,
+    { enabled: !!user && isTrader, refetchInterval: 30_000 }
+  );
+  const inProgressDeclCount = isTrader
+    ? ((declStats as any)?.submitted ?? 0) + ((declStats as any)?.pending ?? 0)
+    : 0;
+
   // Sprint 63: Real-time WebSocket for live bell badge + toast notifications
   const handleWsNotification = useCallback((notif: { title: string; body: string }) => {
     utils.userNotifications.getUnreadCount.invalidate();
@@ -665,6 +676,22 @@ function DashboardLayoutContent({
                           {item.label === "Notification Centre" && unreadCount > 0 && (
                             <Badge variant="destructive" style={{ marginLeft: "auto", height: 18, minWidth: 18, fontSize: 9, padding: "0 4px" }}>
                               {unreadCount}
+                            </Badge>
+                          )}
+                          {item.label === "My Shipment Declarations" && inProgressDeclCount > 0 && (
+                            <Badge
+                              style={{
+                                marginLeft: "auto",
+                                height: 18,
+                                minWidth: 18,
+                                fontSize: 9,
+                                padding: "0 4px",
+                                background: "#D4A017",
+                                color: "#0A1628",
+                                fontWeight: 700,
+                              }}
+                            >
+                              {inProgressDeclCount}
                             </Badge>
                           )}
                         </>

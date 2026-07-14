@@ -199,6 +199,27 @@ function CronExecutionCharts() {
 
   const { data: jobDefs } = trpc.heartbeatJobs.listJobs.useQuery();
 
+  // Load health thresholds to determine acceptable error-rate bounds
+  // We use a simple heuristic: if a job's error rate > (1 - successRate/100) exceeds
+  // the "degraded" threshold (mapped as errorRateThreshold = 20% default), flag it.
+  const { data: thresholds } = trpc.healthThresholds.list.useQuery(
+    undefined,
+    { refetchInterval: 60_000 }
+  );
+
+  // Derive per-job error-rate threshold from health_thresholds.
+  // We repurpose degradedMs as an error-rate % threshold when the component name
+  // matches a cron job name. Fallback: 20% error rate triggers a warning.
+  const CRON_ERROR_RATE_THRESHOLD = 20; // percent
+  const jobThresholdMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    thresholds?.forEach((t: any) => {
+      // degradedMs / 10 gives a rough % threshold (e.g. 200ms → 20%)
+      map[t.componentName] = Math.min(50, Math.max(5, Math.round(t.degradedMs / 10)));
+    });
+    return map;
+  }, [thresholds]);
+
   // Derive unique job names from history
   const jobNames = useMemo(() => {
     const names = new Set<string>();
@@ -217,7 +238,7 @@ function CronExecutionCharts() {
     ];
   }, [runHistory]);
 
-  // Per-job success rate bar data
+  // Per-job success rate bar data (with threshold-aware alert flag)
   const jobSuccessRates = useMemo(() => {
     if (!runHistory || runHistory.length === 0) return [];
     const byJob: Record<string, { total: number; success: number; avgDurationMs: number }> = {};
@@ -227,14 +248,28 @@ function CronExecutionCharts() {
       if (r.status === "success") byJob[r.jobName].success++;
       byJob[r.jobName].avgDurationMs += r.durationMs ?? 0;
     }
-    return Object.entries(byJob).map(([jobName, stats]) => ({
-      jobName: jobName.replace(/_/g, " ").replace(/([A-Z])/g, " $1").trim(),
-      rawJobName: jobName,
-      successRate: Math.round((stats.success / stats.total) * 100),
-      totalRuns: stats.total,
-      avgDurationMs: Math.round(stats.avgDurationMs / stats.total),
-    }));
-  }, [runHistory]);
+    return Object.entries(byJob).map(([jobName, stats]) => {
+      const successRate = Math.round((stats.success / stats.total) * 100);
+      const errorRate = 100 - successRate;
+      const threshold = jobThresholdMap[jobName] ?? CRON_ERROR_RATE_THRESHOLD;
+      return {
+        jobName: jobName.replace(/_/g, " ").replace(/([A-Z])/g, " $1").trim(),
+        rawJobName: jobName,
+        successRate,
+        errorRate,
+        totalRuns: stats.total,
+        avgDurationMs: Math.round(stats.avgDurationMs / stats.total),
+        aboveThreshold: errorRate > threshold,
+        threshold,
+      };
+    });
+  }, [runHistory, jobThresholdMap]);
+
+  // Jobs currently above their error-rate threshold
+  const alertingJobs = useMemo(
+    () => jobSuccessRates.filter((j) => j.aboveThreshold),
+    [jobSuccessRates]
+  );
 
   // Timeline bar chart: last 20 runs grouped by hour
   const timelineData = useMemo(() => {
@@ -302,15 +337,37 @@ function CronExecutionCharts() {
                 <p className="text-xs text-muted-foreground">Total Runs</p>
                 <p className="text-2xl font-bold">{runHistory.length}</p>
               </div>
-              <div className="bg-green-50 rounded-lg p-3">
+              <div className={`rounded-lg p-3 ${successRate < 80 ? "bg-amber-50" : "bg-green-50"}`}>
                 <p className="text-xs text-muted-foreground">Success Rate</p>
-                <p className="text-2xl font-bold text-green-600">{successRate}%</p>
+                <p className={`text-2xl font-bold ${successRate < 80 ? "text-amber-600" : "text-green-600"}`}>{successRate}%</p>
               </div>
-              <div className="bg-red-50 rounded-lg p-3">
+              <div className={`rounded-lg p-3 ${(successRateData[1]?.value ?? 0) > 0 ? "bg-red-50" : "bg-muted/30"}`}>
                 <p className="text-xs text-muted-foreground">Failures</p>
-                <p className="text-2xl font-bold text-red-600">{successRateData[1]?.value ?? 0}</p>
+                <p className={`text-2xl font-bold ${(successRateData[1]?.value ?? 0) > 0 ? "text-red-600" : "text-foreground"}`}>
+                  {successRateData[1]?.value ?? 0}
+                </p>
               </div>
             </div>
+
+            {/* Threshold alert banner */}
+            {alertingJobs.length > 0 && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">
+                    {alertingJobs.length} job{alertingJobs.length > 1 ? "s" : ""} above error-rate threshold
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {alertingJobs.map((j) => (
+                      <span key={j.rawJobName} className="inline-flex items-center gap-1 mr-2">
+                        <span className="font-mono">{j.rawJobName}</span>
+                        <span className="text-amber-600">({j.errorRate}% errors &gt; {j.threshold}% threshold)</span>
+                      </span>
+                    ))}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Success/Failure donut */}
@@ -371,8 +428,26 @@ function CronExecutionCharts() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
                       <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
                       <YAxis dataKey="jobName" type="category" tick={{ fontSize: 10 }} width={120} />
-                      <RechartsTooltip formatter={(val: any) => `${val}%`} />
-                      <Bar dataKey="successRate" fill="#16a34a" name="Success Rate" radius={[0, 3, 3, 0]} />
+                      <RechartsTooltip
+                        formatter={(val: any, _name: any, props: any) => {
+                          const item = props.payload;
+                          const color = item?.aboveThreshold ? "#dc2626" : "#16a34a";
+                          return [<span style={{ color }}>{val}%</span>, "Success Rate"];
+                        }}
+                      />
+                      <Bar
+                        dataKey="successRate"
+                        name="Success Rate"
+                        radius={[0, 3, 3, 0]}
+                        fill="#16a34a"
+                      >
+                        {jobSuccessRates.map((entry, index) => (
+                          <Cell
+                            key={`cell-${index}`}
+                            fill={entry.aboveThreshold ? "#dc2626" : "#16a34a"}
+                          />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
