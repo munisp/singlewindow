@@ -1478,16 +1478,16 @@
 - [x] Run full test suite: 108 test files, 4150 tests, 0 TypeScript errors (22 pre-existing failures in v63.test.ts for missing services.yml — unrelated to v136)
 
 ## v137 Sprint — AEO Document Checklist, Export Delivery Receipts, Sanctions Conflict Resolution
-- [ ] Schema: aeo_renewal_documents table (renewalId, docType, label, required, uploadedAt, fileUrl, status)
-- [ ] Schema: export_schedule_deliveries table (scheduleId, deliveredAt, rowCount, fileSizeBytes, status, errorMessage)
-- [ ] Backend: aeoRenewal.listDocuments + uploadDocument + markDocumentReady procedures
-- [ ] Backend: exportSchedules.listDeliveries procedure
-- [ ] Backend: sanctionsBatch.detectConflicts + resolveConflicts procedures
-- [ ] Frontend: AEO renewal document checklist panel in AEORenewalWorkflow.tsx (required docs, upload status, completion %)
-- [ ] Frontend: Export schedule delivery receipt log in ExportScheduleManager.tsx (last-delivered timestamp, row count, file size)
-- [ ] Frontend: Sanctions batch conflict resolution dialog (side-by-side diff, overwrite/skip/merge per row)
-- [ ] Vitest tests for document checklist completion logic, delivery receipt helpers, and conflict detection
-- [ ] Run full test suite, save checkpoint, push to GitHub
+- [x] Schema: aeo_renewal_documents table (renewalId, docType, label, required, uploadedAt, fileUrl, status)
+- [x] Schema: export_schedule_deliveries table (scheduleId, deliveredAt, rowCount, fileSizeBytes, status, errorMessage)
+- [x] Backend: aeoRenewal.listDocuments + uploadDocument + markDocumentReady procedures
+- [x] Backend: exportSchedules.listDeliveries procedure
+- [x] Backend: sanctionsBatch.detectConflicts + resolveConflicts procedures
+- [x] Frontend: AEO renewal document checklist panel in AEORenewalWorkflow.tsx (required docs, upload status, completion %)
+- [x] Frontend: Export schedule delivery receipt log in ExportScheduleManager.tsx (last-delivered timestamp, row count, file size)
+- [x] Frontend: Sanctions batch conflict resolution dialog (side-by-side diff, overwrite/skip/merge per row)
+- [x] Vitest tests for document checklist completion logic, delivery receipt helpers, and conflict detection
+- [x] Run full test suite, save checkpoint, push to GitHub
 
 ## v137 Sprint — AEO Document Checklist, Export Delivery Receipts, Sanctions Conflict Resolution
 
