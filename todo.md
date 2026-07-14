@@ -1506,3 +1506,41 @@
 - [x] Frontend: SanctionsBatchUpload.tsx — Side-by-side diff view for overwrite and merge tabs
 - [x] Vitest: server/v137.test.ts — 4 suites, 18 tests (checklist summary, delivery receipts, conflict resolution, merge logic)
 - [x] Run full test suite: 109 test files, 4166 tests passed, 22 pre-existing failures in v63.test.ts (services.yml), 0 TypeScript errors
+
+## v138 Sprint — 30 Suggested Next Steps
+
+### Items 1–10
+- [ ] Item 1: AEO checklist document preview modal — PDF/image preview when trader clicks uploaded doc
+- [ ] Item 2: Export schedule delivery failure retry — "Retry" button on failed delivery receipts
+- [ ] Item 3: Sanctions conflict audit trail — read-only audit summary card after all conflicts resolved
+- [ ] Item 4: AEO renewal status email notification — notify trader by in-app message on status change
+- [ ] Item 5: Delivery success rate chart — sparkline/bar chart showing last 30 delivery outcomes per schedule
+- [ ] Item 6: Conflict merge diff editor — inline JSON field editor for merge resolution (edit individual fields)
+- [ ] Item 7: Checklist deadline reminders — show days-until-due badge on AEO renewal rows
+- [ ] Item 8: Schedule pause-on-failure — auto-pause schedule after N consecutive failed deliveries
+- [ ] Item 9: Batch import progress indicator — real-time row-count progress bar during sanctions batch processing
+- [ ] Item 10: Sanctions entity search — search bar to filter the sanctions list by entity name/type/country
+
+### Items 11–20
+- [ ] Item 11: AEO renewal timeline — visual timeline of status transitions per application
+- [ ] Item 12: Export schedule clone — duplicate an existing schedule with one click
+- [ ] Item 13: Sanctions bulk delete — checkbox selection + bulk delete for sanctions entries
+- [ ] Item 14: Document version history — show previous uploads per doc slot with timestamps
+- [ ] Item 15: Delivery receipt email — send delivery summary to user's notification centre on success
+- [ ] Item 16: Conflict resolution undo — allow admin to re-open a resolved conflict within 24 hours
+- [ ] Item 17: Checklist admin override — admin can force-accept any document regardless of status
+- [ ] Item 18: Schedule dry-run — preview what a schedule would export (row count, date range) without writing
+- [ ] Item 19: Batch re-upload — allow admin to re-upload a failed batch without creating a new record
+- [ ] Item 20: Sanctions entity type filter — filter sanctions list by entity type (individual/company/vessel/aircraft)
+
+### Items 21–30
+- [ ] Item 21: AEO renewal comments thread — per-application comment thread for trader ↔ admin communication
+- [ ] Item 22: Export schedule analytics — aggregate stats (total rows exported, avg file size, success rate) per schedule
+- [ ] Item 23: Sanctions watchlist alerts — alert when a declaration's counterparty matches a sanctions entry
+- [ ] Item 24: Document expiry reminders — flag documents that expire within 30 days on the checklist
+- [ ] Item 25: Delivery SLA monitoring — flag schedules where last delivery was > 2× the cadence interval ago
+- [ ] Item 26: Conflict resolution stats dashboard — admin card showing total/resolved/pending conflicts across all batches
+- [ ] Item 27: Checklist template editor — admin can add/remove/reorder document types in the master checklist
+- [ ] Item 28: Schedule dependency chains — mark a schedule as "depends on" another (runs only after dependency succeeds)
+- [ ] Item 29: Batch validation report — downloadable CSV of all validation errors from a batch import
+- [ ] Item 30: Sanctions entity risk scoring — assign a risk score (1–10) to each sanctions entry and surface it in screening

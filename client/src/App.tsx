@@ -140,6 +140,12 @@ const PostClearanceAuditScheduler = lazy(() => import('./pages/admin/PostClearan
 const ExportScheduleManager = lazy(() => import('./pages/app/ExportScheduleManager'));
 const AEORenewalWorkflow = lazy(() => import('./pages/app/AEORenewalWorkflow'));
 
+const AEORenewalComments = lazy(() => import("@/pages/app/AEORenewalComments"));
+const SanctionsEntitiesPage = lazy(() => import("@/pages/admin/SanctionsEntities"));
+const ScheduleAnalyticsPage = lazy(() => import("@/pages/app/ScheduleAnalytics"));
+const BatchValidationReportPage = lazy(() => import("@/pages/admin/BatchValidationReport"));
+
+
 const LazyFallback = () => <_PageSkeleton />;
 
 function Router() {
@@ -585,7 +591,11 @@ function Router() {
 
       {/* 404 */}
       <Route path="/404" component={NotFound} />
-      <Route component={NotFound} />
+              <Route path="/app/aeo-comments/:renewalId" component={AEORenewalComments} />
+        <Route path="/admin/sanctions-entities" component={SanctionsEntitiesPage} />
+        <Route path="/app/schedule-analytics" component={ScheduleAnalyticsPage} />
+        <Route path="/admin/batch-reports" component={BatchValidationReportPage} />
+        <Route component={NotFound} />
     </Switch>
   );
 }

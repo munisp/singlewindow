@@ -3018,3 +3018,92 @@ export const sanctionsBatchConflicts = pgTable("sanctions_batch_conflicts", {
 ]);
 export type SanctionsBatchConflict = typeof sanctionsBatchConflicts.$inferSelect;
 export type InsertSanctionsBatchConflict = typeof sanctionsBatchConflicts.$inferInsert;
+
+// ─── v138 Sprint Tables ───────────────────────────────────────────────────────
+
+export const aeoRenewalComments = pgTable("aeo_renewal_comments", {
+  id: serial("id").primaryKey(),
+  renewalId: integer("renewal_id").notNull(),
+  authorId: integer("author_id").notNull(),
+  authorRole: varchar("author_role", { length: 20 }).notNull().default("user"),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const aeoDocumentVersions = pgTable("aeo_document_versions", {
+  id: serial("id").primaryKey(),
+  renewalDocId: integer("renewal_doc_id").notNull(),
+  fileUrl: varchar("file_url", { length: 1024 }).notNull(),
+  fileKey: varchar("file_key", { length: 512 }),
+  uploadedBy: integer("uploaded_by").notNull(),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+  notes: text("notes"),
+});
+
+export const checklistTemplates = pgTable("checklist_templates", {
+  id: serial("id").primaryKey(),
+  docType: varchar("doc_type", { length: 100 }).notNull().unique(),
+  label: varchar("label", { length: 255 }).notNull(),
+  required: boolean("required").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  expiryDays: integer("expiry_days"),
+  createdBy: integer("created_by"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const scheduleDeliveryStats = pgTable("schedule_delivery_stats", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull(),
+  totalDeliveries: integer("total_deliveries").notNull().default(0),
+  successCount: integer("success_count").notNull().default(0),
+  failureCount: integer("failure_count").notNull().default(0),
+  totalRowsExported: integer("total_rows_exported").notNull().default(0),
+  totalBytesExported: bigint("total_bytes_exported", { mode: "number" }).notNull().default(0),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  lastUpdated: timestamp("last_updated").notNull().defaultNow(),
+});
+
+export const scheduleDependencies = pgTable("schedule_dependencies", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull(),
+  dependsOnScheduleId: integer("depends_on_schedule_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const sanctionsEntities = pgTable("sanctions_entities", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id"),
+  entityName: varchar("entity_name", { length: 512 }).notNull(),
+  entityType: varchar("entity_type", { length: 50 }),
+  country: varchar("country", { length: 100 }),
+  riskScore: integer("risk_score").default(5),
+  aliases: text("aliases"),
+  metadata: json("metadata"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const sanctionsWatchlistAlerts = pgTable("sanctions_watchlist_alerts", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull(),
+  sanctionEntityId: integer("sanction_entity_id").notNull(),
+  matchedField: varchar("matched_field", { length: 100 }).notNull(),
+  matchedValue: varchar("matched_value", { length: 512 }).notNull(),
+  riskScore: integer("risk_score").notNull().default(5),
+  status: varchar("status", { length: 30 }).notNull().default("open"),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const batchValidationErrors = pgTable("batch_validation_errors", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").notNull(),
+  rowIndex: integer("row_index").notNull(),
+  field: varchar("field", { length: 100 }),
+  errorCode: varchar("error_code", { length: 50 }).notNull(),
+  errorMessage: text("error_message").notNull(),
+  rawValue: text("raw_value"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

@@ -309,6 +309,13 @@
       "when": 1783993634263,
       "tag": "0043_smiling_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1783994346374,
+      "tag": "0044_lucky_blue_shield",
+      "breakpoints": true
     }
   ]
 }
