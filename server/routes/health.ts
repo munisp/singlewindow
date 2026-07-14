@@ -15,48 +15,8 @@
 
 import type { Express } from "express";
 import { getDb } from "../db";
-import { healthThresholds } from "../../drizzle/schema";
 import { redisHealthCheck } from "../_core/redis";
 import { getWorkerStatus } from "../paymentWorker";
-
-// ─── Threshold helpers ────────────────────────────────────────────────────────
-const COMPONENT_NAME_MAP: Record<string, string> = {
-  database:     "API Gateway",
-  redis:        "Notification Service",
-  tigerbeetle:  "Ledger Service",
-  temporal:     "Declaration Engine",
-  kafka:        "OGA Integration Hub",
-  aseanSw:      "ASEAN Single Window",
-  cenService:   "WCO CEN Service",
-  permify:      "API Gateway",
-};
-
-const FALLBACK_THRESHOLDS = { degradedMs: 500, unhealthyMs: 3000 };
-
-async function loadThresholds(): Promise<Map<string, { degradedMs: number; unhealthyMs: number; enabled: boolean }>> {
-  try {
-    const db = await getDb();
-    if (!db) return new Map();
-    const rows = await db.select().from(healthThresholds);
-    return new Map(rows.map((r) => [r.componentName, { degradedMs: r.degradedMs, unhealthyMs: r.unhealthyMs, enabled: r.enabled }]));
-  } catch {
-    return new Map();
-  }
-}
-
-function applyThreshold(
-  component: ComponentHealth,
-  thresholds: Map<string, { degradedMs: number; unhealthyMs: number; enabled: boolean }>,
-  componentKey: string
-): ComponentHealth {
-  const name = COMPONENT_NAME_MAP[componentKey];
-  const dbRow = name ? thresholds.get(name) : undefined;
-  const t = dbRow ?? FALLBACK_THRESHOLDS;
-  if (!component.latencyMs || component.status === "down") return component;
-  if (component.latencyMs >= t.unhealthyMs) return { ...component, status: "down", message: `Latency ${component.latencyMs}ms exceeds unhealthy threshold (${t.unhealthyMs}ms)` };
-  if (component.latencyMs >= t.degradedMs) return { ...component, status: "degraded", message: `Latency ${component.latencyMs}ms exceeds degraded threshold (${t.degradedMs}ms)` };
-  return component;
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type HealthStatus = "ok" | "degraded" | "down";
@@ -139,9 +99,8 @@ async function checkOptionalService(
 async function buildHealthReport(): Promise<HealthReport> {
   const isDemoMode = process.env.DEMO_MODE === "true";
 
-  const [thresholdsMap, database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =
+  const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =
     await Promise.all([
-      loadThresholds(),
       checkDatabase(),
       // Use the ioredis client directly for Redis health check (not HTTP)
       redisHealthCheck().then((r): ComponentHealth => ({
@@ -176,24 +135,11 @@ async function buildHealthReport(): Promise<HealthReport> {
       ),
     ]);
 
-  // Apply configurable thresholds to each component
-  const t = thresholdsMap;
-  const components = {
-    database:    applyThreshold(database,    t, "database"),
-    redis:       applyThreshold(redis,       t, "redis"),
-    tigerbeetle: applyThreshold(tigerbeetle, t, "tigerbeetle"),
-    temporal:    applyThreshold(temporal,    t, "temporal"),
-    kafka:       applyThreshold(kafka,       t, "kafka"),
-    aseanSw:     applyThreshold(aseanSw,     t, "aseanSw"),
-    cenService:  applyThreshold(cenService,  t, "cenService"),
-    permify:     applyThreshold(permify,     t, "permify"),
-  };
-
   // Only database is critical — everything else is optional
   let overallStatus: HealthStatus = "ok";
-  if (components.database.status === "down") {
+  if (database.status === "down") {
     overallStatus = "down";
-  } else if (components.database.status === "degraded") {
+  } else if (database.status === "degraded") {
     overallStatus = "degraded";
   }
   // Optional services being degraded does NOT make overall status worse
@@ -206,7 +152,16 @@ async function buildHealthReport(): Promise<HealthReport> {
     timestamp: new Date().toISOString(),
     demoMode: isDemoMode,
     workerStatus: getWorkerStatus(),
-    components,
+    components: {
+      database,
+      redis,
+      tigerbeetle,
+      temporal,
+      kafka,
+      aseanSw,
+      cenService,
+      permify,
+    },
   };
 }
 

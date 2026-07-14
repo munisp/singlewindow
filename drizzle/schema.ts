@@ -2777,17 +2777,18 @@ export type InsertWorkflowInputSchema = typeof workflowInputSchemas.$inferInsert
 export const cronRunLogs = pgTable("cron_run_logs", {
   id: serial("id").primaryKey(),
   jobName: varchar("job_name", { length: 128 }).notNull(),
-  taskUid: varchar("task_uid", { length: 128 }),
-  triggeredBy: varchar("triggered_by", { length: 32 }).notNull().default("scheduler"),
-  status: varchar("status", { length: 16 }).notNull().default("success"),
+  status: varchar("status", { length: 32 }).notNull().default("success"), // success | error
+  triggeredBy: varchar("triggered_by", { length: 64 }).notNull().default("scheduler"), // scheduler | manual
   durationMs: integer("duration_ms"),
   resultSummary: text("result_summary"),
   errorMessage: text("error_message"),
-  triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_cron_run_logs_job").on(t.jobName),
-  index("idx_cron_run_logs_triggered").on(t.triggeredAt),
   index("idx_cron_run_logs_status").on(t.status),
+  index("idx_cron_run_logs_started").on(t.startedAt),
 ]);
 export type CronRunLog = typeof cronRunLogs.$inferSelect;
 export type InsertCronRunLog = typeof cronRunLogs.$inferInsert;
@@ -2795,12 +2796,12 @@ export type InsertCronRunLog = typeof cronRunLogs.$inferInsert;
 // ─── Health Thresholds ────────────────────────────────────────────────────────
 export const healthThresholds = pgTable("health_thresholds", {
   id: serial("id").primaryKey(),
-  componentName: varchar("component_name", { length: 64 }).notNull().unique(),
+  componentName: varchar("component_name", { length: 128 }).notNull().unique(),
   degradedMs: integer("degraded_ms").notNull().default(500),
   unhealthyMs: integer("unhealthy_ms").notNull().default(2000),
-  enabled: boolean("enabled").notNull().default(true),
   updatedBy: varchar("updated_by", { length: 128 }),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_health_thresholds_component").on(t.componentName),
 ]);

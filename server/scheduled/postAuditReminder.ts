@@ -6,19 +6,13 @@
  * Endpoint: POST /api/scheduled/post-audit-reminder
  */
 import type { Request, Response } from "express";
-import { logCronRun } from "./cronLogger";
 import { getPool } from "../db";
 import { notifyOwner } from "../_core/notification";
 
 export async function postAuditReminderHandler(req: Request, res: Response) {
-  const start = Date.now();
-  const triggeredBy: "scheduler" | "manual" = req.headers["x-heartbeat-task-uid"] ? "scheduler" : "manual";
-  const taskUid = req.headers["x-heartbeat-task-uid"] as string | undefined;
-
   try {
     const pool = getPool();
     if (!pool) {
-      await logCronRun({ jobName: "post-audit-reminder", taskUid, triggeredBy, status: "error", durationMs: Date.now() - start, errorMessage: "Database unavailable" });
       return res.status(500).json({ error: "Database unavailable" });
     }
 
@@ -47,7 +41,6 @@ export async function postAuditReminderHandler(req: Request, res: Response) {
     );
 
     if (audits.length === 0) {
-      await logCronRun({ jobName: "post-audit-reminder", taskUid, triggeredBy, status: "success", durationMs: Date.now() - start, resultSummary: "No upcoming audits in the next 7 days — no reminder sent" });
       return res.json({
         ok: true,
         upcomingAudits: 0,
@@ -91,7 +84,6 @@ export async function postAuditReminderHandler(req: Request, res: Response) {
       content,
     });
 
-    await logCronRun({ jobName: "post-audit-reminder", taskUid, triggeredBy, status: "success", durationMs: Date.now() - start, resultSummary: `${audits.length} upcoming audit(s); notified=${notified}` });
     return res.json({
       ok: true,
       upcomingAudits: audits.length,
@@ -99,7 +91,6 @@ export async function postAuditReminderHandler(req: Request, res: Response) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    await logCronRun({ jobName: "post-audit-reminder", taskUid, triggeredBy, status: "error", durationMs: Date.now() - start, errorMessage: message });
     return res.status(500).json({
       error: message,
       context: { url: req.url, timestamp: new Date().toISOString() },
