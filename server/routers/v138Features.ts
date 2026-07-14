@@ -40,6 +40,7 @@ export const aeoCommentsRouter = router({
     .input(z.object({
       renewalId: z.number().int(),
       message: z.string().min(1).max(2000),
+      mentionedUserIds: z.array(z.number().int()).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -50,7 +51,22 @@ export const aeoCommentsRouter = router({
         authorRole: ctx.user.role ?? "user",
         message: input.message,
       });
-      return { success: true };
+      // @mention detection: parse @admin / @trader tokens from message
+      const mentionTokens = input.message.match(/@(admin|trader|\w+)/gi) ?? [];
+      const explicitMentions = input.mentionedUserIds ?? [];
+      // Notify explicitly mentioned users
+      for (const userId of explicitMentions) {
+        if (userId === ctx.user.id) continue;
+        try {
+          await createUserNotification({
+            userId,
+            type: "aeo_comment_mention",
+            title: "You were mentioned in an AEO renewal comment",
+            body: `${ctx.user.name ?? "Someone"} mentioned you on renewal #${input.renewalId}: "${input.message.slice(0, 100)}${input.message.length > 100 ? '...' : ''}"`,
+          });
+        } catch (_) { /* notification failure is non-fatal */ }
+      }
+      return { success: true, mentionTokens };
     }),
 
   delete: protectedProcedure
@@ -267,6 +283,29 @@ export const scheduleDepsRouter = router({
       await db.delete(scheduleDependencies).where(eq(scheduleDependencies.id, input.id));
       return { success: true };
     }),
+
+  getDagGraph: protectedProcedure
+    .input(z.object({ scheduleId: z.number().int().optional() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { nodes: [], edges: [] };
+      const allSchedules = await db.select().from(exportSchedules);
+      const allDeps = await db.select().from(scheduleDependencies);
+      const nodes = allSchedules.map(s => ({
+        id: s.id,
+        label: `${s.exportType} (${s.cadence})`,
+        cadence: s.cadence,
+        isActive: s.isActive,
+        lastRunAt: s.lastRunAt,
+        highlighted: input.scheduleId ? s.id === input.scheduleId : false,
+      }));
+      const edges = allDeps.map(d => ({
+        id: d.id,
+        source: d.dependsOnScheduleId,
+        target: d.scheduleId,
+      }));
+      return { nodes, edges };
+    }),
 });
 
 // ─── Sanctions Entities (Items 10, 13, 20, 30) ───────────────────────────────
@@ -327,6 +366,29 @@ export const sanctionsEntitiesRouter = router({
       .from(sanctionsEntities).where(eq(sanctionsEntities.isActive, true));
     return rows.map(r => r.entityType).filter(Boolean) as string[];
   }),
+
+  mergeEntities: adminProcedure
+    .input(z.object({
+      primaryId: z.number().int(),
+      duplicateId: z.number().int(),
+      mergedFields: z.record(z.string(), z.unknown()),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error('Database unavailable');
+      if (input.primaryId === input.duplicateId) throw new Error('Cannot merge an entity with itself');
+      const [primary] = await db.select().from(sanctionsEntities).where(eq(sanctionsEntities.id, input.primaryId)).limit(1);
+      const [duplicate] = await db.select().from(sanctionsEntities).where(eq(sanctionsEntities.id, input.duplicateId)).limit(1);
+      if (!primary || !duplicate) throw new Error('One or both entities not found');
+      const allowedFields = ['entityName', 'country', 'entityType', 'riskScore', 'metadata'];
+      const updateData: Record<string, unknown> = { updatedAt: new Date() };
+      for (const field of allowedFields) {
+        if (field in input.mergedFields) updateData[field] = input.mergedFields[field];
+      }
+      await db.update(sanctionsEntities).set(updateData as any).where(eq(sanctionsEntities.id, input.primaryId));
+      await db.update(sanctionsEntities).set({ isActive: false, updatedAt: new Date() }).where(eq(sanctionsEntities.id, input.duplicateId));
+      return { success: true, primaryId: input.primaryId, archivedId: input.duplicateId };
+    }),
 });
 
 // ─── Sanctions Watchlist Alerts (Item 23) ────────────────────────────────────

@@ -11,13 +11,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   AlertTriangle, Search, Trash2, Shield, BarChart3,
-  FileDown, RefreshCw, CheckCircle, Clock, XCircle
+  FileDown, RefreshCw, CheckCircle, Clock, XCircle, Merge
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -28,6 +30,106 @@ function RiskBadge({ score }: { score: number | null }) {
   return <Badge variant={color} className="text-xs font-mono">{s}/10</Badge>;
 }
 
+
+// ─── Merge Dialog ─────────────────────────────────────────────────────────────
+const MERGE_FIELDS = ['entityName', 'country', 'entityType', 'riskScore'] as const;
+type MergeField = typeof MERGE_FIELDS[number];
+
+interface MergeDialogProps { primaryId: number; duplicateId: number; onClose: () => void; }
+
+function MergeDialog({ primaryId, duplicateId, onClose }: MergeDialogProps) {
+  const { toast } = useToast();
+  const utils = trpc.useUtils();
+  const { data: allData } = trpc.sanctionsEntities.list.useQuery({ pageSize: 1000 });
+  const primary = allData?.items?.find((e: any) => e.id === primaryId);
+  const duplicate = allData?.items?.find((e: any) => e.id === duplicateId);
+  const [choices, setChoices] = useState<Record<MergeField, 'primary' | 'duplicate'>>(
+    Object.fromEntries(MERGE_FIELDS.map(f => [f, 'primary' as const])) as Record<MergeField, 'primary' | 'duplicate'>
+  );
+
+  const mergeMutation = trpc.sanctionsEntities.mergeEntities.useMutation({
+    onSuccess: () => {
+      utils.sanctionsEntities.list.invalidate();
+      toast({ title: `Entity #${duplicateId} merged into #${primaryId} and archived` });
+      onClose();
+    },
+    onError: (e) => toast({ title: 'Merge failed', description: e.message, variant: 'destructive' }),
+  });
+
+  const handleMerge = () => {
+    if (!primary || !duplicate) return;
+    const mergedFields: Record<string, unknown> = {};
+    MERGE_FIELDS.forEach(f => {
+      mergedFields[f] = choices[f] === 'primary' ? (primary as any)[f] : (duplicate as any)[f];
+    });
+    mergeMutation.mutate({ primaryId, duplicateId, mergedFields });
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Merge className="w-4 h-4 text-amber-500" />
+            Merge Duplicate Entities
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Choose which value to keep for each field. The duplicate entity will be archived after merging.
+        </p>
+        {(!primary || !duplicate) ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">Loading entity data…</p>
+        ) : (
+          <div className="border border-border rounded-lg overflow-hidden">
+            <div className="grid grid-cols-3 bg-muted/50 px-4 py-2 text-xs font-medium">
+              <span>Field</span>
+              <span className="text-amber-400">Primary #{primaryId}</span>
+              <span>Duplicate #{duplicateId}</span>
+            </div>
+            {MERGE_FIELDS.map(field => {
+              const pVal = String((primary as any)[field] ?? '—');
+              const dVal = String((duplicate as any)[field] ?? '—');
+              const isDiff = pVal !== dVal;
+              return (
+                <div key={field} className={`grid grid-cols-3 px-4 py-3 border-t border-border text-sm ${isDiff ? 'bg-amber-500/5' : ''}`}>
+                  <span className="font-medium text-xs capitalize self-center">{field.replace(/([A-Z])/g, ' $1')}</span>
+                  <button
+                    className={`text-left px-2 py-1 rounded transition-colors ${
+                      choices[field] === 'primary'
+                        ? 'bg-amber-500/20 border border-amber-500/50 font-semibold'
+                        : 'hover:bg-muted/50 text-muted-foreground'
+                    }`}
+                    onClick={() => setChoices(c => ({ ...c, [field]: 'primary' }))}
+                  >{pVal}</button>
+                  <button
+                    className={`text-left px-2 py-1 rounded transition-colors ${
+                      choices[field] === 'duplicate'
+                        ? 'bg-amber-500/20 border border-amber-500/50 font-semibold'
+                        : 'hover:bg-muted/50 text-muted-foreground'
+                    }`}
+                    onClick={() => setChoices(c => ({ ...c, [field]: 'duplicate' }))}
+                  >{dVal}</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">Click a cell to select it. Highlighted = chosen value.</p>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            className="bg-amber-600 hover:bg-amber-700"
+            onClick={handleMerge}
+            disabled={mergeMutation.isPending || !primary || !duplicate}
+          >
+            <Merge className="w-3 h-3 mr-1" /> Merge & Archive Duplicate
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Entities Tab ─────────────────────────────────────────────────────────────
 function EntitiesTab() {
   const { toast } = useToast();
@@ -36,6 +138,7 @@ function EntitiesTab() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<number[]>([]);
   const [editingScore, setEditingScore] = useState<{ id: number; score: number } | null>(null);
+  const [mergeState, setMergeState] = useState<{ primaryId: number; duplicateId: number } | null>(null);
   const utils = trpc.useUtils();
 
   const { data: entityTypes = [] } = trpc.sanctionsEntities.getEntityTypes.useQuery();
@@ -112,6 +215,15 @@ function EntitiesTab() {
             disabled={bulkDeleteMutation.isPending}
           >
             <Trash2 className="w-3 h-3 mr-1" /> Deactivate {selected.length}
+          </Button>
+        )}
+        {selected.length === 2 && (
+          <Button
+            size="sm"
+            className="bg-amber-600 hover:bg-amber-700"
+            onClick={() => setMergeState({ primaryId: selected[0], duplicateId: selected[1] })}
+          >
+            <Merge className="w-3 h-3 mr-1" /> Merge 2 Selected
           </Button>
         )}
       </div>
@@ -194,6 +306,14 @@ function EntitiesTab() {
           </tbody>
         </table>
       </div>
+
+      {mergeState && (
+        <MergeDialog
+          primaryId={mergeState.primaryId}
+          duplicateId={mergeState.duplicateId}
+          onClose={() => setMergeState(null)}
+        />
+      )}
 
       {/* Pagination */}
       <div className="flex items-center justify-between text-sm text-muted-foreground">

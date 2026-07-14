@@ -453,6 +453,109 @@ function ChecklistTemplateTab() {
   );
 }
 
+// ─── DAG Visualiser ──────────────────────────────────────────────────────────
+interface DagNode { id: number; label: string; cadence: string; isActive: boolean; highlighted: boolean; lastRunAt: Date | null; }
+interface DagEdge { id: number; source: number; target: number; }
+
+function DagVisualiser({ highlightId }: { highlightId: number | null }) {
+  const { data } = trpc.scheduleDeps.getDagGraph.useQuery({ scheduleId: highlightId ?? undefined });
+  const nodes: DagNode[] = data?.nodes ?? [];
+  const edges: DagEdge[] = data?.edges ?? [];
+
+  if (nodes.length === 0) return (
+    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground border border-dashed border-border rounded-lg">
+      No schedules configured yet
+    </div>
+  );
+
+  // Simple left-to-right layout: nodes with no incoming edges go in column 0, etc.
+  const inDegree = new Map<number, number>(nodes.map(n => [n.id, 0]));
+  edges.forEach(e => inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1));
+  const columns: number[][] = [];
+  const placed = new Set<number>();
+  let remaining = nodes.map(n => n.id);
+  while (remaining.length > 0) {
+    const col = remaining.filter(id => (inDegree.get(id) ?? 0) === 0);
+    if (col.length === 0) { columns.push(remaining); break; } // cycle guard
+    columns.push(col);
+    col.forEach(id => {
+      placed.add(id);
+      edges.filter(e => e.source === id).forEach(e => inDegree.set(e.target, (inDegree.get(e.target) ?? 1) - 1));
+    });
+    remaining = remaining.filter(id => !placed.has(id));
+  }
+
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  const NODE_W = 160, NODE_H = 56, COL_GAP = 80, ROW_GAP = 16;
+  const positions = new Map<number, { x: number; y: number }>();
+  columns.forEach((col, ci) => {
+    col.forEach((id, ri) => {
+      positions.set(id, { x: ci * (NODE_W + COL_GAP), y: ri * (NODE_H + ROW_GAP) });
+    });
+  });
+  const svgW = columns.length * (NODE_W + COL_GAP);
+  const svgH = Math.max(...nodes.map((_, i) => i)) * (NODE_H + ROW_GAP) + NODE_H + 20;
+  const maxH = Math.max(...columns.map(col => col.length)) * (NODE_H + ROW_GAP) + 20;
+
+  return (
+    <div className="overflow-x-auto border border-border rounded-lg bg-muted/20 p-4">
+      <svg width={svgW + 20} height={maxH} className="min-w-full">
+        {/* Edges */}
+        {edges.map(e => {
+          const from = positions.get(e.source);
+          const to = positions.get(e.target);
+          if (!from || !to) return null;
+          const x1 = from.x + NODE_W, y1 = from.y + NODE_H / 2;
+          const x2 = to.x, y2 = to.y + NODE_H / 2;
+          const mx = (x1 + x2) / 2;
+          return (
+            <g key={e.id}>
+              <path
+                d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+                fill="none" stroke="#D4A017" strokeWidth={1.5} strokeDasharray="4 2"
+              />
+              <polygon
+                points={`${x2},${y2} ${x2 - 8},${y2 - 4} ${x2 - 8},${y2 + 4}`}
+                fill="#D4A017"
+              />
+            </g>
+          );
+        })}
+        {/* Nodes */}
+        {nodes.map(n => {
+          const pos = positions.get(n.id);
+          if (!pos) return null;
+          const isHL = n.highlighted;
+          return (
+            <g key={n.id} transform={`translate(${pos.x},${pos.y})`}>
+              <rect
+                width={NODE_W} height={NODE_H} rx={6}
+                fill={isHL ? "#1E3A5F" : "#111827"}
+                stroke={isHL ? "#D4A017" : "#374151"}
+                strokeWidth={isHL ? 2 : 1}
+              />
+              <text x={8} y={20} fill={isHL ? "#D4A017" : "#F9FAFB"} fontSize={11} fontWeight="600">
+                {n.label.length > 20 ? n.label.slice(0, 18) + "…" : n.label}
+              </text>
+              <text x={8} y={36} fill="#9CA3AF" fontSize={10}>
+                {n.cadence} · {n.isActive ? "active" : "paused"}
+              </text>
+              {n.lastRunAt && (
+                <text x={8} y={50} fill="#6B7280" fontSize={9}>
+                  last: {new Date(n.lastRunAt).toLocaleDateString()}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <p className="text-xs text-muted-foreground mt-2">
+        Gold arrows show execution order. Highlighted node = selected schedule.
+      </p>
+    </div>
+  );
+}
+
 // ─── Schedule Dependencies Tab (Item 28) ─────────────────────────────────────
 function ScheduleDepsTab() {
   const { toast } = useToast();
@@ -490,6 +593,12 @@ function ScheduleDepsTab() {
       <p className="text-sm text-muted-foreground">
         Configure schedule dependency chains. A dependent schedule will only run after its dependency completes successfully.
       </p>
+
+      {/* DAG Visualiser */}
+      <div>
+        <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Execution Order Graph</p>
+        <DagVisualiser highlightId={selectedScheduleId} />
+      </div>
 
       <div className="flex gap-3 items-end">
         <div className="space-y-1 flex-1">

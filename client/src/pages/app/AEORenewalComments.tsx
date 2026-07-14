@@ -3,7 +3,7 @@
  * Per-application comment thread for trader ↔ admin communication.
  * Also includes document preview modal (Item 1) and document version history (Item 14).
  */
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -15,9 +15,52 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   MessageSquare, Send, Trash2, FileText, Eye, Clock,
-  ChevronDown, ChevronUp, History
+  ChevronDown, ChevronUp, History, AtSign
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+// ─── @Mention Autocomplete ────────────────────────────────────────────────────
+const MENTION_SUGGESTIONS = [
+  { label: "@admin", token: "@admin", role: "admin" },
+  { label: "@trader", token: "@trader", role: "user" },
+  { label: "@reviewer", token: "@reviewer", role: "admin" },
+];
+
+interface MentionDropdownProps {
+  query: string;
+  onSelect: (token: string) => void;
+  onDismiss: () => void;
+}
+
+function MentionDropdown({ query, onSelect, onDismiss }: MentionDropdownProps) {
+  const filtered = MENTION_SUGGESTIONS.filter(s =>
+    s.label.toLowerCase().includes(query.toLowerCase())
+  );
+  if (filtered.length === 0) return null;
+  return (
+    <div className="absolute bottom-full left-0 mb-1 w-48 bg-popover border border-border rounded-md shadow-lg z-50 overflow-hidden">
+      {filtered.map(s => (
+        <button
+          key={s.token}
+          type="button"
+          className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent text-left transition-colors"
+          onMouseDown={(e) => { e.preventDefault(); onSelect(s.token); }}
+        >
+          <AtSign className="w-3 h-3 text-amber-500" />
+          <span className="font-medium">{s.label}</span>
+          <Badge variant="outline" className="text-xs ml-auto">{s.role}</Badge>
+        </button>
+      ))}
+      <button
+        type="button"
+        className="w-full px-3 py-1 text-xs text-muted-foreground hover:bg-accent text-left"
+        onMouseDown={(e) => { e.preventDefault(); onDismiss(); }}
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
 
 // ─── Document Preview Modal (Item 1) ─────────────────────────────────────────
 interface DocPreviewModalProps {
@@ -148,6 +191,8 @@ export function CommentsThread({ renewalId, renewalRef }: CommentsThreadProps) {
   const { user } = useAuth();
   const { toast } = useToast();
   const [message, setMessage] = useState("");
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const utils = trpc.useUtils();
 
   const { data: comments = [], isLoading } = trpc.aeoComments.list.useQuery({ renewalId });
@@ -155,6 +200,7 @@ export function CommentsThread({ renewalId, renewalRef }: CommentsThreadProps) {
   const postMutation = trpc.aeoComments.post.useMutation({
     onSuccess: () => {
       setMessage("");
+      setMentionQuery(null);
       utils.aeoComments.list.invalidate({ renewalId });
       toast({ title: "Comment posted" });
     },
@@ -169,9 +215,36 @@ export function CommentsThread({ renewalId, renewalRef }: CommentsThreadProps) {
     onError: (e) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  // Detect @mention typing
+  const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setMessage(val);
+    // Check if cursor is inside an @mention token
+    const cursor = e.target.selectionStart ?? val.length;
+    const beforeCursor = val.slice(0, cursor);
+    const mentionMatch = beforeCursor.match(/@(\w*)$/);
+    setMentionQuery(mentionMatch ? mentionMatch[1] : null);
+  }, []);
+
+  const handleMentionSelect = useCallback((token: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const cursor = textarea.selectionStart ?? message.length;
+    const beforeCursor = message.slice(0, cursor);
+    const afterCursor = message.slice(cursor);
+    // Replace the partial @mention with the full token
+    const replaced = beforeCursor.replace(/@\w*$/, token + " ");
+    setMessage(replaced + afterCursor);
+    setMentionQuery(null);
+    setTimeout(() => textarea.focus(), 0);
+  }, [message]);
+
   const handlePost = () => {
     if (!message.trim()) return;
-    postMutation.mutate({ renewalId, message: message.trim() });
+    // Extract @mention tokens and map to user IDs (role-based for now)
+    const tokens = message.match(/@(\w+)/g) ?? [];
+    const mentionedUserIds: number[] = []; // In production, resolve tokens to real user IDs
+    postMutation.mutate({ renewalId, message: message.trim(), mentionedUserIds });
   };
 
   return (
@@ -229,13 +302,22 @@ export function CommentsThread({ renewalId, renewalRef }: CommentsThreadProps) {
           )}
         </ScrollArea>
 
-        <div className="flex gap-2">
+        <div className="relative flex gap-2">
+          {mentionQuery !== null && (
+            <MentionDropdown
+              query={mentionQuery}
+              onSelect={handleMentionSelect}
+              onDismiss={() => setMentionQuery(null)}
+            />
+          )}
           <Textarea
-            placeholder="Write a comment…"
+            ref={textareaRef}
+            placeholder="Write a comment… (type @ to mention)"
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={handleMessageChange}
             className="min-h-[60px] resize-none text-sm"
             onKeyDown={(e) => {
+              if (e.key === "Escape") setMentionQuery(null);
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handlePost();
             }}
           />
@@ -248,7 +330,7 @@ export function CommentsThread({ renewalId, renewalRef }: CommentsThreadProps) {
             <Send className="w-4 h-4" />
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">Ctrl+Enter to submit</p>
+        <p className="text-xs text-muted-foreground">Ctrl+Enter to submit · Type @ to mention</p>
       </CardContent>
     </Card>
   );
