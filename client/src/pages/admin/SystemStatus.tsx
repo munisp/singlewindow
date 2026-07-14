@@ -44,7 +44,13 @@ import {
   Loader2,
   Wifi,
   WifiOff,
+  Settings2,
+  RotateCcw,
+  Save,
 } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,6 +197,29 @@ const PIE_COLORS = ["#16a34a", "#dc2626"];
 
 function CronExecutionCharts() {
   const [selectedJob, setSelectedJob] = useState<string | undefined>(undefined);
+  const [showThresholdEditor, setShowThresholdEditor] = useState(false);
+  const [editingThreshold, setEditingThreshold] = useState<{ componentName: string; degradedMs: number } | null>(null);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const utils = trpc.useUtils();
+  const isAdmin = user?.role === "admin";
+
+  const updateThresholdMutation = trpc.healthThresholds.update.useMutation({
+    onSuccess: (data) => {
+      toast({ title: "Threshold updated", description: `${data.componentName} threshold saved.` });
+      utils.healthThresholds.list.invalidate();
+      setEditingThreshold(null);
+    },
+    onError: (e) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
+  });
+
+  const resetThresholdMutation = trpc.healthThresholds.reset.useMutation({
+    onSuccess: (data) => {
+      toast({ title: "Threshold reset", description: `${data.componentName} reset to default.` });
+      utils.healthThresholds.list.invalidate();
+    },
+    onError: (e) => toast({ title: "Reset failed", description: e.message, variant: "destructive" }),
+  });
 
   const { data: runHistory, isLoading } = trpc.heartbeatJobs.listRunHistory.useQuery(
     { jobName: selectedJob, limit: 100 },
@@ -314,6 +343,17 @@ function CronExecutionCharts() {
                 <option key={name} value={name}>{name.replace(/_/g, " ")}</option>
               ))}
             </select>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowThresholdEditor(v => !v)}
+                className={showThresholdEditor ? "bg-accent/10 border-accent" : ""}
+              >
+                <Settings2 className="h-3.5 w-3.5 mr-1" />
+                Thresholds
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -365,6 +405,96 @@ function CronExecutionCharts() {
                       </span>
                     ))}
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* Inline threshold editor (admin only) */}
+            {isAdmin && showThresholdEditor && thresholds && (
+              <div className="border rounded-lg p-4 bg-muted/20">
+                <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <Settings2 className="h-4 w-4" />
+                  Edit Error-Rate Thresholds
+                  <span className="text-xs font-normal text-muted-foreground ml-1">
+                    (degradedMs ÷ 10 = error-rate % threshold, clamped 5–50%)
+                  </span>
+                </p>
+                <div className="space-y-2">
+                  {thresholds.map((t: any) => {
+                    const isEditing = editingThreshold?.componentName === t.componentName;
+                    const derivedThreshold = Math.min(50, Math.max(5, Math.round(t.degradedMs / 10)));
+                    return (
+                      <div key={t.componentName} className="flex items-center gap-3 py-1.5 border-b last:border-0">
+                        <span className="font-mono text-xs w-32 shrink-0 text-foreground">{t.componentName}</span>
+                        {isEditing ? (
+                          <>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground">degradedMs:</span>
+                              <Input
+                                type="number"
+                                min={50}
+                                max={10000}
+                                value={editingThreshold!.degradedMs}
+                                onChange={e => setEditingThreshold(prev => prev ? { ...prev, degradedMs: Number(e.target.value) } : null)}
+                                className="h-7 w-24 text-xs"
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                → {Math.min(50, Math.max(5, Math.round(editingThreshold!.degradedMs / 10)))}% error threshold
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={updateThresholdMutation.isPending}
+                              onClick={() => updateThresholdMutation.mutate({
+                                componentName: t.componentName,
+                                degradedMs: editingThreshold!.degradedMs,
+                                unhealthyMs: t.unhealthyMs,
+                              })}
+                            >
+                              <Save className="h-3 w-3 mr-1" />
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setEditingThreshold(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-xs text-muted-foreground">
+                              {t.degradedMs}ms → <strong>{derivedThreshold}%</strong> error threshold
+                              {t.isDefault && <span className="ml-1 text-[10px] bg-muted px-1 rounded">default</span>}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs ml-auto"
+                              onClick={() => setEditingThreshold({ componentName: t.componentName, degradedMs: t.degradedMs })}
+                            >
+                              Edit
+                            </Button>
+                            {!t.isDefault && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-red-600 hover:text-red-700"
+                                disabled={resetThresholdMutation.isPending}
+                                onClick={() => resetThresholdMutation.mutate({ componentName: t.componentName })}
+                              >
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Reset
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

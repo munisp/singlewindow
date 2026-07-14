@@ -74,6 +74,27 @@ export default function Payments() {
 
   const exportMyHistoryMutation = trpc.payments.exportMyHistory.useMutation();
   const exportAllMutation = trpc.finance.exportCSV.useMutation();
+  const emailMyHistoryMutation = trpc.payments.emailMyHistory.useMutation();
+  const emailAllMutation = trpc.finance.emailCSV.useMutation();
+  const [emailLoading, setEmailLoading] = useState(false);
+
+  const handleSendToInbox = async () => {
+    setEmailLoading(true);
+    try {
+      const dates = getPresetDates(exportPreset);
+      let result: { success: boolean; rowCount: number; dateRange: string };
+      if (canExportAll) {
+        result = await emailAllMutation.mutateAsync({ ...dates, limit: 5000 });
+      } else {
+        result = await emailMyHistoryMutation.mutateAsync({ ...dates, limit: 2000 });
+      }
+      toast({ title: "Sent to Notification Centre", description: `Summary of ${result.rowCount} records (${result.dateRange}) delivered to your inbox` });
+    } catch (e: any) {
+      toast({ title: "Send failed", description: e?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setEmailLoading(false);
+    }
+  };
 
   function getPresetDates(preset: string): { startDate?: string; endDate?: string } {
     const now = new Date();
@@ -227,6 +248,20 @@ export default function Payments() {
               <Download className="w-4 h-4 mr-2" />
             )}
             Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={emailLoading}
+            onClick={handleSendToInbox}
+            title="Send export summary to your Notification Centre"
+          >
+            {emailLoading ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <span className="mr-2 text-base leading-none">📬</span>
+            )}
+            Send to Inbox
           </Button>
           <Button
             onClick={() => setShowInitiateDialog(true)}

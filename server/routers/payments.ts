@@ -590,4 +590,53 @@ export const paymentsRouter = router({
         filename: `my-payments-${new Date().toISOString().split("T")[0]}.csv`,
       };
     }),
+
+  /**
+   * emailMyHistory — same as exportMyHistory but delivers a summary notification
+   * to the requesting user's in-app notification centre instead of a download.
+   */
+  emailMyHistory: protectedProcedure
+    .input(z.object({
+      startDate: z.string().datetime({ offset: true }).optional(),
+      endDate: z.string().datetime({ offset: true }).optional(),
+      limit: z.number().int().min(1).max(5000).default(2000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const conditions: ReturnType<typeof eq>[] = [eq(payments.traderId, ctx.user.id)];
+      if (input.startDate) conditions.push(gte(payments.createdAt, new Date(input.startDate)) as any);
+      if (input.endDate) conditions.push(lte(payments.createdAt, new Date(input.endDate)) as any);
+      const rows = await db
+        .select({
+          id: payments.id,
+          reference: payments.reference,
+          declarationId: payments.declarationId,
+          amount: payments.amount,
+          currency: payments.currency,
+          status: payments.status,
+          confirmedAt: payments.confirmedAt,
+        })
+        .from(payments)
+        .where(and(...conditions))
+        .orderBy(desc(payments.createdAt))
+        .limit(input.limit);
+
+      const dateRange = input.startDate && input.endDate
+        ? `${input.startDate.split("T")[0]} to ${input.endDate.split("T")[0]}`
+        : "all time";
+
+      const preview = rows.slice(0, 10).map(r =>
+        `${r.reference ?? r.id} | Decl #${r.declarationId ?? "—"} | ${r.amount} ${r.currency} | ${r.status}`
+      ).join("\n");
+
+      await createUserNotification({
+        userId: ctx.user.id,
+        type: "csv_export",
+        title: `Payment History Export Ready — ${rows.length} records (${dateRange})`,
+        body: `Your payment history export for ${dateRange} is ready.\n\nFirst ${Math.min(10, rows.length)} records:\n${preview}\n\nDownload the full CSV from the Payments page.`,
+      });
+
+      return { success: true, rowCount: rows.length, dateRange };
+    }),
 });

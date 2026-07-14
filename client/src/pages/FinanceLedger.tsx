@@ -284,6 +284,24 @@ export default function FinanceLedger() {
   const [exportEntryType, setExportEntryType] = useState("all");
 
   const exportCSVMutation = trpc.ledger.exportCSV.useMutation();
+  const [emailLoading, setEmailLoading] = useState(false);
+  const emailCSVMutation = trpc.finance.emailCSV.useMutation();
+
+  const handleEmailCSV = async () => {
+    setEmailLoading(true);
+    try {
+      const result = await emailCSVMutation.mutateAsync({
+        startDate: exportStartDate ? new Date(exportStartDate).toISOString() : undefined,
+        endDate: exportEndDate ? new Date(exportEndDate).toISOString() : undefined,
+        limit: 5000,
+      });
+      toast.success(`Export summary sent to your Notification Centre (${result.rowCount} records)`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to send export notification");
+    } finally {
+      setEmailLoading(false);
+    }
+  };
 
   const summaryQuery = trpc.ledger.getSummary.useQuery(undefined, {
     retry: false,
@@ -457,15 +475,27 @@ export default function FinanceLedger() {
                 </SelectContent>
               </Select>
             </div>
-            <Button
-              size="sm"
-              disabled={exportLoading}
-              onClick={handleExportCSV}
-              className="bg-[#D4A017] hover:bg-[#B8860B] text-[#0A1628] font-semibold"
-            >
-              {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
-              Download Ledger CSV
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={exportLoading}
+                onClick={handleExportCSV}
+                className="bg-[#D4A017] hover:bg-[#B8860B] text-[#0A1628] font-semibold"
+              >
+                {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+                Download CSV
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={emailLoading}
+                onClick={handleEmailCSV}
+                className="border-[#D4A017]/40 text-[#D4A017] hover:bg-[#D4A017]/10"
+              >
+                {emailLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <span className="mr-1 text-base leading-none">📬</span>}
+                Send to Inbox
+              </Button>
+            </div>
           </div>
           </div>
         </CardContent>

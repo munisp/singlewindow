@@ -478,15 +478,29 @@ function DashboardLayoutContent({
     : 0;
 
   // Sprint 63: Real-time WebSocket for live bell badge + toast notifications
-  const handleWsNotification = useCallback((notif: { title: string; body: string }) => {
+  // Sprint 135: Also refresh declaration badge for declaration status-change notifications
+  const handleWsNotification = useCallback((notif: { title: string; body: string; category?: string; entityType?: string }) => {
     utils.userNotifications.getUnreadCount.invalidate();
     utils.userNotifications.getMyNotifications.invalidate();
+    // Refresh declaration badge when a declaration status change arrives
+    const isDeclarationNotif = notif.category === "declaration" || notif.entityType === "declaration";
+    if (isDeclarationNotif && isTrader) {
+      utils.declarations.stats.invalidate();
+    }
+    const isDeclarationStatusChange = isDeclarationNotif &&
+      (notif.title?.toLowerCase().includes("cleared") ||
+       notif.title?.toLowerCase().includes("rejected") ||
+       notif.title?.toLowerCase().includes("examination") ||
+       notif.title?.toLowerCase().includes("payment") ||
+       notif.title?.toLowerCase().includes("docs"));
     toast.info(notif.title, {
       description: notif.body,
-      duration: 5000,
-      action: { label: "View", onClick: () => setLocation("/app/notification-centre") },
+      duration: isDeclarationStatusChange ? 8000 : 5000,
+      action: isDeclarationStatusChange
+        ? { label: "View Declarations", onClick: () => setLocation("/app/declarations") }
+        : { label: "View", onClick: () => setLocation("/app/notification-centre") },
     });
-  }, [utils, setLocation]);
+  }, [utils, setLocation, isTrader]);
 
   const handleWsUnreadCount = useCallback((count: number) => {
     setLiveUnreadCount(count);

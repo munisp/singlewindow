@@ -1452,3 +1452,14 @@
 - [x] DashboardLayout sidebar: Add live gold count badge for in-progress declarations (submitted + pending) for trader role
 - [x] Vitest tests: server/v134.test.ts — getPresetDates, buildJobThresholdMap, computeJobRatesWithThresholds, computeInProgressCount (106 test files, 4105 tests, 0 TS errors)
 - [x] Run full test suite, save checkpoint, push to GitHub
+
+## v135 Sprint — Threshold Editor, CSV Email, Trader Notifications
+- [x] CronExecutionCharts: Inline threshold editor (admin-only) — edit degradedMs per job, save via healthThresholds.update mutation
+- [x] CronExecutionCharts: Reset-to-default button per job row (visible only when !t.isDefault)
+- [x] FinanceLedger: "Send to Inbox" button that sends export summary to Notification Centre
+- [x] Payments: "Send to Inbox" button that sends export summary to Notification Centre
+- [x] Backend: finance.emailCSV + payments.emailMyHistory tRPC procedures (generate CSV, create userNotification)
+- [x] Declarations: updateStatus already had full notification pipeline; enhanced WS handler to detect declaration status-change category and route to "View Declarations" CTA
+- [x] DashboardLayout: handleWsNotification now calls utils.declarations.stats.invalidate() on declaration notifications for isTrader users
+- [x] Vitest tests: server/v135.test.ts — 4 suites: deriveErrorRateThreshold (4), buildExportNotification (5), getNotifType+STATUS_MESSAGES (7), isDeclarationNotif+isDeclarationStatusChange (9) = 25 new tests
+- [x] Run full test suite: 107 test files, 4129 tests, 0 TypeScript errors
