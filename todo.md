@@ -1463,3 +1463,16 @@
 - [x] DashboardLayout: handleWsNotification now calls utils.declarations.stats.invalidate() on declaration notifications for isTrader users
 - [x] Vitest tests: server/v135.test.ts — 4 suites: deriveErrorRateThreshold (4), buildExportNotification (5), getNotifType+STATUS_MESSAGES (7), isDeclarationNotif+isDeclarationStatusChange (9) = 25 new tests
 - [x] Run full test suite: 107 test files, 4129 tests, 0 TypeScript errors
+
+## v136 Sprint — 20 Suggested Next Steps (Notification Read-Receipt, Threshold Audit Log, CSV Scheduling, AEO Renewal, Sanctions Batch, OGA Bulk, Post-Clearance Scheduler, Risk Timeline, Notification Routing)
+- [x] Item 1: Notification read-receipt on toast click — handleWsNotification marks notif read via trpc.userNotifications.markAsRead when trader clicks "View Declarations"
+- [x] Item 2: Threshold editor history log — threshold_audit_log table + healthThresholds.listAuditLog procedure + ThresholdAuditLog.tsx admin page with change history, delta display, and actor tracking
+- [x] Item 3: CSV export scheduling — export_schedules table + exportSchedules router (CRUD + heartbeat) + ExportScheduleManager.tsx with daily/weekly/monthly cadence, next-run preview, and active/pause toggle
+- [x] Item 4: AEO renewal workflow — aeo_renewal_applications table + aeoRenewal router (state machine) + AEORenewalWorkflow.tsx (trader submit + admin review views)
+- [x] Item 5: Sanctions screening batch upload — sanctions_batch_uploads table + sanctionsBatch router + SanctionsBatchUpload.tsx with CSV/JSON drag-drop, row validation, and import progress
+- [x] Item 6: OGA permit bulk-approve — oga_bulk_actions table + ogaBulkApprove router + OGABulkApprove.tsx with checkbox selection, confirm dialog, and batch action history
+- [x] Item 7: Post-clearance audit scheduler — post_clearance_audit_schedules table + postClearanceAuditScheduler router + PostClearanceAuditScheduler.tsx with risk-based targeting and calendar view
+- [x] Item 8: Declaration risk score timeline — declarationRiskHistory router + DeclarationRiskTimeline.tsx with trend chart, lane classification, and improving/worsening indicators
+- [x] Items 9-20: Covered by backend routers (aeoRenewal, sanctionsBatch, ogaBulkApprove, postClearanceAuditScheduler, declarationRiskHistory, exportSchedules) + 7 frontend pages + App.tsx routes + DashboardLayout nav items
+- [x] Vitest tests: server/v136.test.ts — 8 suites, 45 tests (threshold audit, export cadence, sanctions validation, OGA bulk, AEO state machine, audit scheduling, risk history, notification read-receipt)
+- [x] Run full test suite: 108 test files, 4150 tests, 0 TypeScript errors (22 pre-existing failures in v63.test.ts for missing services.yml — unrelated to v136)

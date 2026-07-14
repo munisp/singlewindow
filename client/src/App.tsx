@@ -132,6 +132,13 @@ const PlatformHealthScorecard = lazy(() => import('./pages/PlatformHealthScoreca
 const VisionBatchAnalysis = lazy(() => import('./pages/app/VisionBatchAnalysis'));
 const CronJobManager = lazy(() => import('./pages/admin/CronJobManager'));
 const AdminSystemStatus = lazy(() => import('./pages/admin/SystemStatus'));
+// v136 sprint pages
+const ThresholdAuditLog = lazy(() => import('./pages/admin/ThresholdAuditLog'));
+const SanctionsBatchUpload = lazy(() => import('./pages/admin/SanctionsBatchUpload'));
+const OGABulkApprove = lazy(() => import('./pages/admin/OGABulkApprove'));
+const PostClearanceAuditScheduler = lazy(() => import('./pages/admin/PostClearanceAuditScheduler'));
+const ExportScheduleManager = lazy(() => import('./pages/app/ExportScheduleManager'));
+const AEORenewalWorkflow = lazy(() => import('./pages/app/AEORenewalWorkflow'));
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -551,6 +558,29 @@ function Router() {
       </Route>
       <Route path="/app/admin/system-status">
         <AdminGuard><Suspense fallback={<LazyFallback />}><AdminSystemStatus /></Suspense></AdminGuard>
+      </Route>
+
+      {/* v136 sprint routes */}
+      <Route path="/app/admin/threshold-audit-log">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><ThresholdAuditLog /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/sanctions-batch">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><SanctionsBatchUpload /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/oga-bulk-approve">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><OGABulkApprove /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/post-clearance-scheduler">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><PostClearanceAuditScheduler /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/finance/export-schedules">
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><ExportScheduleManager /></Suspense></FinanceGuard>
+      </Route>
+      <Route path="/app/trader/aeo-renewal">
+        <Suspense fallback={<LazyFallback />}><AEORenewalWorkflow /></Suspense>
+      </Route>
+      <Route path="/app/admin/aeo-renewal">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AEORenewalWorkflow /></Suspense></AdminGuard>
       </Route>
 
       {/* 404 */}

@@ -295,6 +295,13 @@
       "when": 1783865985253,
       "tag": "0041_majestic_venus",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1783991905757,
+      "tag": "0042_white_wendell_vaughn",
+      "breakpoints": true
     }
   ]
 }

@@ -87,6 +87,12 @@ import { apisixAuditRouter } from "./routers/apisixAudit";
 import { healthRouter } from "./routers/health";
 import { heartbeatJobsRouter } from "./routers/heartbeatJobs";
 import { healthThresholdsRouter } from "./routers/healthThresholds";
+import { exportSchedulesRouter } from "./routers/exportSchedules";
+import { aeoRenewalsRouter } from "./routers/aeoRenewals";
+import { sanctionsBatchRouter } from "./routers/sanctionsBatch";
+import { declarationRiskHistoryRouter } from "./routers/declarationRiskHistory";
+import { ogaBulkApproveRouter } from "./routers/ogaBulkApprove";
+import { postClearanceAuditSchedRouter } from "./routers/postClearanceAuditSched";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -306,6 +312,12 @@ export const appRouter = router({
   health: healthRouter,
   heartbeatJobs: heartbeatJobsRouter,
   healthThresholds: healthThresholdsRouter,
+  exportSchedules: exportSchedulesRouter,
+  aeoRenewals: aeoRenewalsRouter,
+  sanctionsBatch: sanctionsBatchRouter,
+  declarationRiskHistory: declarationRiskHistoryRouter,
+  ogaBulkApprove: ogaBulkApproveRouter,
+  postClearanceAuditSched: postClearanceAuditSchedRouter,
 });
 
 export type AppRouter = typeof appRouter;

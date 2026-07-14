@@ -88,12 +88,14 @@ import {
   Palette,
   ArrowLeftRight,
   ScanLine,
+  History,
+  CheckSquare,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
-import { useNotificationSocket } from "@/hooks/useNotificationSocket";
+import { useNotificationSocket, WsNotificationPayload } from "@/hooks/useNotificationSocket";
 import { toast } from "sonner";
 
 // ─── ROLE-BASED NAVIGATION ────────────────────────────────────────────────────
@@ -243,6 +245,11 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
           { icon: CalendarClock, label: "Cron Job Manager", path: "/app/admin/cron-jobs" },
           { icon: Activity, label: "System Status", path: "/app/admin/system-status" },
+          { icon: History, label: "Threshold Audit Log", path: "/app/admin/threshold-audit-log" },
+          { icon: ShieldAlert, label: "Sanctions Batch Upload", path: "/app/admin/sanctions-batch" },
+          { icon: CheckSquare, label: "OGA Bulk Approve", path: "/app/admin/oga-bulk-approve" },
+          { icon: ClipboardList, label: "Post-Clearance Scheduler", path: "/app/admin/post-clearance-scheduler" },
+          { icon: Award, label: "AEO Renewal Review", path: "/app/admin/aeo-renewal" },
         ],
       },
       common,
@@ -324,6 +331,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Layers, label: "Payment Queue", path: "/app/finance/payment-queue" },
           { icon: BarChart2, label: "Balance Accounts", path: "/app/finance/balance-accounts" },
           { icon: Coins, label: "Ledger (TigerBeetle)", path: "/app/finance/ledger" },
+          { icon: CalendarClock, label: "Recurring Export Schedules", path: "/app/finance/export-schedules" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: BarChart2, label: "Executive Dashboard", path: "/app/executive-dashboard" },
         ],
@@ -344,6 +352,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: Building2, label: "My Business Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
         { icon: Award, label: "AEO Self-Assessment", path: "/app/trader/aeo-self-assessment" },
+        { icon: History, label: "AEO Renewal Status", path: "/app/trader/aeo-renewal" },
         { icon: BarChart3, label: "Performance Scorecard", path: "/app/trader/scorecard" },
         { icon: CreditCard, label: "Duty Payments", path: "/app/trader/payments" },
         { icon: CreditCard, label: "Payments Dashboard", path: "/app/payments" },
@@ -479,7 +488,15 @@ function DashboardLayoutContent({
 
   // Sprint 63: Real-time WebSocket for live bell badge + toast notifications
   // Sprint 135: Also refresh declaration badge for declaration status-change notifications
-  const handleWsNotification = useCallback((notif: { title: string; body: string; category?: string; entityType?: string }) => {
+  // Sprint 136: Mark notification as read when toast action is clicked
+  const markAsReadMutation = trpc.userNotifications.markAsRead.useMutation({
+    onSuccess: () => {
+      utils.userNotifications.getUnreadCount.invalidate();
+      utils.userNotifications.getMyNotifications.invalidate();
+    },
+  });
+
+  const handleWsNotification = useCallback((notif: WsNotificationPayload) => {
     utils.userNotifications.getUnreadCount.invalidate();
     utils.userNotifications.getMyNotifications.invalidate();
     // Refresh declaration badge when a declaration status change arrives
@@ -493,14 +510,19 @@ function DashboardLayoutContent({
        notif.title?.toLowerCase().includes("examination") ||
        notif.title?.toLowerCase().includes("payment") ||
        notif.title?.toLowerCase().includes("docs"));
+    const notifId = notif.id;
+    const handleToastAction = (path: string) => {
+      setLocation(path);
+      if (notifId) markAsReadMutation.mutate({ id: notifId });
+    };
     toast.info(notif.title, {
       description: notif.body,
       duration: isDeclarationStatusChange ? 8000 : 5000,
       action: isDeclarationStatusChange
-        ? { label: "View Declarations", onClick: () => setLocation("/app/declarations") }
-        : { label: "View", onClick: () => setLocation("/app/notification-centre") },
+        ? { label: "View Declarations", onClick: () => handleToastAction("/app/declarations") }
+        : { label: "View", onClick: () => handleToastAction("/app/notification-centre") },
     });
-  }, [utils, setLocation, isTrader]);
+  }, [utils, setLocation, isTrader, markAsReadMutation]);
 
   const handleWsUnreadCount = useCallback((count: number) => {
     setLiveUnreadCount(count);

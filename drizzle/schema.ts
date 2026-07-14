@@ -2807,3 +2807,155 @@ export const healthThresholds = pgTable("health_thresholds", {
 ]);
 export type HealthThreshold = typeof healthThresholds.$inferSelect;
 export type InsertHealthThreshold = typeof healthThresholds.$inferInsert;
+
+// ─── Threshold Audit Log ──────────────────────────────────────────────────────
+export const thresholdAuditLog = pgTable("threshold_audit_log", {
+  id: serial("id").primaryKey(),
+  componentName: varchar("component_name", { length: 128 }).notNull(),
+  changedBy: varchar("changed_by", { length: 128 }).notNull(),
+  changedByUserId: integer("changed_by_user_id"),
+  fromDegradedMs: integer("from_degraded_ms").notNull(),
+  toDegradedMs: integer("to_degraded_ms").notNull(),
+  fromUnhealthyMs: integer("from_unhealthy_ms"),
+  toUnhealthyMs: integer("to_unhealthy_ms"),
+  changeReason: text("change_reason"),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_threshold_audit_component").on(t.componentName),
+  index("idx_threshold_audit_changed_at").on(t.changedAt),
+]);
+export type ThresholdAuditLog = typeof thresholdAuditLog.$inferSelect;
+export type InsertThresholdAuditLog = typeof thresholdAuditLog.$inferInsert;
+
+// ─── Export Schedules ─────────────────────────────────────────────────────────
+export const exportSchedules = pgTable("export_schedules", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  exportType: varchar("export_type", { length: 64 }).notNull(),
+  cadence: varchar("cadence", { length: 32 }).notNull().default("weekly"),
+  filterPreset: varchar("filter_preset", { length: 16 }).notNull().default("30"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_export_schedules_user").on(t.userId),
+  index("idx_export_schedules_next_run").on(t.nextRunAt),
+  index("idx_export_schedules_active").on(t.isActive),
+]);
+export type ExportSchedule = typeof exportSchedules.$inferSelect;
+export type InsertExportSchedule = typeof exportSchedules.$inferInsert;
+
+// ─── AEO Renewals ─────────────────────────────────────────────────────────────
+export const aeoRenewals = pgTable("aeo_renewals", {
+  id: serial("id").primaryKey(),
+  aeoApplicationId: integer("aeo_application_id").notNull(),
+  traderId: integer("trader_id").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  submittedAt: timestamp("submitted_at"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: integer("reviewed_by"),
+  reviewNotes: text("review_notes"),
+  expiryDate: timestamp("expiry_date"),
+  renewalDueDate: timestamp("renewal_due_date"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_aeo_renewals_trader").on(t.traderId),
+  index("idx_aeo_renewals_status").on(t.status),
+  index("idx_aeo_renewals_due").on(t.renewalDueDate),
+]);
+export type AeoRenewal = typeof aeoRenewals.$inferSelect;
+export type InsertAeoRenewal = typeof aeoRenewals.$inferInsert;
+
+// ─── Bond Expiry Alerts ───────────────────────────────────────────────────────
+export const bondExpiryAlerts = pgTable("bond_expiry_alerts", {
+  id: serial("id").primaryKey(),
+  bondId: integer("bond_id").notNull(),
+  traderId: integer("trader_id").notNull(),
+  alertType: varchar("alert_type", { length: 32 }).notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  notificationId: integer("notification_id"),
+}, (t) => [
+  index("idx_bond_expiry_alerts_bond").on(t.bondId),
+  index("idx_bond_expiry_alerts_trader").on(t.traderId),
+]);
+export type BondExpiryAlert = typeof bondExpiryAlerts.$inferSelect;
+export type InsertBondExpiryAlert = typeof bondExpiryAlerts.$inferInsert;
+
+// ─── Post-Clearance Audit Schedule ───────────────────────────────────────────
+export const postClearanceAuditSchedule = pgTable("post_clearance_audit_schedule", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull(),
+  traderId: integer("trader_id").notNull(),
+  scheduledBy: varchar("scheduled_by", { length: 64 }).notNull().default("system"),
+  auditType: varchar("audit_type", { length: 32 }).notNull().default("random"),
+  status: varchar("status", { length: 32 }).notNull().default("scheduled"),
+  scheduledDate: timestamp("scheduled_date"),
+  completedAt: timestamp("completed_at"),
+  assignedOfficer: integer("assigned_officer"),
+  findings: text("findings"),
+  riskScore: integer("risk_score"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcas_declaration").on(t.declarationId),
+  index("idx_pcas_status").on(t.status),
+  index("idx_pcas_scheduled_date").on(t.scheduledDate),
+]);
+export type PostClearanceAuditSchedule = typeof postClearanceAuditSchedule.$inferSelect;
+export type InsertPostClearanceAuditSchedule = typeof postClearanceAuditSchedule.$inferInsert;
+
+// ─── Sanctions Batch Jobs ─────────────────────────────────────────────────────
+export const sanctionsBatchJobs = pgTable("sanctions_batch_jobs", {
+  id: serial("id").primaryKey(),
+  submittedBy: integer("submitted_by").notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileKey: varchar("file_key", { length: 512 }),
+  totalRows: integer("total_rows").default(0),
+  processedRows: integer("processed_rows").default(0),
+  matchCount: integer("match_count").default(0),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  errorMessage: text("error_message"),
+  resultFileUrl: text("result_file_url"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_sanctions_batch_user").on(t.submittedBy),
+  index("idx_sanctions_batch_status").on(t.status),
+]);
+export type SanctionsBatchJob = typeof sanctionsBatchJobs.$inferSelect;
+export type InsertSanctionsBatchJob = typeof sanctionsBatchJobs.$inferInsert;
+
+// ─── Risk Score Timeline ──────────────────────────────────────────────────────
+export const declarationRiskHistory = pgTable("declaration_risk_history", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull(),
+  riskScore: integer("risk_score").notNull(),
+  riskLane: varchar("risk_lane", { length: 16 }),
+  triggeredBy: varchar("triggered_by", { length: 64 }).notNull().default("system"),
+  factors: json("factors"),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_drh_declaration").on(t.declarationId),
+  index("idx_drh_recorded_at").on(t.recordedAt),
+]);
+export type DeclarationRiskHistory = typeof declarationRiskHistory.$inferSelect;
+export type InsertDeclarationRiskHistory = typeof declarationRiskHistory.$inferInsert;
+
+// ─── OGA Permit Bulk Actions ──────────────────────────────────────────────────
+export const ogaBulkActions = pgTable("oga_bulk_actions", {
+  id: serial("id").primaryKey(),
+  performedBy: integer("performed_by").notNull(),
+  action: varchar("action", { length: 32 }).notNull(),
+  permitIds: json("permit_ids").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_oga_bulk_officer").on(t.performedBy),
+]);
+export type OgaBulkAction = typeof ogaBulkActions.$inferSelect;
+export type InsertOgaBulkAction = typeof ogaBulkActions.$inferInsert;
