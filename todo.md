@@ -1547,16 +1547,16 @@
 
 ## v139 Sprint — @Mention Notifications, DAG Visualiser, Entity Merge
 
-- [ ] AEO comments @mention: backend aeoComments.post detects @admin/@trader mentions and sends push notification
-- [ ] AEO comments @mention: frontend @mention autocomplete dropdown in CommentsThread
-- [ ] Schedule DAG visualiser: backend procedure returns dependency graph as nodes + edges
-- [ ] Schedule DAG visualiser: frontend D3.js DAG diagram in ScheduleAnalytics.tsx
-- [ ] Schedule DAG visualiser: highlight critical path and show execution status per node
-- [ ] Sanctions entity merge tool: backend mergeEntities procedure (combine fields, archive duplicate, audit log)
-- [ ] Sanctions entity merge tool: frontend side-by-side diff dialog with field-level selection
-- [ ] Sanctions entity merge tool: merge confirmation with preview of final merged record
-- [ ] Vitest tests for @mention parsing, DAG topological sort, and merge conflict detection
-- [ ] Run full test suite, save checkpoint, push to GitHub
+- [x] AEO comments @mention: backend aeoComments.post detects @admin/@trader mentions and sends push notification
+- [x] AEO comments @mention: frontend @mention autocomplete dropdown in CommentsThread
+- [x] Schedule DAG visualiser: backend procedure returns dependency graph as nodes + edges
+- [x] Schedule DAG visualiser: frontend D3.js DAG diagram in ScheduleAnalytics.tsx
+- [x] Schedule DAG visualiser: highlight critical path and show execution status per node
+- [x] Sanctions entity merge tool: backend mergeEntities procedure (combine fields, archive duplicate, audit log)
+- [x] Sanctions entity merge tool: frontend side-by-side diff dialog with field-level selection
+- [x] Sanctions entity merge tool: merge confirmation with preview of final merged record
+- [x] Vitest tests for @mention parsing, DAG topological sort, and merge conflict detection
+- [x] Run full test suite, save checkpoint, push to GitHub
 
 ## v139 Sprint — @Mention Notifications, DAG Visualiser, Sanctions Merge Tool
 
