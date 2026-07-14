@@ -1428,3 +1428,18 @@
 - [x] Push CI workflow files to GitHub via PAT with workflow scope
 - [x] Write vitest tests for new procedures
 - [x] Run full test suite, save checkpoint, push to GitHub
+
+## v133 Sprint — CI Pipeline, CSV Export, Quick-Filter, Cron Charts
+
+- [x] Push CI workflow files (.github/workflows/node-ci.yml + dependabot.yml) to GitHub
+- [x] Finance Officer: CSV export tRPC procedure for ledger entries
+- [x] Finance Officer: CSV export tRPC procedure for payment history
+- [x] Finance Officer: Download button on ledger page (FinanceLedger.tsx — date range + entry type filters)
+- [x] Finance Officer: Download button on payment history page (Payments.tsx — role-aware export)
+- [x] Trader: Quick-filter widget for declaration status (All/Submitted/Under Review/Green/Yellow/Red Lane/Cleared/Rejected)
+- [x] Trader: Quick-filter widget for permit status (All/Active/Pending/Rejected+Conditional)
+- [x] Trader: Real-time status badge refresh on declaration list
+- [x] Admin: Cron execution history bar chart (success/failure stacked by time)
+- [x] Admin: Cron job success rate donut charts
+- [x] Admin: Cron execution timeline on System Status dashboard (CronExecutionCharts component)
+- [x] Vitest tests for CSV export procedures and filter logic (server/csv-export.test.ts — 105 test files, 4086 tests)

@@ -521,4 +521,73 @@ export const paymentsRouter = router({
 
       return { success: true, payment: updated };
     }),
+
+  /**
+   * exportMyHistory — export the current user's own payment history as CSV.
+   * Scoped strictly to ctx.user.id so traders can only see their own records.
+   * Finance/admin roles can use finance.exportCSV for all payments.
+   */
+  exportMyHistory: protectedProcedure
+    .input(z.object({
+      startDate: z.string().datetime({ offset: true }).optional(),
+      endDate: z.string().datetime({ offset: true }).optional(),
+      status: z.enum(["pending", "processing", "confirmed", "failed", "refunded"]).optional(),
+      limit: z.number().int().min(1).max(5000).default(2000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const conditions: ReturnType<typeof eq>[] = [
+        eq(payments.traderId, ctx.user.id),
+      ];
+      if (input.startDate) conditions.push(gte(payments.createdAt, new Date(input.startDate)) as any);
+      if (input.endDate) conditions.push(lte(payments.createdAt, new Date(input.endDate)) as any);
+      if (input.status) conditions.push(eq(payments.status, input.status as any));
+      const rows = await db
+        .select({
+          id: payments.id,
+          reference: payments.reference,
+          declarationId: payments.declarationId,
+          amount: payments.amount,
+          currency: payments.currency,
+          paymentMethod: payments.paymentMethod,
+          status: payments.status,
+          mojalooopTransferId: payments.mojalooopTransferId,
+          confirmedAt: payments.confirmedAt,
+          failureReason: payments.failureReason,
+          createdAt: payments.createdAt,
+        })
+        .from(payments)
+        .where(and(...conditions))
+        .orderBy(desc(payments.createdAt))
+        .limit(input.limit);
+      const headers = [
+        "ID", "Reference", "Declaration ID", "Amount", "Currency",
+        "Payment Method", "Status", "Mojaloop Transfer ID",
+        "Confirmed At", "Failure Reason", "Created At",
+      ];
+      const escape = (v: unknown) => {
+        const s = v == null ? "" : String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      };
+      const csvLines = [
+        headers.join(","),
+        ...rows.map((r) =>
+          [
+            r.id, r.reference ?? "", r.declarationId, r.amount, r.currency,
+            r.paymentMethod, r.status, r.mojalooopTransferId ?? "",
+            r.confirmedAt ? new Date(r.confirmedAt).toISOString() : "",
+            r.failureReason ?? "",
+            r.createdAt ? new Date(r.createdAt).toISOString() : "",
+          ].map(escape).join(",")
+        ),
+      ];
+      return {
+        csv: csvLines.join("\n"),
+        rowCount: rows.length,
+        filename: `my-payments-${new Date().toISOString().split("T")[0]}.csv`,
+      };
+    }),
 });

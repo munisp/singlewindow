@@ -3,7 +3,13 @@
  * Real-time system health dashboard that polls /api/health every 15 seconds.
  * Visualises component health, uptime, response latencies, and DEMO_MODE state.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { trpc } from "@/lib/trpc";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip as RechartsTooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -171,6 +177,257 @@ function Sparkline({ history }: { history: HistoryPoint[] }) {
     <svg width={W} height={H} className="overflow-visible">
       <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.5} />
     </svg>
+  );
+}
+
+// ─── Cron Execution Charts ───────────────────────────────────────────────────
+
+const CRON_COLORS = {
+  success: "#16a34a",
+  error: "#dc2626",
+};
+
+const PIE_COLORS = ["#16a34a", "#dc2626"];
+
+function CronExecutionCharts() {
+  const [selectedJob, setSelectedJob] = useState<string | undefined>(undefined);
+
+  const { data: runHistory, isLoading } = trpc.heartbeatJobs.listRunHistory.useQuery(
+    { jobName: selectedJob, limit: 100 },
+    { refetchInterval: 30_000 }
+  );
+
+  const { data: jobDefs } = trpc.heartbeatJobs.listJobs.useQuery();
+
+  // Derive unique job names from history
+  const jobNames = useMemo(() => {
+    const names = new Set<string>();
+    runHistory?.forEach((r: any) => names.add(r.jobName));
+    return Array.from(names).sort();
+  }, [runHistory]);
+
+  // Success rate donut data
+  const successRateData = useMemo(() => {
+    if (!runHistory || runHistory.length === 0) return [];
+    const successCount = runHistory.filter((r: any) => r.status === "success").length;
+    const errorCount = runHistory.length - successCount;
+    return [
+      { name: "Success", value: successCount },
+      { name: "Error", value: errorCount },
+    ];
+  }, [runHistory]);
+
+  // Per-job success rate bar data
+  const jobSuccessRates = useMemo(() => {
+    if (!runHistory || runHistory.length === 0) return [];
+    const byJob: Record<string, { total: number; success: number; avgDurationMs: number }> = {};
+    for (const r of runHistory as any[]) {
+      if (!byJob[r.jobName]) byJob[r.jobName] = { total: 0, success: 0, avgDurationMs: 0 };
+      byJob[r.jobName].total++;
+      if (r.status === "success") byJob[r.jobName].success++;
+      byJob[r.jobName].avgDurationMs += r.durationMs ?? 0;
+    }
+    return Object.entries(byJob).map(([jobName, stats]) => ({
+      jobName: jobName.replace(/_/g, " ").replace(/([A-Z])/g, " $1").trim(),
+      rawJobName: jobName,
+      successRate: Math.round((stats.success / stats.total) * 100),
+      totalRuns: stats.total,
+      avgDurationMs: Math.round(stats.avgDurationMs / stats.total),
+    }));
+  }, [runHistory]);
+
+  // Timeline bar chart: last 20 runs grouped by hour
+  const timelineData = useMemo(() => {
+    if (!runHistory || runHistory.length === 0) return [];
+    const hourMap: Record<string, { success: number; error: number }> = {};
+    for (const r of (runHistory as any[]).slice(0, 50)) {
+      const hour = new Date(r.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      if (!hourMap[hour]) hourMap[hour] = { success: 0, error: 0 };
+      if (r.status === "success") hourMap[hour].success++;
+      else hourMap[hour].error++;
+    }
+    return Object.entries(hourMap)
+      .slice(-12)
+      .map(([time, counts]) => ({ time, ...counts }));
+  }, [runHistory]);
+
+  const successRate = successRateData.length > 0
+    ? Math.round((successRateData[0]?.value / (successRateData[0]?.value + (successRateData[1]?.value ?? 0))) * 100)
+    : 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Cron Job Execution History
+            </CardTitle>
+            <CardDescription>
+              Success rates and execution timeline for scheduled background jobs.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedJob ?? ""}
+              onChange={e => setSelectedJob(e.target.value || undefined)}
+              className="text-xs border rounded px-2 py-1 bg-background text-foreground"
+            >
+              <option value="">All Jobs</option>
+              {jobNames.map(name => (
+                <option key={name} value={name}>{name.replace(/_/g, " ")}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading execution history…</span>
+          </div>
+        ) : !runHistory || runHistory.length === 0 ? (
+          <div className="py-8 text-center text-muted-foreground">
+            <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">No cron execution records found.</p>
+            <p className="text-xs mt-1">Records appear after the first scheduled job runs.</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Summary KPIs */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-muted/30 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Total Runs</p>
+                <p className="text-2xl font-bold">{runHistory.length}</p>
+              </div>
+              <div className="bg-green-50 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Success Rate</p>
+                <p className="text-2xl font-bold text-green-600">{successRate}%</p>
+              </div>
+              <div className="bg-red-50 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Failures</p>
+                <p className="text-2xl font-bold text-red-600">{successRateData[1]?.value ?? 0}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Success/Failure donut */}
+              <div>
+                <p className="text-sm font-medium mb-3">Overall Success Rate</p>
+                <div style={{ height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={successRateData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={80}
+                        dataKey="value"
+                        label={({ name, value }) => `${name}: ${value}`}
+                        labelLine={false}
+                      >
+                        {successRateData.map((_, idx) => (
+                          <Cell key={idx} fill={PIE_COLORS[idx]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Execution timeline */}
+              <div>
+                <p className="text-sm font-medium mb-3">Execution Timeline (last 50 runs)</p>
+                <div style={{ height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={timelineData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="time" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                      <RechartsTooltip />
+                      <Bar dataKey="success" stackId="a" fill={CRON_COLORS.success} name="Success" />
+                      <Bar dataKey="error" stackId="a" fill={CRON_COLORS.error} name="Error" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            {/* Per-job success rates */}
+            {jobSuccessRates.length > 1 && (
+              <div>
+                <p className="text-sm font-medium mb-3">Success Rate by Job</p>
+                <div style={{ height: Math.max(160, jobSuccessRates.length * 36) }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={jobSuccessRates}
+                      layout="vertical"
+                      margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
+                      <YAxis dataKey="jobName" type="category" tick={{ fontSize: 10 }} width={120} />
+                      <RechartsTooltip formatter={(val: any) => `${val}%`} />
+                      <Bar dataKey="successRate" fill="#16a34a" name="Success Rate" radius={[0, 3, 3, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Recent runs table */}
+            <div>
+              <p className="text-sm font-medium mb-2">Recent Executions</p>
+              <div className="overflow-x-auto rounded border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Job</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Trigger</th>
+                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Duration</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Started At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {(runHistory as any[]).slice(0, 15).map((r: any) => (
+                      <tr key={r.id} className="hover:bg-muted/20">
+                        <td className="px-3 py-2 font-mono">{r.jobName}</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            r.status === "success"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}>
+                            {r.status === "success" ? (
+                              <CheckCircle2 className="h-2.5 w-2.5" />
+                            ) : (
+                              <XCircle className="h-2.5 w-2.5" />
+                            )}
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{r.triggeredBy ?? "scheduler"}</td>
+                        <td className="px-3 py-2 text-right font-mono">
+                          {r.durationMs != null ? `${r.durationMs}ms` : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {r.startedAt ? new Date(r.startedAt).toLocaleString() : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -540,6 +797,9 @@ export default function SystemStatus() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* ── Cron Job Execution History ─────────────────────────────── */}
+            <CronExecutionCharts />
 
             {/* Footer */}
             <div className="flex items-center justify-between text-xs text-muted-foreground">

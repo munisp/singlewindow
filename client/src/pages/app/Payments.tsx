@@ -67,6 +67,40 @@ export default function Payments() {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const isAdmin = user?.role === "admin";
+  const isFinance = user?.role === "finance";
+  const canExportAll = isAdmin || isFinance;
+  const [exportLoading, setExportLoading] = useState(false);
+
+  const exportMyHistoryMutation = trpc.payments.exportMyHistory.useMutation();
+  const exportAllMutation = trpc.finance.exportCSV.useMutation();
+
+  const handleExportCSV = async () => {
+    setExportLoading(true);
+    try {
+      let result: { csv: string; rowCount: number; filename: string };
+      if (canExportAll) {
+        result = await exportAllMutation.mutateAsync({
+          startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
+          endDate: new Date().toISOString(),
+          limit: 5000,
+        });
+      } else {
+        result = await exportMyHistoryMutation.mutateAsync({ limit: 2000 });
+      }
+      const blob = new Blob([result.csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Export complete", description: `Downloaded ${result.rowCount} payment records` });
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   const { data: historyData, isLoading: historyLoading } = trpc.payments.myHistory.useQuery(
     { limit: 50, offset: 0 },
@@ -148,13 +182,28 @@ export default function Payments() {
             Manage duty payments, track transactions, and reconcile ledger entries
           </p>
         </div>
-        <Button
-          onClick={() => setShowInitiateDialog(true)}
-          className="bg-accent hover:bg-[#b8891a] text-white"
-        >
-          <DollarSign className="w-4 h-4 mr-2" />
-          Initiate Payment
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exportLoading}
+            onClick={handleExportCSV}
+          >
+            {exportLoading ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            Export CSV
+          </Button>
+          <Button
+            onClick={() => setShowInitiateDialog(true)}
+            className="bg-accent hover:bg-[#b8891a] text-white"
+          >
+            <DollarSign className="w-4 h-4 mr-2" />
+            Initiate Payment
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}

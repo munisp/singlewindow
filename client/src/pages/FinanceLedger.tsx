@@ -50,6 +50,7 @@ import {
   ArrowRight,
   BarChart3,
   Loader2,
+  Download,
 } from "lucide-react";
 
 // ─── Account colour map ───────────────────────────────────────────────────────
@@ -277,6 +278,12 @@ function RiskScorerPanel() {
 
 export default function FinanceLedger() {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState("");
+  const [exportEndDate, setExportEndDate] = useState("");
+  const [exportEntryType, setExportEntryType] = useState("all");
+
+  const exportCSVMutation = trpc.ledger.exportCSV.useMutation();
 
   const summaryQuery = trpc.ledger.getSummary.useQuery(undefined, {
     retry: false,
@@ -286,6 +293,30 @@ export default function FinanceLedger() {
   const refresh = () => {
     setRefreshKey(k => k + 1);
     summaryQuery.refetch();
+  };
+
+  const handleExportCSV = async () => {
+    setExportLoading(true);
+    try {
+      const result = await exportCSVMutation.mutateAsync({
+        startDate: exportStartDate ? new Date(exportStartDate).toISOString() : undefined,
+        endDate: exportEndDate ? new Date(exportEndDate).toISOString() : undefined,
+        entryType: exportEntryType !== "all" ? exportEntryType : undefined,
+        limit: 5000,
+      });
+      const blob = new Blob([result.csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${result.rowCount} ledger entries`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "CSV export failed");
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const summary = summaryQuery.data as any;
@@ -325,8 +356,70 @@ export default function FinanceLedger() {
             <RefreshCw className="w-4 h-4 mr-1" />
             Refresh
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exportLoading}
+            onClick={handleExportCSV}
+            className="border-[#D4A017]/50 text-[#D4A017] hover:bg-[#D4A017]/10"
+          >
+            {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+            Export CSV
+          </Button>
         </div>
       </div>
+
+      {/* CSV Export Filters */}
+      <Card className="bg-[#0D1F3C] border-[#1E3A5F]">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-gray-400 text-xs">From Date</Label>
+              <Input
+                type="date"
+                value={exportStartDate}
+                onChange={(e) => setExportStartDate(e.target.value)}
+                className="bg-[#0A1628] border-[#1E3A5F] text-white text-sm w-36"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-gray-400 text-xs">To Date</Label>
+              <Input
+                type="date"
+                value={exportEndDate}
+                onChange={(e) => setExportEndDate(e.target.value)}
+                className="bg-[#0A1628] border-[#1E3A5F] text-white text-sm w-36"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-gray-400 text-xs">Entry Type</Label>
+              <Select value={exportEntryType} onValueChange={setExportEntryType}>
+                <SelectTrigger className="bg-[#0A1628] border-[#1E3A5F] text-white text-sm w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#0D1F3C] border-[#1E3A5F]">
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="duty_payment">Duty Payment</SelectItem>
+                  <SelectItem value="bond_deposit">Bond Deposit</SelectItem>
+                  <SelectItem value="bond_release">Bond Release</SelectItem>
+                  <SelectItem value="drawback_payment">Drawback Payment</SelectItem>
+                  <SelectItem value="transit_guarantee">Transit Guarantee</SelectItem>
+                  <SelectItem value="penalty">Penalty</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              size="sm"
+              disabled={exportLoading}
+              onClick={handleExportCSV}
+              className="bg-[#D4A017] hover:bg-[#B8860B] text-[#0A1628] font-semibold"
+            >
+              {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+              Download Ledger CSV
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Account Balances */}
       {summaryQuery.isLoading ? (
