@@ -405,4 +405,35 @@ export const traderScorecardRouter = router({
         declarations: rows,
       };
     }),
+
+  /**
+   * v96: Export trader scorecard data as CSV-ready JSON array (derived from declarations).
+   */
+  exportScorecard: protectedProcedure
+    .input(z.object({
+      traderId: z.number().int().positive().optional(),
+      format: z.enum(["json", "csv"]).default("json"),
+    }))
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      const targetId = input.traderId ?? (isAdmin ? undefined : ctx.user.id);
+      const conditions: any[] = [];
+      if (targetId) conditions.push(eq(declarations.traderId, targetId));
+      const rows = await db.select({
+        traderId: declarations.traderId,
+        declarationNumber: declarations.declarationNumber,
+        status: declarations.status,
+        submittedAt: declarations.submittedAt,
+        clearedAt: declarations.clearedAt,
+        totalDue: declarations.totalDue,
+        hsCode: declarations.hsCode,
+      })
+        .from(declarations)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(declarations.submittedAt))
+        .limit(500);
+      return rows;
+    }),
 });

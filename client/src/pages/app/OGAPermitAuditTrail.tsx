@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useToast } from "@/hooks/use-toast";
 
 const AGENCIES = ["FDA", "EPA", "MOFEP", "CEPS", "NACOC", "GFZA", "GCAA", "NPA", "DVLA", "GSA"];
 const EVENT_TYPES = ["REQUESTED", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED", "EXPIRED", "RENEWED", "REVOKED"] as const;
@@ -38,8 +40,10 @@ const EVENT_ICONS: Record<EventType, React.ReactNode> = {
 };
 
 export default function OGAPermitAuditTrail() {
+  const { toast } = useToast();
   const [agencyFilter, setAgencyFilter] = useState<string>("all");
   const [eventTypeFilter, setEventTypeFilter] = useState<EventType | "all">("all");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const { data, isLoading, refetch } = trpc.ogaPermitAudit.getRecentEvents.useQuery({
     limit: 100,
@@ -50,6 +54,23 @@ export default function OGAPermitAuditTrail() {
   const { data: agencyStats } = trpc.ogaPermitAudit.getAgencyStats.useQuery();
 
   const events = data?.events ?? [];
+  const pendingEvents = events.filter((e: any) => e.eventType === "SUBMITTED" || e.eventType === "UNDER_REVIEW");
+  const allPendingSelected = pendingEvents.length > 0 && pendingEvents.every((e: any) => selectedIds.includes(e.id));
+
+  const bulkApproveMutation = trpc.ogaPermitAudit.bulkApprovePermits.useMutation({
+    onSuccess: (res) => {
+      toast({ title: "Bulk approve complete", description: `${res.approvedCount} permit(s) approved.` });
+      setSelectedIds([]);
+      refetch();
+    },
+    onError: (err) => toast({ title: "Bulk approve failed", description: err.message, variant: "destructive" }),
+  });
+
+  const toggleSelect = (id: number) =>
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+
+  const toggleAll = () =>
+    setSelectedIds(allPendingSelected ? [] : pendingEvents.map((e: any) => e.id));
 
   return (
     <div className="p-6 space-y-6">
@@ -114,11 +135,27 @@ export default function OGAPermitAuditTrail() {
         </span>
       </div>
 
+      {/* Bulk Action Bar */}
+      {selectedIds.length > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-primary/10 border border-primary/30 rounded-lg">
+          <span className="text-sm font-medium text-primary">{selectedIds.length} selected</span>
+          <Button size="sm" className="h-7 text-xs" onClick={() => bulkApproveMutation.mutate({ permitIds: selectedIds })} disabled={bulkApproveMutation.isPending}>
+            {bulkApproveMutation.isPending ? <RefreshCw className="w-3 h-3 mr-1 animate-spin" /> : <CheckCircle className="w-3 h-3 mr-1" />}
+            Bulk Approve
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedIds([])}>
+            Clear
+          </Button>
+        </div>
+      )}
       {/* Timeline Table */}
       <div className="rounded-lg border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 border-b">
             <tr>
+              <th className="px-4 py-3 text-left font-medium w-10">
+                <Checkbox checked={allPendingSelected} onCheckedChange={toggleAll} aria-label="Select all pending" />
+              </th>
               <th className="px-4 py-3 text-left font-medium">Agency</th>
               <th className="px-4 py-3 text-left font-medium">Event</th>
               <th className="px-4 py-3 text-left font-medium">Status Change</th>
@@ -132,13 +169,13 @@ export default function OGAPermitAuditTrail() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                   Loading audit trail…
                 </td>
               </tr>
             ) : events.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">
                   No events found
                 </td>
               </tr>
@@ -146,8 +183,13 @@ export default function OGAPermitAuditTrail() {
               events.map((event: any) => (
                 <tr
                   key={event.id}
-                  className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                  className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${selectedIds.includes(event.id) ? "bg-primary/5" : ""}`}
                 >
+                  <td className="px-4 py-3">
+                    {(event.eventType === "SUBMITTED" || event.eventType === "UNDER_REVIEW") && (
+                      <Checkbox checked={selectedIds.includes(event.id)} onCheckedChange={() => toggleSelect(event.id)} />
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <span className="font-semibold text-xs bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">
                       {event.agencyCode}

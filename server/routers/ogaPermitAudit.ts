@@ -177,4 +177,27 @@ export const ogaPermitAuditRouter = router({
       pending: Number(r.pending),
     }));
   }),
+
+  /**
+   * v92: Bulk-approve multiple OGA permits in one operation (admin/customs_officer only).
+   */
+  bulkApprovePermits: protectedProcedure
+    .input(z.object({
+      permitIds: z.array(z.number().int().positive()).min(1).max(100),
+      reviewNotes: z.string().max(500).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer", "oga_officer"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { ogaPermits } = await import("../../drizzle/schema");
+      const { inArray } = await import("drizzle-orm");
+      const updated = await db.update(ogaPermits)
+        .set({ status: "approved", reviewNotes: input.reviewNotes ?? null, respondedAt: new Date(), updatedAt: new Date() })
+        .where(inArray(ogaPermits.id, input.permitIds))
+        .returning({ id: ogaPermits.id });
+      return { approvedCount: updated.length, ids: updated.map(r => r.id) };
+    }),
 });

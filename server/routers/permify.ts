@@ -3,6 +3,7 @@
  * Exposes Permify policy management and permission-check procedures.
  * All write operations are admin-only; reads are protected (any logged-in user).
  */
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import {
@@ -199,5 +200,35 @@ export const permifyRouter = router({
    */
   listPolicies: adminProcedure.query(async () => {
     return listSchemas();
+  }),
+
+  /**
+   * v91: Get Permify authorization audit log entries.
+   */
+  getAuditLog: adminProcedure
+    .input(z.object({
+      operation: z.string().optional(),
+      entity: z.string().optional(),
+      limit: z.number().int().min(1).max(500).default(100),
+    }))
+    .query(async ({ input }) => {
+      const { getPermifyAuditLog } = await import("../db");
+      return getPermifyAuditLog({ operation: input.operation, entity: input.entity, limit: input.limit });
+    }),
+
+  /**
+   * v91: Get Permify audit log stats (operation breakdown).
+   */
+  getAuditStats: adminProcedure.query(async () => {
+    const { getPermifyAuditLog } = await import("../db");
+    const rows = await getPermifyAuditLog({ limit: 1000 });
+    const byOp: Record<string, { total: number; allowed: number; denied: number }> = {};
+    for (const r of rows) {
+      if (!byOp[r.operation]) byOp[r.operation] = { total: 0, allowed: 0, denied: 0 };
+      byOp[r.operation].total++;
+      if (r.allowed === true) byOp[r.operation].allowed++;
+      if (r.allowed === false) byOp[r.operation].denied++;
+    }
+    return Object.entries(byOp).map(([operation, stats]) => ({ operation, ...stats }));
   }),
 });

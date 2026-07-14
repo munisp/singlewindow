@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import {
   ClipboardCheck, AlertTriangle, CheckCircle2, Clock, TrendingUp,
-  DollarSign, Search, Plus, Eye, Edit3, ChevronLeft, ChevronRight,
+  DollarSign, Search, Plus, Eye, Edit3, ChevronLeft, ChevronRight, Calendar,
 } from "lucide-react";
 
 // ─── STATUS / OUTCOME BADGES ─────────────────────────────────────────────────
@@ -226,6 +226,10 @@ export default function PostClearanceAudit() {
   const isOfficer = ["customs_officer", "admin", "inspector"].includes(user?.role ?? "");
 
   const { data: stats } = trpc.postAudit.stats.useQuery(undefined, { enabled: isOfficer });
+  const { data: scheduledData } = trpc.postAudit.getScheduledAudits.useQuery(
+    { limit: 5 },
+    { enabled: isOfficer }
+  );
   const { data, isLoading } = trpc.postAudit.list.useQuery({
     status: statusFilter !== "all" ? statusFilter as any : undefined,
     search: search || undefined,
@@ -286,6 +290,36 @@ export default function PostClearanceAudit() {
           </div>
         )}
 
+        {/* Upcoming Scheduled Audits */}
+        {isOfficer && scheduledData && scheduledData.length > 0 && (
+          <Card className="bg-[#0D1B2E]/80 border-white/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                <Calendar size={14} className="text-gold" />
+                Upcoming Scheduled Audits ({scheduledData.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="space-y-2">
+                {scheduledData.map((a: any) => (
+                  <div key={a.id} className="flex items-center justify-between text-sm border-b border-white/5 pb-2 last:border-0 last:pb-0">
+                    <div className="flex items-center gap-2">
+                      <Clock size={12} className="text-blue-400" />
+                      <span className="text-white font-mono text-xs">{a.auditNumber}</span>
+                      <span className="text-slate-400 text-xs">· Decl #{a.declarationId}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">
+                        {a.scheduledDate ? new Date(a.scheduledDate).toLocaleDateString() : "—"}
+                      </span>
+                      <Badge className="text-xs bg-blue-500/20 text-blue-300 border-blue-500/30">scheduled</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {/* Filters */}
         <div className="flex gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">

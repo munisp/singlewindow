@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, sql, count, inArray } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql, count, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -27,6 +27,11 @@ import {
   // v83 new tables
   geoipSeedJobs, type InsertGeoipSeedJob,
   workflowInputSchemas, type InsertWorkflowInputSchema,
+  // v88-v91 middleware tables
+  fluvioTopicOffsets,
+  apisixRouteAudit,
+  keycloakSessions,
+  permifyAuditLog,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1783,4 +1788,105 @@ export async function listWorkflowInputSchemas() {
   return db.select().from(workflowInputSchemas)
     .where(eq(workflowInputSchemas.isActive, true))
     .orderBy(workflowInputSchemas.workflowType, desc(workflowInputSchemas.version));
+}
+
+// ─── v87: Schema Version History ─────────────────────────────────────────────
+export async function getSchemaVersionHistory(workflowType: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(workflowInputSchemas)
+    .where(eq(workflowInputSchemas.workflowType, workflowType))
+    .orderBy(desc(workflowInputSchemas.version));
+}
+
+// ─── v88: Fluvio Topic Offsets ────────────────────────────────────────────────
+export async function getFluvioTopicOffsets(opts?: { topic?: string; consumerGroup?: string }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.topic) conditions.push(eq(fluvioTopicOffsets.topic, opts.topic));
+  if (opts?.consumerGroup) conditions.push(eq(fluvioTopicOffsets.consumerGroup, opts.consumerGroup));
+  return db.select().from(fluvioTopicOffsets)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(fluvioTopicOffsets.lagCount));
+}
+
+export async function upsertFluvioOffset(data: {
+  topic: string; partition: number; consumerGroup: string;
+  committedOffset: number; latestOffset: number; lagCount: number; isHealthy: boolean;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(fluvioTopicOffsets).values({
+    ...data,
+    lastUpdatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: [fluvioTopicOffsets.topic, fluvioTopicOffsets.partition, fluvioTopicOffsets.consumerGroup],
+    set: {
+      committedOffset: data.committedOffset,
+      latestOffset: data.latestOffset,
+      lagCount: data.lagCount,
+      isHealthy: data.isHealthy,
+      lastUpdatedAt: new Date(),
+    },
+  }).returning();
+  return row;
+}
+
+// ─── v89: APISIX Route Audit ──────────────────────────────────────────────────
+export async function getApisixRouteAuditLog(opts?: { routeId?: string; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.routeId) conditions.push(eq(apisixRouteAudit.routeId, opts.routeId));
+  return db.select().from(apisixRouteAudit)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(apisixRouteAudit.createdAt))
+    .limit(opts?.limit ?? 100);
+}
+
+export async function insertApisixRouteAuditEntry(data: {
+  routeId: string; routeName?: string; operation: string; actorId?: number;
+  previousConfig?: object; newConfig?: object; changeReason?: string; apisixVersion?: string;
+}) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(apisixRouteAudit).values(data).returning();
+  return row;
+}
+
+// ─── v90: Keycloak Sessions ───────────────────────────────────────────────────
+export async function getKeycloakSessions(opts?: { userId?: number; isActive?: boolean; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.userId !== undefined) conditions.push(eq(keycloakSessions.userId, opts.userId));
+  if (opts?.isActive !== undefined) conditions.push(eq(keycloakSessions.isActive, opts.isActive));
+  return db.select().from(keycloakSessions)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(keycloakSessions.lastAccessAt))
+    .limit(opts?.limit ?? 200);
+}
+
+export async function revokeKeycloakSession(sessionId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(keycloakSessions)
+    .set({ isActive: false })
+    .where(eq(keycloakSessions.sessionId, sessionId))
+    .returning();
+  return row;
+}
+
+// ─── v91: Permify Audit Log ───────────────────────────────────────────────────
+export async function getPermifyAuditLog(opts?: { operation?: string; entity?: string; limit?: number }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions: any[] = [];
+  if (opts?.operation) conditions.push(eq(permifyAuditLog.operation, opts.operation));
+  if (opts?.entity) conditions.push(like(permifyAuditLog.entity, `%${opts.entity}%`));
+  return db.select().from(permifyAuditLog)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(permifyAuditLog.createdAt))
+    .limit(opts?.limit ?? 200);
 }

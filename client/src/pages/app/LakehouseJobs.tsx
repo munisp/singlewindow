@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, Database, Layers } from "lucide-react";
+import { Loader2, RefreshCw, Play, CheckCircle2, XCircle, Clock, Database, Layers, RotateCcw } from "lucide-react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -63,6 +64,7 @@ export default function LakehouseJobs() {
   const [jobTypeFilter, setJobTypeFilter] = useState<string>("ALL");
   const [tableFilter, setTableFilter] = useState<string>("ALL");
   const [page, setPage] = useState(0);
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [triggerDialog, setTriggerDialog] = useState(false);
   const [triggerJobType, setTriggerJobType] = useState<string>("");
   const [triggerTable, setTriggerTable] = useState<string>("");
@@ -81,6 +83,18 @@ export default function LakehouseJobs() {
     targetTable: tableFilter !== "ALL" ? tableFilter : undefined,
   });
 
+  const jobDetailQuery = trpc.lakehouse.getLakehouseJobById.useQuery(
+    { id: selectedJobId! },
+    { enabled: selectedJobId !== null }
+  );
+  const retriggerJobMutation = trpc.lakehouse.retriggerJob.useMutation({
+    onSuccess: (data) => {
+      toast({ title: "Job re-triggered", description: `New job ${data.jobId} created` });
+      setSelectedJobId(null);
+      jobsQuery.refetch();
+    },
+    onError: (err) => toast({ title: "Re-trigger failed", description: err.message, variant: "destructive" }),
+  });
   const triggerMutation = trpc.lakehouse.triggerLakehouseJob.useMutation({
     onSuccess: (data) => {
       toast({ title: "Job triggered", description: data.message });
@@ -236,7 +250,7 @@ export default function LakehouseJobs() {
                 </TableRow>
               ) : (
                 jobs.map((job) => (
-                  <TableRow key={job.id} className="border-border hover:bg-muted/30">
+                  <TableRow key={job.id} className="border-border hover:bg-muted/30 cursor-pointer" onClick={() => setSelectedJobId(job.id)}>
                     <TableCell className="font-mono text-xs text-muted-foreground">{job.jobId}</TableCell>
                     <TableCell className="text-xs font-medium">{job.jobType.replace(/_/g, " ")}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{job.targetTable}</TableCell>
@@ -277,6 +291,51 @@ export default function LakehouseJobs() {
         </div>
       )}
 
+      {/* Job Detail Sheet */}
+      <Sheet open={selectedJobId !== null} onOpenChange={(open) => { if (!open) setSelectedJobId(null); }}>
+        <SheetContent className="w-[480px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle className="text-sm">Job Detail</SheetTitle>
+          </SheetHeader>
+          {jobDetailQuery.isLoading ? (
+            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+          ) : jobDetailQuery.data ? (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                {([
+                  ["Job ID", jobDetailQuery.data.jobId],
+                  ["Type", jobDetailQuery.data.jobType],
+                  ["Table", jobDetailQuery.data.targetTable],
+                  ["Status", jobDetailQuery.data.status.toUpperCase()],
+                  ["Rows Processed", jobDetailQuery.data.rowsProcessed?.toLocaleString() ?? "—"],
+                  ["Duration", jobDetailQuery.data.durationMs ? `${(jobDetailQuery.data.durationMs / 1000).toFixed(1)}s` : "—"],
+                  ["Triggered By", jobDetailQuery.data.triggeredBy ?? "scheduler"],
+                  ["Created", new Date(jobDetailQuery.data.createdAt).toLocaleString()],
+                ] as [string, string][]).map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-sm font-medium text-foreground">{value}</p>
+                  </div>
+                ))}
+              </div>
+              {jobDetailQuery.data.errorMessage && (
+                <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3">
+                  <p className="text-xs font-semibold text-red-400 mb-1">Error</p>
+                  <pre className="text-xs text-red-300 whitespace-pre-wrap">{jobDetailQuery.data.errorMessage}</pre>
+                </div>
+              )}
+              {(jobDetailQuery.data.status === "failed" || jobDetailQuery.data.status === "completed") && (
+                <Button className="w-full" variant="outline"
+                  onClick={() => retriggerJobMutation.mutate({ id: selectedJobId! })}
+                  disabled={retriggerJobMutation.isPending}>
+                  {retriggerJobMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+                  Re-trigger Job
+                </Button>
+              )}
+            </div>
+          ) : null}
+        </SheetContent>
+      </Sheet>
       {/* Trigger Job Dialog */}
       <Dialog open={triggerDialog} onOpenChange={setTriggerDialog}>
         <DialogContent>

@@ -122,6 +122,38 @@ export default function TraderDeclarations() {
           </div>
         </div>
 
+        {/* Quick-filter status pills */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { value: "ALL", label: "All", icon: null },
+            { value: "submitted", label: "Submitted", icon: <Clock className="h-3 w-3" /> },
+            { value: "under_review", label: "Under Review", icon: <Search className="h-3 w-3" /> },
+            { value: "green_lane", label: "Green Lane", icon: <CheckCircle2 className="h-3 w-3" /> },
+            { value: "yellow_lane", label: "Yellow Lane", icon: <Clock className="h-3 w-3" /> },
+            { value: "red_lane", label: "Red Lane", icon: <XCircle className="h-3 w-3" /> },
+            { value: "cleared", label: "Cleared", icon: <CheckCircle2 className="h-3 w-3" /> },
+            { value: "rejected", label: "Rejected", icon: <XCircle className="h-3 w-3" /> },
+          ].map(pill => (
+            <button
+              key={pill.value}
+              onClick={() => setStatusFilter(pill.value)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                statusFilter === pill.value
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-muted/40 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {pill.icon}
+              {pill.label}
+              {statusFilter === pill.value && pill.value !== "ALL" && data && (
+                <span className="ml-0.5 bg-primary-foreground/20 text-primary-foreground rounded-full px-1.5 py-0 text-[10px] font-bold">
+                  {data.length}{hasMore ? "+" : ""}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
         {/* Search + Filter bar */}
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">

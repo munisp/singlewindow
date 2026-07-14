@@ -1690,4 +1690,32 @@ ${riskScore !== null ? `<div class="section"><div class="section-title">Risk Ass
         .limit(input.limit);
       return rows;
     }),
+
+  /**
+   * v95: Get risk score change history for a declaration (from audit events).
+   */
+  getRiskScoreHistory: protectedProcedure
+    .input(z.object({ declarationId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return [];
+      const { auditEvents } = await import("../../drizzle/schema");
+      const { eq, and, desc } = await import("drizzle-orm");
+      const rows = await db.select().from(auditEvents)
+        .where(and(
+          eq(auditEvents.entityType, "declaration"),
+          eq(auditEvents.entityId, input.declarationId),
+        ))
+        .orderBy(desc(auditEvents.createdAt))
+        .limit(100);
+      // Filter to events that contain risk score information
+      return rows.filter(r => {
+        const ns = r.newState as any;
+        const ps = r.previousState as any;
+        return ns?.riskScore !== undefined || ps?.riskScore !== undefined ||
+               ns?.riskLane !== undefined || ps?.riskLane !== undefined ||
+               r.action === "risk_score_updated" || r.action === "lane_assigned";
+      });
+    }),
 });

@@ -3,12 +3,13 @@
  * Real-time system health dashboard that polls /api/health every 15 seconds.
  * Visualises component health, uptime, response latencies, and DEMO_MODE state.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc";
-import { useAuth } from "@/_core/hooks/useAuth";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip as RechartsTooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
+} from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -47,7 +48,9 @@ import {
   RotateCcw,
   Save,
 } from "lucide-react";
-import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -183,185 +186,453 @@ function Sparkline({ history }: { history: HistoryPoint[] }) {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Cron Execution Charts ───────────────────────────────────────────────────
 
-// ─── Threshold Settings Panel ────────────────────────────────────────────────
+const CRON_COLORS = {
+  success: "#16a34a",
+  error: "#dc2626",
+};
 
-function ThresholdSettings() {
+const PIE_COLORS = ["#16a34a", "#dc2626"];
+
+function CronExecutionCharts() {
+  const [selectedJob, setSelectedJob] = useState<string | undefined>(undefined);
+  const [showThresholdEditor, setShowThresholdEditor] = useState(false);
+  const [editingThreshold, setEditingThreshold] = useState<{ componentName: string; degradedMs: number } | null>(null);
   const { user } = useAuth();
+  const { toast } = useToast();
   const utils = trpc.useUtils();
-  const { data: thresholds, isLoading } = trpc.healthThresholds.list.useQuery();
-  const [edits, setEdits] = useState<Record<string, { degradedMs: number; unhealthyMs: number }>>({});
-
-  const updateMutation = trpc.healthThresholds.update.useMutation({
-    onSuccess: (d) => {
-      toast.success(`Threshold saved for ${d.componentName}`);
-      utils.healthThresholds.list.invalidate();
-    },
-    onError: (e) => toast.error(`Save failed: ${e.message}`),
-  });
-
-  const resetMutation = trpc.healthThresholds.reset.useMutation({
-    onSuccess: (d) => {
-      toast.success(`Reset to defaults for ${d.componentName}`);
-      setEdits((prev) => { const n = { ...prev }; delete n[d.componentName]; return n; });
-      utils.healthThresholds.list.invalidate();
-    },
-    onError: (e) => toast.error(`Reset failed: ${e.message}`),
-  });
-
-  const resetAllMutation = trpc.healthThresholds.resetAll.useMutation({
-    onSuccess: () => {
-      toast.success("All thresholds reset to defaults");
-      setEdits({});
-      utils.healthThresholds.list.invalidate();
-    },
-    onError: (e) => toast.error(`Reset all failed: ${e.message}`),
-  });
-
   const isAdmin = user?.role === "admin";
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        <span>Loading thresholds…</span>
-      </div>
-    );
-  }
+  const updateThresholdMutation = trpc.healthThresholds.update.useMutation({
+    onSuccess: (data) => {
+      toast({ title: "Threshold updated", description: `${data.componentName} threshold saved.` });
+      utils.healthThresholds.list.invalidate();
+      setEditingThreshold(null);
+    },
+    onError: (e) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
+  });
+
+  const resetThresholdMutation = trpc.healthThresholds.reset.useMutation({
+    onSuccess: (data) => {
+      toast({ title: "Threshold reset", description: `${data.componentName} reset to default.` });
+      utils.healthThresholds.list.invalidate();
+    },
+    onError: (e) => toast({ title: "Reset failed", description: e.message, variant: "destructive" }),
+  });
+
+  const { data: runHistory, isLoading } = trpc.heartbeatJobs.listRunHistory.useQuery(
+    { jobName: selectedJob, limit: 100 },
+    { refetchInterval: 30_000 }
+  );
+
+  const { data: jobDefs } = trpc.heartbeatJobs.listJobs.useQuery();
+
+  // Load health thresholds to determine acceptable error-rate bounds
+  // We use a simple heuristic: if a job's error rate > (1 - successRate/100) exceeds
+  // the "degraded" threshold (mapped as errorRateThreshold = 20% default), flag it.
+  const { data: thresholds } = trpc.healthThresholds.list.useQuery(
+    undefined,
+    { refetchInterval: 60_000 }
+  );
+
+  // Derive per-job error-rate threshold from health_thresholds.
+  // We repurpose degradedMs as an error-rate % threshold when the component name
+  // matches a cron job name. Fallback: 20% error rate triggers a warning.
+  const CRON_ERROR_RATE_THRESHOLD = 20; // percent
+  const jobThresholdMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    thresholds?.forEach((t: any) => {
+      // degradedMs / 10 gives a rough % threshold (e.g. 200ms → 20%)
+      map[t.componentName] = Math.min(50, Math.max(5, Math.round(t.degradedMs / 10)));
+    });
+    return map;
+  }, [thresholds]);
+
+  // Derive unique job names from history
+  const jobNames = useMemo(() => {
+    const names = new Set<string>();
+    runHistory?.forEach((r: any) => names.add(r.jobName));
+    return Array.from(names).sort();
+  }, [runHistory]);
+
+  // Success rate donut data
+  const successRateData = useMemo(() => {
+    if (!runHistory || runHistory.length === 0) return [];
+    const successCount = runHistory.filter((r: any) => r.status === "success").length;
+    const errorCount = runHistory.length - successCount;
+    return [
+      { name: "Success", value: successCount },
+      { name: "Error", value: errorCount },
+    ];
+  }, [runHistory]);
+
+  // Per-job success rate bar data (with threshold-aware alert flag)
+  const jobSuccessRates = useMemo(() => {
+    if (!runHistory || runHistory.length === 0) return [];
+    const byJob: Record<string, { total: number; success: number; avgDurationMs: number }> = {};
+    for (const r of runHistory as any[]) {
+      if (!byJob[r.jobName]) byJob[r.jobName] = { total: 0, success: 0, avgDurationMs: 0 };
+      byJob[r.jobName].total++;
+      if (r.status === "success") byJob[r.jobName].success++;
+      byJob[r.jobName].avgDurationMs += r.durationMs ?? 0;
+    }
+    return Object.entries(byJob).map(([jobName, stats]) => {
+      const successRate = Math.round((stats.success / stats.total) * 100);
+      const errorRate = 100 - successRate;
+      const threshold = jobThresholdMap[jobName] ?? CRON_ERROR_RATE_THRESHOLD;
+      return {
+        jobName: jobName.replace(/_/g, " ").replace(/([A-Z])/g, " $1").trim(),
+        rawJobName: jobName,
+        successRate,
+        errorRate,
+        totalRuns: stats.total,
+        avgDurationMs: Math.round(stats.avgDurationMs / stats.total),
+        aboveThreshold: errorRate > threshold,
+        threshold,
+      };
+    });
+  }, [runHistory, jobThresholdMap]);
+
+  // Jobs currently above their error-rate threshold
+  const alertingJobs = useMemo(
+    () => jobSuccessRates.filter((j) => j.aboveThreshold),
+    [jobSuccessRates]
+  );
+
+  // Timeline bar chart: last 20 runs grouped by hour
+  const timelineData = useMemo(() => {
+    if (!runHistory || runHistory.length === 0) return [];
+    const hourMap: Record<string, { success: number; error: number }> = {};
+    for (const r of (runHistory as any[]).slice(0, 50)) {
+      const hour = new Date(r.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      if (!hourMap[hour]) hourMap[hour] = { success: 0, error: 0 };
+      if (r.status === "success") hourMap[hour].success++;
+      else hourMap[hour].error++;
+    }
+    return Object.entries(hourMap)
+      .slice(-12)
+      .map(([time, counts]) => ({ time, ...counts }));
+  }, [runHistory]);
+
+  const successRate = successRateData.length > 0
+    ? Math.round((successRateData[0]?.value / (successRateData[0]?.value + (successRateData[1]?.value ?? 0))) * 100)
+    : 0;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Configure per-component latency thresholds. Components exceeding the
-          <strong> Degraded</strong> threshold are shown in amber;
-          exceeding <strong>Unhealthy</strong> in red.
-        </p>
-        {isAdmin && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => resetAllMutation.mutate()}
-            disabled={resetAllMutation.isPending}
-            className="gap-1.5 shrink-0"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Reset All
-          </Button>
-        )}
-      </div>
-
-      {!isAdmin && (
-        <div className="rounded-md border border-amber-200 bg-amber-50/40 px-4 py-3 text-sm text-amber-800">
-          <AlertTriangle className="inline h-4 w-4 mr-1.5" />
-          Threshold editing requires admin role. You can view current values below.
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Cron Job Execution History
+            </CardTitle>
+            <CardDescription>
+              Success rates and execution timeline for scheduled background jobs.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedJob ?? ""}
+              onChange={e => setSelectedJob(e.target.value || undefined)}
+              className="text-xs border rounded px-2 py-1 bg-background text-foreground"
+            >
+              <option value="">All Jobs</option>
+              {jobNames.map(name => (
+                <option key={name} value={name}>{name.replace(/_/g, " ")}</option>
+              ))}
+            </select>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowThresholdEditor(v => !v)}
+                className={showThresholdEditor ? "bg-accent/10 border-accent" : ""}
+              >
+                <Settings2 className="h-3.5 w-3.5 mr-1" />
+                Thresholds
+              </Button>
+            )}
+          </div>
         </div>
-      )}
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading execution history…</span>
+          </div>
+        ) : !runHistory || runHistory.length === 0 ? (
+          <div className="py-8 text-center text-muted-foreground">
+            <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">No cron execution records found.</p>
+            <p className="text-xs mt-1">Records appear after the first scheduled job runs.</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {/* Summary KPIs */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-muted/30 rounded-lg p-3">
+                <p className="text-xs text-muted-foreground">Total Runs</p>
+                <p className="text-2xl font-bold">{runHistory.length}</p>
+              </div>
+              <div className={`rounded-lg p-3 ${successRate < 80 ? "bg-amber-50" : "bg-green-50"}`}>
+                <p className="text-xs text-muted-foreground">Success Rate</p>
+                <p className={`text-2xl font-bold ${successRate < 80 ? "text-amber-600" : "text-green-600"}`}>{successRate}%</p>
+              </div>
+              <div className={`rounded-lg p-3 ${(successRateData[1]?.value ?? 0) > 0 ? "bg-red-50" : "bg-muted/30"}`}>
+                <p className="text-xs text-muted-foreground">Failures</p>
+                <p className={`text-2xl font-bold ${(successRateData[1]?.value ?? 0) > 0 ? "text-red-600" : "text-foreground"}`}>
+                  {successRateData[1]?.value ?? 0}
+                </p>
+              </div>
+            </div>
 
-      <div className="space-y-3">
-        {(thresholds ?? []).map((t) => {
-          const local = edits[t.componentName];
-          const degradedVal = local?.degradedMs ?? t.degradedMs;
-          const unhealthyVal = local?.unhealthyMs ?? t.unhealthyMs;
-          const isDirty = !!local;
-
-          return (
-            <Card key={t.componentName}>
-              <CardContent className="pt-4 pb-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-sm truncate">{t.componentName}</p>
-                    {t.isCustomised && (
-                      <p className="text-xs text-muted-foreground">
-                        Last edited by {t.updatedBy} ·{" "}
-                        {t.updatedAt ? new Date(t.updatedAt).toLocaleDateString() : ""}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <Label className="text-xs text-amber-700 w-20">Degraded (ms)</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={60000}
-                        value={degradedVal}
-                        disabled={!isAdmin}
-                        onChange={(e) =>
-                          setEdits((prev) => ({
-                            ...prev,
-                            [t.componentName]: {
-                              degradedMs: Number(e.target.value),
-                              unhealthyMs: prev[t.componentName]?.unhealthyMs ?? t.unhealthyMs,
-                            },
-                          }))
-                        }
-                        className="w-24 h-7 text-xs"
-                      />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <Label className="text-xs text-red-700 w-22">Unhealthy (ms)</Label>
-                      <Input
-                        type="number"
-                        min={1}
-                        max={60000}
-                        value={unhealthyVal}
-                        disabled={!isAdmin}
-                        onChange={(e) =>
-                          setEdits((prev) => ({
-                            ...prev,
-                            [t.componentName]: {
-                              degradedMs: prev[t.componentName]?.degradedMs ?? t.degradedMs,
-                              unhealthyMs: Number(e.target.value),
-                            },
-                          }))
-                        }
-                        className="w-24 h-7 text-xs"
-                      />
-                    </div>
-
-                    {isAdmin && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant={isDirty ? "default" : "outline"}
-                          disabled={!isDirty || updateMutation.isPending}
-                          onClick={() =>
-                            updateMutation.mutate({
-                              componentName: t.componentName,
-                              degradedMs: degradedVal,
-                              unhealthyMs: unhealthyVal,
-                            })
-                          }
-                          className="h-7 px-2 gap-1 text-xs"
-                        >
-                          <Save className="h-3 w-3" />
-                          Save
-                        </Button>
-                        {t.isCustomised && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={resetMutation.isPending}
-                            onClick={() => resetMutation.mutate({ componentName: t.componentName })}
-                            className="h-7 px-2 gap-1 text-xs text-muted-foreground"
-                          >
-                            <RotateCcw className="h-3 w-3" />
-                            Reset
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </div>
+            {/* Threshold alert banner */}
+            {alertingJobs.length > 0 && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">
+                    {alertingJobs.length} job{alertingJobs.length > 1 ? "s" : ""} above error-rate threshold
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {alertingJobs.map((j) => (
+                      <span key={j.rawJobName} className="inline-flex items-center gap-1 mr-2">
+                        <span className="font-mono">{j.rawJobName}</span>
+                        <span className="text-amber-600">({j.errorRate}% errors &gt; {j.threshold}% threshold)</span>
+                      </span>
+                    ))}
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
+              </div>
+            )}
+
+            {/* Inline threshold editor (admin only) */}
+            {isAdmin && showThresholdEditor && thresholds && (
+              <div className="border rounded-lg p-4 bg-muted/20">
+                <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                  <Settings2 className="h-4 w-4" />
+                  Edit Error-Rate Thresholds
+                  <span className="text-xs font-normal text-muted-foreground ml-1">
+                    (degradedMs ÷ 10 = error-rate % threshold, clamped 5–50%)
+                  </span>
+                </p>
+                <div className="space-y-2">
+                  {thresholds.map((t: any) => {
+                    const isEditing = editingThreshold?.componentName === t.componentName;
+                    const derivedThreshold = Math.min(50, Math.max(5, Math.round(t.degradedMs / 10)));
+                    return (
+                      <div key={t.componentName} className="flex items-center gap-3 py-1.5 border-b last:border-0">
+                        <span className="font-mono text-xs w-32 shrink-0 text-foreground">{t.componentName}</span>
+                        {isEditing ? (
+                          <>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground">degradedMs:</span>
+                              <Input
+                                type="number"
+                                min={50}
+                                max={10000}
+                                value={editingThreshold!.degradedMs}
+                                onChange={e => setEditingThreshold(prev => prev ? { ...prev, degradedMs: Number(e.target.value) } : null)}
+                                className="h-7 w-24 text-xs"
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                → {Math.min(50, Math.max(5, Math.round(editingThreshold!.degradedMs / 10)))}% error threshold
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={updateThresholdMutation.isPending}
+                              onClick={() => updateThresholdMutation.mutate({
+                                componentName: t.componentName,
+                                degradedMs: editingThreshold!.degradedMs,
+                                unhealthyMs: t.unhealthyMs,
+                              })}
+                            >
+                              <Save className="h-3 w-3 mr-1" />
+                              Save
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setEditingThreshold(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-xs text-muted-foreground">
+                              {t.degradedMs}ms → <strong>{derivedThreshold}%</strong> error threshold
+                              {t.isDefault && <span className="ml-1 text-[10px] bg-muted px-1 rounded">default</span>}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs ml-auto"
+                              onClick={() => setEditingThreshold({ componentName: t.componentName, degradedMs: t.degradedMs })}
+                            >
+                              Edit
+                            </Button>
+                            {!t.isDefault && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-red-600 hover:text-red-700"
+                                disabled={resetThresholdMutation.isPending}
+                                onClick={() => resetThresholdMutation.mutate({ componentName: t.componentName })}
+                              >
+                                <RotateCcw className="h-3 w-3 mr-1" />
+                                Reset
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Success/Failure donut */}
+              <div>
+                <p className="text-sm font-medium mb-3">Overall Success Rate</p>
+                <div style={{ height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={successRateData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={80}
+                        dataKey="value"
+                        label={({ name, value }) => `${name}: ${value}`}
+                        labelLine={false}
+                      >
+                        {successRateData.map((_, idx) => (
+                          <Cell key={idx} fill={PIE_COLORS[idx]} />
+                        ))}
+                      </Pie>
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Execution timeline */}
+              <div>
+                <p className="text-sm font-medium mb-3">Execution Timeline (last 50 runs)</p>
+                <div style={{ height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={timelineData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="time" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                      <RechartsTooltip />
+                      <Bar dataKey="success" stackId="a" fill={CRON_COLORS.success} name="Success" />
+                      <Bar dataKey="error" stackId="a" fill={CRON_COLORS.error} name="Error" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            {/* Per-job success rates */}
+            {jobSuccessRates.length > 1 && (
+              <div>
+                <p className="text-sm font-medium mb-3">Success Rate by Job</p>
+                <div style={{ height: Math.max(160, jobSuccessRates.length * 36) }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={jobSuccessRates}
+                      layout="vertical"
+                      margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
+                      <YAxis dataKey="jobName" type="category" tick={{ fontSize: 10 }} width={120} />
+                      <RechartsTooltip
+                        formatter={(val: any, _name: any, props: any) => {
+                          const item = props.payload;
+                          const color = item?.aboveThreshold ? "#dc2626" : "#16a34a";
+                          return [<span style={{ color }}>{val}%</span>, "Success Rate"];
+                        }}
+                      />
+                      <Bar
+                        dataKey="successRate"
+                        name="Success Rate"
+                        radius={[0, 3, 3, 0]}
+                        fill="#16a34a"
+                      >
+                        {jobSuccessRates.map((entry, index) => (
+                          <Cell
+                            key={`cell-${index}`}
+                            fill={entry.aboveThreshold ? "#dc2626" : "#16a34a"}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Recent runs table */}
+            <div>
+              <p className="text-sm font-medium mb-2">Recent Executions</p>
+              <div className="overflow-x-auto rounded border">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Job</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Trigger</th>
+                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Duration</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Started At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {(runHistory as any[]).slice(0, 15).map((r: any) => (
+                      <tr key={r.id} className="hover:bg-muted/20">
+                        <td className="px-3 py-2 font-mono">{r.jobName}</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            r.status === "success"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}>
+                            {r.status === "success" ? (
+                              <CheckCircle2 className="h-2.5 w-2.5" />
+                            ) : (
+                              <XCircle className="h-2.5 w-2.5" />
+                            )}
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{r.triggeredBy ?? "scheduler"}</td>
+                        <td className="px-3 py-2 text-right font-mono">
+                          {r.durationMs != null ? `${r.durationMs}ms` : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {r.startedAt ? new Date(r.startedAt).toLocaleString() : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -732,6 +1003,9 @@ export default function SystemStatus() {
               </CardContent>
             </Card>
 
+            {/* ── Cron Job Execution History ─────────────────────────────── */}
+            <CronExecutionCharts />
+
             {/* Footer */}
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
@@ -742,31 +1016,6 @@ export default function SystemStatus() {
             </div>
           </>
         )}
-
-        {/* Threshold Settings Tab */}
-        <div className="mt-8">
-          <Tabs defaultValue="status">
-            <TabsList>
-              <TabsTrigger value="status" className="gap-2">
-                <Activity className="h-4 w-4" />
-                Live Status
-              </TabsTrigger>
-              <TabsTrigger value="thresholds" className="gap-2">
-                <Settings2 className="h-4 w-4" />
-                Alert Thresholds
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="status">
-              <p className="text-sm text-muted-foreground py-4">
-                Live status is shown in the dashboard above. Switch to the Alert Thresholds tab
-                to configure per-component latency limits.
-              </p>
-            </TabsContent>
-            <TabsContent value="thresholds" className="pt-4">
-              <ThresholdSettings />
-            </TabsContent>
-          </Tabs>
-        </div>
       </div>
     </TooltipProvider>
   );

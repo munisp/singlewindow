@@ -160,4 +160,32 @@ export const temporalRunsRouter = router({
     .query(async () => {
       return WORKFLOW_TYPES;
     }),
+
+  /**
+   * v94: Get the input payload history for a specific workflow type (last N runs).
+   */
+  getWorkflowInputHistory: protectedProcedure
+    .input(z.object({
+      workflowType: z.string().min(1),
+      limit: z.number().int().min(1).max(50).default(10),
+    }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) return [];
+      const { temporalWorkflowRuns } = await import("../../drizzle/schema");
+      const { eq, desc } = await import("drizzle-orm");
+      const rows = await db.select({
+        id: temporalWorkflowRuns.id,
+        workflowId: temporalWorkflowRuns.workflowId,
+        input: temporalWorkflowRuns.input,
+        startedAt: temporalWorkflowRuns.startedAt,
+        status: temporalWorkflowRuns.status,
+      })
+        .from(temporalWorkflowRuns)
+        .where(eq(temporalWorkflowRuns.workflowType, input.workflowType))
+        .orderBy(desc(temporalWorkflowRuns.startedAt))
+        .limit(input.limit);
+      return rows;
+    }),
 });

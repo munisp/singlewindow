@@ -412,4 +412,19 @@ export const systemRouter = router({
         checkedAt: Date.now(),
       };
     }),
+
+  /**
+   * v104: Get a composite platform health score (0-100) based on service statuses.
+   */
+  getPlatformHealthScore: publicProcedure.query(async () => {
+    const healthMap = await getServiceHealthSummary();
+    const entries = Object.entries(healthMap);
+    const total = entries.length;
+    if (total === 0) return { score: 100, status: "healthy", healthy: 0, down: 0, total: 0, services: {} };
+    const healthy = entries.filter(([, ok]) => ok === true).length;
+    const down = total - healthy;
+    const score = Math.round((healthy / total) * 100);
+    const overallStatus = down === 0 ? "healthy" : down <= 2 ? "degraded" : "critical";
+    return { score, status: overallStatus, healthy, down, total, services: healthMap };
+  }),
 });

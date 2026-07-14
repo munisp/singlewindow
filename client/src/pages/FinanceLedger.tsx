@@ -50,6 +50,7 @@ import {
   ArrowRight,
   BarChart3,
   Loader2,
+  Download,
 } from "lucide-react";
 
 // ─── Account colour map ───────────────────────────────────────────────────────
@@ -277,6 +278,30 @@ function RiskScorerPanel() {
 
 export default function FinanceLedger() {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState("");
+  const [exportEndDate, setExportEndDate] = useState("");
+  const [exportEntryType, setExportEntryType] = useState("all");
+
+  const exportCSVMutation = trpc.ledger.exportCSV.useMutation();
+  const [emailLoading, setEmailLoading] = useState(false);
+  const emailCSVMutation = trpc.finance.emailCSV.useMutation();
+
+  const handleEmailCSV = async () => {
+    setEmailLoading(true);
+    try {
+      const result = await emailCSVMutation.mutateAsync({
+        startDate: exportStartDate ? new Date(exportStartDate).toISOString() : undefined,
+        endDate: exportEndDate ? new Date(exportEndDate).toISOString() : undefined,
+        limit: 5000,
+      });
+      toast.success(`Export summary sent to your Notification Centre (${result.rowCount} records)`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "Failed to send export notification");
+    } finally {
+      setEmailLoading(false);
+    }
+  };
 
   const summaryQuery = trpc.ledger.getSummary.useQuery(undefined, {
     retry: false,
@@ -286,6 +311,30 @@ export default function FinanceLedger() {
   const refresh = () => {
     setRefreshKey(k => k + 1);
     summaryQuery.refetch();
+  };
+
+  const handleExportCSV = async () => {
+    setExportLoading(true);
+    try {
+      const result = await exportCSVMutation.mutateAsync({
+        startDate: exportStartDate ? new Date(exportStartDate).toISOString() : undefined,
+        endDate: exportEndDate ? new Date(exportEndDate).toISOString() : undefined,
+        entryType: exportEntryType !== "all" ? exportEntryType : undefined,
+        limit: 5000,
+      });
+      const blob = new Blob([result.csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${result.rowCount} ledger entries`);
+    } catch (e: any) {
+      toast.error(e?.message ?? "CSV export failed");
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const summary = summaryQuery.data as any;
@@ -325,8 +374,132 @@ export default function FinanceLedger() {
             <RefreshCw className="w-4 h-4 mr-1" />
             Refresh
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exportLoading}
+            onClick={handleExportCSV}
+            className="border-[#D4A017]/50 text-[#D4A017] hover:bg-[#D4A017]/10"
+          >
+            {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+            Export CSV
+          </Button>
         </div>
       </div>
+
+      {/* CSV Export Filters */}
+      <Card className="bg-[#0D1F3C] border-[#1E3A5F]">
+        <CardContent className="p-4">
+          <div className="space-y-3">
+            {/* Quick-preset date range buttons */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-gray-400 text-xs font-medium">Quick range:</span>
+              {[
+                { label: "Last 7d",  days: 7 },
+                { label: "Last 30d", days: 30 },
+                { label: "Last 90d", days: 90 },
+                { label: "This Year", days: null },
+              ].map((preset) => {
+                const isActive = (() => {
+                  if (preset.days === null) {
+                    const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString().split("T")[0];
+                    return exportStartDate === yearStart && exportEndDate === "";
+                  }
+                  const expected = new Date(Date.now() - preset.days * 86400_000).toISOString().split("T")[0];
+                  return exportStartDate === expected && exportEndDate === "";
+                })();
+                return (
+                  <button
+                    key={preset.label}
+                    onClick={() => {
+                      if (preset.days === null) {
+                        setExportStartDate(new Date(new Date().getFullYear(), 0, 1).toISOString().split("T")[0]);
+                      } else {
+                        setExportStartDate(new Date(Date.now() - preset.days * 86400_000).toISOString().split("T")[0]);
+                      }
+                      setExportEndDate("");
+                    }}
+                    className={`px-2.5 py-1 rounded text-xs font-medium border transition-all ${
+                      isActive
+                        ? "bg-[#D4A017] text-[#0A1628] border-[#D4A017]"
+                        : "bg-transparent text-[#D4A017] border-[#D4A017]/40 hover:bg-[#D4A017]/10"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              {(exportStartDate || exportEndDate) && (
+                <button
+                  onClick={() => { setExportStartDate(""); setExportEndDate(""); }}
+                  className="px-2.5 py-1 rounded text-xs font-medium border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-all"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-gray-400 text-xs">From Date</Label>
+              <Input
+                type="date"
+                value={exportStartDate}
+                onChange={(e) => setExportStartDate(e.target.value)}
+                className="bg-[#0A1628] border-[#1E3A5F] text-white text-sm w-36"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-gray-400 text-xs">To Date</Label>
+              <Input
+                type="date"
+                value={exportEndDate}
+                onChange={(e) => setExportEndDate(e.target.value)}
+                className="bg-[#0A1628] border-[#1E3A5F] text-white text-sm w-36"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-gray-400 text-xs">Entry Type</Label>
+              <Select value={exportEntryType} onValueChange={setExportEntryType}>
+                <SelectTrigger className="bg-[#0A1628] border-[#1E3A5F] text-white text-sm w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#0D1F3C] border-[#1E3A5F]">
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="duty_payment">Duty Payment</SelectItem>
+                  <SelectItem value="bond_deposit">Bond Deposit</SelectItem>
+                  <SelectItem value="bond_release">Bond Release</SelectItem>
+                  <SelectItem value="drawback_payment">Drawback Payment</SelectItem>
+                  <SelectItem value="transit_guarantee">Transit Guarantee</SelectItem>
+                  <SelectItem value="penalty">Penalty</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                disabled={exportLoading}
+                onClick={handleExportCSV}
+                className="bg-[#D4A017] hover:bg-[#B8860B] text-[#0A1628] font-semibold"
+              >
+                {exportLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />}
+                Download CSV
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={emailLoading}
+                onClick={handleEmailCSV}
+                className="border-[#D4A017]/40 text-[#D4A017] hover:bg-[#D4A017]/10"
+              >
+                {emailLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <span className="mr-1 text-base leading-none">📬</span>}
+                Send to Inbox
+              </Button>
+            </div>
+          </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Account Balances */}
       {summaryQuery.isLoading ? (

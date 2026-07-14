@@ -3,6 +3,7 @@
  * Tables: cep_patterns, cep_alerts
  */
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb, getPool } from "../db";
 import { randomUUID } from "crypto";
@@ -459,5 +460,65 @@ export const cepRouter = router({
         threshold: r.daily_alert_threshold,
         todayCount: parseInt(r.today_count, 10),
       }));
+    }),
+
+  /**
+   * v102: Export all CEP patterns as JSON for backup/migration.
+   */
+  exportCepPatterns: protectedProcedure.query(async () => {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) return [];
+    const { cepPatterns } = await import("../../drizzle/schema");
+    const { desc } = await import("drizzle-orm");
+    return db.select().from(cepPatterns).orderBy(desc(cepPatterns.createdAt));
+  }),
+
+  /**
+   * v102: Import CEP patterns from a JSON array (upsert by patternName).
+   */
+  importCepPatterns: protectedProcedure
+    .input(z.object({
+      patterns: z.array(z.object({
+        patternName: z.string().min(1).max(200),
+        description: z.string().optional(),
+        ruleDefinition: z.record(z.string(), z.unknown()),
+        severity: z.enum(["low", "medium", "high", "critical"]).default("medium"),
+        isActive: z.boolean().default(true),
+        windowDurationMs: z.number().int().min(0).optional(),
+        alertThreshold: z.number().int().min(0).optional(),
+      })).min(1).max(500),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { cepPatterns } = await import("../../drizzle/schema");
+      let imported = 0;
+      for (const p of input.patterns) {
+        const patId = `imported-${p.patternName.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 80)}`;
+        await db.insert(cepPatterns).values({
+          patternId: patId,
+          name: p.patternName,
+          description: p.description,
+          parameters: p.ruleDefinition,
+          status: p.isActive ? "enabled" as any : "disabled" as any,
+          dailyAlertThreshold: p.alertThreshold,
+        }).onConflictDoUpdate({
+          target: cepPatterns.patternId,
+          set: {
+            name: p.patternName,
+            description: p.description,
+            parameters: p.ruleDefinition,
+            status: p.isActive ? "enabled" as any : "disabled" as any,
+            dailyAlertThreshold: p.alertThreshold,
+            updatedAt: new Date(),
+          },
+        });
+        imported++;
+      }
+      return { imported };
     }),
 });

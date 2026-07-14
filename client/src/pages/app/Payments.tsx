@@ -67,6 +67,71 @@ export default function Payments() {
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const isAdmin = user?.role === "admin";
+  const isFinance = user?.role === "finance";
+  const canExportAll = isAdmin || isFinance;
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportPreset, setExportPreset] = useState<"7" | "30" | "90" | "year" | "all">("30");
+
+  const exportMyHistoryMutation = trpc.payments.exportMyHistory.useMutation();
+  const exportAllMutation = trpc.finance.exportCSV.useMutation();
+  const emailMyHistoryMutation = trpc.payments.emailMyHistory.useMutation();
+  const emailAllMutation = trpc.finance.emailCSV.useMutation();
+  const [emailLoading, setEmailLoading] = useState(false);
+
+  const handleSendToInbox = async () => {
+    setEmailLoading(true);
+    try {
+      const dates = getPresetDates(exportPreset);
+      let result: { success: boolean; rowCount: number; dateRange: string };
+      if (canExportAll) {
+        result = await emailAllMutation.mutateAsync({ ...dates, limit: 5000 });
+      } else {
+        result = await emailMyHistoryMutation.mutateAsync({ ...dates, limit: 2000 });
+      }
+      toast({ title: "Sent to Notification Centre", description: `Summary of ${result.rowCount} records (${result.dateRange}) delivered to your inbox` });
+    } catch (e: any) {
+      toast({ title: "Send failed", description: e?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  function getPresetDates(preset: string): { startDate?: string; endDate?: string } {
+    const now = new Date();
+    if (preset === "7")    return { startDate: new Date(now.getTime() - 7  * 86400_000).toISOString(), endDate: now.toISOString() };
+    if (preset === "30")   return { startDate: new Date(now.getTime() - 30 * 86400_000).toISOString(), endDate: now.toISOString() };
+    if (preset === "90")   return { startDate: new Date(now.getTime() - 90 * 86400_000).toISOString(), endDate: now.toISOString() };
+    if (preset === "year") return { startDate: new Date(now.getFullYear(), 0, 1).toISOString(), endDate: now.toISOString() };
+    return {}; // "all" — no date filter
+  }
+
+  const handleExportCSV = async () => {
+    setExportLoading(true);
+    try {
+      let result: { csv: string; rowCount: number; filename: string };
+      const dates = getPresetDates(exportPreset);
+      if (canExportAll) {
+        result = await exportAllMutation.mutateAsync({
+          ...dates,
+          limit: 5000,
+        });
+      } else {
+        result = await exportMyHistoryMutation.mutateAsync({ ...dates, limit: 2000 });
+      }
+      const blob = new Blob([result.csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: "Export complete", description: `Downloaded ${result.rowCount} payment records` });
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   const { data: historyData, isLoading: historyLoading } = trpc.payments.myHistory.useQuery(
     { limit: 50, offset: 0 },
@@ -148,13 +213,64 @@ export default function Payments() {
             Manage duty payments, track transactions, and reconcile ledger entries
           </p>
         </div>
-        <Button
-          onClick={() => setShowInitiateDialog(true)}
-          className="bg-accent hover:bg-[#b8891a] text-white"
-        >
-          <DollarSign className="w-4 h-4 mr-2" />
-          Initiate Payment
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Quick date-range presets */}
+          <div className="flex items-center gap-1 bg-muted/40 rounded-md p-1">
+            {([
+              { key: "7",    label: "7d" },
+              { key: "30",   label: "30d" },
+              { key: "90",   label: "90d" },
+              { key: "year", label: "YTD" },
+              { key: "all",  label: "All" },
+            ] as const).map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setExportPreset(p.key)}
+                className={`px-2 py-0.5 rounded text-xs font-medium transition-all ${
+                  exportPreset === p.key
+                    ? "bg-accent text-white"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exportLoading}
+            onClick={handleExportCSV}
+          >
+            {exportLoading ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4 mr-2" />
+            )}
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={emailLoading}
+            onClick={handleSendToInbox}
+            title="Send export summary to your Notification Centre"
+          >
+            {emailLoading ? (
+              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <span className="mr-2 text-base leading-none">📬</span>
+            )}
+            Send to Inbox
+          </Button>
+          <Button
+            onClick={() => setShowInitiateDialog(true)}
+            className="bg-accent hover:bg-[#b8891a] text-white"
+          >
+            <DollarSign className="w-4 h-4 mr-2" />
+            Initiate Payment
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}

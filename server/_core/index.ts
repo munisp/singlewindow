@@ -1472,6 +1472,22 @@ async function startServer() {
     app.post("/api/scheduled/lakehouse-rollup", lakehouseRollupHandler);
     console.log("[Heartbeat] /api/scheduled/lakehouse-rollup registered");
   }
+  // v106: Post-Clearance Audit Weekly Reminder — Heartbeat handler (Monday 06:00 UTC)
+  {
+    const { postAuditReminderHandler } = await import("../scheduled/postAuditReminder");
+    app.post("/api/scheduled/post-audit-reminder", postAuditReminderHandler);
+    console.log("[Heartbeat] /api/scheduled/post-audit-reminder registered");
+  }
+  {
+    const { slaBreachEscalationHandler } = await import("../scheduled/slaBreachEscalation");
+    app.post("/api/scheduled/sla-breach-escalation", slaBreachEscalationHandler);
+    console.log("[Heartbeat] /api/scheduled/sla-breach-escalation registered");
+  }
+  {
+    const { documentVaultExpiryHandler } = await import("../scheduled/documentVaultExpiry");
+    app.post("/api/scheduled/document-vault-expiry", documentVaultExpiryHandler);
+    console.log("[Heartbeat] /api/scheduled/document-vault-expiry registered");
+  }
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

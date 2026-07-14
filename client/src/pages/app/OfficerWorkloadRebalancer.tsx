@@ -10,7 +10,7 @@
  *   trpc.officerWorkload.autoRebalanceWorkload    — rebalance unassigned declarations
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Progress } from "@/components/ui/progress";
 import {
   Users,
   RefreshCw,
@@ -50,6 +51,8 @@ import {
   ArrowRightLeft,
   Eye,
   Play,
+  Loader2,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -118,6 +121,11 @@ export default function OfficerWorkloadRebalancer() {
     reason?: string;
   } | null>(null);
 
+  // Live-assignment progress state
+  const [liveProgress, setLiveProgress] = useState(0);
+  const [liveStatusMsg, setLiveStatusMsg] = useState("");
+  const liveProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const utils = trpc.useUtils();
 
   // Live queue distribution
@@ -135,6 +143,10 @@ export default function OfficerWorkloadRebalancer() {
   // Auto-rebalance mutation
   const rebalanceMutation = trpc.officerWorkload.autoRebalanceWorkload.useMutation({
     onSuccess: (result) => {
+      if (liveProgressRef.current) clearInterval(liveProgressRef.current);
+      setLiveProgress(100);
+      setLiveStatusMsg(result.dryRun ? "Preview ready" : "All assignments applied ✓");
+      setTimeout(() => { setLiveProgress(0); setLiveStatusMsg(""); }, 1800);
       setLastResult(result);
       if (result.dryRun) {
         toast.info("Dry-run complete", {
@@ -149,9 +161,46 @@ export default function OfficerWorkloadRebalancer() {
         utils.officerWorkload.getTeamSummary.invalidate();
       }
     },
-    onError: (err: { message: string }) =>
-      toast.error("Rebalance failed", { description: err.message }),
+    onError: (err: { message: string }) => {
+      if (liveProgressRef.current) clearInterval(liveProgressRef.current);
+      setLiveProgress(0);
+      setLiveStatusMsg("");
+      toast.error("Rebalance failed", { description: err.message });
+    },
   });
+
+  // Simulated live-progress ticker (runs while mutation is pending in live mode)
+  useEffect(() => {
+    if (rebalanceMutation.isPending && !dryRun) {
+      setLiveProgress(0);
+      setLiveStatusMsg("Scanning unassigned declarations…");
+      const steps = [
+        { pct: 15, msg: "Scanning unassigned declarations…" },
+        { pct: 35, msg: "Calculating officer capacity…" },
+        { pct: 55, msg: "Scoring workload balance…" },
+        { pct: 72, msg: "Generating assignment plan…" },
+        { pct: 88, msg: "Applying assignments to queue…" },
+        { pct: 95, msg: "Finalising and refreshing data…" },
+      ];
+      let idx = 0;
+      liveProgressRef.current = setInterval(() => {
+        if (idx < steps.length) {
+          setLiveProgress(steps[idx].pct);
+          setLiveStatusMsg(steps[idx].msg);
+          idx++;
+        } else {
+          if (liveProgressRef.current) clearInterval(liveProgressRef.current);
+        }
+      }, 420);
+    } else {
+      if (liveProgressRef.current) clearInterval(liveProgressRef.current);
+      if (!rebalanceMutation.isPending) {
+        setLiveProgress(0);
+        setLiveStatusMsg("");
+      }
+    }
+    return () => { if (liveProgressRef.current) clearInterval(liveProgressRef.current); };
+  }, [rebalanceMutation.isPending, dryRun]);
 
   const dist = distQuery.data;
   const summary = summaryQuery.data;
@@ -419,28 +468,51 @@ export default function OfficerWorkloadRebalancer() {
                   variant={dryRun ? "outline" : "default"}
                 >
                   {rebalanceMutation.isPending ? (
-                    <RefreshCw size={14} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin" />
                   ) : dryRun ? (
                     <Eye size={14} />
                   ) : (
                     <Play size={14} />
                   )}
                   {rebalanceMutation.isPending
-                    ? "Running…"
+                    ? dryRun ? "Previewing…" : "Applying…"
                     : dryRun
                     ? "Preview Rebalance"
                     : "Apply Rebalance"}
                 </Button>
 
-                {dryRun && (
+                {/* Live-mode progress banner */}
+                {rebalanceMutation.isPending && !dryRun && liveProgress > 0 && (
+                  <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={13} className="animate-spin text-primary shrink-0" />
+                      <span className="text-xs text-primary font-medium">{liveStatusMsg}</span>
+                    </div>
+                    <Progress value={liveProgress} className="h-1.5" />
+                    <p className="text-[10px] text-muted-foreground text-right">{liveProgress}%</p>
+                  </div>
+                )}
+
+                {/* Dry-run in-progress indicator */}
+                {rebalanceMutation.isPending && dryRun && (
+                  <div className="flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/5 p-2.5">
+                    <Loader2 size={13} className="animate-spin text-blue-400 shrink-0" />
+                    <span className="text-xs text-blue-400">Simulating assignment plan…</span>
+                  </div>
+                )}
+
+                {dryRun && !rebalanceMutation.isPending && (
                   <p className="text-[11px] text-muted-foreground text-center">
                     Dry run — no declarations will be reassigned.
                   </p>
                 )}
-                {!dryRun && (
-                  <p className="text-[11px] text-amber-500 text-center">
-                    Live mode — declarations will be reassigned immediately.
-                  </p>
+                {!dryRun && !rebalanceMutation.isPending && (
+                  <div className="flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
+                    <Info size={12} className="text-amber-500 shrink-0" />
+                    <p className="text-[11px] text-amber-500">
+                      Live mode — declarations will be reassigned immediately.
+                    </p>
+                  </div>
                 )}
               </CardContent>
             </Card>

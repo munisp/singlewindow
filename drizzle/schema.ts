@@ -2807,3 +2807,303 @@ export const healthThresholds = pgTable("health_thresholds", {
 ]);
 export type HealthThreshold = typeof healthThresholds.$inferSelect;
 export type InsertHealthThreshold = typeof healthThresholds.$inferInsert;
+
+// ─── Threshold Audit Log ──────────────────────────────────────────────────────
+export const thresholdAuditLog = pgTable("threshold_audit_log", {
+  id: serial("id").primaryKey(),
+  componentName: varchar("component_name", { length: 128 }).notNull(),
+  changedBy: varchar("changed_by", { length: 128 }).notNull(),
+  changedByUserId: integer("changed_by_user_id"),
+  fromDegradedMs: integer("from_degraded_ms").notNull(),
+  toDegradedMs: integer("to_degraded_ms").notNull(),
+  fromUnhealthyMs: integer("from_unhealthy_ms"),
+  toUnhealthyMs: integer("to_unhealthy_ms"),
+  changeReason: text("change_reason"),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_threshold_audit_component").on(t.componentName),
+  index("idx_threshold_audit_changed_at").on(t.changedAt),
+]);
+export type ThresholdAuditLog = typeof thresholdAuditLog.$inferSelect;
+export type InsertThresholdAuditLog = typeof thresholdAuditLog.$inferInsert;
+
+// ─── Export Schedules ─────────────────────────────────────────────────────────
+export const exportSchedules = pgTable("export_schedules", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  exportType: varchar("export_type", { length: 64 }).notNull(),
+  cadence: varchar("cadence", { length: 32 }).notNull().default("weekly"),
+  filterPreset: varchar("filter_preset", { length: 16 }).notNull().default("30"),
+  isActive: boolean("is_active").notNull().default(true),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_export_schedules_user").on(t.userId),
+  index("idx_export_schedules_next_run").on(t.nextRunAt),
+  index("idx_export_schedules_active").on(t.isActive),
+]);
+export type ExportSchedule = typeof exportSchedules.$inferSelect;
+export type InsertExportSchedule = typeof exportSchedules.$inferInsert;
+
+// ─── AEO Renewals ─────────────────────────────────────────────────────────────
+export const aeoRenewals = pgTable("aeo_renewals", {
+  id: serial("id").primaryKey(),
+  aeoApplicationId: integer("aeo_application_id").notNull(),
+  traderId: integer("trader_id").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  submittedAt: timestamp("submitted_at"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewedBy: integer("reviewed_by"),
+  reviewNotes: text("review_notes"),
+  expiryDate: timestamp("expiry_date"),
+  renewalDueDate: timestamp("renewal_due_date"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_aeo_renewals_trader").on(t.traderId),
+  index("idx_aeo_renewals_status").on(t.status),
+  index("idx_aeo_renewals_due").on(t.renewalDueDate),
+]);
+export type AeoRenewal = typeof aeoRenewals.$inferSelect;
+export type InsertAeoRenewal = typeof aeoRenewals.$inferInsert;
+
+// ─── Bond Expiry Alerts ───────────────────────────────────────────────────────
+export const bondExpiryAlerts = pgTable("bond_expiry_alerts", {
+  id: serial("id").primaryKey(),
+  bondId: integer("bond_id").notNull(),
+  traderId: integer("trader_id").notNull(),
+  alertType: varchar("alert_type", { length: 32 }).notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  notificationId: integer("notification_id"),
+}, (t) => [
+  index("idx_bond_expiry_alerts_bond").on(t.bondId),
+  index("idx_bond_expiry_alerts_trader").on(t.traderId),
+]);
+export type BondExpiryAlert = typeof bondExpiryAlerts.$inferSelect;
+export type InsertBondExpiryAlert = typeof bondExpiryAlerts.$inferInsert;
+
+// ─── Post-Clearance Audit Schedule ───────────────────────────────────────────
+export const postClearanceAuditSchedule = pgTable("post_clearance_audit_schedule", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull(),
+  traderId: integer("trader_id").notNull(),
+  scheduledBy: varchar("scheduled_by", { length: 64 }).notNull().default("system"),
+  auditType: varchar("audit_type", { length: 32 }).notNull().default("random"),
+  status: varchar("status", { length: 32 }).notNull().default("scheduled"),
+  scheduledDate: timestamp("scheduled_date"),
+  completedAt: timestamp("completed_at"),
+  assignedOfficer: integer("assigned_officer"),
+  findings: text("findings"),
+  riskScore: integer("risk_score"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcas_declaration").on(t.declarationId),
+  index("idx_pcas_status").on(t.status),
+  index("idx_pcas_scheduled_date").on(t.scheduledDate),
+]);
+export type PostClearanceAuditSchedule = typeof postClearanceAuditSchedule.$inferSelect;
+export type InsertPostClearanceAuditSchedule = typeof postClearanceAuditSchedule.$inferInsert;
+
+// ─── Sanctions Batch Jobs ─────────────────────────────────────────────────────
+export const sanctionsBatchJobs = pgTable("sanctions_batch_jobs", {
+  id: serial("id").primaryKey(),
+  submittedBy: integer("submitted_by").notNull(),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileUrl: text("file_url").notNull(),
+  fileKey: varchar("file_key", { length: 512 }),
+  totalRows: integer("total_rows").default(0),
+  processedRows: integer("processed_rows").default(0),
+  matchCount: integer("match_count").default(0),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  errorMessage: text("error_message"),
+  resultFileUrl: text("result_file_url"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_sanctions_batch_user").on(t.submittedBy),
+  index("idx_sanctions_batch_status").on(t.status),
+]);
+export type SanctionsBatchJob = typeof sanctionsBatchJobs.$inferSelect;
+export type InsertSanctionsBatchJob = typeof sanctionsBatchJobs.$inferInsert;
+
+// ─── Risk Score Timeline ──────────────────────────────────────────────────────
+export const declarationRiskHistory = pgTable("declaration_risk_history", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull(),
+  riskScore: integer("risk_score").notNull(),
+  riskLane: varchar("risk_lane", { length: 16 }),
+  triggeredBy: varchar("triggered_by", { length: 64 }).notNull().default("system"),
+  factors: json("factors"),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_drh_declaration").on(t.declarationId),
+  index("idx_drh_recorded_at").on(t.recordedAt),
+]);
+export type DeclarationRiskHistory = typeof declarationRiskHistory.$inferSelect;
+export type InsertDeclarationRiskHistory = typeof declarationRiskHistory.$inferInsert;
+
+// ─── OGA Permit Bulk Actions ──────────────────────────────────────────────────
+export const ogaBulkActions = pgTable("oga_bulk_actions", {
+  id: serial("id").primaryKey(),
+  performedBy: integer("performed_by").notNull(),
+  action: varchar("action", { length: 32 }).notNull(),
+  permitIds: json("permit_ids").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_oga_bulk_officer").on(t.performedBy),
+]);
+export type OgaBulkAction = typeof ogaBulkActions.$inferSelect;
+export type InsertOgaBulkAction = typeof ogaBulkActions.$inferInsert;
+
+// ─── AEO Renewal Documents ────────────────────────────────────────────────────
+export const aeoRenewalDocuments = pgTable("aeo_renewal_documents", {
+  id: serial("id").primaryKey(),
+  renewalId: integer("renewal_id").notNull(),
+  docType: varchar("doc_type", { length: 64 }).notNull(),
+  label: varchar("label", { length: 255 }).notNull(),
+  required: boolean("required").notNull().default(true),
+  uploadedAt: timestamp("uploaded_at"),
+  fileUrl: text("file_url"),
+  fileKey: text("file_key"),
+  status: varchar("status", { length: 32 }).notNull().default("pending"),
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ard_renewal").on(t.renewalId),
+  index("idx_ard_status").on(t.status),
+]);
+export type AeoRenewalDocument = typeof aeoRenewalDocuments.$inferSelect;
+export type InsertAeoRenewalDocument = typeof aeoRenewalDocuments.$inferInsert;
+
+// ─── Export Schedule Deliveries ───────────────────────────────────────────────
+export const exportScheduleDeliveries = pgTable("export_schedule_deliveries", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull(),
+  deliveredAt: timestamp("delivered_at").defaultNow().notNull(),
+  rowCount: integer("row_count").notNull().default(0),
+  fileSizeBytes: integer("file_size_bytes").notNull().default(0),
+  status: varchar("status", { length: 32 }).notNull().default("success"),
+  errorMessage: text("error_message"),
+  notificationId: integer("notification_id"),
+}, (t) => [
+  index("idx_esd_schedule").on(t.scheduleId),
+  index("idx_esd_delivered_at").on(t.deliveredAt),
+]);
+export type ExportScheduleDelivery = typeof exportScheduleDeliveries.$inferSelect;
+export type InsertExportScheduleDelivery = typeof exportScheduleDeliveries.$inferInsert;
+
+// ─── Sanctions Batch Conflicts ────────────────────────────────────────────────
+export const sanctionsBatchConflicts = pgTable("sanctions_batch_conflicts", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").notNull(),
+  rowIndex: integer("row_index").notNull(),
+  entityName: varchar("entity_name", { length: 255 }).notNull(),
+  entityType: varchar("entity_type", { length: 64 }),
+  existingId: integer("existing_id"),
+  incomingData: json("incoming_data").notNull(),
+  existingData: json("existing_data"),
+  resolution: varchar("resolution", { length: 32 }),
+  resolvedBy: integer("resolved_by"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_sbc_batch").on(t.batchId),
+  index("idx_sbc_resolution").on(t.resolution),
+]);
+export type SanctionsBatchConflict = typeof sanctionsBatchConflicts.$inferSelect;
+export type InsertSanctionsBatchConflict = typeof sanctionsBatchConflicts.$inferInsert;
+
+// ─── v138 Sprint Tables ───────────────────────────────────────────────────────
+
+export const aeoRenewalComments = pgTable("aeo_renewal_comments", {
+  id: serial("id").primaryKey(),
+  renewalId: integer("renewal_id").notNull(),
+  authorId: integer("author_id").notNull(),
+  authorRole: varchar("author_role", { length: 20 }).notNull().default("user"),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const aeoDocumentVersions = pgTable("aeo_document_versions", {
+  id: serial("id").primaryKey(),
+  renewalDocId: integer("renewal_doc_id").notNull(),
+  fileUrl: varchar("file_url", { length: 1024 }).notNull(),
+  fileKey: varchar("file_key", { length: 512 }),
+  uploadedBy: integer("uploaded_by").notNull(),
+  uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
+  notes: text("notes"),
+});
+
+export const checklistTemplates = pgTable("checklist_templates", {
+  id: serial("id").primaryKey(),
+  docType: varchar("doc_type", { length: 100 }).notNull().unique(),
+  label: varchar("label", { length: 255 }).notNull(),
+  required: boolean("required").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  expiryDays: integer("expiry_days"),
+  createdBy: integer("created_by"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const scheduleDeliveryStats = pgTable("schedule_delivery_stats", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull(),
+  totalDeliveries: integer("total_deliveries").notNull().default(0),
+  successCount: integer("success_count").notNull().default(0),
+  failureCount: integer("failure_count").notNull().default(0),
+  totalRowsExported: integer("total_rows_exported").notNull().default(0),
+  totalBytesExported: bigint("total_bytes_exported", { mode: "number" }).notNull().default(0),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  lastUpdated: timestamp("last_updated").notNull().defaultNow(),
+});
+
+export const scheduleDependencies = pgTable("schedule_dependencies", {
+  id: serial("id").primaryKey(),
+  scheduleId: integer("schedule_id").notNull(),
+  dependsOnScheduleId: integer("depends_on_schedule_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const sanctionsEntities = pgTable("sanctions_entities", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id"),
+  entityName: varchar("entity_name", { length: 512 }).notNull(),
+  entityType: varchar("entity_type", { length: 50 }),
+  country: varchar("country", { length: 100 }),
+  riskScore: integer("risk_score").default(5),
+  aliases: text("aliases"),
+  metadata: json("metadata"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const sanctionsWatchlistAlerts = pgTable("sanctions_watchlist_alerts", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull(),
+  sanctionEntityId: integer("sanction_entity_id").notNull(),
+  matchedField: varchar("matched_field", { length: 100 }).notNull(),
+  matchedValue: varchar("matched_value", { length: 512 }).notNull(),
+  riskScore: integer("risk_score").notNull().default(5),
+  status: varchar("status", { length: 30 }).notNull().default("open"),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const batchValidationErrors = pgTable("batch_validation_errors", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").notNull(),
+  rowIndex: integer("row_index").notNull(),
+  field: varchar("field", { length: 100 }),
+  errorCode: varchar("error_code", { length: 50 }).notNull(),
+  errorMessage: text("error_message").notNull(),
+  rawValue: text("raw_value"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

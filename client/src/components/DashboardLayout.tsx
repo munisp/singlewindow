@@ -88,12 +88,14 @@ import {
   Palette,
   ArrowLeftRight,
   ScanLine,
+  History,
+  CheckSquare,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
-import { useNotificationSocket } from "@/hooks/useNotificationSocket";
+import { useNotificationSocket, WsNotificationPayload } from "@/hooks/useNotificationSocket";
 import { toast } from "sonner";
 
 // ─── ROLE-BASED NAVIGATION ────────────────────────────────────────────────────
@@ -243,6 +245,11 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
           { icon: CalendarClock, label: "Cron Job Manager", path: "/app/admin/cron-jobs" },
           { icon: Activity, label: "System Status", path: "/app/admin/system-status" },
+          { icon: History, label: "Threshold Audit Log", path: "/app/admin/threshold-audit-log" },
+          { icon: ShieldAlert, label: "Sanctions Batch Upload", path: "/app/admin/sanctions-batch" },
+          { icon: CheckSquare, label: "OGA Bulk Approve", path: "/app/admin/oga-bulk-approve" },
+          { icon: ClipboardList, label: "Post-Clearance Scheduler", path: "/app/admin/post-clearance-scheduler" },
+          { icon: Award, label: "AEO Renewal Review", path: "/app/admin/aeo-renewal" },
         ],
       },
       common,
@@ -324,6 +331,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Layers, label: "Payment Queue", path: "/app/finance/payment-queue" },
           { icon: BarChart2, label: "Balance Accounts", path: "/app/finance/balance-accounts" },
           { icon: Coins, label: "Ledger (TigerBeetle)", path: "/app/finance/ledger" },
+          { icon: CalendarClock, label: "Recurring Export Schedules", path: "/app/finance/export-schedules" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: BarChart2, label: "Executive Dashboard", path: "/app/executive-dashboard" },
         ],
@@ -344,6 +352,7 @@ function getNavGroups(role: string): NavGroup[] {
         { icon: Building2, label: "My Business Profile", path: "/app/trader/profile" },
         { icon: ShieldCheck, label: "Trusted Trader Status", path: "/app/trader/aeo" },
         { icon: Award, label: "AEO Self-Assessment", path: "/app/trader/aeo-self-assessment" },
+        { icon: History, label: "AEO Renewal Status", path: "/app/trader/aeo-renewal" },
         { icon: BarChart3, label: "Performance Scorecard", path: "/app/trader/scorecard" },
         { icon: CreditCard, label: "Duty Payments", path: "/app/trader/payments" },
         { icon: CreditCard, label: "Payments Dashboard", path: "/app/payments" },
@@ -466,16 +475,54 @@ function DashboardLayoutContent({
   const [liveUnreadCount, setLiveUnreadCount] = useState<number | null>(null);
   const unreadCount = liveUnreadCount ?? unreadData?.count ?? 0;
 
+  // Live in-progress declaration count badge (submitted + under_review) for trader role
+  // The "user" role is the default trader role in this system
+  const isTrader = user?.role === "user";
+  const { data: declStats } = trpc.declarations.stats.useQuery(
+    undefined,
+    { enabled: !!user && isTrader, refetchInterval: 30_000 }
+  );
+  const inProgressDeclCount = isTrader
+    ? ((declStats as any)?.submitted ?? 0) + ((declStats as any)?.pending ?? 0)
+    : 0;
+
   // Sprint 63: Real-time WebSocket for live bell badge + toast notifications
-  const handleWsNotification = useCallback((notif: { title: string; body: string }) => {
+  // Sprint 135: Also refresh declaration badge for declaration status-change notifications
+  // Sprint 136: Mark notification as read when toast action is clicked
+  const markAsReadMutation = trpc.userNotifications.markAsRead.useMutation({
+    onSuccess: () => {
+      utils.userNotifications.getUnreadCount.invalidate();
+      utils.userNotifications.getMyNotifications.invalidate();
+    },
+  });
+
+  const handleWsNotification = useCallback((notif: WsNotificationPayload) => {
     utils.userNotifications.getUnreadCount.invalidate();
     utils.userNotifications.getMyNotifications.invalidate();
+    // Refresh declaration badge when a declaration status change arrives
+    const isDeclarationNotif = notif.category === "declaration" || notif.entityType === "declaration";
+    if (isDeclarationNotif && isTrader) {
+      utils.declarations.stats.invalidate();
+    }
+    const isDeclarationStatusChange = isDeclarationNotif &&
+      (notif.title?.toLowerCase().includes("cleared") ||
+       notif.title?.toLowerCase().includes("rejected") ||
+       notif.title?.toLowerCase().includes("examination") ||
+       notif.title?.toLowerCase().includes("payment") ||
+       notif.title?.toLowerCase().includes("docs"));
+    const notifId = notif.id;
+    const handleToastAction = (path: string) => {
+      setLocation(path);
+      if (notifId) markAsReadMutation.mutate({ id: notifId });
+    };
     toast.info(notif.title, {
       description: notif.body,
-      duration: 5000,
-      action: { label: "View", onClick: () => setLocation("/app/notification-centre") },
+      duration: isDeclarationStatusChange ? 8000 : 5000,
+      action: isDeclarationStatusChange
+        ? { label: "View Declarations", onClick: () => handleToastAction("/app/declarations") }
+        : { label: "View", onClick: () => handleToastAction("/app/notification-centre") },
     });
-  }, [utils, setLocation]);
+  }, [utils, setLocation, isTrader, markAsReadMutation]);
 
   const handleWsUnreadCount = useCallback((count: number) => {
     setLiveUnreadCount(count);
@@ -665,6 +712,22 @@ function DashboardLayoutContent({
                           {item.label === "Notification Centre" && unreadCount > 0 && (
                             <Badge variant="destructive" style={{ marginLeft: "auto", height: 18, minWidth: 18, fontSize: 9, padding: "0 4px" }}>
                               {unreadCount}
+                            </Badge>
+                          )}
+                          {item.label === "My Shipment Declarations" && inProgressDeclCount > 0 && (
+                            <Badge
+                              style={{
+                                marginLeft: "auto",
+                                height: 18,
+                                minWidth: 18,
+                                fontSize: 9,
+                                padding: "0 4px",
+                                background: "#D4A017",
+                                color: "#0A1628",
+                                fontWeight: 700,
+                              }}
+                            >
+                              {inProgressDeclCount}
                             </Badge>
                           )}
                         </>

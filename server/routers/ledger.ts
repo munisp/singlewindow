@@ -510,4 +510,68 @@ export const ledgerRouter = router({
         }),
       });
     }),
+
+  /**
+   * exportCSV — export ledger entries as CSV for Finance Officers.
+   * Supports date range, entry type, and declaration filtering.
+   */
+  exportCSV: protectedProcedure
+    .input(z.object({
+      startDate: z.string().datetime({ offset: true }).optional(),
+      endDate: z.string().datetime({ offset: true }).optional(),
+      entryType: z.string().optional(),
+      declarationId: z.number().int().positive().optional(),
+      limit: z.number().int().min(1).max(10000).default(5000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const allowedRoles = ["admin", "finance", "customs_officer"];
+      if (!allowedRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Finance access required" });
+      }
+      const { getDb } = await import("../db");
+      const { tigerBeetleLedgerEntries } = await import("../../drizzle/schema");
+      const { and, gte, lte, eq, desc } = await import("drizzle-orm");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const conditions: ReturnType<typeof eq>[] = [];
+      if (input.startDate) conditions.push(gte(tigerBeetleLedgerEntries.createdAt, new Date(input.startDate)) as any);
+      if (input.endDate) conditions.push(lte(tigerBeetleLedgerEntries.createdAt, new Date(input.endDate)) as any);
+      if (input.entryType) conditions.push(eq(tigerBeetleLedgerEntries.entryType, input.entryType as any));
+      if (input.declarationId) conditions.push(eq(tigerBeetleLedgerEntries.declarationId, input.declarationId));
+      const rows = await db
+        .select()
+        .from(tigerBeetleLedgerEntries)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(tigerBeetleLedgerEntries.createdAt))
+        .limit(input.limit);
+      const headers = [
+        "ID", "TB Transfer ID", "Entry Type", "Status",
+        "Debit Account", "Credit Account", "Amount (Minor Units)", "Currency",
+        "Declaration ID", "Payment ID", "Reference", "Description",
+        "Posted At", "Created At",
+      ];
+      const escape = (v: unknown) => {
+        const s = v == null ? "" : String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      };
+      const csvLines = [
+        headers.join(","),
+        ...rows.map((r) =>
+          [
+            r.id, r.tbTransferId, r.entryType, r.status,
+            r.debitAccountId, r.creditAccountId, r.amountMinorUnits, r.currency,
+            r.declarationId ?? "", r.paymentId ?? "", r.reference ?? "", r.description ?? "",
+            r.postedAt ? new Date(r.postedAt).toISOString() : "",
+            r.createdAt ? new Date(r.createdAt).toISOString() : "",
+          ].map(escape).join(",")
+        ),
+      ];
+      return {
+        csv: csvLines.join("\n"),
+        rowCount: rows.length,
+        filename: `ledger-export-${new Date().toISOString().split("T")[0]}.csv`,
+      };
+    }),
 });

@@ -132,6 +132,19 @@ const PlatformHealthScorecard = lazy(() => import('./pages/PlatformHealthScoreca
 const VisionBatchAnalysis = lazy(() => import('./pages/app/VisionBatchAnalysis'));
 const CronJobManager = lazy(() => import('./pages/admin/CronJobManager'));
 const AdminSystemStatus = lazy(() => import('./pages/admin/SystemStatus'));
+// v136 sprint pages
+const ThresholdAuditLog = lazy(() => import('./pages/admin/ThresholdAuditLog'));
+const SanctionsBatchUpload = lazy(() => import('./pages/admin/SanctionsBatchUpload'));
+const OGABulkApprove = lazy(() => import('./pages/admin/OGABulkApprove'));
+const PostClearanceAuditScheduler = lazy(() => import('./pages/admin/PostClearanceAuditScheduler'));
+const ExportScheduleManager = lazy(() => import('./pages/app/ExportScheduleManager'));
+const AEORenewalWorkflow = lazy(() => import('./pages/app/AEORenewalWorkflow'));
+
+const AEORenewalComments = lazy(() => import("@/pages/app/AEORenewalComments"));
+const SanctionsEntitiesPage = lazy(() => import("@/pages/admin/SanctionsEntities"));
+const ScheduleAnalyticsPage = lazy(() => import("@/pages/app/ScheduleAnalytics"));
+const BatchValidationReportPage = lazy(() => import("@/pages/admin/BatchValidationReport"));
+
 
 const LazyFallback = () => <_PageSkeleton />;
 
@@ -553,9 +566,36 @@ function Router() {
         <AdminGuard><Suspense fallback={<LazyFallback />}><AdminSystemStatus /></Suspense></AdminGuard>
       </Route>
 
+      {/* v136 sprint routes */}
+      <Route path="/app/admin/threshold-audit-log">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><ThresholdAuditLog /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/sanctions-batch">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><SanctionsBatchUpload /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/oga-bulk-approve">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><OGABulkApprove /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/admin/post-clearance-scheduler">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><PostClearanceAuditScheduler /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/finance/export-schedules">
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><ExportScheduleManager /></Suspense></FinanceGuard>
+      </Route>
+      <Route path="/app/trader/aeo-renewal">
+        <Suspense fallback={<LazyFallback />}><AEORenewalWorkflow /></Suspense>
+      </Route>
+      <Route path="/app/admin/aeo-renewal">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AEORenewalWorkflow /></Suspense></AdminGuard>
+      </Route>
+
       {/* 404 */}
       <Route path="/404" component={NotFound} />
-      <Route component={NotFound} />
+              <Route path="/app/aeo-comments/:renewalId" component={AEORenewalComments} />
+        <Route path="/admin/sanctions-entities" component={SanctionsEntitiesPage} />
+        <Route path="/app/schedule-analytics" component={ScheduleAnalyticsPage} />
+        <Route path="/admin/batch-reports" component={BatchValidationReportPage} />
+        <Route component={NotFound} />
     </Switch>
   );
 }

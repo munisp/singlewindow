@@ -252,4 +252,44 @@ export const keycloakRouter = router({
       });
       return result;
     }),
+
+  /**
+   * v90: List Keycloak sessions (admin: all; user: own sessions).
+   */
+  getSessions: protectedProcedure
+    .input(z.object({ userId: z.number().int().optional(), isActive: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      const { getKeycloakSessions } = await import("../db");
+      const userId = isAdmin ? input?.userId : ctx.user.id;
+      return getKeycloakSessions({ userId, isActive: input?.isActive, limit: 200 });
+    }),
+
+  /**
+   * v90: Revoke a specific Keycloak session by sessionId.
+   */
+  revokeSession: protectedProcedure
+    .input(z.object({ sessionId: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { revokeKeycloakSession } = await import("../db");
+      const result = await revokeKeycloakSession(input.sessionId);
+      if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+      return { success: true };
+    }),
+
+  /**
+   * v90: Revoke all active sessions for a given user (admin only).
+   */
+  revokeAllUserSessions: protectedProcedure
+    .input(z.object({ userId: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { getKeycloakSessions, revokeKeycloakSession } = await import("../db");
+      const sessions = await getKeycloakSessions({ userId: input.userId, isActive: true });
+      await Promise.all(sessions.map(s => revokeKeycloakSession(s.sessionId)));
+      return { revokedCount: sessions.length };
+    }),
 });

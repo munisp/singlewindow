@@ -447,4 +447,43 @@ export const bondedWarehouseRouter = router({
       );
       return { success: true, newExpiry };
     }),
+
+  /**
+   * v98: Send SMS/notification alerts for bonds expiring within N days.
+   */
+  sendBondExpiryAlerts: protectedProcedure
+    .input(z.object({ daysAhead: z.number().int().min(1).max(90).default(30) }))
+    .mutation(async ({ ctx }) => {
+      const isAdmin = ["admin", "customs_officer", "finance"].includes(ctx.user.role);
+      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
+      const { notifyOwner } = await import("../_core/notification");
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+      const { bondedWarehouses } = await import("../../drizzle/schema");
+      const { lte, gte, and } = await import("drizzle-orm");
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() + 30);
+      const expiring = await db.select({
+        id: bondedWarehouses.id,
+        licenseNo: bondedWarehouses.licenseNo,
+        operatorName: bondedWarehouses.operatorName,
+        bondExpiryDate: bondedWarehouses.bondExpiry,
+      })
+        .from(bondedWarehouses)
+        .where(and(
+          lte(bondedWarehouses.bondExpiry, cutoff),
+          gte(bondedWarehouses.bondExpiry, new Date()),
+        ))
+        .limit(50);
+      if (expiring.length === 0) return { notified: 0 };
+      const lines = expiring.map(w =>
+        `• ${w.licenseNo} (${w.operatorName ?? "N/A"}) — expires ${w.bondExpiryDate?.toISOString().split("T")[0] ?? "unknown"}`
+      ).join("\n");
+      await notifyOwner({
+        title: `⚠️ Bond Expiry Alert: ${expiring.length} warehouse(s) expiring within 30 days`,
+        content: lines,
+      });
+      return { notified: expiring.length };
+    }),
 });

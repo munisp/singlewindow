@@ -222,4 +222,37 @@ export const workflowSchemasRouter = router({
       }
       return { seeded, message: `Seeded ${seeded} default schemas` };
     }),
+
+  /**
+   * v87: Get all versions of a workflow input schema for a given workflowType.
+   */
+  getVersionHistory: adminProcedure
+    .input(z.object({ workflowType: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const { getSchemaVersionHistory } = await import("../db");
+      return getSchemaVersionHistory(input.workflowType);
+    }),
+
+  /**
+   * v87: Restore a specific version as the active schema (creates a new version entry).
+   */
+  restoreVersion: adminProcedure
+    .input(z.object({ workflowType: z.string().min(1), version: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const { getSchemaVersionHistory, upsertWorkflowInputSchema } = await import("../db");
+      const history = await getSchemaVersionHistory(input.workflowType);
+      const target = history.find(h => h.version === input.version);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Version not found" });
+      // Get current max version
+      const maxVersion = history.reduce((m, h) => Math.max(m, h.version), 0);
+      return upsertWorkflowInputSchema({
+        workflowType: input.workflowType,
+        version: maxVersion + 1,
+        jsonSchema: target.jsonSchema as object,
+        description: `Restored from v${input.version}: ${target.description ?? ""}`,
+        isActive: true,
+      });
+    }),
 });
+
+// Appended by v87 sprint

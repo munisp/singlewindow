@@ -25,6 +25,7 @@ const STATUS_CONFIG: Record<string, { label: string; variant: "default" | "secon
 
 export default function OGAPortal() {
   const [search, setSearch] = useState("");
+  const [permitStatusFilter, setPermitStatusFilter] = useState("all");
   const utils = trpc.useUtils();
 
   const { data: permits, isLoading } = trpc.oga.myPermits.useQuery();
@@ -45,11 +46,20 @@ export default function OGAPortal() {
     onError: (err: any) => toast.error("Failed to reject permit", { description: err.message }),
   });
 
-  const filtered = permits?.filter((p: any) =>
+  const searchFiltered = permits?.filter((p: any) =>
     !search ||
     p.permitNumber?.toLowerCase().includes(search.toLowerCase()) ||
     p.agencyCode?.toLowerCase().includes(search.toLowerCase())
   ) ?? [];
+
+  const filtered = permitStatusFilter === "all"
+    ? searchFiltered
+    : searchFiltered.filter((p: any) => {
+        if (permitStatusFilter === "active") return p.status === "approved";
+        if (permitStatusFilter === "pending") return p.status === "pending" || p.status === "under_review";
+        if (permitStatusFilter === "expired") return p.status === "rejected" || p.status === "conditional";
+        return true;
+      });
 
   const pending = filtered.filter((p: any) => p.status === "pending" || p.status === "under_review");
   const decided = filtered.filter((p: any) => p.status === "approved" || p.status === "rejected" || p.status === "conditional");
@@ -88,6 +98,33 @@ export default function OGAPortal() {
               <p className="text-xs text-muted-foreground mt-1">Rejected</p>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Quick-filter permit status pills */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { value: "all", label: "All Permits", count: searchFiltered.length },
+            { value: "active", label: "Active", count: searchFiltered.filter((p: any) => p.status === "approved").length },
+            { value: "pending", label: "Pending", count: searchFiltered.filter((p: any) => p.status === "pending" || p.status === "under_review").length },
+            { value: "expired", label: "Rejected / Conditional", count: searchFiltered.filter((p: any) => p.status === "rejected" || p.status === "conditional").length },
+          ].map(pill => (
+            <button
+              key={pill.value}
+              onClick={() => setPermitStatusFilter(pill.value)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                permitStatusFilter === pill.value
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-muted/40 text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              {pill.label}
+              <span className={`rounded-full px-1.5 py-0 text-[10px] font-bold ${
+                permitStatusFilter === pill.value ? "bg-primary-foreground/20" : "bg-muted"
+              }`}>
+                {pill.count}
+              </span>
+            </button>
+          ))}
         </div>
 
         {/* Search */}
