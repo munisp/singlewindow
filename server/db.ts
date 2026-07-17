@@ -1916,3 +1916,27 @@ export async function markTenantDomainVerified(tenantId: string) {
     .returning();
   return row;
 }
+
+export async function incrementTenantDomainFailCount(tenantId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(tenants)
+    .set({
+      domainVerificationFailCount: sql`${tenants.domainVerificationFailCount} + 1`,
+      domainLastFailedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+  return row;
+}
+
+export async function resetTenantDomainFailCount(tenantId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(tenants)
+    .set({ domainVerificationFailCount: 0, updatedAt: new Date() })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+  return row;
+}

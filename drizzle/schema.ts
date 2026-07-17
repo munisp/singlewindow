@@ -1071,6 +1071,9 @@ export const tenants = pgTable("tenants", {
   domainVerified: boolean("domain_verified").default(false).notNull(),
   domainVerifiedAt: timestamp("domain_verified_at"),
   domainVerificationToken: varchar("domain_verification_token", { length: 64 }),
+  // Consecutive DNS verification failure counter — triggers owner notification at 3
+  domainVerificationFailCount: integer("domain_verification_fail_count").default(0).notNull(),
+  domainLastFailedAt: timestamp("domain_last_failed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -3125,6 +3128,13 @@ export const corazaWafRules = pgTable("coraza_waf_rules", {
   severity: varchar("severity", { length: 16 }).notNull().default("medium"),
   category: varchar("category", { length: 64 }).notNull().default("OWASP-CRS"),
   description: text("description"),
+  // CRS metadata added by bulkImportRules
+  crsVersion: varchar("crs_version", { length: 32 }),
+  paranoiaLevel: integer("paranoia_level").default(1),
+  tags: text("tags"),  // JSON array of CRS tag strings
+  phase: integer("phase").default(2),
+  action: varchar("action", { length: 16 }).default("block"),
+  importedAt: timestamp("imported_at"),
   // Who last changed this rule and when
   disabledBy: integer("disabled_by").references(() => users.id, { onDelete: "set null" }),
   disabledAt: timestamp("disabled_at"),
