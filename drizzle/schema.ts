@@ -3143,3 +3143,23 @@ export const corazaWafRules = pgTable("coraza_waf_rules", {
 
 export type CorazaWafRule = typeof corazaWafRules.$inferSelect;
 export type InsertCorazaWafRule = typeof corazaWafRules.$inferInsert;
+
+// ─── System Heartbeat Jobs ────────────────────────────────────────────────────
+// Tracks project-level (§4a) Heartbeat jobs created via the sandbox CLI or
+// admin tRPC procedures. Stores the platform-issued taskUid so the job can be
+// paused, resumed, or deleted without re-running the CLI.
+export const systemHeartbeatJobs = pgTable("system_heartbeat_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 128 }).notNull().unique(),
+  taskUid: varchar("task_uid", { length: 65 }).unique(),
+  cronExpression: varchar("cron_expression", { length: 64 }).notNull(),
+  callbackPath: varchar("callback_path", { length: 256 }).notNull(),
+  description: varchar("description", { length: 512 }),
+  isEnabled: boolean("is_enabled").default(true).notNull(),
+  lastExecutedAt: timestamp("last_executed_at"),
+  nextExecutionAt: timestamp("next_execution_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type SystemHeartbeatJob = typeof systemHeartbeatJobs.$inferSelect;
+export type InsertSystemHeartbeatJob = typeof systemHeartbeatJobs.$inferInsert;
