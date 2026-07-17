@@ -323,6 +323,13 @@
       "when": 1784257167371,
       "tag": "0045_easy_medusa",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1784261938543,
+      "tag": "0046_cultured_stellaris",
+      "breakpoints": true
     }
   ]
 }
