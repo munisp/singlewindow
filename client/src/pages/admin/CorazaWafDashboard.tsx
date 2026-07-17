@@ -10,6 +10,7 @@
  */
 
 import { useState, useMemo } from "react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  TrendingUp,
+  Activity,
+  Eye,
 } from "lucide-react";
 
 // ─── Severity helpers ─────────────────────────────────────────────────────────
@@ -90,6 +94,11 @@ export default function CorazaWafDashboard() {
   const [bulkReason, setBulkReason] = useState("");
   const [showBulkDialog, setShowBulkDialog] = useState(false);
 
+  // Event correlation state
+  const [activeTab, setActiveTab] = useState("rules");
+  const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
+  const [correlationDays, setCorrelationDays] = useState(7);
+
   // Data queries
   const { data: stats, refetch: refetchStats } = trpc.corazaWaf.getRuleStats.useQuery();
   const { data: caddyStatus, refetch: refetchCaddy } = trpc.corazaWaf.getCaddyAdminStatus.useQuery();
@@ -101,6 +110,14 @@ export default function CorazaWafDashboard() {
     pageSize: PAGE_SIZE,
   });
   const { data: recentChanges, refetch: refetchChanges } = trpc.corazaWaf.getRecentChanges.useQuery({ limit: 10 });
+
+  // Event correlation queries
+  const { data: topFiringRules, refetch: refetchTopFiring } = trpc.corazaWaf.getTopFiringRules.useQuery({ limit: 10 });
+  const { data: correlationSummary, refetch: refetchCorrelation } = trpc.corazaWaf.getEventCorrelationSummary.useQuery({ days: correlationDays });
+  const { data: ruleEvents } = trpc.corazaWaf.getEventsForRule.useQuery(
+    { ruleId: selectedRuleId!, limit: 20 },
+    { enabled: !!selectedRuleId }
+  );
 
   // Mutations
   const toggleMutation = trpc.corazaWaf.toggleRule.useMutation({
@@ -161,6 +178,8 @@ export default function CorazaWafDashboard() {
     refetchStats();
     refetchCaddy();
     refetchChanges();
+    refetchTopFiring();
+    refetchCorrelation();
   }
 
   return (
@@ -226,6 +245,19 @@ export default function CorazaWafDashboard() {
           </div>
         </div>
       )}
+
+      {/* Main Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="bg-[#0E1E35] border border-gray-700">
+          <TabsTrigger value="rules" className="data-[state=active]:bg-[#D4A017] data-[state=active]:text-black text-gray-300">
+            <Shield className="w-3.5 h-3.5 mr-1.5" /> Rules
+          </TabsTrigger>
+          <TabsTrigger value="events" className="data-[state=active]:bg-[#D4A017] data-[state=active]:text-black text-gray-300">
+            <Activity className="w-3.5 h-3.5 mr-1.5" /> Event Correlation
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="rules" className="mt-4 space-y-4">
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
@@ -399,6 +431,178 @@ export default function CorazaWafDashboard() {
           </div>
         </div>
       )}
+
+        </TabsContent>
+
+        {/* ── Event Correlation Tab ─────────────────────────────────────────── */}
+        <TabsContent value="events" className="mt-4 space-y-4">
+
+          {/* Controls */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-400">Time window:</span>
+            <Select value={String(correlationDays)} onValueChange={v => setCorrelationDays(Number(v))}>
+              <SelectTrigger className="w-32 bg-[#0E1E35] border-gray-600 text-gray-100">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-[#0E1E35] border-gray-600">
+                <SelectItem value="1">Last 24h</SelectItem>
+                <SelectItem value="7">Last 7 days</SelectItem>
+                <SelectItem value="30">Last 30 days</SelectItem>
+                <SelectItem value="90">Last 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" className="border-gray-600 text-gray-300" onClick={() => { refetchTopFiring(); refetchCorrelation(); }}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+            </Button>
+          </div>
+
+          {/* Top Firing Rules */}
+          <div className="bg-[#0E1E35] border border-gray-700 rounded-lg p-4">
+            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-[#D4A017]" />
+              Top Firing Rules
+              <span className="text-xs text-gray-500 font-normal ml-1">(click a rule to see its events)</span>
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-700">
+                    <th className="text-left px-3 py-2 text-gray-400 font-medium text-xs">Rule ID</th>
+                    <th className="text-left px-3 py-2 text-gray-400 font-medium text-xs">Description</th>
+                    <th className="text-left px-3 py-2 text-gray-400 font-medium text-xs">Severity</th>
+                    <th className="text-left px-3 py-2 text-gray-400 font-medium text-xs">Status</th>
+                    <th className="text-right px-3 py-2 text-gray-400 font-medium text-xs">Events</th>
+                    <th className="text-left px-3 py-2 text-gray-400 font-medium text-xs">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(topFiringRules ?? []).map(rule => (
+                    <tr
+                      key={rule.ruleId}
+                      className={`border-b border-gray-800 cursor-pointer ${
+                        selectedRuleId === rule.ruleId ? "bg-[#D4A017]/10" : "hover:bg-[#0A1628]/50"
+                      }`}
+                      onClick={() => setSelectedRuleId(selectedRuleId === rule.ruleId ? null : rule.ruleId)}
+                    >
+                      <td className="px-3 py-2 font-mono text-[#D4A017] text-xs">{rule.ruleId}</td>
+                      <td className="px-3 py-2 text-gray-300 text-xs max-w-xs truncate" title={rule.description}>{rule.description}</td>
+                      <td className="px-3 py-2"><SeverityBadge severity={rule.severity} /></td>
+                      <td className="px-3 py-2">
+                        {rule.enabled ? (
+                          <span className="flex items-center gap-1 text-green-400 text-xs"><CheckCircle2 className="w-3 h-3" /> On</span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-red-400 text-xs"><XCircle className="w-3 h-3" /> Off</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <span className="text-white font-bold text-sm">{rule.eventCount.toLocaleString()}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-gray-600 text-gray-300 text-xs h-6"
+                          onClick={e => { e.stopPropagation(); setSelectedRuleId(rule.ruleId); }}
+                        >
+                          <Eye className="w-3 h-3 mr-1" /> Events
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Correlation Summary Heatmap */}
+          {correlationSummary && correlationSummary.length > 0 && (
+            <div className="bg-[#0E1E35] border border-gray-700 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-[#D4A017]" />
+                Event Volume by Rule — Last {correlationDays} day{correlationDays !== 1 ? "s" : ""}
+              </h3>
+              <div className="space-y-2">
+                {correlationSummary.map(r => {
+                  const maxEvents = Math.max(...correlationSummary.map(x => x.totalEvents));
+                  const pct = maxEvents > 0 ? (r.totalEvents / maxEvents) * 100 : 0;
+                  return (
+                    <div key={r.ruleId} className="flex items-center gap-3">
+                      <span className="font-mono text-[#D4A017] text-xs w-20 flex-shrink-0">{r.ruleId}</span>
+                      <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-[#D4A017] to-orange-500 rounded-full"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-gray-300 text-xs w-12 text-right">{r.totalEvents.toLocaleString()}</span>
+                      <span className="text-red-400 text-xs w-16 text-right">{r.blockedEvents} blocked</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Events for Selected Rule */}
+          {selectedRuleId && (
+            <div className="bg-[#0E1E35] border border-[#D4A017]/40 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                <Eye className="w-4 h-4 text-[#D4A017]" />
+                Recent Events — Rule <span className="font-mono text-[#D4A017]">{selectedRuleId}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto border-gray-600 text-gray-400 h-6 text-xs"
+                  onClick={() => setSelectedRuleId(null)}
+                >
+                  Clear
+                </Button>
+              </h3>
+              {!ruleEvents || ruleEvents.length === 0 ? (
+                <p className="text-sm text-gray-500 py-4 text-center">No events found for this rule.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-700">
+                        <th className="text-left px-3 py-2 text-gray-400">Attack Type</th>
+                        <th className="text-left px-3 py-2 text-gray-400">Severity</th>
+                        <th className="text-left px-3 py-2 text-gray-400">Source IP</th>
+                        <th className="text-left px-3 py-2 text-gray-400">Target Path</th>
+                        <th className="text-left px-3 py-2 text-gray-400">Action</th>
+                        <th className="text-left px-3 py-2 text-gray-400">Ack</th>
+                        <th className="text-left px-3 py-2 text-gray-400">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ruleEvents.map((ev: any) => (
+                        <tr key={ev.id ?? ev.eventId} className="border-b border-gray-800 hover:bg-[#0A1628]/50">
+                          <td className="px-3 py-2 text-orange-300">{ev.attackType}</td>
+                          <td className="px-3 py-2"><SeverityBadge severity={ev.severity ?? "low"} /></td>
+                          <td className="px-3 py-2 font-mono text-gray-300">{ev.sourceIp}</td>
+                          <td className="px-3 py-2 text-gray-400 max-w-[160px] truncate" title={ev.targetPath}>{ev.targetPath}</td>
+                          <td className="px-3 py-2">
+                            <span className={ev.action === "BLOCK" ? "text-red-400" : "text-yellow-400"}>{ev.action}</span>
+                          </td>
+                          <td className="px-3 py-2">
+                            {ev.isAcknowledged
+                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                              : <XCircle className="w-3.5 h-3.5 text-gray-600" />}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500">
+                            {ev.createdAt ? new Date(ev.createdAt).toLocaleString() : ""}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+        </TabsContent>
+      </Tabs>
 
       {/* Toggle Confirmation Dialog */}
       <Dialog open={!!pendingToggle} onOpenChange={() => { setPendingToggle(null); setToggleReason(""); }}>

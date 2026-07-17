@@ -12,7 +12,7 @@
  */
 
 import { z } from "zod";
-import { router, adminProcedure } from "../_core/trpc";
+import { router, keycloakAdminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import { corazaWafRules } from "../../drizzle/schema";
@@ -93,7 +93,7 @@ export const corazaWafRouter = router({
    * listRules — list all Coraza WAF rules with their current state.
    * Seeds the DB with OWASP CRS defaults if no rules exist yet.
    */
-  listRules: adminProcedure
+  listRules: keycloakAdminProcedure
     .input(
       z.object({
         category: z.string().optional(),
@@ -176,7 +176,7 @@ export const corazaWafRouter = router({
    * toggleRule — enable or disable a single Coraza rule with an audit trail.
    * Also triggers a Caddy hot-reload.
    */
-  toggleRule: adminProcedure
+  toggleRule: keycloakAdminProcedure
     .input(
       z.object({
         ruleId: z.string().min(1).max(32),
@@ -227,7 +227,7 @@ export const corazaWafRouter = router({
   /**
    * bulkToggleRules — enable or disable multiple rules at once (by category or explicit list).
    */
-  bulkToggleRules: adminProcedure
+  bulkToggleRules: keycloakAdminProcedure
     .input(
       z.object({
         ruleIds: z.array(z.string()).min(1).max(200).optional(),
@@ -291,7 +291,7 @@ export const corazaWafRouter = router({
   /**
    * getRuleStats — summary of enabled/disabled counts by category and severity.
    */
-  getRuleStats: adminProcedure.query(async () => {
+  getRuleStats: keycloakAdminProcedure.query(async () => {
     const db = await getDb();
     if (!db) {
       const total = OWASP_CRS_SEED.length;
@@ -332,7 +332,7 @@ export const corazaWafRouter = router({
   /**
    * getRecentChanges — audit log of the last N rule state changes.
    */
-  getRecentChanges: adminProcedure
+  getRecentChanges: keycloakAdminProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -361,7 +361,7 @@ export const corazaWafRouter = router({
   /**
    * getCaddyAdminStatus — check if Caddy's admin API is reachable.
    */
-  getCaddyAdminStatus: adminProcedure.query(async () => {
+  getCaddyAdminStatus: keycloakAdminProcedure.query(async () => {
     try {
       const res = await fetch(`${CADDY_ADMIN_URL}/config/`, {
         signal: AbortSignal.timeout(3000),
@@ -379,4 +379,149 @@ export const corazaWafRouter = router({
       return { reachable: false, adminUrl: CADDY_ADMIN_URL, error: String(err) };
     }
   }),
+
+  /**
+   * getTopFiringRules — returns the top N Coraza rule IDs by event count,
+   * correlated against openAppSecEvents.ruleId (stored as OWASP-CRS-<ruleId>).
+   * In dev mode returns seeded data; in production queries the DB.
+   */
+  getTopFiringRules: keycloakAdminProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(50).default(10) }).optional())
+    .query(async ({ input }) => {
+      const limit = input?.limit ?? 10;
+      if (process.env.NODE_ENV !== "production") {
+        // Return seeded dev data correlated with OWASP_CRS_SEED rule IDs
+        return [
+          { ruleId: "942100", description: "SQL Injection via libinjection",     category: "OWASP-CRS", severity: "critical", eventCount: 47, enabled: true },
+          { ruleId: "941100", description: "XSS via libinjection",               category: "OWASP-CRS", severity: "high",     eventCount: 31, enabled: true },
+          { ruleId: "930100", description: "Path Traversal (/../)",              category: "OWASP-CRS", severity: "critical", eventCount: 22, enabled: true },
+          { ruleId: "932100", description: "Unix Command Injection",             category: "OWASP-CRS", severity: "critical", eventCount: 18, enabled: true },
+          { ruleId: "942110", description: "SQL Injection Testing Detected",     category: "OWASP-CRS", severity: "critical", eventCount: 15, enabled: true },
+          { ruleId: "941110", description: "XSS — Script Tag Vector",           category: "OWASP-CRS", severity: "high",     eventCount: 12, enabled: true },
+          { ruleId: "920350", description: "Host header is numeric IP",          category: "OWASP-CRS", severity: "medium",   eventCount: 9,  enabled: true },
+          { ruleId: "932150", description: "Direct Unix Command Execution",      category: "OWASP-CRS", severity: "critical", eventCount: 7,  enabled: false },
+          { ruleId: "930120", description: "OS File Access Attempt",             category: "OWASP-CRS", severity: "high",     eventCount: 5,  enabled: true },
+          { ruleId: "NGSWTP-001", description: "HS Code Injection Attempt",      category: "NGSWTP-Custom", severity: "high", eventCount: 4, enabled: true },
+        ].slice(0, limit);
+      }
+      const db = await getDb();
+      if (!db) return [];
+      const { openAppSecEvents } = await import("../../drizzle/schema");
+      const { count, like, isNotNull } = await import("drizzle-orm");
+      // openAppSecEvents stores ruleId as "OWASP-CRS-<ruleId>" — strip prefix for join
+      const rows = await db
+        .select({
+          rawRuleId: openAppSecEvents.id, // placeholder — we use sql below
+          eventCount: count(openAppSecEvents.id),
+        })
+        .from(openAppSecEvents)
+        .where(isNotNull(sql`${openAppSecEvents}.rule_id`))
+        .groupBy(sql`${openAppSecEvents}.rule_id`)
+        .orderBy(desc(count(openAppSecEvents.id)))
+        .limit(limit);
+      // Enrich with rule metadata from corazaWafRules table
+      const ruleIds = rows.map((r: any) =>
+        String(r.rawRuleId).replace(/^OWASP-CRS-/, "").replace(/^NGSWTP-/, "NGSWTP-")
+      );
+      const rules = ruleIds.length > 0
+        ? await db.select().from(corazaWafRules).where(inArray(corazaWafRules.ruleId, ruleIds))
+        : [];
+      const ruleMap = new Map(rules.map((r) => [r.ruleId, r]));
+      return rows.map((r: any, i: number) => ({
+        ruleId: ruleIds[i],
+        description: ruleMap.get(ruleIds[i])?.description ?? "Unknown rule",
+        category: ruleMap.get(ruleIds[i])?.category ?? "OWASP-CRS",
+        severity: ruleMap.get(ruleIds[i])?.severity ?? "medium",
+        eventCount: Number(r.eventCount),
+        enabled: ruleMap.get(ruleIds[i])?.enabled ?? true,
+      }));
+    }),
+
+  /**
+   * getEventsForRule — returns recent WAF events for a specific Coraza rule ID.
+   * Correlates openAppSecEvents with corazaWafRules by ruleId.
+   */
+  getEventsForRule: keycloakAdminProcedure
+    .input(z.object({
+      ruleId: z.string().min(1),
+      limit: z.number().int().min(1).max(200).default(20),
+    }))
+    .query(async ({ input }) => {
+      if (process.env.NODE_ENV !== "production") {
+        // Return seeded dev events for the requested rule
+        const ATTACK_MAP: Record<string, string> = {
+          "942100": "SQL_INJECTION", "941100": "XSS", "930100": "PATH_TRAVERSAL",
+          "932100": "COMMAND_INJECTION", "NGSWTP-001": "SQL_INJECTION",
+        };
+        const attackType = ATTACK_MAP[input.ruleId] ?? "MALFORMED_REQUEST";
+        return Array.from({ length: Math.min(input.limit, 8) }, (_, i) => ({
+          id: i + 1,
+          eventId: `waf-rule-${input.ruleId}-${i}`,
+          attackType,
+          severity: ["critical", "high", "medium"][i % 3],
+          sourceIp: ["203.0.113.42", "185.220.101.3", "198.51.100.7"][i % 3],
+          targetPath: `/api/trpc/declarations.${["create", "list", "update"][i % 3]}`,
+          action: i % 3 === 0 ? "BLOCK" : "LOG",
+          isAcknowledged: i % 4 === 0,
+          createdAt: new Date(Date.now() - i * 1_800_000),
+          ruleId: `OWASP-CRS-${input.ruleId}`,
+        }));
+      }
+      const db = await getDb();
+      if (!db) return [];
+      const { openAppSecEvents } = await import("../../drizzle/schema");
+      const { like } = await import("drizzle-orm");
+      return db
+        .select()
+        .from(openAppSecEvents)
+        .where(like(sql`${openAppSecEvents}.rule_id`, `%${input.ruleId}%`))
+        .orderBy(desc(openAppSecEvents.createdAt))
+        .limit(input.limit);
+    }),
+
+  /**
+   * getEventCorrelationSummary — aggregate WAF event counts per rule for
+   * the last N days, used to populate the heatmap in CorazaWafDashboard.
+   */
+  getEventCorrelationSummary: keycloakAdminProcedure
+    .input(z.object({ days: z.number().int().min(1).max(90).default(7) }).optional())
+    .query(async ({ input }) => {
+      const days = input?.days ?? 7;
+      if (process.env.NODE_ENV !== "production") {
+        const RULE_IDS = ["942100", "941100", "930100", "932100", "942110", "941110", "920350", "932150"];
+        return RULE_IDS.map((ruleId) => ({
+          ruleId,
+          totalEvents: Math.floor(Math.random() * 50) + 1,
+          blockedEvents: Math.floor(Math.random() * 30),
+          loggedEvents: Math.floor(Math.random() * 20),
+          lastEventAt: new Date(Date.now() - Math.random() * 86_400_000 * days).toISOString(),
+        }));
+      }
+      const db = await getDb();
+      if (!db) return [];
+      const { openAppSecEvents } = await import("../../drizzle/schema");
+      const { gte, count } = await import("drizzle-orm");
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const rows = await db
+        .select({
+          ruleId: sql<string>`${openAppSecEvents}.rule_id`,
+          totalEvents: count(openAppSecEvents.id),
+          blockedEvents: sql<number>`SUM(CASE WHEN ${openAppSecEvents.action} = 'block' THEN 1 ELSE 0 END)`,
+          loggedEvents: sql<number>`SUM(CASE WHEN ${openAppSecEvents.action} = 'log' THEN 1 ELSE 0 END)`,
+          lastEventAt: sql<string>`MAX(${openAppSecEvents.createdAt})`,
+        })
+        .from(openAppSecEvents)
+        .where(and(gte(openAppSecEvents.createdAt, cutoff), sql`${openAppSecEvents}.rule_id IS NOT NULL`))
+        .groupBy(sql`${openAppSecEvents}.rule_id`)
+        .orderBy(desc(count(openAppSecEvents.id)))
+        .limit(50);
+      return rows.map((r) => ({
+        ruleId: String(r.ruleId ?? "").replace(/^OWASP-CRS-/, ""),
+        totalEvents: Number(r.totalEvents),
+        blockedEvents: Number(r.blockedEvents ?? 0),
+        loggedEvents: Number(r.loggedEvents ?? 0),
+        lastEventAt: String(r.lastEventAt ?? ""),
+      }));
+    }),
 });

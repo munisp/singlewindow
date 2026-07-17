@@ -1603,17 +1603,17 @@
 
 ## Sprint Next Steps (Caddy On-Demand TLS + Keycloak Roles + Coraza WAF Dashboard)
 
-- [ ] Schema: add customDomain + domainVerified columns to tenants table
-- [ ] Schema: add coraza_waf_rules table (ruleId, enabled, severity, description, disabledBy, disabledAt)
-- [ ] Backend: tenant.validateHostname public procedure (Caddy ask endpoint)
-- [ ] Backend: tenant.registerCustomDomain + verifyCustomDomain procedures
-- [ ] Caddyfile.prod: add on_demand_tls block with ask endpoint
-- [ ] Backend: extend ctx.user with keycloakRoles[] from JWT payload (context.ts + sdk.ts)
-- [ ] Backend: keycloakRoleProcedure(requiredRole) factory for role-gated procedures
-- [ ] Backend: openAppSec.getCorazaRules, toggleCorazaRule, bulkToggleCorazaRules procedures
-- [ ] Frontend: WAF Rule Tuning tab in KeycloakAdmin page (rule list, toggle, severity filter)
-- [ ] Frontend: Custom Domain tab in Tenant Management page
-- [ ] Vitest: tests for validateHostname, keycloakRoles context, coraza rule toggle
+- [x] Schema: add customDomain + domainVerified columns to tenants table
+- [x] Schema: add coraza_waf_rules table (ruleId, enabled, severity, description, disabledBy, disabledAt)
+- [x] Backend: tenant.validateHostname public procedure (Caddy ask endpoint)
+- [x] Backend: tenant.registerCustomDomain + verifyCustomDomain procedures
+- [x] Caddyfile.prod: add on_demand_tls block with ask endpoint
+- [x] Backend: extend ctx.user with keycloakRoles[] from JWT payload (context.ts + sdk.ts)
+- [x] Backend: keycloakRoleProcedure(requiredRole) factory for role-gated procedures
+- [x] Backend: openAppSec.getCorazaRules, toggleCorazaRule, bulkToggleCorazaRules procedures
+- [x] Frontend: WAF Rule Tuning tab in KeycloakAdmin page (rule list, toggle, severity filter)
+- [x] Frontend: Custom Domain tab in Tenant Management page
+- [x] Vitest: tests for validateHostname, keycloakRoles context, coraza rule toggle
 
 ## Sprint Caddy Next Steps — Completed
 - [x] Caddy On-Demand TLS: tenant.validateCustomDomain endpoint + Caddyfile.prod :443 block
@@ -1623,3 +1623,27 @@
 - [x] Coraza WAF router (corazaWaf.ts): listRules, toggleRule, bulkToggleRules, getRuleStats, getRecentChanges, getCaddyAdminStatus
 - [x] CorazaWafDashboard page at /app/admin/coraza-waf with sidebar link
 - [x] Vitest: next-steps.test.ts — 4301/4301 passing
+
+## Sprint 3 Next Steps
+- [ ] Frontend: Custom Domain tab in TenantManagement page (register, DNS TXT verify, remove)
+- [ ] Backend: keycloakAdminProcedure migration for keycloak, openAppSec, apisixAudit, permify routers
+- [ ] Backend: corazaWaf.getEventsForRule + getTopFiringRules procedures (correlate openAppSecEvents with rules)
+- [ ] Frontend: CorazaWafDashboard event correlation tab (top firing rules, events per rule, toggle from event list)
+- [ ] Vitest: tests for custom domain UI procedures, keycloakAdminProcedure migration, event correlation
+
+## Sprint: Next Steps v2 (Tenant Domain UI + keycloakAdminProcedure Migration + WAF Event Correlation)
+- [x] TenantManagement page: add Custom Domain tab with register/verify/remove flows
+- [x] Tenant router: registerCustomDomain, verifyCustomDomain, removeCustomDomain, listTenantDomains procedures
+- [x] Schema: customDomain, domainVerified, domainVerifiedAt, domainVerificationToken columns on tenants table
+- [x] Caddyfile.prod: on_demand_tls with ask endpoint pointing to validateHostname
+- [x] keycloakAdminProcedure migration: keycloak router (getSessions, revokeSession, revokeAllUserSessions)
+- [x] keycloakAdminProcedure migration: corazaWaf router (all 8 procedures)
+- [x] keycloakAdminProcedure migration: openAppSec router
+- [x] keycloakAdminProcedure migration: apisixAudit router
+- [x] keycloakAdminProcedure migration: permify router
+- [x] Fix ctx.keycloakRoles undefined guard in trpc.ts keycloakRoleProcedure
+- [x] Remove stale requireAdmin() function from keycloak router
+- [x] corazaWaf router: getTopFiringRules, getEventsForRule, getEventCorrelationSummary procedures
+- [x] CorazaWafDashboard: Event Correlation tab with top-firing rules table, bar chart, and rule drill-down
+- [x] Vitest: next-steps-v2.test.ts (42 assertions, all passing)
+- [x] All 4351 tests passing, 0 TypeScript errors

@@ -154,7 +154,7 @@ export function keycloakRoleProcedure(requiredRole: string) {
       validateCsrf(ctx);
 
       // Primary check: Keycloak JWT roles (zero DB round-trip)
-      const hasKeycloakRole = ctx.keycloakRoles.includes(requiredRole);
+      const hasKeycloakRole = (ctx.keycloakRoles ?? []).includes(requiredRole);
 
       // Fallback: DB role for Manus session-cookie auth
       // Map Keycloak role names to DB role values for backward compatibility

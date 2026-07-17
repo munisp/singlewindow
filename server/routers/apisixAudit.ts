@@ -2,7 +2,7 @@
  * apisixAuditRouter — v89: APISIX route change audit trail.
  */
 import { z } from "zod";
-import { router, adminProcedure, protectedProcedure } from "../_core/trpc";
+import { router, keycloakAdminProcedure, protectedProcedure } from "../_core/trpc";
 
 export const apisixAuditRouter = router({
   /**
@@ -18,7 +18,7 @@ export const apisixAuditRouter = router({
   /**
    * v89: Record a new APISIX route change event.
    */
-  recordChange: adminProcedure
+  recordChange: keycloakAdminProcedure
     .input(z.object({
       routeId: z.string().min(1),
       routeName: z.string().optional(),

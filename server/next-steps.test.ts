@@ -183,13 +183,13 @@ describe("Coraza WAF rule tuning", () => {
     expect(content).toContain("getCaddyAdminStatus");
   });
 
-  it("corazaWaf router uses adminProcedure for all mutations", () => {
+  it("corazaWaf router uses keycloakAdminProcedure for all mutations", () => {
     const content = readFileSync(
       path.resolve(__dirname, "./routers/corazaWaf.ts"),
       "utf-8"
     );
-    // All write operations must be admin-only
-    expect(content).toContain("adminProcedure");
+    // All write operations must be keycloak-admin-only (migrated from adminProcedure)
+    expect(content).toContain("keycloakAdminProcedure");
     // toggleRule and bulkToggleRules must be mutations
     expect(content).toContain(".mutation(");
   });

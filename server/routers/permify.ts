@@ -5,7 +5,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
+import { router, protectedProcedure, keycloakAdminProcedure } from "../_core/trpc";
 import {
   can,
   writeTuple,
@@ -93,7 +93,7 @@ export const permifyRouter = router({
    * POST /permify.writeTuple (admin-only)
    * Creates a new relationship tuple in Permify.
    */
-  writeTuple: adminProcedure
+  writeTuple: keycloakAdminProcedure
     .input(
       z.object({
         entityType: z.string().min(1),
@@ -119,7 +119,7 @@ export const permifyRouter = router({
    * POST /permify.deleteTuple (admin-only)
    * Removes a relationship tuple from Permify.
    */
-  deleteTuple: adminProcedure
+  deleteTuple: keycloakAdminProcedure
     .input(
       z.object({
         entityType: z.string().min(1),
@@ -145,7 +145,7 @@ export const permifyRouter = router({
    * POST /permify.setOwner (admin-only)
    * Sets the owner of a resource entity.
    */
-  setOwner: adminProcedure
+  setOwner: keycloakAdminProcedure
     .input(
       z.object({
         entityType: z.string().min(1),
@@ -162,7 +162,7 @@ export const permifyRouter = router({
    * POST /permify.assignReviewer (admin-only)
    * Assigns a reviewer to a resource entity.
    */
-  assignReviewer: adminProcedure
+  assignReviewer: keycloakAdminProcedure
     .input(
       z.object({
         entityType: z.string().min(1),
@@ -179,7 +179,7 @@ export const permifyRouter = router({
    * POST /permify.writeRelationship (admin-only)
    * Low-level write of a full relationship object.
    */
-  writeRelationship: adminProcedure
+  writeRelationship: keycloakAdminProcedure
     .input(
       z.object({
         entityType: z.string().min(1),
@@ -198,14 +198,14 @@ export const permifyRouter = router({
    * GET /permify.listPolicies (admin-only)
    * Returns the current schema versions available in Permify.
    */
-  listPolicies: adminProcedure.query(async () => {
+  listPolicies: keycloakAdminProcedure.query(async () => {
     return listSchemas();
   }),
 
   /**
    * v91: Get Permify authorization audit log entries.
    */
-  getAuditLog: adminProcedure
+  getAuditLog: keycloakAdminProcedure
     .input(z.object({
       operation: z.string().optional(),
       entity: z.string().optional(),
@@ -219,7 +219,7 @@ export const permifyRouter = router({
   /**
    * v91: Get Permify audit log stats (operation breakdown).
    */
-  getAuditStats: adminProcedure.query(async () => {
+  getAuditStats: keycloakAdminProcedure.query(async () => {
     const { getPermifyAuditLog } = await import("../db");
     const rows = await getPermifyAuditLog({ limit: 1000 });
     const byOp: Record<string, { total: number; allowed: number; denied: number }> = {};
