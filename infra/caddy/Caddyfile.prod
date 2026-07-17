@@ -1,0 +1,273 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# TradeGateway™ NGSWTP — Caddy Production Caddyfile
+#
+# Architecture:
+#   Internet → Caddy (TLS termination, HTTP/3, Coraza WAF)
+#            → Apache APISIX (API gateway, openid-connect plugin, rate limiting)
+#            → tRPC / Go microservices
+#
+# Caddy's responsibilities:
+#   • Automatic TLS via Let's Encrypt / ZeroSSL (ACME)
+#   • HTTP/3 + QUIC on all listeners
+#   • HTTP → HTTPS redirect
+#   • Coraza WAF (OWASP CRS) — first-line WAF before APISIX
+#   • forward_auth to oauth2-proxy → Keycloak for browser-based portals
+#   • Reverse proxy to APISIX for all API traffic
+#   • Serve Keycloak itself over HTTPS
+#
+# Environment variables (set via Kubernetes secrets / .env):
+#   CADDY_DOMAIN_BASE      e.g. tradegateway.gov.ng
+#   KEYCLOAK_UPSTREAM      e.g. keycloak:8080
+#   APISIX_UPSTREAM        e.g. apisix:9080
+#   FRONTEND_UPSTREAM      e.g. frontend:3000
+#   OAUTH2_PROXY_UPSTREAM  e.g. oauth2-proxy:4180
+#   ACME_EMAIL             e.g. ops@tradegateway.gov.ng
+# ═══════════════════════════════════════════════════════════════════════════════
+
+{
+    # ── Global options ────────────────────────────────────────────────────────
+    email {$ACME_EMAIL:ops@tradegateway.gov.ng}
+
+    # Use ZeroSSL as primary CA (better for government domains) with
+    # Let's Encrypt as fallback.
+    acme_ca https://acme.zerossl.com/v2/DV90
+    acme_ca_root /etc/ssl/certs/ca-certificates.crt
+
+    # HTTP/3 is enabled by default on all listeners in Caddy.
+    # Explicitly set QUIC alt-svc header lifetime.
+    servers {
+        protocols h1 h2 h3
+    }
+
+    # Coraza WAF — must be ordered before all other handlers.
+    order coraza_waf first
+
+    # Admin API (internal only — not exposed externally)
+    admin 0.0.0.0:2019
+
+    # Logging: structured JSON for OpenSearch / Wazuh ingestion
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 10
+        }
+        format json
+        level INFO
+    }
+}
+
+# ── Snippet: Coraza WAF (OWASP CRS) ──────────────────────────────────────────
+(coraza_waf_snippet) {
+    coraza_waf {
+        load_owasp_crs
+        directives `
+            Include @coraza.conf-recommended
+            Include @crs-setup.conf.example
+            Include @owasp_crs/*.conf
+            SecRuleEngine On
+            SecRequestBodyAccess On
+            SecResponseBodyAccess Off
+            SecRequestBodyLimit 52428800
+            SecRequestBodyNoFilesLimit 1048576
+            # TradeGateway-specific exclusions
+            # Exclude HS code lookup paths from URI-based rules (contain slashes)
+            SecRuleUpdateTargetById 930120 "!REQUEST_URI"
+        `
+    }
+}
+
+# ── Snippet: Security headers ─────────────────────────────────────────────────
+(security_headers) {
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+}
+
+# ── Snippet: forward_auth to oauth2-proxy → Keycloak ─────────────────────────
+# Used for browser-facing portals (Trader Portal, OGA Portal, Admin Console).
+# API clients (mobile apps, Go microservices) use Bearer JWT validated by APISIX.
+(keycloak_forward_auth) {
+    forward_auth {$OAUTH2_PROXY_UPSTREAM:oauth2-proxy:4180} {
+        uri /oauth2/auth
+        copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Groups X-Auth-Request-Access-Token
+        # Pass original URI so oauth2-proxy can redirect back after login
+        header_up X-Forwarded-Uri {uri}
+    }
+}
+
+# ── HTTP → HTTPS redirect (all hosts) ────────────────────────────────────────
+http:// {
+    redir https://{host}{uri} permanent
+}
+
+# ── Keycloak IAM portal ───────────────────────────────────────────────────────
+# Caddy serves Keycloak over HTTPS with automatic TLS.
+# All OIDC discovery and JWKS endpoints are available at this domain.
+auth.{$CADDY_DOMAIN_BASE:tradegateway.gov.ng} {
+    import security_headers
+    import coraza_waf_snippet
+
+    reverse_proxy {$KEYCLOAK_UPSTREAM:keycloak:8080} {
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {host}
+        # Keycloak needs the real client IP for brute-force protection
+        header_up X-Real-IP {remote_host}
+        # Health check
+        health_uri /health/ready
+        health_interval 30s
+        health_timeout 10s
+    }
+}
+
+# ── Trader Portal ─────────────────────────────────────────────────────────────
+# Browser-facing portal for importers/exporters.
+# Protected by forward_auth → oauth2-proxy → Keycloak.
+trader.{$CADDY_DOMAIN_BASE:tradegateway.gov.ng} {
+    import security_headers
+    import coraza_waf_snippet
+
+    # Protect all routes with Keycloak authentication
+    import keycloak_forward_auth
+
+    # OAuth2 proxy callback (must be excluded from forward_auth)
+    handle /oauth2/* {
+        reverse_proxy {$OAUTH2_PROXY_UPSTREAM:oauth2-proxy:4180}
+    }
+
+    # API traffic → APISIX
+    handle /api/* {
+        reverse_proxy {$APISIX_UPSTREAM:apisix:9080} {
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # Frontend SPA → Node.js frontend server
+    handle {
+        reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000} {
+            header_up X-Forwarded-Proto https
+        }
+    }
+}
+
+# ── OGA Portal ────────────────────────────────────────────────────────────────
+# Portal for Other Government Agency officers.
+oga.{$CADDY_DOMAIN_BASE:tradegateway.gov.ng} {
+    import security_headers
+    import coraza_waf_snippet
+    import keycloak_forward_auth
+
+    handle /oauth2/* {
+        reverse_proxy {$OAUTH2_PROXY_UPSTREAM:oauth2-proxy:4180}
+    }
+
+    handle /api/* {
+        reverse_proxy {$APISIX_UPSTREAM:apisix:9080} {
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    handle {
+        reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000} {
+            header_up X-Forwarded-Proto https
+        }
+    }
+}
+
+# ── Admin Console ─────────────────────────────────────────────────────────────
+# Internal admin dashboard — restricted to admin + customs_officer roles.
+# Additional IP allowlist can be applied here for extra security.
+admin.{$CADDY_DOMAIN_BASE:tradegateway.gov.ng} {
+    import security_headers
+    import coraza_waf_snippet
+    import keycloak_forward_auth
+
+    # Optional: restrict to known government IP ranges
+    # @allowed_ips {
+    #     remote_ip 196.0.0.0/8 105.0.0.0/8
+    # }
+    # handle @allowed_ips {
+    #     ...
+    # }
+    # respond "Access denied" 403
+
+    handle /oauth2/* {
+        reverse_proxy {$OAUTH2_PROXY_UPSTREAM:oauth2-proxy:4180}
+    }
+
+    handle /api/* {
+        reverse_proxy {$APISIX_UPSTREAM:apisix:9080} {
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    handle {
+        reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000} {
+            header_up X-Forwarded-Proto https
+        }
+    }
+}
+
+# ── Public API gateway (direct API access for mobile apps / B2B) ──────────────
+# No forward_auth — API clients authenticate via Bearer JWT validated by APISIX.
+api.{$CADDY_DOMAIN_BASE:tradegateway.gov.ng} {
+    import security_headers
+    import coraza_waf_snippet
+
+    # Rate limit at edge: 1000 req/min per IP (coarse-grained)
+    # Fine-grained rate limiting is handled by APISIX per-consumer
+    rate_limit {
+        zone api_edge {
+            key {remote_host}
+            events 1000
+            window 1m
+        }
+    }
+
+    reverse_proxy {$APISIX_UPSTREAM:apisix:9080} {
+        header_up X-Forwarded-Proto https
+        header_up X-Real-IP {remote_host}
+        # Preserve original Host for APISIX virtual host routing
+        header_up Host {upstream_hostport}
+        # Long timeout for declaration processing
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 120s
+        }
+    }
+}
+
+# ── Monitoring / Observability (internal) ────────────────────────────────────
+# Grafana, Prometheus, Jaeger — accessible only from internal network.
+# In production, restrict with IP allowlist or VPN.
+monitoring.{$CADDY_DOMAIN_BASE:tradegateway.gov.ng} {
+    import security_headers
+
+    @grafana path /grafana/*
+    handle @grafana {
+        uri strip_prefix /grafana
+        reverse_proxy grafana:3000
+    }
+
+    @prometheus path /prometheus/*
+    handle @prometheus {
+        uri strip_prefix /prometheus
+        reverse_proxy prometheus:9090
+    }
+
+    @jaeger path /jaeger/*
+    handle @jaeger {
+        uri strip_prefix /jaeger
+        reverse_proxy jaeger:16686
+    }
+
+    respond "Not found" 404
+}

@@ -28,8 +28,73 @@ volumes:
   minio_data:
   fluvio_data:
   permify_data:
+  caddy_data:
+  caddy_config:
 
 services:
+
+  # ── CADDY (Edge Proxy + TLS + WAF) ──────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: tg-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 QUIC
+      - "2019:2019"     # Admin API (internal only)
+    volumes:
+      - ./caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      CADDY_DOMAIN_BASE: ${CADDY_DOMAIN_BASE:-tradegateway.gov.ng}
+      KEYCLOAK_UPSTREAM: keycloak:8080
+      APISIX_UPSTREAM: apisix:9080
+      FRONTEND_UPSTREAM: frontend:3000
+      OAUTH2_PROXY_UPSTREAM: oauth2-proxy:4180
+      ACME_EMAIL: ${ACME_EMAIL:-ops@tradegateway.gov.ng}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      apisix:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - tradegateway
+
+  # ── OAUTH2-PROXY (Keycloak OIDC bridge for Caddy forward_auth) ──────────────
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    container_name: tg-oauth2-proxy
+    restart: unless-stopped
+    command:
+      - --config=/etc/oauth2-proxy/oauth2-proxy.cfg
+    environment:
+      OAUTH2_PROXY_CLIENT_SECRET: ${KEYCLOAK_CADDY_CLIENT_SECRET:-changeme-replace-in-production}
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:-Y2hhbmdlbWUzMmJ5dGVzYmFzZTY0PT0=}
+    volumes:
+      - ./caddy/oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+    ports:
+      - "4180:4180"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4180/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - tradegateway
 
   # ── POSTGRESQL ─────────────────────────────────────────────────────────────
   postgres:

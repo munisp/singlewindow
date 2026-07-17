@@ -21,6 +21,11 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getKeycloakConfig, upsertKeycloakConfig, logAuditEvent } from "../db";
+import {
+  getJwksStatus,
+  invalidateJwksCache,
+  validateKeycloakToken,
+} from "../middleware/keycloakJwt";
 
 const KEYCLOAK_SVC_URL = process.env.KEYCLOAK_SVC_URL || "http://localhost:8087";
 
@@ -163,16 +168,150 @@ export const keycloakRouter = router({
 
   /**
    * Force a JWKS key rotation (re-fetch from Keycloak).
-   * Admin only.
+   * Admin only. Also invalidates the local jose JWKS cache.
    */
   refreshJWKS: protectedProcedure.mutation(async ({ ctx }) => {
     requireAdmin(ctx.user.role);
+    // Invalidate the local jose JWKS cache immediately
+    invalidateJwksCache();
     const available = await keycloakSvcAvailable();
-    if (!available) {
-      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "keycloak-svc is unavailable" });
+    if (available) {
+      try {
+        await keycloakFetch<Record<string, unknown>>("/api/oidc/refresh-jwks", { method: "POST" });
+      } catch {
+        // Non-fatal — local cache already cleared
+      }
     }
-    return keycloakFetch<Record<string, unknown>>("/api/oidc/refresh-jwks", { method: "POST" });
+    // Re-check JWKS status after cache invalidation
+    const status = await getJwksStatus();
+    return { success: true, jwksStatus: status };
   }),
+
+  /**
+   * Get JWKS endpoint health status — checks reachability and key count.
+   * Admin only.
+   */
+  getJwksStatus: protectedProcedure.query(async ({ ctx }) => {
+    requireAdmin(ctx.user.role);
+    return getJwksStatus();
+  }),
+
+  /**
+   * Exchange a Keycloak authorization code for tokens.
+   * Used by the frontend after Keycloak redirects back with ?code=...
+   * Protected — requires an existing Manus session to call this.
+   */
+  exchangeCode: protectedProcedure
+    .input(z.object({
+      code: z.string().min(1),
+      redirectUri: z.string().url(),
+      codeVerifier: z.string().optional(), // PKCE
+    }))
+    .mutation(async ({ input }) => {
+      const keycloakRealmUrl =
+        process.env.KEYCLOAK_REALM_URL || "http://keycloak:8080/realms/tradegateway";
+      const clientId =
+        process.env.KEYCLOAK_CLIENT_ID || "tradegateway-backend";
+      const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || "";
+
+      const tokenUrl = `${keycloakRealmUrl}/protocol/openid-connect/token`;
+
+      const body = new URLSearchParams({
+        grant_type: "authorization_code",
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        client_id: clientId,
+        client_secret: clientSecret,
+        ...(input.codeVerifier ? { code_verifier: input.codeVerifier } : {}),
+      });
+
+      const res = await fetch(tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Token exchange failed: ${err}`,
+        });
+      }
+
+      const tokens = await res.json() as {
+        access_token: string;
+        refresh_token?: string;
+        id_token?: string;
+        expires_in: number;
+        token_type: string;
+      };
+
+      // Validate the returned access token
+      const user = await validateKeycloakToken(tokens.access_token).catch(() => null);
+
+      return {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token ?? null,
+        idToken: tokens.id_token ?? null,
+        expiresIn: tokens.expires_in,
+        tokenType: tokens.token_type,
+        user,
+      };
+    }),
+
+  /**
+   * Introspect a Keycloak token via the introspection endpoint.
+   * Returns active status, expiry, and claims.
+   * Admin only.
+   */
+  introspectToken: protectedProcedure
+    .input(z.object({ token: z.string().min(10) }))
+    .mutation(async ({ input, ctx }) => {
+      requireAdmin(ctx.user.role);
+      const keycloakRealmUrl =
+        process.env.KEYCLOAK_REALM_URL || "http://keycloak:8080/realms/tradegateway";
+      const clientId =
+        process.env.KEYCLOAK_CLIENT_ID || "tradegateway-backend";
+      const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || "";
+
+      const introspectUrl = `${keycloakRealmUrl}/protocol/openid-connect/token/introspect`;
+
+      const body = new URLSearchParams({
+        token: input.token,
+        client_id: clientId,
+        client_secret: clientSecret,
+      });
+
+      const res = await fetch(introspectUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (!res.ok) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Introspection failed: HTTP ${res.status}`,
+        });
+      }
+
+      const result = await res.json() as Record<string, unknown>;
+      return {
+        active: result.active as boolean,
+        sub: result.sub as string | undefined,
+        username: result.preferred_username as string | undefined,
+        email: result.email as string | undefined,
+        realmRoles: (result.realm_access as any)?.roles ?? [],
+        expiresAt: result.exp
+          ? new Date((result.exp as number) * 1000).toISOString()
+          : null,
+        introspectedAt: new Date().toISOString(),
+        raw: result,
+      };
+    }),
 
   /**
    * Validate a JWT token against the configured Keycloak realm.

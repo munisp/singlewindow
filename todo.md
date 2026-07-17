@@ -1569,3 +1569,34 @@
 - [x] mergeEntities backend procedure: updates primary record with chosen fields, deactivates duplicate
 - [x] Vitest tests: server/v139.test.ts — 4 suites, 20 tests (parseMentionTokens, computeDagColumns, buildMergedFields, deduplicateMentionedUsers)
 - [x] Full suite: 111 test files, 4216 tests, 0 TypeScript errors (22 pre-existing failures in v63.test.ts for missing services.yml)
+
+## Caddy + Keycloak Integration Sprint
+- [ ] Caddy: create infra/caddy/ directory with Caddyfile (dev + prod variants)
+- [ ] Caddy: add caddy service to infra/docker-compose.yml (port 443/80, auto-TLS)
+- [ ] Caddy: add caddy service to docker-compose.yml (local dev, HTTP-only on port 8888)
+- [ ] Caddy: create infra/k8s/caddy/ Kubernetes Deployment + Service + ConfigMap manifests
+- [ ] Caddy: create infra/k8s/caddy/ingress-class.yaml for Caddy as cluster ingress
+- [ ] Keycloak: add caddy-frontend client to infra/keycloak/realm-export.json
+- [ ] Keycloak: update APISIX openid-connect plugin config for JWT validation
+- [ ] Backend: create server/middleware/keycloakJwt.ts — JWKS-based JWT validation middleware
+- [ ] Backend: add keycloak.getJwksStatus, exchangeCode, introspectToken procedures
+- [ ] Frontend: create client/src/pages/KeycloakAdmin.tsx — Keycloak config & session management page
+- [ ] Frontend: add /admin/keycloak route to App.tsx
+- [ ] Frontend: update DashboardLayout sidebar to include Keycloak Admin link (admin role only)
+- [ ] Vitest: server/caddy-keycloak.test.ts — tests for JWT middleware, JWKS fetch, token introspection
+
+## Caddy + Keycloak Integration (Sprint Caddy)
+
+- [x] infra/caddy/Caddyfile.prod — Production Caddyfile (ACME TLS, HTTP/3, Coraza WAF, forward_auth)
+- [x] infra/caddy/Caddyfile.dev — Development Caddyfile (HTTP-only, port 8888)
+- [x] infra/caddy/oauth2-proxy.cfg — oauth2-proxy Keycloak OIDC configuration
+- [x] infra/caddy/README.md — Caddy architecture documentation
+- [x] infra/docker-compose.yml — Caddy + oauth2-proxy services added
+- [x] infra/k8s/caddy/configmap.yaml — Kubernetes ConfigMap for Caddyfile
+- [x] infra/k8s/caddy/deployment.yaml — Kubernetes Deployment for Caddy
+- [x] infra/k8s/caddy/service.yaml — Kubernetes Service (LoadBalancer) + oauth2-proxy Deployment
+- [x] infra/k8s/caddy/ingress-class.yaml — Kubernetes IngressClass for Caddy
+- [x] server/middleware/keycloakJwt.ts — jose JWKS-based JWT middleware (validateKeycloakToken, requireKeycloakAuth, getJwksStatus, invalidateJwksCache)
+- [x] server/routers/keycloak.ts — Added getJwksStatus, refreshJWKS (with cache invalidation), exchangeCode, introspectToken procedures
+- [x] client/src/pages/IdentityProvider.tsx — Added JWKS Status, Introspect Token, Caddy Edge tabs
+- [x] server/caddy-keycloak.test.ts — 30 Vitest tests (all passing)
