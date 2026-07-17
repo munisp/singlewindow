@@ -79,6 +79,7 @@ import { kafkaEventsRouter } from "./routers/kafkaEvents";
 import { ogaPermitAuditRouter } from "./routers/ogaPermitAudit";
 import { temporalRunsRouter } from "./routers/temporalRuns";
 import { openAppSecRouter } from "./routers/openAppSec";
+import { corazaWafRouter } from "./routers/corazaWaf";
 import { lakehouseRouter } from "./routers/lakehouse";
 import { geoipRouter } from "./routers/geoip";
 import { workflowSchemasRouter } from "./routers/workflowSchemas";
@@ -315,6 +316,7 @@ export const appRouter = router({
   ogaPermitAudit: ogaPermitAuditRouter,
   temporalRuns: temporalRunsRouter,
   openAppSec: openAppSecRouter,
+  corazaWaf: corazaWafRouter,
   lakehouse: lakehouseRouter,
   geoip: geoipRouter,
   workflowSchemas: workflowSchemasRouter,

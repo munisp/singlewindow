@@ -1065,6 +1065,12 @@ export const tenants = pgTable("tenants", {
   plan: varchar("plan", { length: 32 }).default("standard").notNull(),
   apiPrefix: varchar("api_prefix", { length: 64 }).notNull(),
   status: varchar("status", { length: 32 }).default("active").notNull(),
+  // ── Caddy On-Demand TLS: custom hostname per tenant ──────────────────────
+  // Caddy's `ask` endpoint validates this before issuing an ACME certificate.
+  customDomain: varchar("custom_domain", { length: 253 }).unique(),
+  domainVerified: boolean("domain_verified").default(false).notNull(),
+  domainVerifiedAt: timestamp("domain_verified_at"),
+  domainVerificationToken: varchar("domain_verification_token", { length: 64 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -3107,3 +3113,33 @@ export const batchValidationErrors = pgTable("batch_validation_errors", {
   rawValue: text("raw_value"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ─── CORAZA WAF RULE OVERRIDES (Sprint Caddy) ─────────────────────────────────
+// Stores per-rule enable/disable overrides for the Coraza WAF embedded in Caddy.
+// The Caddy admin API reads this table via the /api/trpc/openAppSec.getCorazaRules
+// endpoint and regenerates the Caddyfile SecRule directives on the fly.
+export const corazaWafRules = pgTable("coraza_waf_rules", {
+  id: serial("id").primaryKey(),
+  ruleId: varchar("rule_id", { length: 32 }).notNull().unique(),
+  enabled: boolean("enabled").default(true).notNull(),
+  severity: varchar("severity", { length: 16 }).notNull().default("medium"),
+  category: varchar("category", { length: 64 }).notNull().default("OWASP-CRS"),
+  description: text("description"),
+  // Who last changed this rule and when
+  disabledBy: integer("disabled_by").references(() => users.id, { onDelete: "set null" }),
+  disabledAt: timestamp("disabled_at"),
+  enabledBy: integer("enabled_by").references(() => users.id, { onDelete: "set null" }),
+  enabledAt: timestamp("enabled_at"),
+  // Reason for the override (required for audit trail)
+  changeReason: text("change_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_coraza_rule_id").on(t.ruleId),
+  index("idx_coraza_enabled").on(t.enabled),
+  index("idx_coraza_severity").on(t.severity),
+  index("idx_coraza_category").on(t.category),
+]);
+
+export type CorazaWafRule = typeof corazaWafRules.$inferSelect;
+export type InsertCorazaWafRule = typeof corazaWafRules.$inferInsert;

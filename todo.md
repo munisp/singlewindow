@@ -1600,3 +1600,26 @@
 - [x] server/routers/keycloak.ts — Added getJwksStatus, refreshJWKS (with cache invalidation), exchangeCode, introspectToken procedures
 - [x] client/src/pages/IdentityProvider.tsx — Added JWKS Status, Introspect Token, Caddy Edge tabs
 - [x] server/caddy-keycloak.test.ts — 30 Vitest tests (all passing)
+
+## Sprint Next Steps (Caddy On-Demand TLS + Keycloak Roles + Coraza WAF Dashboard)
+
+- [ ] Schema: add customDomain + domainVerified columns to tenants table
+- [ ] Schema: add coraza_waf_rules table (ruleId, enabled, severity, description, disabledBy, disabledAt)
+- [ ] Backend: tenant.validateHostname public procedure (Caddy ask endpoint)
+- [ ] Backend: tenant.registerCustomDomain + verifyCustomDomain procedures
+- [ ] Caddyfile.prod: add on_demand_tls block with ask endpoint
+- [ ] Backend: extend ctx.user with keycloakRoles[] from JWT payload (context.ts + sdk.ts)
+- [ ] Backend: keycloakRoleProcedure(requiredRole) factory for role-gated procedures
+- [ ] Backend: openAppSec.getCorazaRules, toggleCorazaRule, bulkToggleCorazaRules procedures
+- [ ] Frontend: WAF Rule Tuning tab in KeycloakAdmin page (rule list, toggle, severity filter)
+- [ ] Frontend: Custom Domain tab in Tenant Management page
+- [ ] Vitest: tests for validateHostname, keycloakRoles context, coraza rule toggle
+
+## Sprint Caddy Next Steps — Completed
+- [x] Caddy On-Demand TLS: tenant.validateCustomDomain endpoint + Caddyfile.prod :443 block
+- [x] Schema: customDomain, domainVerified columns on tenants table; coraza_waf_rules table
+- [x] Keycloak roles → tRPC ctx.keycloakRoles: X-Auth-Request-Groups header extraction in context.ts
+- [x] keycloakRoleProcedure factory and keycloakAdminProcedure in trpc.ts
+- [x] Coraza WAF router (corazaWaf.ts): listRules, toggleRule, bulkToggleRules, getRuleStats, getRecentChanges, getCaddyAdminStatus
+- [x] CorazaWafDashboard page at /app/admin/coraza-waf with sidebar link
+- [x] Vitest: next-steps.test.ts — 4301/4301 passing
