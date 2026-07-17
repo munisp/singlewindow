@@ -1571,19 +1571,19 @@
 - [x] Full suite: 111 test files, 4216 tests, 0 TypeScript errors (22 pre-existing failures in v63.test.ts for missing services.yml)
 
 ## Caddy + Keycloak Integration Sprint
-- [ ] Caddy: create infra/caddy/ directory with Caddyfile (dev + prod variants)
-- [ ] Caddy: add caddy service to infra/docker-compose.yml (port 443/80, auto-TLS)
-- [ ] Caddy: add caddy service to docker-compose.yml (local dev, HTTP-only on port 8888)
-- [ ] Caddy: create infra/k8s/caddy/ Kubernetes Deployment + Service + ConfigMap manifests
-- [ ] Caddy: create infra/k8s/caddy/ingress-class.yaml for Caddy as cluster ingress
-- [ ] Keycloak: add caddy-frontend client to infra/keycloak/realm-export.json
-- [ ] Keycloak: update APISIX openid-connect plugin config for JWT validation
-- [ ] Backend: create server/middleware/keycloakJwt.ts — JWKS-based JWT validation middleware
-- [ ] Backend: add keycloak.getJwksStatus, exchangeCode, introspectToken procedures
-- [ ] Frontend: create client/src/pages/KeycloakAdmin.tsx — Keycloak config & session management page
-- [ ] Frontend: add /admin/keycloak route to App.tsx
-- [ ] Frontend: update DashboardLayout sidebar to include Keycloak Admin link (admin role only)
-- [ ] Vitest: server/caddy-keycloak.test.ts — tests for JWT middleware, JWKS fetch, token introspection
+- [x] Caddy: create infra/caddy/ directory with Caddyfile (dev + prod variants)
+- [x] Caddy: add caddy service to infra/docker-compose.yml (port 443/80, auto-TLS)
+- [x] Caddy: add caddy service to docker-compose.yml (local dev, HTTP-only on port 8888)
+- [x] Caddy: create infra/k8s/caddy/ Kubernetes Deployment + Service + ConfigMap manifests
+- [x] Caddy: create infra/k8s/caddy/ingress-class.yaml for Caddy as cluster ingress
+- [x] Keycloak: add caddy-frontend client to infra/keycloak/realm-export.json
+- [x] Keycloak: update APISIX openid-connect plugin config for JWT validation
+- [x] Backend: create server/middleware/keycloakJwt.ts — JWKS-based JWT validation middleware
+- [x] Backend: add keycloak.getJwksStatus, exchangeCode, introspectToken procedures
+- [x] Frontend: create client/src/pages/KeycloakAdmin.tsx — Keycloak config & session management page
+- [x] Frontend: add /admin/keycloak route to App.tsx
+- [x] Frontend: update DashboardLayout sidebar to include Keycloak Admin link (admin role only)
+- [x] Vitest: server/caddy-keycloak.test.ts — tests for JWT middleware, JWKS fetch, token introspection
 
 ## Caddy + Keycloak Integration (Sprint Caddy)
 

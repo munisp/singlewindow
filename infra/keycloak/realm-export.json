@@ -447,6 +447,80 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       }
+    },
+    {
+      "clientId": "caddy-frontend",
+      "name": "Caddy Edge Proxy (oauth2-proxy)",
+      "description": "OIDC client for oauth2-proxy running behind Caddy. Handles browser-based OIDC flows for trader, OGA, and admin portals.",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "redirectUris": [
+        "https://trader.${CADDY_DOMAIN_BASE}/oauth2/callback",
+        "https://oga.${CADDY_DOMAIN_BASE}/oauth2/callback",
+        "https://admin.${CADDY_DOMAIN_BASE}/oauth2/callback",
+        "http://localhost:8888/oauth2/callback"
+      ],
+      "webOrigins": [
+        "https://trader.${CADDY_DOMAIN_BASE}",
+        "https://oga.${CADDY_DOMAIN_BASE}",
+        "https://admin.${CADDY_DOMAIN_BASE}",
+        "http://localhost:8888"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "3600",
+        "client.session.idle.timeout": "1800"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tradegateway-role-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tradegateway_role",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tradegateway_role",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     }
   ],
   "clientScopes": [

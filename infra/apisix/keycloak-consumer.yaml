@@ -23,34 +23,65 @@
 # ── Plugin Configuration ──────────────────────────────────────────────────────
 
 plugin_configs:
-  # Shared OIDC config for all protected microservice routes
+  # ── Shared OIDC config for all protected microservice routes ─────────────────
+  # Tokens arrive at APISIX pre-validated by Caddy's forward_auth → oauth2-proxy
+  # layer. APISIX performs a second, stateless JWT signature check using the
+  # Keycloak JWKS endpoint (RS256). This provides defence-in-depth: even if
+  # Caddy's forward_auth is bypassed, APISIX will still reject unsigned tokens.
   - id: "keycloak-oidc"
     plugins:
       openid-connect:
-        # Keycloak realm discovery URL
+        # Keycloak realm discovery URL (internal cluster DNS)
         discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
-        # Client credentials (tradegateway-backend client)
-        client_id: "tradegateway-backend"
-        client_secret: "${KEYCLOAK_CLIENT_SECRET}"
-        # Redirect URI for browser-based flows
-        redirect_uri: "https://api.tradegateway.gov.gh/api/oauth/callback"
+        # Client credentials — tradegateway-api client (confidential, API-only)
+        client_id: "tradegateway-api"
+        client_secret: "${KEYCLOAK_API_CLIENT_SECRET}"
+        # Redirect URI for browser-based flows (only used when bearer_only=false)
+        redirect_uri: "https://api.${CADDY_DOMAIN_BASE}/api/oauth/callback"
         # Scope requested
         scope: "openid profile email roles"
-        # Token validation
+        # Token validation — RS256 only (Keycloak default)
         token_signing_alg_values_expected: "RS256"
-        # Introspection endpoint (optional — use for opaque tokens)
-        # introspection_endpoint: "http://keycloak.../protocol/openid-connect/token/introspect"
-        # Pass claims to upstream
+        # Pass validated claims to upstream microservices as headers
         set_userinfo_header: true
-        set_id_token_header: true
+        set_id_token_header: false
         set_access_token_header: true
-        # Header names for upstream services
         access_token_in_authorization_header: true
-        # Cache JWKS for 5 minutes
+        # Cache JWKS for 5 minutes (300s)
         jwks_expires_in: 300
-        # Reject requests without valid token
+        # bearer_only=true: APISIX validates the Bearer token but does NOT
+        # redirect to Keycloak. Caddy + oauth2-proxy handles the redirect for
+        # browser portals. API clients must supply a valid Bearer token.
         bearer_only: true
-        # Realm roles claim path
+        # Realm roles claim path in the JWT payload
+        realm_roles_claim: "realm_access.roles"
+        # Upstream header mappings — downstream services read these
+        # X-Forwarded-User, X-Forwarded-Email, X-Forwarded-Groups are set
+        # by oauth2-proxy before Caddy forwards to APISIX for browser flows.
+        # For direct API calls, APISIX sets them from the validated JWT.
+        userinfo_header_name: "X-Keycloak-Userinfo"
+
+  # ── Caddy-forwarded browser sessions (oauth2-proxy header trust) ─────────────
+  # When Caddy's forward_auth succeeds, oauth2-proxy injects:
+  #   X-Auth-Request-User, X-Auth-Request-Email, X-Auth-Request-Groups,
+  #   X-Auth-Request-Access-Token (the Keycloak access token)
+  # APISIX validates the access token from X-Auth-Request-Access-Token
+  # using the same JWKS endpoint.
+  - id: "caddy-forwarded-oidc"
+    plugins:
+      openid-connect:
+        discovery: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/.well-known/openid-configuration"
+        client_id: "caddy-frontend"
+        client_secret: "${KEYCLOAK_CADDY_CLIENT_SECRET}"
+        scope: "openid profile email roles"
+        token_signing_alg_values_expected: "RS256"
+        # Read the token from the header oauth2-proxy injects
+        token_header_name: "X-Auth-Request-Access-Token"
+        set_userinfo_header: true
+        set_access_token_header: true
+        access_token_in_authorization_header: true
+        jwks_expires_in: 300
+        bearer_only: true
         realm_roles_claim: "realm_access.roles"
 
 # ── Consumers ─────────────────────────────────────────────────────────────────
