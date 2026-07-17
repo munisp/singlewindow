@@ -483,6 +483,68 @@ export const corazaWafRouter = router({
    * getEventCorrelationSummary — aggregate WAF event counts per rule for
    * the last N days, used to populate the heatmap in CorazaWafDashboard.
    */
+  /**
+   * exportEventsCSV — returns all WAF event correlation data as a CSV string
+   * for the specified time window. Used by the "Export CSV" button in
+   * CorazaWafDashboard.
+   */
+  exportEventsCSV: keycloakAdminProcedure
+    .input(z.object({
+      days: z.number().int().min(1).max(90).default(7),
+      ruleId: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const days = input.days;
+      if (process.env.NODE_ENV !== "production") {
+        // Dev: generate synthetic CSV rows
+        const headers = ["Rule ID", "Attack Type", "Severity", "Source IP", "Target Path", "Action", "Acknowledged", "Timestamp"];
+        const rows = Array.from({ length: 20 }, (_, i) => [
+          `OWASP-CRS-94${2100 + i}`,
+          ["SQL_INJECTION", "XSS", "PATH_TRAVERSAL", "COMMAND_INJECTION"][i % 4],
+          ["critical", "high", "medium", "low"][i % 4],
+          ["203.0.113.42", "185.220.101.3", "198.51.100.7"][i % 3],
+          `/api/trpc/declarations.${["create", "list", "update"][i % 3]}`,
+          i % 3 === 0 ? "BLOCK" : "LOG",
+          i % 4 === 0 ? "true" : "false",
+          new Date(Date.now() - i * 3_600_000).toISOString(),
+        ]);
+        const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+        return { csv, rowCount: rows.length, generatedAt: new Date().toISOString() };
+      }
+      const db = await getDb();
+      if (!db) return { csv: "", rowCount: 0, generatedAt: new Date().toISOString() };
+      const { openAppSecEvents } = await import("../../drizzle/schema");
+      const { gte, like } = await import("drizzle-orm");
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const conditions: any[] = [gte(openAppSecEvents.createdAt, cutoff)];
+      if (input.ruleId) {
+        conditions.push(like(sql`${openAppSecEvents}.rule_id`, `%${input.ruleId}%`));
+      }
+      const events = await db
+        .select()
+        .from(openAppSecEvents)
+        .where(and(...conditions))
+        .orderBy(desc(openAppSecEvents.createdAt))
+        .limit(5000);
+      const headers = ["Event ID", "Rule ID", "Attack Type", "Severity", "Source IP", "Target Path", "Action", "Acknowledged", "Timestamp"];
+      const rows = events.map(e => [
+        String(e.id ?? ""),
+        String((e as any).ruleId ?? (e as any).rule_id ?? ""),
+        String((e as any).attackType ?? (e as any).attack_type ?? ""),
+        String((e as any).severity ?? ""),
+        String((e as any).sourceIp ?? (e as any).source_ip ?? ""),
+        String((e as any).targetPath ?? (e as any).target_path ?? ""),
+        String((e as any).action ?? ""),
+        String((e as any).isAcknowledged ?? (e as any).is_acknowledged ?? false),
+        e.createdAt ? new Date(e.createdAt).toISOString() : "",
+      ]);
+      const csv = [headers, ...rows]
+        .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+      return { csv, rowCount: rows.length, generatedAt: new Date().toISOString() };
+    }),
+
   getEventCorrelationSummary: keycloakAdminProcedure
     .input(z.object({ days: z.number().int().min(1).max(90).default(7) }).optional())
     .query(async ({ input }) => {

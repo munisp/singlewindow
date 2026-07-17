@@ -9,7 +9,7 @@
  *   - Recent rule change audit log
  */
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ import {
   TrendingUp,
   Activity,
   Eye,
+  Download,
 } from "lucide-react";
 
 // ─── Severity helpers ─────────────────────────────────────────────────────────
@@ -99,6 +100,9 @@ export default function CorazaWafDashboard() {
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [correlationDays, setCorrelationDays] = useState(7);
 
+  // CSV export state
+  const [csvExportEnabled, setCsvExportEnabled] = useState(false);
+
   // Data queries
   const { data: stats, refetch: refetchStats } = trpc.corazaWaf.getRuleStats.useQuery();
   const { data: caddyStatus, refetch: refetchCaddy } = trpc.corazaWaf.getCaddyAdminStatus.useQuery();
@@ -118,6 +122,44 @@ export default function CorazaWafDashboard() {
     { ruleId: selectedRuleId!, limit: 20 },
     { enabled: !!selectedRuleId }
   );
+
+  // CSV export query (lazy — only fires when csvExportEnabled is true)
+  const { data: csvData, isFetching: csvFetching, error: csvError } = trpc.corazaWaf.exportEventsCSV.useQuery(
+    { days: correlationDays, ruleId: selectedRuleId ?? undefined },
+    { enabled: csvExportEnabled }
+  );
+
+  // Trigger file download when data arrives
+  useEffect(() => {
+    if (!csvData || !csvExportEnabled || csvFetching) return;
+    setCsvExportEnabled(false);
+    if (!csvData.csv) return;
+    const blob = new Blob([csvData.csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const suffix = selectedRuleId ? `-rule-${selectedRuleId}` : "";
+    a.download = `waf-events-${correlationDays}d${suffix}-${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast({
+      title: "CSV Exported",
+      description: `${csvData.rowCount} events exported (${correlationDays}d window${selectedRuleId ? `, rule ${selectedRuleId}` : ""}).`,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvData, csvFetching]);
+
+  useEffect(() => {
+    if (!csvError || !csvExportEnabled) return;
+    setCsvExportEnabled(false);
+    toast({ title: "Export Failed", description: csvError.message, variant: "destructive" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvError]);
+
+  const handleExportCSV = () => setCsvExportEnabled(true);
 
   // Mutations
   const toggleMutation = trpc.corazaWaf.toggleRule.useMutation({
@@ -464,6 +506,19 @@ export default function CorazaWafDashboard() {
             </Select>
             <Button variant="outline" size="sm" className="border-gray-600 text-gray-300" onClick={() => { refetchTopFiring(); refetchCorrelation(); }}>
               <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-[#D4A017]/50 text-[#D4A017] hover:bg-[#D4A017]/10 ml-auto"
+              onClick={handleExportCSV}
+              disabled={csvFetching}
+            >
+              {csvFetching ? (
+                <><RefreshCw className="w-3.5 h-3.5 mr-1 animate-spin" /> Exporting…</>
+              ) : (
+                <><Download className="w-3.5 h-3.5 mr-1" /> Export CSV{selectedRuleId ? ` (Rule ${selectedRuleId})` : ""}</>
+              )}
             </Button>
           </div>
 

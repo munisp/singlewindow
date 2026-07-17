@@ -330,6 +330,13 @@
       "when": 1784261938543,
       "tag": "0046_cultured_stellaris",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1784263066127,
+      "tag": "0047_left_doctor_faustus",
+      "breakpoints": true
     }
   ]
 }

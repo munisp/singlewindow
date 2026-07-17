@@ -1665,9 +1665,20 @@
 - [x] Vitest tests: next-steps-v3.test.ts (all 4380 tests passing)
 
 ## Sprint Next Steps v4 (Heartbeat/Coraza/CI)
-- [ ] DNS poller Heartbeat: tRPC admin procedures to create/pause/resume/delete the job
-- [ ] DNS poller Heartbeat: UI panel in TenantManagement Custom Domain tab to manage the job
+- [x] DNS poller Heartbeat: tRPC admin procedures to create/pause/resume/delete the job
+- [x] DNS poller Heartbeat: UI panel in TenantManagement Custom Domain tab to manage the job
 - [x] Coraza hot-reload smoke test: integration test for /load endpoint
-- [ ] GitHub PR: create feat/caddy-keycloak-waf branch and open PR
-- [ ] GitHub CI: wire services.yml to run pnpm test on PR
-- [ ] Vitest: tests for Heartbeat management procedures and Coraza hot-reload
+- [x] GitHub PR: create feat/caddy-keycloak-waf branch and open PR
+- [x] GitHub CI: wire services.yml to run pnpm test on PR
+- [x] Vitest: tests for Heartbeat management procedures and Coraza hot-reload
+
+## Sprint Caddy v5 — OWASP CRS Import, DNS Failure Notifications, CSV Export
+
+- [ ] Merge PR #11 (feat/caddy-keycloak-waf) into main on munisp/singlewindow
+- [ ] OWASP CRS bulkImportRules tRPC procedure (fetch latest GitHub release, parse rules, seed DB)
+- [ ] CRS import UI button in CorazaWafDashboard Rules tab
+- [ ] DNS poller: domainVerificationFailCount column in tenants schema
+- [ ] DNS poller: notifyOwner after 3 consecutive verification failures
+- [ ] Coraza WAF Dashboard: CSV export button for event correlation data
+- [ ] tRPC exportEventCorrelationCsv procedure
+- [ ] Vitest tests for all sprint v5 features

@@ -81,6 +81,7 @@ import { temporalRunsRouter } from "./routers/temporalRuns";
 import { openAppSecRouter } from "./routers/openAppSec";
 import { corazaWafRouter } from "./routers/corazaWaf";
 import { heartbeatAdminRouter } from "./routers/heartbeatAdmin";
+import { crsImportRouter } from "./routers/crsImport";
 import { lakehouseRouter } from "./routers/lakehouse";
 import { geoipRouter } from "./routers/geoip";
 import { workflowSchemasRouter } from "./routers/workflowSchemas";
@@ -319,6 +320,7 @@ export const appRouter = router({
   openAppSec: openAppSecRouter,
   corazaWaf: corazaWafRouter,
   heartbeatAdmin: heartbeatAdminRouter,
+  crsImport: crsImportRouter,
   lakehouse: lakehouseRouter,
   geoip: geoipRouter,
   workflowSchemas: workflowSchemasRouter,
