@@ -1649,8 +1649,25 @@
 - [x] All 4351 tests passing, 0 TypeScript errors
 
 ## Sprint: Next Steps v3 (WAF Ack + DNS Polling + GitHub Export)
-- [ ] WAF event acknowledgement: acknowledgeEvent mutation in corazaWaf router
-- [ ] WAF event acknowledgement: Acknowledge button in CorazaWafDashboard event drill-down
-- [ ] Tenant DNS polling: Heartbeat job for auto-verifying pending custom domains
-- [ ] GitHub export: push to munisp/singlewindow
-- [ ] Vitest: tests for acknowledgeEvent and DNS polling job
+- [x] WAF event acknowledgement: acknowledgeEvent mutation in corazaWaf router
+- [x] WAF event acknowledgement: Acknowledge button in CorazaWafDashboard event drill-down
+- [x] Tenant DNS polling: Heartbeat job for auto-verifying pending custom domains
+- [x] GitHub export: push to munisp/singlewindow
+- [x] Vitest: tests for acknowledgeEvent and DNS polling job
+
+## Sprint Next Steps v3 (Caddy/Keycloak/WAF)
+- [x] WAF event acknowledgement: Acknowledge button in CorazaWafDashboard event drill-down
+- [x] Tenant DNS propagation poller: Heartbeat handler at /api/scheduled/tenant-domain-poll
+- [x] sdk.ts cron patch: CRON_OPEN_ID_PREFIX, AuthenticatedUser, buildCronUser
+- [x] db.ts helpers: getTenantsWithPendingDomain, markTenantDomainVerified
+- [x] index.ts: Heartbeat endpoint registered for tenant-domain-poll
+- [x] GitHub export: pushed to munisp/singlewindow (commit 5264444)
+- [x] Vitest tests: next-steps-v3.test.ts (all 4380 tests passing)
+
+## Sprint Next Steps v4 (Heartbeat/Coraza/CI)
+- [ ] DNS poller Heartbeat: tRPC admin procedures to create/pause/resume/delete the job
+- [ ] DNS poller Heartbeat: UI panel in TenantManagement Custom Domain tab to manage the job
+- [ ] Coraza hot-reload smoke test: integration test for /load endpoint
+- [ ] GitHub PR: create feat/caddy-keycloak-waf branch and open PR
+- [ ] GitHub CI: wire services.yml to run pnpm test on PR
+- [ ] Vitest: tests for Heartbeat management procedures and Coraza hot-reload

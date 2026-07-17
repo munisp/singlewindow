@@ -90,6 +90,7 @@ import {
   ScanLine,
   History,
   CheckSquare,
+  Clock,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -243,6 +244,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Users, label: "Keycloak Sessions", path: "/app/admin/keycloak-sessions" },
           { icon: Shield, label: "Keycloak + Caddy Admin", path: "/app/admin/keycloak" },
           { icon: ShieldAlert, label: "Coraza WAF Rules", path: "/app/admin/coraza-waf" },
+          { icon: Clock, label: "Heartbeat Job Manager", path: "/app/admin/heartbeat-admin" },
           { icon: Lock, label: "Permify Audit Log", path: "/app/admin/permify-audit" },
           { icon: HeartPulse, label: "Platform Health Scorecard", path: "/app/admin/platform-health" },
           { icon: CalendarClock, label: "Cron Job Manager", path: "/app/admin/cron-jobs" },
