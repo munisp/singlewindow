@@ -1684,14 +1684,14 @@
 - [x] Vitest tests for all sprint v5 features
 
 ## Sprint v6 — CRS Modal, Paranoia Filter, Domain Health
-- [ ] CRS dry-run preview modal: dryRun=true call, result modal with rule breakdown and Confirm Import
-- [ ] Paranoia Level filter in Rules tab: extend listRules procedure + UI select
-- [ ] domain_verification_events schema table + migration
-- [ ] db helpers: logDomainVerificationEvent, getDomainVerificationHistory
-- [ ] tRPC procedures: getDomainVerificationHistory, getDomainHealthSummary
-- [ ] Domain Health tab in TenantManagement page
-- [ ] Vitest tests for sprint v6
-- [ ] Checkpoint and GitHub sync
+- [x] CRS dry-run preview modal: dryRun=true call, result modal with rule breakdown and Confirm Import
+- [x] Paranoia Level filter in Rules tab: extend listRules procedure + UI select
+- [x] domain_verification_events schema table + migration
+- [x] db helpers: logDomainVerificationEvent, getDomainVerificationHistory
+- [x] tRPC procedures: getDomainVerificationHistory, getDomainHealthSummary
+- [x] Domain Health tab in TenantManagement page
+- [x] Vitest tests for sprint v6
+- [x] Checkpoint and GitHub sync
 
 ## Sprint v6 Features
 - [x] CRS dry-run preview modal — admin sees parsed rules/changes before confirming live import
