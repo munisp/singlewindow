@@ -19,8 +19,13 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, keycloakAdminProcedure, router } from "../_core/trpc";
 import { getKeycloakConfig, upsertKeycloakConfig, logAuditEvent } from "../db";
+import {
+  getJwksStatus,
+  invalidateJwksCache,
+  validateKeycloakToken,
+} from "../middleware/keycloakJwt";
 
 const KEYCLOAK_SVC_URL = process.env.KEYCLOAK_SVC_URL || "http://localhost:8087";
 
@@ -49,19 +54,12 @@ async function keycloakFetch<T>(path: string, options?: RequestInit): Promise<T>
   return res.json() as Promise<T>;
 }
 
-function requireAdmin(role: string) {
-  if (role !== "admin") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
-  }
-}
-
 export const keycloakRouter = router({
   /**
    * Get the current OIDC configuration from the Go service.
    * Admin only — client secret is redacted.
    */
-  getConfig: protectedProcedure.query(async ({ ctx }) => {
-    requireAdmin(ctx.user.role);
+  getConfig: keycloakAdminProcedure.query(async ({ ctx }) => {
     const available = await keycloakSvcAvailable();
     if (!available) {
       // Fall back to DB config
@@ -75,7 +73,7 @@ export const keycloakRouter = router({
    * Update the OIDC configuration in the Go service and persist to DB.
    * Admin only.
    */
-  updateConfig: protectedProcedure
+  updateConfig: keycloakAdminProcedure
     .input(z.object({
       enabled: z.boolean().optional(),
       realmUrl: z.string().url().optional(),
@@ -87,7 +85,6 @@ export const keycloakRouter = router({
       scopes: z.array(z.string()).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      requireAdmin(ctx.user.role);
 
       // Update Go service
       const available = await keycloakSvcAvailable();
@@ -136,8 +133,7 @@ export const keycloakRouter = router({
    * Test connectivity to the configured Keycloak realm.
    * Admin only.
    */
-  testConnection: protectedProcedure.mutation(async ({ ctx }) => {
-    requireAdmin(ctx.user.role);
+  testConnection: keycloakAdminProcedure.mutation(async ({ ctx }) => {
     const available = await keycloakSvcAvailable();
     if (!available) {
       return {
@@ -163,16 +159,147 @@ export const keycloakRouter = router({
 
   /**
    * Force a JWKS key rotation (re-fetch from Keycloak).
+   * Admin only. Also invalidates the local jose JWKS cache.
+   */
+  refreshJWKS: keycloakAdminProcedure.mutation(async ({ ctx }) => {
+    // Invalidate the local jose JWKS cache immediately
+    invalidateJwksCache();
+    const available = await keycloakSvcAvailable();
+    if (available) {
+      try {
+        await keycloakFetch<Record<string, unknown>>("/api/oidc/refresh-jwks", { method: "POST" });
+      } catch {
+        // Non-fatal — local cache already cleared
+      }
+    }
+    // Re-check JWKS status after cache invalidation
+    const status = await getJwksStatus();
+    return { success: true, jwksStatus: status };
+  }),
+
+  /**
+   * Get JWKS endpoint health status — checks reachability and key count.
    * Admin only.
    */
-  refreshJWKS: protectedProcedure.mutation(async ({ ctx }) => {
-    requireAdmin(ctx.user.role);
-    const available = await keycloakSvcAvailable();
-    if (!available) {
-      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "keycloak-svc is unavailable" });
-    }
-    return keycloakFetch<Record<string, unknown>>("/api/oidc/refresh-jwks", { method: "POST" });
+  getJwksStatus: keycloakAdminProcedure.query(async ({ ctx }) => {
+    return getJwksStatus();
   }),
+
+  /**
+   * Exchange a Keycloak authorization code for tokens.
+   * Used by the frontend after Keycloak redirects back with ?code=...
+   * Protected — requires an existing Manus session to call this.
+   */
+  exchangeCode: protectedProcedure
+    .input(z.object({
+      code: z.string().min(1),
+      redirectUri: z.string().url(),
+      codeVerifier: z.string().optional(), // PKCE
+    }))
+    .mutation(async ({ input }) => {
+      const keycloakRealmUrl =
+        process.env.KEYCLOAK_REALM_URL || "http://keycloak:8080/realms/tradegateway";
+      const clientId =
+        process.env.KEYCLOAK_CLIENT_ID || "tradegateway-backend";
+      const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || "";
+
+      const tokenUrl = `${keycloakRealmUrl}/protocol/openid-connect/token`;
+
+      const body = new URLSearchParams({
+        grant_type: "authorization_code",
+        code: input.code,
+        redirect_uri: input.redirectUri,
+        client_id: clientId,
+        client_secret: clientSecret,
+        ...(input.codeVerifier ? { code_verifier: input.codeVerifier } : {}),
+      });
+
+      const res = await fetch(tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Token exchange failed: ${err}`,
+        });
+      }
+
+      const tokens = await res.json() as {
+        access_token: string;
+        refresh_token?: string;
+        id_token?: string;
+        expires_in: number;
+        token_type: string;
+      };
+
+      // Validate the returned access token
+      const user = await validateKeycloakToken(tokens.access_token).catch(() => null);
+
+      return {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token ?? null,
+        idToken: tokens.id_token ?? null,
+        expiresIn: tokens.expires_in,
+        tokenType: tokens.token_type,
+        user,
+      };
+    }),
+
+  /**
+   * Introspect a Keycloak token via the introspection endpoint.
+   * Returns active status, expiry, and claims.
+   * Admin only.
+   */
+  introspectToken: keycloakAdminProcedure
+    .input(z.object({ token: z.string().min(10) }))
+    .mutation(async ({ input, ctx }) => {
+      const keycloakRealmUrl =
+        process.env.KEYCLOAK_REALM_URL || "http://keycloak:8080/realms/tradegateway";
+      const clientId =
+        process.env.KEYCLOAK_CLIENT_ID || "tradegateway-backend";
+      const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || "";
+
+      const introspectUrl = `${keycloakRealmUrl}/protocol/openid-connect/token/introspect`;
+
+      const body = new URLSearchParams({
+        token: input.token,
+        client_id: clientId,
+        client_secret: clientSecret,
+      });
+
+      const res = await fetch(introspectUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (!res.ok) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Introspection failed: HTTP ${res.status}`,
+        });
+      }
+
+      const result = await res.json() as Record<string, unknown>;
+      return {
+        active: result.active as boolean,
+        sub: result.sub as string | undefined,
+        username: result.preferred_username as string | undefined,
+        email: result.email as string | undefined,
+        realmRoles: (result.realm_access as any)?.roles ?? [],
+        expiresAt: result.exp
+          ? new Date((result.exp as number) * 1000).toISOString()
+          : null,
+        introspectedAt: new Date().toISOString(),
+        raw: result,
+      };
+    }),
 
   /**
    * Validate a JWT token against the configured Keycloak realm.
@@ -216,8 +343,7 @@ export const keycloakRouter = router({
   /**
    * Get the DB-persisted Keycloak configuration (admin only).
    */
-  getDbConfig: protectedProcedure.query(async ({ ctx }) => {
-    requireAdmin(ctx.user.role);
+  getDbConfig: keycloakAdminProcedure.query(async ({ ctx }) => {
     const config = await getKeycloakConfig();
     if (!config) return null;
     return { ...config, clientSecret: config.clientSecret ? "[redacted]" : null };
@@ -227,7 +353,7 @@ export const keycloakRouter = router({
    * Persist Keycloak configuration directly to DB (admin only).
    * Use this when keycloak-svc is not deployed yet.
    */
-  saveDbConfig: protectedProcedure
+  saveDbConfig: keycloakAdminProcedure
     .input(z.object({
       enabled: z.boolean().optional(),
       realmUrl: z.string().url().optional(),
@@ -240,7 +366,6 @@ export const keycloakRouter = router({
       fallbackEnabled: z.boolean().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      requireAdmin(ctx.user.role);
       const result = await upsertKeycloakConfig({ ...input, roleMappings: input.roleMappings as Record<string, string> | undefined, updatedBy: ctx.user.id });
       await logAuditEvent({
         entityType: "user",
@@ -256,23 +381,22 @@ export const keycloakRouter = router({
   /**
    * v90: List Keycloak sessions (admin: all; user: own sessions).
    */
-  getSessions: protectedProcedure
+  getSessions: keycloakAdminProcedure
     .input(z.object({ userId: z.number().int().optional(), isActive: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
       const { getKeycloakSessions } = await import("../db");
-      const userId = isAdmin ? input?.userId : ctx.user.id;
+      // keycloakAdminProcedure already enforces realm-admin role;
+      // admins may query any userId, or default to their own.
+      const userId = input?.userId ?? undefined;
       return getKeycloakSessions({ userId, isActive: input?.isActive, limit: 200 });
     }),
 
   /**
    * v90: Revoke a specific Keycloak session by sessionId.
    */
-  revokeSession: protectedProcedure
+  revokeSession: keycloakAdminProcedure
     .input(z.object({ sessionId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
-      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
       const { revokeKeycloakSession } = await import("../db");
       const result = await revokeKeycloakSession(input.sessionId);
       if (!result) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
@@ -282,11 +406,9 @@ export const keycloakRouter = router({
   /**
    * v90: Revoke all active sessions for a given user (admin only).
    */
-  revokeAllUserSessions: protectedProcedure
+  revokeAllUserSessions: keycloakAdminProcedure
     .input(z.object({ userId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
-      const isAdmin = ["admin", "customs_officer"].includes(ctx.user.role);
-      if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
       const { getKeycloakSessions, revokeKeycloakSession } = await import("../db");
       const sessions = await getKeycloakSessions({ userId: input.userId, isActive: true });
       await Promise.all(sessions.map(s => revokeKeycloakSession(s.sessionId)));

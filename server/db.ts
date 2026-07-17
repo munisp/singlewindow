@@ -32,6 +32,8 @@ import {
   apisixRouteAudit,
   keycloakSessions,
   permifyAuditLog,
+  tenants,
+  corazaWafRules,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1889,4 +1891,28 @@ export async function getPermifyAuditLog(opts?: { operation?: string; entity?: s
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(permifyAuditLog.createdAt))
     .limit(opts?.limit ?? 200);
+}
+
+// ─── Tenant Domain Polling helpers ───────────────────────────────────────────
+export async function getTenantsWithPendingDomain() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(tenants)
+    .where(
+      and(
+        sql`${tenants.customDomain} IS NOT NULL`,
+        eq(tenants.domainVerified, false),
+        sql`${tenants.domainVerificationToken} IS NOT NULL`
+      )
+    );
+}
+
+export async function markTenantDomainVerified(tenantId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.update(tenants)
+    .set({ domainVerified: true, domainVerifiedAt: new Date() })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+  return row;
 }

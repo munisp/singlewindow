@@ -274,6 +274,55 @@
       "when": 1783796466836,
       "tag": "0038_previous_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1783864890702,
+      "tag": "0039_slow_susan_delgado",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1783865222709,
+      "tag": "0040_clever_puma",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1783865985253,
+      "tag": "0041_majestic_venus",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1783991905757,
+      "tag": "0042_white_wendell_vaughn",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1783993634263,
+      "tag": "0043_smiling_silverclaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1783994346374,
+      "tag": "0044_lucky_blue_shield",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1784257167371,
+      "tag": "0045_easy_medusa",
+      "breakpoints": true
     }
   ]
 }

@@ -125,6 +125,92 @@ export const adminProcedure = t.procedure.use(
   }),
 );
 
+// ─── Keycloak Role-Gated Procedures ─────────────────────────────────────────
+//
+// These procedures validate against ctx.keycloakRoles (populated from the
+// verified JWT in context.ts) rather than the DB role column. This means:
+//   - Zero extra DB round-trips for role checks
+//   - Roles are always fresh (from the current token, not a cached DB row)
+//   - Works for both Keycloak-issued Bearer tokens AND Manus session cookies
+//     (session-cookie auth falls back to ctx.user.role for compatibility)
+
+/**
+ * keycloakRoleProcedure(requiredRole) — factory that creates a procedure
+ * requiring the caller to hold a specific Keycloak realm role.
+ *
+ * Falls back to ctx.user.role for Manus session-cookie auth so existing
+ * admin accounts continue to work without a Keycloak token.
+ *
+ * @example
+ *   export const customsOfficerProcedure = keycloakRoleProcedure("tradegateway-customs-officer");
+ */
+export function keycloakRoleProcedure(requiredRole: string) {
+  return t.procedure.use(
+    t.middleware(async opts => {
+      const { ctx, next } = opts;
+      if (!ctx.user) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Authentication required" });
+      }
+      validateCsrf(ctx);
+
+      // Primary check: Keycloak JWT roles (zero DB round-trip)
+      const hasKeycloakRole = (ctx.keycloakRoles ?? []).includes(requiredRole);
+
+      // Fallback: DB role for Manus session-cookie auth
+      // Map Keycloak role names to DB role values for backward compatibility
+      const KEYCLOAK_TO_DB_ROLE: Record<string, string> = {
+        "tradegateway-admin": "admin",
+        "tradegateway-customs-officer": "customs_officer",
+        "tradegateway-oga-officer": "oga_officer",
+        "tradegateway-inspector": "inspector",
+        "tradegateway-finance": "finance",
+        "tradegateway-trader": "user",
+        admin: "admin",
+        customs_officer: "customs_officer",
+        oga_officer: "oga_officer",
+        inspector: "inspector",
+        finance: "finance",
+        trader: "user",
+      };
+      const dbEquivalent = KEYCLOAK_TO_DB_ROLE[requiredRole];
+      const hasDbRole = dbEquivalent ? ctx.user.role === dbEquivalent : false;
+
+      if (!hasKeycloakRole && !hasDbRole) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: `Keycloak role '${requiredRole}' is required`,
+        });
+      }
+
+      return next({ ctx: { ...ctx, user: ctx.user } });
+    })
+  );
+}
+
+/**
+ * keycloakAdminProcedure — shorthand for keycloakRoleProcedure("tradegateway-admin").
+ * Validates against both the Keycloak JWT role AND the DB admin role.
+ */
+export const keycloakAdminProcedure = keycloakRoleProcedure("tradegateway-admin");
+
+/**
+ * keycloakCustomsOfficerProcedure — requires customs_officer or higher.
+ */
+export const keycloakCustomsOfficerProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
+    validateCsrf(ctx);
+    const ALLOWED_KC_ROLES = ["tradegateway-admin", "tradegateway-customs-officer", "tradegateway-inspector"];
+    const ALLOWED_DB_ROLES = ["admin", "customs_officer", "inspector"];
+    const hasRole =
+      ctx.keycloakRoles.some(r => ALLOWED_KC_ROLES.includes(r)) ||
+      ALLOWED_DB_ROLES.includes(ctx.user.role);
+    if (!hasRole) throw new TRPCError({ code: "FORBIDDEN", message: "Customs officer role required" });
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  })
+);
+
 // ─── Rate Limiting (Redis-backed sliding window, in-memory fallback) ──────────
 
 // In-memory fallback store for when Redis is unavailable

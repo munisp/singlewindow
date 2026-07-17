@@ -132,6 +132,8 @@ const PlatformHealthScorecard = lazy(() => import('./pages/PlatformHealthScoreca
 const VisionBatchAnalysis = lazy(() => import('./pages/app/VisionBatchAnalysis'));
 const CronJobManager = lazy(() => import('./pages/admin/CronJobManager'));
 const AdminSystemStatus = lazy(() => import('./pages/admin/SystemStatus'));
+const KeycloakAdmin = lazy(() => import('./pages/admin/KeycloakAdmin'));
+const CorazaWafDashboard = lazy(() => import('./pages/admin/CorazaWafDashboard'));
 // v136 sprint pages
 const ThresholdAuditLog = lazy(() => import('./pages/admin/ThresholdAuditLog'));
 const SanctionsBatchUpload = lazy(() => import('./pages/admin/SanctionsBatchUpload'));
@@ -564,6 +566,14 @@ function Router() {
       </Route>
       <Route path="/app/admin/system-status">
         <AdminGuard><Suspense fallback={<LazyFallback />}><AdminSystemStatus /></Suspense></AdminGuard>
+      </Route>
+      {/* Sprint Caddy — Keycloak + Caddy Admin */}
+      <Route path="/app/admin/keycloak">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><KeycloakAdmin /></Suspense></AdminGuard>
+      </Route>
+      {/* Sprint Caddy — Coraza WAF Rule Tuning Dashboard */}
+      <Route path="/app/admin/coraza-waf">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><CorazaWafDashboard /></Suspense></AdminGuard>
       </Route>
 
       {/* v136 sprint routes */}

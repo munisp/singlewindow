@@ -3,7 +3,7 @@
  * Admin/security procedures for WAF event monitoring and triage.
  */
 import { z } from "zod";
-import { router, adminProcedure } from "../_core/trpc";
+import { router, keycloakAdminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 
 const SEVERITIES = ["critical", "high", "medium", "low"] as const;
@@ -73,7 +73,7 @@ export const openAppSecRouter = router({
   /**
    * getWafEvents — paginated list of WAF security events.
    */
-  getWafEvents: adminProcedure
+  getWafEvents: keycloakAdminProcedure
     .input(
       z.object({
         limit: z.number().int().min(1).max(500).default(50),
@@ -113,7 +113,7 @@ export const openAppSecRouter = router({
   /**
    * acknowledgeEvent — mark a WAF event as acknowledged by the current admin.
    */
-  acknowledgeEvent: adminProcedure
+  acknowledgeEvent: keycloakAdminProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
       if (process.env.NODE_ENV !== "production") {
@@ -128,7 +128,7 @@ export const openAppSecRouter = router({
   /**
    * bulkAcknowledge — acknowledge multiple WAF events at once.
    */
-  bulkAcknowledge: adminProcedure
+  bulkAcknowledge: keycloakAdminProcedure
     .input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(200) }))
     .mutation(async ({ input, ctx }) => {
       if (process.env.NODE_ENV !== "production") {
@@ -142,7 +142,7 @@ export const openAppSecRouter = router({
   /**
    * getWafStats — summary counts by severity + unacknowledged total.
    */
-  getWafStats: adminProcedure
+  getWafStats: keycloakAdminProcedure
     .query(async () => {
       if (process.env.NODE_ENV !== "production") {
         return { critical: 3, high: 12, medium: 28, low: 47, unacknowledged: 64 };
@@ -155,7 +155,7 @@ export const openAppSecRouter = router({
   /**
    * getAttackTypes — list of distinct attack types for filter dropdowns.
    */
-  getAttackTypes: adminProcedure
+  getAttackTypes: keycloakAdminProcedure
     .query(async () => {
       return [...ATTACK_TYPES];
     }),
@@ -163,7 +163,7 @@ export const openAppSecRouter = router({
   /**
    * getWafTrend — daily event counts by severity for the last N days.
    */
-  getWafTrend: adminProcedure
+  getWafTrend: keycloakAdminProcedure
     .input(z.object({ days: z.number().int().min(7).max(90).default(30) }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 30;

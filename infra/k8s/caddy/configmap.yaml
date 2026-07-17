@@ -1,0 +1,152 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# TradeGateway NGSWTP — Caddy ConfigMap
+# Stores the production Caddyfile as a Kubernetes ConfigMap.
+# Mounted into the Caddy pod at /etc/caddy/Caddyfile.
+# ═══════════════════════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  namespace: tradegateway
+  labels:
+    app: caddy
+    component: edge-proxy
+data:
+  Caddyfile: |
+    {
+        email {$ACME_EMAIL}
+        acme_ca https://acme.zerossl.com/v2/DV90
+        servers {
+            protocols h1 h2 h3
+        }
+        order coraza_waf first
+        admin 0.0.0.0:2019
+        log {
+            output stdout
+            format json
+            level INFO
+        }
+    }
+
+    (coraza_waf_snippet) {
+        coraza_waf {
+            load_owasp_crs
+            directives `
+                Include @coraza.conf-recommended
+                Include @crs-setup.conf.example
+                Include @owasp_crs/*.conf
+                SecRuleEngine On
+                SecRequestBodyAccess On
+                SecResponseBodyAccess Off
+                SecRequestBodyLimit 52428800
+            `
+        }
+    }
+
+    (security_headers) {
+        header {
+            Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+            X-Content-Type-Options "nosniff"
+            X-Frame-Options "SAMEORIGIN"
+            Referrer-Policy "strict-origin-when-cross-origin"
+            -Server
+        }
+    }
+
+    (keycloak_forward_auth) {
+        forward_auth oauth2-proxy.tradegateway.svc.cluster.local:4180 {
+            uri /oauth2/auth
+            copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Groups X-Auth-Request-Access-Token
+            header_up X-Forwarded-Uri {uri}
+        }
+    }
+
+    http:// {
+        redir https://{host}{uri} permanent
+    }
+
+    auth.{$CADDY_DOMAIN_BASE} {
+        import security_headers
+        import coraza_waf_snippet
+        reverse_proxy keycloak.tradegateway.svc.cluster.local:8080 {
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-Host {host}
+            header_up X-Real-IP {remote_host}
+            health_uri /health/ready
+            health_interval 30s
+        }
+    }
+
+    trader.{$CADDY_DOMAIN_BASE} {
+        import security_headers
+        import coraza_waf_snippet
+        import keycloak_forward_auth
+        handle /oauth2/* {
+            reverse_proxy oauth2-proxy.tradegateway.svc.cluster.local:4180
+        }
+        handle /api/* {
+            reverse_proxy apisix.tradegateway.svc.cluster.local:9080 {
+                header_up X-Forwarded-Proto https
+                header_up X-Real-IP {remote_host}
+            }
+        }
+        handle {
+            reverse_proxy frontend.tradegateway.svc.cluster.local:3000 {
+                header_up X-Forwarded-Proto https
+            }
+        }
+    }
+
+    oga.{$CADDY_DOMAIN_BASE} {
+        import security_headers
+        import coraza_waf_snippet
+        import keycloak_forward_auth
+        handle /oauth2/* {
+            reverse_proxy oauth2-proxy.tradegateway.svc.cluster.local:4180
+        }
+        handle /api/* {
+            reverse_proxy apisix.tradegateway.svc.cluster.local:9080 {
+                header_up X-Forwarded-Proto https
+                header_up X-Real-IP {remote_host}
+            }
+        }
+        handle {
+            reverse_proxy frontend.tradegateway.svc.cluster.local:3000 {
+                header_up X-Forwarded-Proto https
+            }
+        }
+    }
+
+    admin.{$CADDY_DOMAIN_BASE} {
+        import security_headers
+        import coraza_waf_snippet
+        import keycloak_forward_auth
+        handle /oauth2/* {
+            reverse_proxy oauth2-proxy.tradegateway.svc.cluster.local:4180
+        }
+        handle /api/* {
+            reverse_proxy apisix.tradegateway.svc.cluster.local:9080 {
+                header_up X-Forwarded-Proto https
+                header_up X-Real-IP {remote_host}
+            }
+        }
+        handle {
+            reverse_proxy frontend.tradegateway.svc.cluster.local:3000 {
+                header_up X-Forwarded-Proto https
+            }
+        }
+    }
+
+    api.{$CADDY_DOMAIN_BASE} {
+        import security_headers
+        import coraza_waf_snippet
+        reverse_proxy apisix.tradegateway.svc.cluster.local:9080 {
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {remote_host}
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 120s
+            }
+        }
+    }

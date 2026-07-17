@@ -1,0 +1,71 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# TradeGateway NGSWTP — Caddy IngressClass
+#
+# Registers Caddy as a named IngressClass so Kubernetes Ingress resources
+# can target it with:  ingressClassName: caddy
+#
+# The Caddy Ingress Controller (github.com/caddyserver/ingress) watches
+# Ingress resources and dynamically updates Caddy's configuration via
+# the admin API at caddy-admin:2019.
+#
+# Install the Caddy Ingress Controller:
+#   helm repo add caddy https://caddyserver.github.io/ingress/
+#   helm install caddy-ingress caddy/caddy-ingress-controller \
+#     --namespace tradegateway \
+#     --set ingressController.config.onDemandTLS=true \
+#     --set ingressController.config.email=ops@tradegateway.gov.ng
+# ═══════════════════════════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: caddy
+  annotations:
+    ingressclass.kubernetes.io/is-default-class: "true"
+spec:
+  controller: caddy.ingress.kubernetes.io/ingress-controller
+---
+# ── Example Ingress resource using the Caddy IngressClass ────────────────────
+# Uncomment and customise once the Caddy Ingress Controller is installed.
+#
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: tradegateway-ingress
+#   namespace: tradegateway
+#   annotations:
+#     # On-Demand TLS: Caddy issues certificates at handshake time
+#     caddy.ingress.kubernetes.io/on-demand-tls: "true"
+# spec:
+#   ingressClassName: caddy
+#   rules:
+#     - host: trader.tradegateway.gov.ng
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: frontend
+#                 port:
+#                   number: 3000
+#     - host: api.tradegateway.gov.ng
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: apisix
+#                 port:
+#                   number: 9080
+#     - host: auth.tradegateway.gov.ng
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: keycloak
+#                 port:
+#                   number: 8080

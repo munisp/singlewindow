@@ -1569,3 +1569,88 @@
 - [x] mergeEntities backend procedure: updates primary record with chosen fields, deactivates duplicate
 - [x] Vitest tests: server/v139.test.ts — 4 suites, 20 tests (parseMentionTokens, computeDagColumns, buildMergedFields, deduplicateMentionedUsers)
 - [x] Full suite: 111 test files, 4216 tests, 0 TypeScript errors (22 pre-existing failures in v63.test.ts for missing services.yml)
+
+## Caddy + Keycloak Integration Sprint
+- [x] Caddy: create infra/caddy/ directory with Caddyfile (dev + prod variants)
+- [x] Caddy: add caddy service to infra/docker-compose.yml (port 443/80, auto-TLS)
+- [x] Caddy: add caddy service to docker-compose.yml (local dev, HTTP-only on port 8888)
+- [x] Caddy: create infra/k8s/caddy/ Kubernetes Deployment + Service + ConfigMap manifests
+- [x] Caddy: create infra/k8s/caddy/ingress-class.yaml for Caddy as cluster ingress
+- [x] Keycloak: add caddy-frontend client to infra/keycloak/realm-export.json
+- [x] Keycloak: update APISIX openid-connect plugin config for JWT validation
+- [x] Backend: create server/middleware/keycloakJwt.ts — JWKS-based JWT validation middleware
+- [x] Backend: add keycloak.getJwksStatus, exchangeCode, introspectToken procedures
+- [x] Frontend: create client/src/pages/KeycloakAdmin.tsx — Keycloak config & session management page
+- [x] Frontend: add /admin/keycloak route to App.tsx
+- [x] Frontend: update DashboardLayout sidebar to include Keycloak Admin link (admin role only)
+- [x] Vitest: server/caddy-keycloak.test.ts — tests for JWT middleware, JWKS fetch, token introspection
+
+## Caddy + Keycloak Integration (Sprint Caddy)
+
+- [x] infra/caddy/Caddyfile.prod — Production Caddyfile (ACME TLS, HTTP/3, Coraza WAF, forward_auth)
+- [x] infra/caddy/Caddyfile.dev — Development Caddyfile (HTTP-only, port 8888)
+- [x] infra/caddy/oauth2-proxy.cfg — oauth2-proxy Keycloak OIDC configuration
+- [x] infra/caddy/README.md — Caddy architecture documentation
+- [x] infra/docker-compose.yml — Caddy + oauth2-proxy services added
+- [x] infra/k8s/caddy/configmap.yaml — Kubernetes ConfigMap for Caddyfile
+- [x] infra/k8s/caddy/deployment.yaml — Kubernetes Deployment for Caddy
+- [x] infra/k8s/caddy/service.yaml — Kubernetes Service (LoadBalancer) + oauth2-proxy Deployment
+- [x] infra/k8s/caddy/ingress-class.yaml — Kubernetes IngressClass for Caddy
+- [x] server/middleware/keycloakJwt.ts — jose JWKS-based JWT middleware (validateKeycloakToken, requireKeycloakAuth, getJwksStatus, invalidateJwksCache)
+- [x] server/routers/keycloak.ts — Added getJwksStatus, refreshJWKS (with cache invalidation), exchangeCode, introspectToken procedures
+- [x] client/src/pages/IdentityProvider.tsx — Added JWKS Status, Introspect Token, Caddy Edge tabs
+- [x] server/caddy-keycloak.test.ts — 30 Vitest tests (all passing)
+
+## Sprint Next Steps (Caddy On-Demand TLS + Keycloak Roles + Coraza WAF Dashboard)
+
+- [x] Schema: add customDomain + domainVerified columns to tenants table
+- [x] Schema: add coraza_waf_rules table (ruleId, enabled, severity, description, disabledBy, disabledAt)
+- [x] Backend: tenant.validateHostname public procedure (Caddy ask endpoint)
+- [x] Backend: tenant.registerCustomDomain + verifyCustomDomain procedures
+- [x] Caddyfile.prod: add on_demand_tls block with ask endpoint
+- [x] Backend: extend ctx.user with keycloakRoles[] from JWT payload (context.ts + sdk.ts)
+- [x] Backend: keycloakRoleProcedure(requiredRole) factory for role-gated procedures
+- [x] Backend: openAppSec.getCorazaRules, toggleCorazaRule, bulkToggleCorazaRules procedures
+- [x] Frontend: WAF Rule Tuning tab in KeycloakAdmin page (rule list, toggle, severity filter)
+- [x] Frontend: Custom Domain tab in Tenant Management page
+- [x] Vitest: tests for validateHostname, keycloakRoles context, coraza rule toggle
+
+## Sprint Caddy Next Steps — Completed
+- [x] Caddy On-Demand TLS: tenant.validateCustomDomain endpoint + Caddyfile.prod :443 block
+- [x] Schema: customDomain, domainVerified columns on tenants table; coraza_waf_rules table
+- [x] Keycloak roles → tRPC ctx.keycloakRoles: X-Auth-Request-Groups header extraction in context.ts
+- [x] keycloakRoleProcedure factory and keycloakAdminProcedure in trpc.ts
+- [x] Coraza WAF router (corazaWaf.ts): listRules, toggleRule, bulkToggleRules, getRuleStats, getRecentChanges, getCaddyAdminStatus
+- [x] CorazaWafDashboard page at /app/admin/coraza-waf with sidebar link
+- [x] Vitest: next-steps.test.ts — 4301/4301 passing
+
+## Sprint 3 Next Steps
+- [x] Frontend: Custom Domain tab in TenantManagement page (register, DNS TXT verify, remove)
+- [x] Backend: keycloakAdminProcedure migration for keycloak, openAppSec, apisixAudit, permify routers
+- [x] Backend: corazaWaf.getEventsForRule + getTopFiringRules procedures (correlate openAppSecEvents with rules)
+- [x] Frontend: CorazaWafDashboard event correlation tab (top firing rules, events per rule, toggle from event list)
+- [x] Vitest: tests for custom domain UI procedures, keycloakAdminProcedure migration, event correlation
+
+## Sprint: Next Steps v2 (Tenant Domain UI + keycloakAdminProcedure Migration + WAF Event Correlation)
+- [x] TenantManagement page: add Custom Domain tab with register/verify/remove flows
+- [x] Tenant router: registerCustomDomain, verifyCustomDomain, removeCustomDomain, listTenantDomains procedures
+- [x] Schema: customDomain, domainVerified, domainVerifiedAt, domainVerificationToken columns on tenants table
+- [x] Caddyfile.prod: on_demand_tls with ask endpoint pointing to validateHostname
+- [x] keycloakAdminProcedure migration: keycloak router (getSessions, revokeSession, revokeAllUserSessions)
+- [x] keycloakAdminProcedure migration: corazaWaf router (all 8 procedures)
+- [x] keycloakAdminProcedure migration: openAppSec router
+- [x] keycloakAdminProcedure migration: apisixAudit router
+- [x] keycloakAdminProcedure migration: permify router
+- [x] Fix ctx.keycloakRoles undefined guard in trpc.ts keycloakRoleProcedure
+- [x] Remove stale requireAdmin() function from keycloak router
+- [x] corazaWaf router: getTopFiringRules, getEventsForRule, getEventCorrelationSummary procedures
+- [x] CorazaWafDashboard: Event Correlation tab with top-firing rules table, bar chart, and rule drill-down
+- [x] Vitest: next-steps-v2.test.ts (42 assertions, all passing)
+- [x] All 4351 tests passing, 0 TypeScript errors
+
+## Sprint: Next Steps v3 (WAF Ack + DNS Polling + GitHub Export)
+- [ ] WAF event acknowledgement: acknowledgeEvent mutation in corazaWaf router
+- [ ] WAF event acknowledgement: Acknowledge button in CorazaWafDashboard event drill-down
+- [ ] Tenant DNS polling: Heartbeat job for auto-verifying pending custom domains
+- [ ] GitHub export: push to munisp/singlewindow
+- [ ] Vitest: tests for acknowledgeEvent and DNS polling job

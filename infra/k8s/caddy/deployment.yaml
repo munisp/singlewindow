@@ -1,0 +1,130 @@
+---
+# ═══════════════════════════════════════════════════════════════════════════════
+# TradeGateway NGSWTP — Caddy Deployment
+# Caddy with Coraza WAF module compiled in via xcaddy.
+# Uses the official caddy:2-alpine image for standard deployments.
+# For Coraza WAF support, build a custom image:
+#   xcaddy build --with github.com/corazawaf/coraza-caddy/v2
+# ═══════════════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caddy
+  namespace: tradegateway
+  labels:
+    app: caddy
+    component: edge-proxy
+    tier: ingress
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: caddy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: caddy
+        component: edge-proxy
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "2019"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: false   # Caddy needs port 443 (privileged ports < 1024)
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: caddy
+          # Use standard image; swap for custom xcaddy build with Coraza in production
+          image: caddy:2-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+            - containerPort: 443
+              name: https
+              protocol: TCP
+            - containerPort: 443
+              name: https-quic
+              protocol: UDP
+            - containerPort: 2019
+              name: admin
+              protocol: TCP
+          env:
+            - name: CADDY_DOMAIN_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: CADDY_DOMAIN_BASE
+                  optional: true
+            - name: ACME_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: caddy-secrets
+                  key: acme-email
+                  optional: true
+          volumeMounts:
+            - name: caddy-config
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+              readOnly: true
+            - name: caddy-data
+              mountPath: /data
+            - name: caddy-config-dir
+              mountPath: /config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 2019
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 2019
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: caddy-config
+          configMap:
+            name: caddy-config
+        - name: caddy-data
+          persistentVolumeClaim:
+            claimName: caddy-data-pvc
+        - name: caddy-config-dir
+          emptyDir: {}
+---
+# PVC for Caddy certificate storage (shared across replicas via ReadWriteMany)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: caddy-data-pvc
+  namespace: tradegateway
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard

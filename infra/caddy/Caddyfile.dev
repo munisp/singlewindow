@@ -1,0 +1,57 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# TradeGateway™ NGSWTP — Caddy Development Caddyfile
+#
+# Runs on HTTP only (no ACME) for local development.
+# Listens on port 8888 (mapped from host) so it does not conflict with the
+# Node.js dev server on port 3000.
+#
+# Access locally:
+#   http://localhost:8888          → Frontend SPA
+#   http://localhost:8888/api/     → APISIX API gateway
+#   http://localhost:8888/auth/    → Keycloak IAM
+#   http://localhost:8888/oauth2/  → oauth2-proxy
+# ═══════════════════════════════════════════════════════════════════════════════
+
+{
+    # Disable HTTPS in dev — use plain HTTP
+    auto_https off
+    admin 0.0.0.0:2019
+
+    log {
+        output stdout
+        format console
+        level DEBUG
+    }
+}
+
+# Single dev listener on port 8888
+:8888 {
+    # ── Keycloak ─────────────────────────────────────────────────────────────
+    handle /auth/* {
+        uri strip_prefix /auth
+        reverse_proxy keycloak:8080 {
+            header_up X-Forwarded-Proto http
+            header_up X-Forwarded-Host localhost:8888
+        }
+    }
+
+    # ── oauth2-proxy callback ─────────────────────────────────────────────────
+    handle /oauth2/* {
+        reverse_proxy oauth2-proxy:4180
+    }
+
+    # ── APISIX API gateway ────────────────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy apisix:9080 {
+            header_up X-Forwarded-Proto http
+            header_up X-Real-IP {remote_host}
+        }
+    }
+
+    # ── Frontend SPA ──────────────────────────────────────────────────────────
+    handle {
+        reverse_proxy frontend:3000 {
+            header_up X-Forwarded-Proto http
+        }
+    }
+}

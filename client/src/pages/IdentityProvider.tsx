@@ -38,6 +38,7 @@ import {
   TestTube,
   Lock,
   Users,
+  Server,
 } from "lucide-react";
 import { useAuth } from "@/_core/hooks/useAuth";
 
@@ -548,6 +549,18 @@ export default function IdentityProvider() {
             <Globe className="w-4 h-4 mr-1" />
             OIDC Discovery
           </TabsTrigger>
+          <TabsTrigger value="jwks" className="data-[state=active]:bg-[#1E3A5F] text-gray-300">
+            <Key className="w-4 h-4 mr-1" />
+            JWKS Status
+          </TabsTrigger>
+          <TabsTrigger value="introspect" className="data-[state=active]:bg-[#1E3A5F] text-gray-300">
+            <Lock className="w-4 h-4 mr-1" />
+            Introspect Token
+          </TabsTrigger>
+          <TabsTrigger value="caddy" className="data-[state=active]:bg-[#1E3A5F] text-gray-300">
+            <Server className="w-4 h-4 mr-1" />
+            Caddy Edge
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="config">
@@ -586,8 +599,317 @@ export default function IdentityProvider() {
         <TabsContent value="discovery">
           <DiscoveryPanel />
         </TabsContent>
+
+        <TabsContent value="jwks">
+          <JwksStatusPanel />
+        </TabsContent>
+
+        <TabsContent value="introspect">
+          <IntrospectPanel />
+        </TabsContent>
+
+        <TabsContent value="caddy">
+          <CaddyEdgePanel />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+// ─── JWKS Status Panel ───────────────────────────────────────────────────────
+
+function JwksStatusPanel() {
+  const jwksQuery = trpc.keycloak.getJwksStatus.useQuery(undefined, {
+    retry: false,
+    refetchInterval: 60_000,
+  });
+  const refreshMutation = trpc.keycloak.refreshJWKS.useMutation({
+    onSuccess: () => {
+      toast.success("JWKS cache invalidated — keys re-fetched from Keycloak");
+      jwksQuery.refetch();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const status = jwksQuery.data;
+
+  return (
+    <Card className="bg-[#0D1F3C] border-[#1E3A5F]">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-white text-base">JWKS Endpoint Health</CardTitle>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => jwksQuery.refetch()}
+              disabled={jwksQuery.isFetching}
+              className="border-[#1E3A5F] text-gray-300 hover:bg-[#1E3A5F]"
+            >
+              {jwksQuery.isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              <span className="ml-1">Refresh</span>
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => refreshMutation.mutate()}
+              disabled={refreshMutation.isPending}
+              className="bg-[#D4A017] hover:bg-[#B8860B] text-black"
+            >
+              {refreshMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Key className="w-4 h-4" />}
+              <span className="ml-1">Rotate JWKS Cache</span>
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {jwksQuery.isLoading && (
+          <div className="flex items-center gap-2 text-gray-400 py-4">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Checking JWKS endpoint…</span>
+          </div>
+        )}
+        {status && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              {status.reachable ? (
+                <CheckCircle className="w-5 h-5 text-green-400" />
+              ) : (
+                <XCircle className="w-5 h-5 text-red-400" />
+              )}
+              <span className={status.reachable ? "text-green-400 font-medium" : "text-red-400 font-medium"}>
+                {status.reachable ? "JWKS endpoint reachable" : "JWKS endpoint unreachable"}
+              </span>
+              <Badge className={status.reachable ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}>
+                {status.keyCount} key{status.keyCount !== 1 ? "s" : ""}
+              </Badge>
+            </div>
+            <div className="bg-[#0A1628] rounded-lg p-4 space-y-2 border border-[#1E3A5F]">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Issuer</span>
+                <span className="text-gray-200 font-mono text-xs">{status.issuer}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">JWKS URL</span>
+                <span className="text-gray-200 font-mono text-xs break-all">{status.jwksUrl}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Checked at</span>
+                <span className="text-gray-200 text-xs">{new Date(status.checkedAt).toLocaleString()}</span>
+              </div>
+              {status.error && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Error</span>
+                  <span className="text-red-400 text-xs">{status.error}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {jwksQuery.isError && (
+          <p className="text-red-400 text-sm">{jwksQuery.error?.message}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Token Introspection Panel ────────────────────────────────────────────────
+
+function IntrospectPanel() {
+  const [token, setToken] = useState("");
+  const introspectMutation = trpc.keycloak.introspectToken.useMutation({
+    onError: (err) => toast.error(err.message),
+  });
+
+  return (
+    <Card className="bg-[#0D1F3C] border-[#1E3A5F]">
+      <CardHeader>
+        <CardTitle className="text-white text-base">Token Introspection</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-gray-400 text-sm">
+          Paste a Keycloak access token to introspect it via the Keycloak introspection endpoint.
+          Returns active status, expiry, subject, email, and realm roles.
+        </p>
+        <div className="space-y-2">
+          <Label className="text-gray-300">Access Token</Label>
+          <Textarea
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+            className="bg-[#0A1628] border-[#1E3A5F] text-gray-200 font-mono text-xs h-28 resize-none"
+          />
+        </div>
+        <Button
+          onClick={() => introspectMutation.mutate({ token })}
+          disabled={!token.trim() || introspectMutation.isPending}
+          className="bg-[#1E3A5F] hover:bg-[#2A4F7F] text-white"
+        >
+          {introspectMutation.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+          ) : (
+            <Lock className="w-4 h-4 mr-2" />
+          )}
+          Introspect Token
+        </Button>
+        {introspectMutation.data && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              {introspectMutation.data.active ? (
+                <CheckCircle className="w-5 h-5 text-green-400" />
+              ) : (
+                <XCircle className="w-5 h-5 text-red-400" />
+              )}
+              <span className={introspectMutation.data.active ? "text-green-400 font-medium" : "text-red-400 font-medium"}>
+                {introspectMutation.data.active ? "Token is ACTIVE" : "Token is INACTIVE / EXPIRED"}
+              </span>
+            </div>
+            <div className="bg-[#0A1628] rounded-lg p-4 space-y-2 border border-[#1E3A5F]">
+              {introspectMutation.data.sub && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Subject (sub)</span>
+                  <span className="text-gray-200 font-mono text-xs">{introspectMutation.data.sub}</span>
+                </div>
+              )}
+              {introspectMutation.data.username && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Username</span>
+                  <span className="text-gray-200">{introspectMutation.data.username}</span>
+                </div>
+              )}
+              {introspectMutation.data.email && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Email</span>
+                  <span className="text-gray-200">{introspectMutation.data.email}</span>
+                </div>
+              )}
+              {introspectMutation.data.realmRoles.length > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Realm Roles</span>
+                  <div className="flex flex-wrap gap-1 justify-end">
+                    {introspectMutation.data.realmRoles.map((r: string) => (
+                      <Badge key={r} className="bg-[#1E3A5F] text-gray-200 text-xs">{r}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {introspectMutation.data.expiresAt && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Expires at</span>
+                  <span className="text-gray-200 text-xs">{new Date(introspectMutation.data.expiresAt).toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Caddy Edge Proxy Panel ───────────────────────────────────────────────────
+
+function CaddyEdgePanel() {
+  return (
+    <Card className="bg-[#0D1F3C] border-[#1E3A5F]">
+      <CardHeader>
+        <CardTitle className="text-white text-base">Caddy Edge Proxy — Architecture</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <p className="text-gray-300 text-sm leading-relaxed">
+          Caddy serves as the outermost TLS-terminating edge proxy for TradeGateway NGSWTP.
+          It provisions and renews certificates automatically via ACME (Let's Encrypt / ZeroSSL),
+          enables HTTP/3 + QUIC on all listeners, and enforces the Coraza WAF (OWASP CRS) before
+          traffic reaches APISIX.
+        </p>
+
+        {/* Trust chain */}
+        <div className="bg-[#0A1628] rounded-lg p-4 border border-[#1E3A5F]">
+          <p className="text-[#D4A017] text-xs font-semibold uppercase tracking-wider mb-3">Trust Chain</p>
+          <div className="flex flex-col gap-1 text-sm font-mono">
+            {[
+              { label: "Internet (HTTPS/HTTP3)", color: "text-gray-400" },
+              { label: "↓", color: "text-gray-600" },
+              { label: "Caddy :443  (TLS termination, Coraza WAF, forward_auth)", color: "text-[#D4A017]" },
+              { label: "↓", color: "text-gray-600" },
+              { label: "oauth2-proxy :4180  (Keycloak OIDC session management)", color: "text-blue-400" },
+              { label: "↓", color: "text-gray-600" },
+              { label: "Keycloak :8080  (OIDC provider, JWKS, token issuance)", color: "text-green-400" },
+              { label: "↓", color: "text-gray-600" },
+              { label: "APISIX :9080  (API gateway, openid-connect plugin, rate limiting)", color: "text-purple-400" },
+              { label: "↓", color: "text-gray-600" },
+              { label: "tRPC backend  (protectedProcedure, adminProcedure)", color: "text-gray-300" },
+            ].map((item, i) => (
+              <span key={i} className={item.color}>{item.label}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Virtual hosts */}
+        <div>
+          <p className="text-[#D4A017] text-xs font-semibold uppercase tracking-wider mb-3">Virtual Hosts</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#1E3A5F]">
+                  <th className="text-left text-gray-400 pb-2 pr-4">Host</th>
+                  <th className="text-left text-gray-400 pb-2 pr-4">Auth</th>
+                  <th className="text-left text-gray-400 pb-2">Upstream</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1E3A5F]">
+                {[
+                  { host: "auth.*", auth: "None (public)", upstream: "Keycloak :8080" },
+                  { host: "trader.*", auth: "forward_auth → oauth2-proxy → Keycloak", upstream: "APISIX + Frontend" },
+                  { host: "oga.*", auth: "forward_auth → oauth2-proxy → Keycloak", upstream: "APISIX + Frontend" },
+                  { host: "admin.*", auth: "forward_auth → oauth2-proxy → Keycloak", upstream: "APISIX + Frontend" },
+                  { host: "api.*", auth: "Bearer JWT (APISIX validates)", upstream: "APISIX :9080" },
+                  { host: "monitoring.*", auth: "None (internal)", upstream: "Grafana / Prometheus / Jaeger" },
+                ].map((row) => (
+                  <tr key={row.host}>
+                    <td className="py-2 pr-4 text-gray-200 font-mono text-xs">{row.host}</td>
+                    <td className="py-2 pr-4 text-gray-300 text-xs">{row.auth}</td>
+                    <td className="py-2 text-gray-300 text-xs">{row.upstream}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Key features */}
+        <div>
+          <p className="text-[#D4A017] text-xs font-semibold uppercase tracking-wider mb-3">Key Features</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { icon: "🔒", title: "Automatic TLS", desc: "Let's Encrypt / ZeroSSL via ACME — zero manual cert management" },
+              { icon: "⚡", title: "HTTP/3 + QUIC", desc: "Enabled by default on all listeners — benefits mobile traders" },
+              { icon: "🛡️", title: "Coraza WAF", desc: "OWASP CRS compiled into Caddy — first-line WAF before APISIX" },
+              { icon: "🔄", title: "Live Reconfiguration", desc: "Admin API at :2019 — add routes atomically without restart" },
+            ].map((f) => (
+              <div key={f.title} className="bg-[#0A1628] rounded-lg p-3 border border-[#1E3A5F]">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">{f.icon}</span>
+                  <span className="text-gray-200 font-medium text-sm">{f.title}</span>
+                </div>
+                <p className="text-gray-400 text-xs">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Config files */}
+        <div className="bg-[#0A1628] rounded-lg p-4 border border-[#1E3A5F]">
+          <p className="text-[#D4A017] text-xs font-semibold uppercase tracking-wider mb-2">Configuration Files</p>
+          <div className="space-y-1 text-xs font-mono">
+            <p className="text-gray-300">infra/caddy/Caddyfile.prod — Production (ACME TLS, Coraza WAF, forward_auth)</p>
+            <p className="text-gray-300">infra/caddy/Caddyfile.dev — Development (HTTP-only, port 8888)</p>
+            <p className="text-gray-300">infra/caddy/oauth2-proxy.cfg — oauth2-proxy Keycloak OIDC config</p>
+            <p className="text-gray-300">infra/k8s/caddy/ — Kubernetes Deployment, Service, ConfigMap, IngressClass</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
