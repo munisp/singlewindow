@@ -1488,6 +1488,15 @@ async function startServer() {
     app.post("/api/scheduled/document-vault-expiry", documentVaultExpiryHandler);
     console.log("[Heartbeat] /api/scheduled/document-vault-expiry registered");
   }
+  // Tenant Domain DNS Propagation Poller — Heartbeat handler (every 15 min)
+  // Cron creation: manus-heartbeat create --name tenant-domain-poller
+  //   --cron "0 */15 * * * *" --path /api/scheduled/tenant-domain-poll
+  //   --description "Auto-verify pending tenant custom domains every 15 minutes"
+  {
+    const { tenantDomainPollerHandler } = await import("../scheduled/tenantDomainPoller");
+    app.post("/api/scheduled/tenant-domain-poll", tenantDomainPollerHandler);
+    console.log("[Heartbeat] /api/scheduled/tenant-domain-poll registered");
+  }
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(

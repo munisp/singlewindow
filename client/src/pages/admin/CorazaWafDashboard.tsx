@@ -137,6 +137,17 @@ export default function CorazaWafDashboard() {
     },
   });
 
+  const acknowledgeEventMutation = trpc.openAppSec.acknowledgeEvent.useMutation({
+    onSuccess: (data) => {
+      toast({ title: "Event Acknowledged", description: `WAF event #${data.id} marked as reviewed.` });
+      // Refetch the current rule's events to reflect the updated state
+      refetchTopFiring();
+    },
+    onError: (err) => {
+      toast({ title: "Acknowledge Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const bulkMutation = trpc.corazaWaf.bulkToggleRules.useMutation({
     onSuccess: (data) => {
       toast({
@@ -585,9 +596,21 @@ export default function CorazaWafDashboard() {
                             <span className={ev.action === "BLOCK" ? "text-red-400" : "text-yellow-400"}>{ev.action}</span>
                           </td>
                           <td className="px-3 py-2">
-                            {ev.isAcknowledged
-                              ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
-                              : <XCircle className="w-3.5 h-3.5 text-gray-600" />}
+                            {ev.isAcknowledged ? (
+                              <span className="flex items-center gap-1 text-green-400 text-xs">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Acked
+                              </span>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs border-gray-600 text-gray-300 hover:text-white hover:border-gold-500"
+                                disabled={acknowledgeEventMutation.isPending}
+                                onClick={() => acknowledgeEventMutation.mutate({ id: ev.id ?? ev.eventId })}
+                              >
+                                Ack
+                              </Button>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-gray-500">
                             {ev.createdAt ? new Date(ev.createdAt).toLocaleString() : ""}

@@ -1625,11 +1625,11 @@
 - [x] Vitest: next-steps.test.ts — 4301/4301 passing
 
 ## Sprint 3 Next Steps
-- [ ] Frontend: Custom Domain tab in TenantManagement page (register, DNS TXT verify, remove)
-- [ ] Backend: keycloakAdminProcedure migration for keycloak, openAppSec, apisixAudit, permify routers
-- [ ] Backend: corazaWaf.getEventsForRule + getTopFiringRules procedures (correlate openAppSecEvents with rules)
-- [ ] Frontend: CorazaWafDashboard event correlation tab (top firing rules, events per rule, toggle from event list)
-- [ ] Vitest: tests for custom domain UI procedures, keycloakAdminProcedure migration, event correlation
+- [x] Frontend: Custom Domain tab in TenantManagement page (register, DNS TXT verify, remove)
+- [x] Backend: keycloakAdminProcedure migration for keycloak, openAppSec, apisixAudit, permify routers
+- [x] Backend: corazaWaf.getEventsForRule + getTopFiringRules procedures (correlate openAppSecEvents with rules)
+- [x] Frontend: CorazaWafDashboard event correlation tab (top firing rules, events per rule, toggle from event list)
+- [x] Vitest: tests for custom domain UI procedures, keycloakAdminProcedure migration, event correlation
 
 ## Sprint: Next Steps v2 (Tenant Domain UI + keycloakAdminProcedure Migration + WAF Event Correlation)
 - [x] TenantManagement page: add Custom Domain tab with register/verify/remove flows
@@ -1647,3 +1647,19 @@
 - [x] CorazaWafDashboard: Event Correlation tab with top-firing rules table, bar chart, and rule drill-down
 - [x] Vitest: next-steps-v2.test.ts (42 assertions, all passing)
 - [x] All 4351 tests passing, 0 TypeScript errors
+
+## Sprint: Next Steps v3 (WAF Ack + DNS Polling + GitHub Export)
+- [ ] WAF event acknowledgement: acknowledgeEvent mutation in corazaWaf router
+- [ ] WAF event acknowledgement: Acknowledge button in CorazaWafDashboard event drill-down
+- [ ] Tenant DNS polling: Heartbeat job for auto-verifying pending custom domains
+- [ ] GitHub export: push to munisp/singlewindow
+- [ ] Vitest: tests for acknowledgeEvent and DNS polling job
+
+## Sprint Next Steps v3 (Caddy/Keycloak/WAF)
+- [x] WAF event acknowledgement: Acknowledge button in CorazaWafDashboard event drill-down
+- [x] Tenant DNS propagation poller: Heartbeat handler at /api/scheduled/tenant-domain-poll
+- [x] sdk.ts cron patch: CRON_OPEN_ID_PREFIX, AuthenticatedUser, buildCronUser
+- [x] db.ts helpers: getTenantsWithPendingDomain, markTenantDomainVerified
+- [x] index.ts: Heartbeat endpoint registered for tenant-domain-poll
+- [x] GitHub export: pushed to munisp/singlewindow (commit 5264444)
+- [x] Vitest tests: next-steps-v3.test.ts (all 4380 tests passing)
