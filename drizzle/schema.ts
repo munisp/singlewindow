@@ -3173,3 +3173,32 @@ export const systemHeartbeatJobs = pgTable("system_heartbeat_jobs", {
 });
 export type SystemHeartbeatJob = typeof systemHeartbeatJobs.$inferSelect;
 export type InsertSystemHeartbeatJob = typeof systemHeartbeatJobs.$inferInsert;
+
+// ─── Domain Verification Events (Sprint v6) ───────────────────────────────────
+// Audit trail for each DNS TXT verification attempt made by the tenant domain
+// poller. Stores the outcome of every check so admins can diagnose propagation
+// issues via the Domain Health tab in TenantManagement.
+export const domainVerificationOutcomeEnum = pgEnum("domain_verification_outcome", [
+  "success",
+  "failure",
+  "error",
+]);
+
+export const domainVerificationEvents = pgTable("domain_verification_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  domain: varchar("domain", { length: 253 }).notNull(),
+  outcome: domainVerificationOutcomeEnum("outcome").notNull(),
+  /** Short machine-readable error code, e.g. "ENOTFOUND", "TOKEN_MISMATCH" */
+  errorCode: varchar("error_code", { length: 64 }),
+  /** Human-readable detail message */
+  detail: varchar("detail", { length: 512 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_dve_tenant_id").on(t.tenantId),
+  index("idx_dve_domain").on(t.domain),
+  index("idx_dve_created_at").on(t.createdAt),
+  index("idx_dve_outcome").on(t.outcome),
+]);
+export type DomainVerificationEvent = typeof domainVerificationEvents.$inferSelect;
+export type InsertDomainVerificationEvent = typeof domainVerificationEvents.$inferInsert;

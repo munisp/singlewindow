@@ -34,6 +34,7 @@ import {
   permifyAuditLog,
   tenants,
   corazaWafRules,
+  domainVerificationEvents,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -1939,4 +1940,79 @@ export async function resetTenantDomainFailCount(tenantId: string) {
     .where(eq(tenants.id, tenantId))
     .returning();
   return row;
+}
+
+// ─── Domain Verification Event helpers (Sprint v6) ───────────────────────────
+
+/**
+ * logDomainVerificationEvent — records a single DNS verification attempt.
+ * Called by the tenant domain poller on every check (success, failure, or error).
+ */
+export async function logDomainVerificationEvent(
+  tenantId: string,
+  domain: string,
+  outcome: "success" | "failure" | "error",
+  errorCode?: string,
+  detail?: string,
+) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(domainVerificationEvents).values({
+    tenantId,
+    domain,
+    outcome,
+    errorCode: errorCode ?? null,
+    detail: detail ?? null,
+    createdAt: new Date(),
+  }).returning();
+  return row;
+}
+
+/**
+ * getDomainVerificationHistory — returns the last N events for a given tenant.
+ * Ordered newest-first.
+ */
+export async function getDomainVerificationHistory(tenantId: string, limit = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(domainVerificationEvents)
+    .where(eq(domainVerificationEvents.tenantId, tenantId))
+    .orderBy(desc(domainVerificationEvents.createdAt))
+    .limit(limit);
+}
+
+/**
+ * getDomainHealthSummary — aggregates the last 30 events per tenant into
+ * a health summary: total checks, successes, failures, last outcome, last checked.
+ */
+export async function getDomainHealthSummary(tenantId: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const events = await db
+    .select()
+    .from(domainVerificationEvents)
+    .where(eq(domainVerificationEvents.tenantId, tenantId))
+    .orderBy(desc(domainVerificationEvents.createdAt))
+    .limit(30);
+
+  if (events.length === 0) return null;
+
+  const total = events.length;
+  const successes = events.filter(e => e.outcome === "success").length;
+  const failures = events.filter(e => e.outcome === "failure").length;
+  const errors = events.filter(e => e.outcome === "error").length;
+  const lastEvent = events[0];
+
+  return {
+    total,
+    successes,
+    failures,
+    errors,
+    successRate: total > 0 ? Math.round((successes / total) * 100) : 0,
+    lastOutcome: lastEvent.outcome,
+    lastCheckedAt: lastEvent.createdAt,
+    lastErrorCode: lastEvent.errorCode,
+  };
 }

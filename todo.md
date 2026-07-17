@@ -1682,3 +1682,27 @@
 - [x] Coraza WAF Dashboard: CSV export button for event correlation data
 - [x] tRPC exportEventCorrelationCsv procedure
 - [x] Vitest tests for all sprint v5 features
+
+## Sprint v6 — CRS Modal, Paranoia Filter, Domain Health
+- [ ] CRS dry-run preview modal: dryRun=true call, result modal with rule breakdown and Confirm Import
+- [ ] Paranoia Level filter in Rules tab: extend listRules procedure + UI select
+- [ ] domain_verification_events schema table + migration
+- [ ] db helpers: logDomainVerificationEvent, getDomainVerificationHistory
+- [ ] tRPC procedures: getDomainVerificationHistory, getDomainHealthSummary
+- [ ] Domain Health tab in TenantManagement page
+- [ ] Vitest tests for sprint v6
+- [ ] Checkpoint and GitHub sync
+
+## Sprint v6 Features
+- [x] CRS dry-run preview modal — admin sees parsed rules/changes before confirming live import
+- [x] CRS import modal shows inserted/updated/skipped breakdown, CRS version, categories, and PL selector
+- [x] Paranoia Level (PL 1–4) filter added to corazaWaf.listRules procedure
+- [x] Paranoia Level filter dropdown added to Rules tab in CorazaWafDashboard
+- [x] PL column with colour-coded badge added to rules table
+- [x] Active PL filter banner with clear button shown when PL filter is active
+- [x] domain_verification_events schema table with outcome enum, FK, and 4 indexes (migration 0048)
+- [x] logDomainVerificationEvent / getDomainVerificationHistory / getDomainHealthSummary db helpers
+- [x] tenantDomainPoller logs success/failure/error events on every DNS check
+- [x] tenant router exposes getDomainVerificationHistory and getDomainHealthSummary tRPC procedures
+- [x] Domain Health tab added to TenantManagement with health summary cards and event history table
+- [x] 4495 tests passing (118 test files) — Sprint v6 tests in server/next-steps-v6.test.ts

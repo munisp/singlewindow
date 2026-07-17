@@ -99,6 +99,7 @@ export const corazaWafRouter = router({
         category: z.string().optional(),
         severity: z.enum(["critical", "high", "medium", "low"]).optional(),
         enabled: z.boolean().optional(),
+        paranoiaLevel: z.number().int().min(1).max(4).optional(),
         page: z.number().int().min(1).default(1),
         pageSize: z.number().int().min(1).max(100).default(50),
       }).optional()
@@ -150,6 +151,7 @@ export const corazaWafRouter = router({
       if (input?.category) conditions.push(eq(corazaWafRules.category, input.category));
       if (input?.severity) conditions.push(eq(corazaWafRules.severity, input.severity));
       if (input?.enabled !== undefined) conditions.push(eq(corazaWafRules.enabled, input.enabled));
+      if (input?.paranoiaLevel !== undefined) conditions.push(eq(corazaWafRules.paranoiaLevel, input.paranoiaLevel));
 
       const page = input?.page ?? 1;
       const pageSize = input?.pageSize ?? 50;

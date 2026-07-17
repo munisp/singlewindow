@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Building2, Plus, RefreshCw, Users, Key, CheckCircle,
   XCircle, Globe, Copy, AlertTriangle, ShieldCheck, Trash2,
+  HeartPulse, Activity, CheckCircle2, Clock,
 } from "lucide-react";
 
 function formatDate(ts: Date | string | null | undefined) {
@@ -52,6 +53,7 @@ export default function TenantManagement() {
   const [showDomainDialog, setShowDomainDialog] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
   const [selectedTenantName, setSelectedTenantName] = useState<string>("");
+  const [healthTenantId, setHealthTenantId] = useState<string | null>(null);
   const [domainInput, setDomainInput] = useState("");
   const [provisionForm, setProvisionForm] = useState({
     name: "",
@@ -78,6 +80,18 @@ export default function TenantManagement() {
   const { data: myTenants } = trpc.tenant.getMyTenants.useQuery(undefined, { enabled: !isAdmin });
   const { data: domainList, isLoading: domainsLoading, refetch: refetchDomains } =
     trpc.tenant.listTenantDomains.useQuery(undefined, { enabled: isAdmin });
+
+  // Domain Health queries
+  const { data: domainHealthHistory, isLoading: healthHistoryLoading, refetch: refetchHealthHistory } =
+    trpc.tenant.getDomainVerificationHistory.useQuery(
+      { tenantId: healthTenantId!, limit: 20 },
+      { enabled: !!healthTenantId }
+    );
+  const { data: domainHealthSummary, refetch: refetchHealthSummary } =
+    trpc.tenant.getDomainHealthSummary.useQuery(
+      { tenantId: healthTenantId! },
+      { enabled: !!healthTenantId }
+    );
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const provisionMutation = trpc.tenant.provisionTenant.useMutation({
@@ -213,7 +227,7 @@ export default function TenantManagement() {
         </div>
       )}
 
-      {/* Tabs: Tenants | Custom Domains */}
+      {/* Tabs: Tenants | Custom Domains | Domain Health */}
       <Tabs defaultValue="tenants">
         <TabsList>
           <TabsTrigger value="tenants">
@@ -221,6 +235,9 @@ export default function TenantManagement() {
           </TabsTrigger>
           <TabsTrigger value="domains">
             <Globe className="w-4 h-4 mr-1.5" /> Custom Domains
+          </TabsTrigger>
+          <TabsTrigger value="domain-health">
+            <HeartPulse className="w-4 h-4 mr-1.5" /> Domain Health
           </TabsTrigger>
         </TabsList>
 
@@ -438,6 +455,163 @@ export default function TenantManagement() {
               <RefreshCw className="w-4 h-4 mr-1.5" /> Refresh
             </Button>
           </div>
+        </TabsContent>
+
+        {/* ── Domain Health Tab ────────────────────────────────────────────────── */}
+        <TabsContent value="domain-health" className="mt-4 space-y-4">
+          {/* Explanation banner */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+            <div className="flex items-start gap-2">
+              <HeartPulse className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <span className="font-semibold">Domain Verification Health</span> — Each entry shows the DNS TXT
+                verification attempts made by the background poller for a tenant's custom domain.
+                Select a tenant below to view its recent verification history.
+              </div>
+            </div>
+          </div>
+
+          {/* Tenant selector */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-foreground whitespace-nowrap">Select Tenant:</label>
+            <select
+              className="border rounded-md px-3 py-1.5 text-sm bg-background text-foreground flex-1 max-w-xs"
+              value={healthTenantId ?? ""}
+              onChange={e => setHealthTenantId(e.target.value || null)}
+            >
+              <option value="">— choose a tenant —</option>
+              {domainRows.filter((r: any) => !!r.customDomain).map((r: any) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.customDomain})
+                </option>
+              ))}
+            </select>
+            {healthTenantId && (
+              <Button variant="outline" size="sm" onClick={() => { refetchHealthHistory(); refetchHealthSummary(); }}>
+                <RefreshCw className="w-4 h-4 mr-1" /> Refresh
+              </Button>
+            )}
+          </div>
+
+          {!healthTenantId ? (
+            <div className="text-center py-12 text-muted-foreground border rounded-lg">
+              <HeartPulse className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p className="font-medium">Select a tenant with a registered custom domain above</p>
+              <p className="text-xs mt-1">Only tenants with a custom domain registered will appear in the list.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Health Summary Card */}
+              {domainHealthSummary ? (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-card border rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground uppercase">Total Checks</p>
+                    <p className="text-2xl font-bold mt-1">{domainHealthSummary.total}</p>
+                  </div>
+                  <div className="bg-card border rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground uppercase">Success Rate</p>
+                    <p className={`text-2xl font-bold mt-1 ${
+                      domainHealthSummary.successRate >= 80 ? "text-green-600" :
+                      domainHealthSummary.successRate >= 50 ? "text-yellow-600" : "text-red-600"
+                    }`}>{domainHealthSummary.successRate}%</p>
+                  </div>
+                  <div className="bg-card border rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground uppercase">Last Outcome</p>
+                    <div className="mt-1">
+                      {domainHealthSummary.lastOutcome === "success" ? (
+                        <span className="flex items-center gap-1 text-green-600 font-semibold">
+                          <CheckCircle2 className="w-4 h-4" /> Success
+                        </span>
+                      ) : domainHealthSummary.lastOutcome === "failure" ? (
+                        <span className="flex items-center gap-1 text-yellow-600 font-semibold">
+                          <AlertTriangle className="w-4 h-4" /> Failure
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-red-600 font-semibold">
+                          <XCircle className="w-4 h-4" /> Error
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="bg-card border rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground uppercase">Last Checked</p>
+                    <p className="text-xs font-medium mt-1">
+                      {domainHealthSummary.lastCheckedAt ? new Date(domainHealthSummary.lastCheckedAt).toLocaleString() : "—"}
+                    </p>
+                    {domainHealthSummary.lastErrorCode && (
+                      <p className="text-xs text-red-500 font-mono mt-0.5">{domainHealthSummary.lastErrorCode}</p>
+                    )}
+                  </div>
+                </div>
+              ) : !healthHistoryLoading && (
+                <div className="bg-muted/30 border rounded-lg p-4 text-sm text-muted-foreground text-center">
+                  <Activity className="w-6 h-6 mx-auto mb-1 opacity-40" />
+                  No verification attempts recorded yet. The background poller runs every 15 minutes.
+                </div>
+              )}
+
+              {/* Event History Table */}
+              {healthHistoryLoading ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading history…
+                </div>
+              ) : domainHealthHistory && domainHealthHistory.length > 0 ? (
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left px-4 py-3 font-medium">Time</th>
+                        <th className="text-left px-4 py-3 font-medium">Domain</th>
+                        <th className="text-left px-4 py-3 font-medium">Outcome</th>
+                        <th className="text-left px-4 py-3 font-medium">Error Code</th>
+                        <th className="text-left px-4 py-3 font-medium">Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {domainHealthHistory.map((event: any) => (
+                        <tr key={event.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {new Date(event.createdAt).toLocaleString()}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs">{event.domain}</td>
+                          <td className="px-4 py-3">
+                            {event.outcome === "success" ? (
+                              <Badge className="text-xs border bg-green-100 text-green-800 border-green-200">
+                                <CheckCircle2 className="w-3 h-3 mr-1 inline" /> Success
+                              </Badge>
+                            ) : event.outcome === "failure" ? (
+                              <Badge className="text-xs border bg-yellow-100 text-yellow-800 border-yellow-200">
+                                <AlertTriangle className="w-3 h-3 mr-1 inline" /> Failure
+                              </Badge>
+                            ) : (
+                              <Badge className="text-xs border bg-red-100 text-red-800 border-red-200">
+                                <XCircle className="w-3 h-3 mr-1 inline" /> Error
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-red-600">
+                            {event.errorCode ?? <span className="text-muted-foreground">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-xs truncate" title={event.detail ?? ""}>
+                            {event.detail ?? "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground border rounded-lg">
+                  <HeartPulse className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="font-medium">No verification events yet</p>
+                  <p className="text-xs mt-1">Events are recorded each time the background poller checks this domain.</p>
+                </div>
+              )}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 

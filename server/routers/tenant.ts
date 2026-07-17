@@ -8,6 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
+import { getDomainVerificationHistory, getDomainHealthSummary } from "../db";
 import { tenants, tenantKeycloakConfig, tenantUsers, tenantBranding } from "../../drizzle/schema";
 import { eq, desc, and, or } from "drizzle-orm";
 import crypto from "crypto";
@@ -613,5 +614,28 @@ export const tenantRouter = router({
         throw new TRPCError({ code: "FORBIDDEN", message: "Domain not registered or not verified" });
       }
       return { allowed: true, tenantId: tenant.id, tenantName: tenant.name };
+    }),
+
+  /**
+   * getDomainVerificationHistory — returns the last N verification events for a tenant.
+   * Used by the Domain Health tab in TenantManagement.
+   */
+  getDomainVerificationHistory: protectedProcedure
+    .input(z.object({
+      tenantId: z.string().uuid(),
+      limit: z.number().int().min(1).max(50).default(10),
+    }))
+    .query(async ({ input }) => {
+      return getDomainVerificationHistory(input.tenantId, input.limit);
+    }),
+
+  /**
+   * getDomainHealthSummary — aggregates the last 30 events for a tenant into
+   * a health summary (success rate, last outcome, last checked).
+   */
+  getDomainHealthSummary: protectedProcedure
+    .input(z.object({ tenantId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      return getDomainHealthSummary(input.tenantId);
     }),
 });
