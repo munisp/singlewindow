@@ -1674,11 +1674,11 @@
 
 ## Sprint Caddy v5 — OWASP CRS Import, DNS Failure Notifications, CSV Export
 
-- [ ] Merge PR #11 (feat/caddy-keycloak-waf) into main on munisp/singlewindow
-- [ ] OWASP CRS bulkImportRules tRPC procedure (fetch latest GitHub release, parse rules, seed DB)
-- [ ] CRS import UI button in CorazaWafDashboard Rules tab
-- [ ] DNS poller: domainVerificationFailCount column in tenants schema
-- [ ] DNS poller: notifyOwner after 3 consecutive verification failures
-- [ ] Coraza WAF Dashboard: CSV export button for event correlation data
-- [ ] tRPC exportEventCorrelationCsv procedure
-- [ ] Vitest tests for all sprint v5 features
+- [x] Merge PR #11 (feat/caddy-keycloak-waf) into main on munisp/singlewindow
+- [x] OWASP CRS bulkImportRules tRPC procedure (fetch latest GitHub release, parse rules, seed DB)
+- [x] CRS import UI button in CorazaWafDashboard Rules tab
+- [x] DNS poller: domainVerificationFailCount column in tenants schema
+- [x] DNS poller: notifyOwner after 3 consecutive verification failures
+- [x] Coraza WAF Dashboard: CSV export button for event correlation data
+- [x] tRPC exportEventCorrelationCsv procedure
+- [x] Vitest tests for all sprint v5 features

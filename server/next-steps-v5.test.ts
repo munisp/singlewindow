@@ -118,6 +118,35 @@ SecRule ARGS "@detectXSS" \\
   });
 });
 
+describe("OWASP CRS Import UI", () => {
+  it("CorazaWafDashboard has Import CRS button wired to crsImport.bulkImportRules", () => {
+    const src = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../client/src/pages/admin/CorazaWafDashboard.tsx"
+      ),
+      "utf-8"
+    );
+    expect(src).toContain("crsImportMutation");
+    expect(src).toContain("Import CRS");
+    expect(src).toContain("trpc.crsImport.bulkImportRules.useMutation");
+  });
+
+  it("CRS import toast uses correct return field names (inserted, crsVersion)", () => {
+    const src = fs.readFileSync(
+      path.resolve(
+        __dirname,
+        "../client/src/pages/admin/CorazaWafDashboard.tsx"
+      ),
+      "utf-8"
+    );
+    expect(src).toContain("data.crsVersion");
+    expect(src).toContain("data.inserted");
+    expect(src).toContain("data.updated");
+    expect(src).toContain("data.skipped");
+  });
+});
+
 // ─── 2. DNS Poller Consecutive-Failure Notifications ─────────────────────────
 
 describe("DNS Poller Consecutive-Failure Notifications", () => {

@@ -190,6 +190,20 @@ export default function CorazaWafDashboard() {
     },
   });
 
+  const crsImportMutation = trpc.crsImport.bulkImportRules.useMutation({
+    onSuccess: (data) => {
+      toast({
+        title: "CRS Import Complete",
+        description: `CRS ${data.crsVersion}: ${data.inserted} inserted, ${data.updated} updated, ${data.skipped} skipped (${data.uniqueRules} total unique rules).`,
+      });
+      refetchRules();
+      refetchStats();
+    },
+    onError: (err) => {
+      toast({ title: "CRS Import Failed", description: err.message, variant: "destructive" });
+    },
+  });
+
   const bulkMutation = trpc.corazaWaf.bulkToggleRules.useMutation({
     onSuccess: (data) => {
       toast({
@@ -246,15 +260,28 @@ export default function CorazaWafDashboard() {
             <p className="text-sm text-gray-400">Manage OWASP CRS and custom NGSWTP rules — changes hot-reload Caddy</p>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefreshAll}
-          className="border-gray-600 text-gray-300 hover:bg-gray-800"
-        >
-          <RefreshCw className="w-4 h-4 mr-1" />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => crsImportMutation.mutate({ dryRun: false })}
+            disabled={crsImportMutation.isPending}
+            className="border-[#D4A017] text-[#D4A017] hover:bg-[#D4A017]/10"
+          >
+            {crsImportMutation.isPending
+              ? <><RefreshCw className="w-4 h-4 mr-1 animate-spin" />Importing…</>
+              : <><Download className="w-4 h-4 mr-1" />Import CRS</>}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefreshAll}
+            className="border-gray-600 text-gray-300 hover:bg-gray-800"
+          >
+            <RefreshCw className="w-4 h-4 mr-1" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Caddy Status Bar */}
