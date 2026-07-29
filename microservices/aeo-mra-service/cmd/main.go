@@ -331,6 +331,72 @@ func (s *Server) issueRulingDecision(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) listAdvanceRulingsByTrader(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	traderID := vars["trader_id"]
+	status := r.URL.Query().Get("status")
+	limitStr := r.URL.Query().Get("limit")
+	offsetStr := r.URL.Query().Get("offset")
+
+	limit := 20
+	offset := 0
+	fmt.Sscanf(limitStr, "%d", &limit)
+	fmt.Sscanf(offsetStr, "%d", &offset)
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	var rows *sql.Rows
+	var err error
+	if status != "" {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, trader_id, ruling_type, goods_description, hs_code_requested,
+			       COALESCE(hs_code_decided,''), COALESCE(origin_decided,''),
+			       COALESCE(valuation_decided,0), status, COALESCE(decision,''),
+			       COALESCE(issued_by,''), valid_from, valid_to, created_at, updated_at
+			FROM advance_rulings
+			WHERE trader_id = $1 AND status = $2
+			ORDER BY created_at DESC LIMIT $3 OFFSET $4
+		`, traderID, status, limit, offset)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, trader_id, ruling_type, goods_description, hs_code_requested,
+			       COALESCE(hs_code_decided,''), COALESCE(origin_decided,''),
+			       COALESCE(valuation_decided,0), status, COALESCE(decision,''),
+			       COALESCE(issued_by,''), valid_from, valid_to, created_at, updated_at
+			FROM advance_rulings
+			WHERE trader_id = $1
+			ORDER BY created_at DESC LIMIT $2 OFFSET $3
+		`, traderID, limit, offset)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var rulings []AdvanceRuling
+	for rows.Next() {
+		var ruling AdvanceRuling
+		if err := rows.Scan(
+			&ruling.ID, &ruling.TraderID, &ruling.RulingType, &ruling.GoodsDescription,
+			&ruling.HSCodeRequested, &ruling.HSCodeDecided, &ruling.OriginDecided,
+			&ruling.ValuationDecided, &ruling.Status, &ruling.Decision,
+			&ruling.IssuedBy, &ruling.ValidFrom, &ruling.ValidTo,
+			&ruling.CreatedAt, &ruling.UpdatedAt,
+		); err != nil {
+			continue
+		}
+		rulings = append(rulings, ruling)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"rulings": rulings, "count": len(rulings)})
+}
+
 func (s *Server) getAdvanceRuling(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	rulingID := vars["id"]
@@ -459,6 +525,7 @@ func main() {
 	r.HandleFunc("/v1/advance-rulings", srv.submitAdvanceRuling).Methods("POST")
 	r.HandleFunc("/v1/advance-rulings/{id}", srv.issueRulingDecision).Methods("PUT")
 	r.HandleFunc("/v1/advance-rulings/{id}", srv.getAdvanceRuling).Methods("GET")
+	r.HandleFunc("/v1/advance-rulings/trader/{trader_id}", srv.listAdvanceRulingsByTrader).Methods("GET")
 
 	port := getEnv("PORT", "8096")
 	log.Printf("AEO MRA Service listening on :%s", port)

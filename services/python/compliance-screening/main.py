@@ -508,6 +508,78 @@ async def file_str(req: STRRequest, db=Depends(get_db)):
     }
 
 
+@app.get("/v1/screening/sanctions/{screening_id}")
+async def get_sanctions_screening(screening_id: str, db=Depends(get_db)):
+    """Get a sanctions screening result by ID."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute(
+            "SELECT * FROM sanctions_screening_results WHERE id = %s",
+            (screening_id,)
+        )
+        row = cur.fetchone()
+    except Exception:
+        raise HTTPException(status_code=404, detail="Screening result not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Screening result not found")
+    return dict(row)
+
+
+@app.get("/v1/screening/tbml/{screening_id}")
+async def get_tbml_screening(screening_id: str, db=Depends(get_db)):
+    """Get a TBML screening result by ID."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute(
+            "SELECT * FROM tbml_screening_results WHERE id = %s",
+            (screening_id,)
+        )
+        row = cur.fetchone()
+    except Exception:
+        raise HTTPException(status_code=404, detail="Screening result not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Screening result not found")
+    return dict(row)
+
+
+@app.get("/v1/screening/declaration/{declaration_id}")
+async def get_screening_by_declaration(declaration_id: str, db=Depends(get_db)):
+    """Get all screening results for a declaration."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    results: dict = {"declaration_id": declaration_id, "sanctions": [], "tbml": []}
+    try:
+        cur.execute(
+            "SELECT * FROM sanctions_screening_results WHERE declaration_id = %s ORDER BY screened_at DESC",
+            (declaration_id,)
+        )
+        results["sanctions"] = [dict(r) for r in cur.fetchall()]
+        cur.execute(
+            "SELECT * FROM tbml_screening_results WHERE declaration_id = %s ORDER BY screened_at DESC",
+            (declaration_id,)
+        )
+        results["tbml"] = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        pass
+    return results
+
+
+@app.get("/v1/str/{str_id}")
+async def get_str(str_id: str, db=Depends(get_db)):
+    """Get a Suspicious Transaction Report by ID."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cur.execute(
+            "SELECT * FROM suspicious_transaction_reports WHERE id = %s",
+            (str_id,)
+        )
+        row = cur.fetchone()
+    except Exception:
+        raise HTTPException(status_code=404, detail="STR not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="STR not found")
+    return dict(row)
+
+
 @app.get("/v1/health")
 async def health():
     return {"status": "ok", "service": "compliance-screening"}

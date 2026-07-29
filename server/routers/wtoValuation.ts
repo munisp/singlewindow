@@ -61,6 +61,39 @@ export const wtoValuationRouter = router({
       return res.json();
     }),
 
+  getByDeclaration: protectedProcedure
+    .input(z.object({ declarationId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const res = await fetchWithResilience(
+        `${WTO_VALUATION_URL}/v1/valuations/declaration/${input.declarationId}`,
+        {},
+        "wto-valuation"
+      );
+      if (res.status === 404) return null;
+      return res.json();
+    }),
+
+  listByTrader: protectedProcedure
+    .input(z.object({
+      traderId: z.string(),
+      limit:    z.number().int().min(1).max(100).default(20),
+      offset:   z.number().int().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const { getDb } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const db = getDb();
+      const rows = await db.execute(sql`
+        SELECT cv.*, d.trader_id
+        FROM customs_valuations cv
+        JOIN declarations d ON d.id = cv.declaration_id
+        WHERE d.trader_id = ${input.traderId}
+        ORDER BY cv.created_at DESC
+        LIMIT ${input.limit} OFFSET ${input.offset}
+      `);
+      return rows;
+    }),
+
   getMCVTable: protectedProcedure
     .query(async () => {
       // Return the NCS 2024 Minimum Customs Value table

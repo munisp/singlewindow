@@ -353,6 +353,143 @@ func (s *Server) getTrackingHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) getLC(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	lcID := vars["id"]
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var lc LetterOfCredit
+	var docsJSON []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, lc_number, COALESCE(declaration_id,''), applicant_id, applicant_name,
+		       beneficiary_name, beneficiary_country, issuing_bank, COALESCE(advising_bank,''),
+		       amount, currency, expiry_date, port_of_loading, port_of_discharge,
+		       goods_description, hs_code, incoterms, status, documents_required,
+		       COALESCE(swift_mt700,''), created_at, updated_at
+		FROM letters_of_credit WHERE id = $1
+	`, lcID).Scan(
+		&lc.ID, &lc.LCNumber, &lc.DeclarationID, &lc.ApplicantID, &lc.ApplicantName,
+		&lc.BeneficiaryName, &lc.BeneficiaryCountry, &lc.IssuingBank, &lc.AdvisingBank,
+		&lc.Amount, &lc.Currency, &lc.ExpiryDate, &lc.PortOfLoading, &lc.PortOfDischarge,
+		&lc.GoodsDescription, &lc.HSCode, &lc.Incoterms, &lc.Status, &docsJSON,
+		&lc.SWIFTMessage, &lc.CreatedAt, &lc.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		http.Error(w, "LC not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.Unmarshal(docsJSON, &lc.Documents)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(lc)
+}
+
+func (s *Server) listLC(w http.ResponseWriter, r *http.Request) {
+	declarationID := r.URL.Query().Get("declaration_id")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var rows *sql.Rows
+	var err error
+	if declarationID != "" {
+		rows, err = s.db.QueryContext(ctx, `SELECT id, lc_number, status, amount, currency, expiry_date, created_at FROM letters_of_credit WHERE declaration_id = $1 ORDER BY created_at DESC`, declarationID)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `SELECT id, lc_number, status, amount, currency, expiry_date, created_at FROM letters_of_credit ORDER BY created_at DESC LIMIT 50`)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	type LCSummary struct {
+		ID string `json:"id"`
+		LCNumber string `json:"lc_number"`
+		Status string `json:"status"`
+		Amount float64 `json:"amount"`
+		Currency string `json:"currency"`
+		ExpiryDate time.Time `json:"expiry_date"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	var lcs []LCSummary
+	for rows.Next() {
+		var lc LCSummary
+		if err := rows.Scan(&lc.ID, &lc.LCNumber, &lc.Status, &lc.Amount, &lc.Currency, &lc.ExpiryDate, &lc.CreatedAt); err != nil {
+			continue
+		}
+		lcs = append(lcs, lc)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"letters_of_credit": lcs, "count": len(lcs)})
+}
+
+func (s *Server) getBG(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	bgID := vars["id"]
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var bg BankGuarantee
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, bg_number, COALESCE(declaration_id,''), trader_id, issuing_bank,
+		       beneficiary_name, guarantee_type, amount, currency, valid_from, valid_to,
+		       status, COALESCE(duty_amount,0), created_at
+		FROM bank_guarantees WHERE id = $1
+	`, bgID).Scan(
+		&bg.ID, &bg.BGNumber, &bg.DeclarationID, &bg.TraderID, &bg.IssuingBank,
+		&bg.BeneficiaryName, &bg.GuaranteeType, &bg.Amount, &bg.Currency,
+		&bg.ValidFrom, &bg.ValidTo, &bg.Status, &bg.DutyAmount, &bg.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Bank Guarantee not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bg)
+}
+
+func (s *Server) listBG(w http.ResponseWriter, r *http.Request) {
+	traderID := r.URL.Query().Get("trader_id")
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	var rows *sql.Rows
+	var err error
+	if traderID != "" {
+		rows, err = s.db.QueryContext(ctx, `SELECT id, bg_number, guarantee_type, amount, currency, valid_to, status, created_at FROM bank_guarantees WHERE trader_id = $1 ORDER BY created_at DESC`, traderID)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `SELECT id, bg_number, guarantee_type, amount, currency, valid_to, status, created_at FROM bank_guarantees ORDER BY created_at DESC LIMIT 50`)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	type BGSummary struct {
+		ID string `json:"id"`
+		BGNumber string `json:"bg_number"`
+		GuaranteeType string `json:"guarantee_type"`
+		Amount float64 `json:"amount"`
+		Currency string `json:"currency"`
+		ValidTo time.Time `json:"valid_to"`
+		Status string `json:"status"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	var bgs []BGSummary
+	for rows.Next() {
+		var bg BGSummary
+		if err := rows.Scan(&bg.ID, &bg.BGNumber, &bg.GuaranteeType, &bg.Amount, &bg.Currency, &bg.ValidTo, &bg.Status, &bg.CreatedAt); err != nil {
+			continue
+		}
+		bgs = append(bgs, bg)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"bank_guarantees": bgs, "count": len(bgs)})
+}
+
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "trade-finance-service"})
@@ -447,7 +584,11 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/v1/health", srv.health).Methods("GET")
 	r.HandleFunc("/v1/letters-of-credit", srv.createLC).Methods("POST")
+	r.HandleFunc("/v1/letters-of-credit", srv.listLC).Methods("GET")
+	r.HandleFunc("/v1/letters-of-credit/{id}", srv.getLC).Methods("GET")
 	r.HandleFunc("/v1/bank-guarantees", srv.createBankGuarantee).Methods("POST")
+	r.HandleFunc("/v1/bank-guarantees", srv.listBG).Methods("GET")
+	r.HandleFunc("/v1/bank-guarantees/{id}", srv.getBG).Methods("GET")
 	r.HandleFunc("/v1/tracking/{declaration_id}/events", srv.addTrackingEvent).Methods("POST")
 	r.HandleFunc("/v1/tracking/{declaration_id}", srv.getTrackingHistory).Methods("GET")
 

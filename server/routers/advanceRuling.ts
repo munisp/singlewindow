@@ -114,6 +114,23 @@ export const advanceRulingRouter = router({
       return res.json();
     }),
 
+  // List rulings for a trader
+  listByTrader: protectedProcedure
+    .input(z.object({
+      traderId: z.string(),
+      status:   z.enum(["pending", "under_review", "issued", "revoked"]).optional(),
+      limit:    z.number().int().min(1).max(100).default(20),
+      offset:   z.number().int().min(0).default(0),
+    }))
+    .query(async ({ input }) => {
+      const res = await fetchWithResilience(
+        `${AEO_MRA_URL}/v1/advance-rulings/trader/${input.traderId}?status=${input.status ?? ""}&limit=${input.limit}&offset=${input.offset}`,
+        {},
+        "aeo-mra"
+      );
+      return res.json();
+    }),
+
   // Get MRA partner list
   getMRAPartners: protectedProcedure
     .query(async () => {

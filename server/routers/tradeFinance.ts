@@ -131,6 +131,52 @@ export const tradeFinanceRouter = router({
       return res.json();
     }),
 
+  getLC: protectedProcedure
+    .input(z.object({ lcId: z.string() }))
+    .query(async ({ input }) => {
+      const res = await fetchWithResilience(
+        `${TRADE_FINANCE_URL}/v1/letters-of-credit/${input.lcId}`,
+        {},
+        "trade-finance"
+      );
+      if (res.status === 404) return null;
+      return res.json();
+    }),
+
+  listLCByDeclaration: protectedProcedure
+    .input(z.object({ declarationId: z.string().uuid() }))
+    .query(async ({ input }) => {
+      const res = await fetchWithResilience(
+        `${TRADE_FINANCE_URL}/v1/letters-of-credit?declaration_id=${input.declarationId}`,
+        {},
+        "trade-finance"
+      );
+      return res.json();
+    }),
+
+  getBankGuarantee: protectedProcedure
+    .input(z.object({ bgId: z.string() }))
+    .query(async ({ input }) => {
+      const res = await fetchWithResilience(
+        `${TRADE_FINANCE_URL}/v1/bank-guarantees/${input.bgId}`,
+        {},
+        "trade-finance"
+      );
+      if (res.status === 404) return null;
+      return res.json();
+    }),
+
+  listBGByTrader: protectedProcedure
+    .input(z.object({ traderId: z.string() }))
+    .query(async ({ input }) => {
+      const res = await fetchWithResilience(
+        `${TRADE_FINANCE_URL}/v1/bank-guarantees?trader_id=${input.traderId}`,
+        {},
+        "trade-finance"
+      );
+      return res.json();
+    }),
+
   getTrackingHistory: protectedProcedure
     .input(z.object({ declarationId: z.string().uuid() }))
     .query(async ({ input }) => {

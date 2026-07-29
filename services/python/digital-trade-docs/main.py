@@ -455,6 +455,102 @@ async def issue_cites_permit(req: CITESPermitRequest, db=Depends(get_db)):
     }
 
 
+@app.get("/v1/ebl/{ebl_id}")
+async def get_ebl(ebl_id: str, db=Depends(get_db)):
+    """Get eBL details by ID."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM electronic_bills_of_lading WHERE id = %s", (ebl_id,))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="eBL not found")
+    return dict(row)
+
+
+@app.get("/v1/ebl/number/{ebl_number}")
+async def get_ebl_by_number(ebl_number: str, db=Depends(get_db)):
+    """Get eBL details by eBL number."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM electronic_bills_of_lading WHERE ebl_number = %s", (ebl_number,))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="eBL not found")
+    return dict(row)
+
+
+@app.post("/v1/ephyto/verify")
+async def verify_ephyto(req: dict, db=Depends(get_db)):
+    """Verify an incoming ePhytosanitary certificate by number."""
+    cert_number = req.get("cert_number") or req.get("certNumber")
+    if not cert_number:
+        raise HTTPException(status_code=400, detail="cert_number is required")
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT * FROM ephyto_certificates WHERE cert_number = %s",
+        (cert_number,)
+    )
+    row = cur.fetchone()
+    if not row:
+        return {"valid": False, "cert_number": cert_number, "reason": "Certificate not found in registry"}
+    cert = dict(row)
+    now = datetime.now(timezone.utc)
+    is_expired = cert.get("valid_until") and cert["valid_until"] < now
+    is_active = cert.get("status") == "ISSUED"
+    return {
+        "valid": is_active and not is_expired,
+        "cert_number": cert_number,
+        "status": cert.get("status"),
+        "issuing_authority": cert.get("issuing_authority"),
+        "valid_until": cert.get("valid_until").isoformat() if cert.get("valid_until") else None,
+        "expired": is_expired,
+        "commodity": cert.get("commodity"),
+        "origin_country": cert.get("origin_country"),
+    }
+
+
+@app.post("/v1/eco/verify")
+async def verify_eco(req: dict, db=Depends(get_db)):
+    """Verify an electronic Certificate of Origin by number or QR hash."""
+    cert_number = req.get("cert_number") or req.get("certNumber")
+    qr_hash = req.get("qr_code_hash") or req.get("qrCodeHash")
+    if not cert_number and not qr_hash:
+        raise HTTPException(status_code=400, detail="cert_number or qr_code_hash is required")
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if cert_number:
+        cur.execute("SELECT * FROM certificates_of_origin WHERE cert_number = %s", (cert_number,))
+    else:
+        cur.execute("SELECT * FROM certificates_of_origin WHERE qr_code_hash = %s", (qr_hash,))
+    row = cur.fetchone()
+    if not row:
+        return {"valid": False, "reason": "Certificate not found in registry"}
+    cert = dict(row)
+    now = datetime.now(timezone.utc)
+    is_expired = cert.get("valid_until") and cert["valid_until"] < now
+    is_active = cert.get("status") == "ISSUED"
+    return {
+        "valid": is_active and not is_expired,
+        "cert_number": cert.get("cert_number"),
+        "status": cert.get("status"),
+        "agreement_type": cert.get("agreement_type"),
+        "preferential_duty_rate": float(cert.get("preferential_rate") or 0),
+        "origin_country": cert.get("origin_country"),
+        "destination_country": cert.get("destination_country"),
+        "valid_until": cert.get("valid_until").isoformat() if cert.get("valid_until") else None,
+        "expired": is_expired,
+        "issuing_chamber": cert.get("issuing_chamber"),
+    }
+
+
+@app.get("/v1/cites/{permit_id}")
+async def get_cites_permit(permit_id: str, db=Depends(get_db)):
+    """Get CITES permit details by ID."""
+    cur = db.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM cites_permits WHERE id = %s", (permit_id,))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="CITES permit not found")
+    return dict(row)
+
+
 @app.get("/v1/health")
 async def health():
     return {"status": "ok", "service": "digital-trade-docs"}
