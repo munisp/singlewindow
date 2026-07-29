@@ -245,3 +245,44 @@ networks:
   tradegateway:
     external: true
     name: tradegateway_default
+
+  wto-valuation-engine:
+    build: ../services/rust/wto-valuation-engine
+    ports: ["8095:8095"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CBN_USD_NGN_RATE: ${CBN_USD_NGN_RATE:-1580.0}
+    depends_on: [postgres]
+    restart: unless-stopped
+
+  aeo-mra-service:
+    build: ../microservices/aeo-mra-service
+    ports: ["8096:8096"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on: [postgres]
+    restart: unless-stopped
+
+  trade-finance-service:
+    build: ../microservices/trade-finance-service
+    ports: ["8097:8097"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on: [postgres]
+    restart: unless-stopped
+
+  digital-trade-docs:
+    build: ../services/python/digital-trade-docs
+    ports: ["8098:8098"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on: [postgres]
+    restart: unless-stopped
+
+  compliance-screening:
+    build: ../services/python/compliance-screening
+    ports: ["8099:8099"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on: [postgres]
+    restart: unless-stopped
