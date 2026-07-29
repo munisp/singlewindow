@@ -1,0 +1,249 @@
+version: "3.9"
+
+# TradeGateway NGSWTP — AI/ML Stack
+# Includes: MLflow, Ray, Neo4j, all AI microservices
+
+services:
+
+  # ── MLflow Tracking Server ────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.2
+    container_name: tradegateway-mlflow
+    command: >
+      mlflow server
+        --host 0.0.0.0
+        --port 5000
+        --backend-store-uri postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/mlflow_tracking
+        --default-artifact-root s3://tradegateway-mlflow/artifacts
+        --serve-artifacts
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: tradegateway
+      AWS_SECRET_ACCESS_KEY: tradegateway_minio_secret
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Ray Head Node ─────────────────────────────────────────────────────────
+  ray-head:
+    image: rayproject/ray:2.20.0-py311-cpu
+    container_name: tradegateway-ray-head
+    command: >
+      ray start --head
+        --port=6379
+        --dashboard-host=0.0.0.0
+        --dashboard-port=8265
+        --num-cpus=4
+        --block
+    environment:
+      RAY_DISABLE_IMPORT_WARNING: "1"
+    ports:
+      - "8265:8265"   # Ray dashboard
+      - "6379:6379"   # Ray head port
+    volumes:
+      - ./services/python-ai:/app/python-ai:ro
+      - ray_data:/tmp/ray
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "ray", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Neo4j Graph Database ──────────────────────────────────────────────────
+  neo4j:
+    image: neo4j:5.19-community
+    container_name: tradegateway-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/tradegateway_neo4j_2026
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 2G
+      NEO4J_dbms_memory_pagecache_size: 512m
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "tradegateway_neo4j_2026", "RETURN 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # ── GNN Risk Service ──────────────────────────────────────────────────────
+  gnn-risk:
+    build:
+      context: ../microservices/gnn-risk
+      dockerfile: Dockerfile
+    container_name: tradegateway-gnn-risk
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_DIR: /models/gnn
+      PORT: "8092"
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: tradegateway_neo4j_2026
+    ports:
+      - "8092:8092"
+    volumes:
+      - model_weights:/models
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8092/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Risk AI Service ───────────────────────────────────────────────────────
+  risk-ai:
+    build:
+      context: ../microservices/risk-ai
+      dockerfile: Dockerfile
+    container_name: tradegateway-risk-ai
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_DIR: /models/risk
+      PORT: "8091"
+    ports:
+      - "8091:8091"
+    volumes:
+      - model_weights:/models
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ── HS Classifier Service ─────────────────────────────────────────────────
+  hs-classifier:
+    build:
+      context: ../microservices/hs-classifier
+      dockerfile: Dockerfile
+    container_name: tradegateway-hs-classifier
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      REDIS_URL: redis://redis:6379
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_DIR: /models/hs
+      PORT: "8093"
+    ports:
+      - "8093:8093"
+    volumes:
+      - model_weights:/models
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Continuous Training Worker ────────────────────────────────────────────
+  training-worker:
+    build:
+      context: ../services/python-ai
+      dockerfile: Dockerfile
+    container_name: tradegateway-training-worker
+    command: python3 training/continuous_training_pipeline.py --mode scheduled
+    environment:
+      DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      KAFKA_BROKERS: kafka:9092
+      LAKEHOUSE_PATH: /data/lakehouse
+      MODEL_DIR: /models
+      RAY_ADDRESS: ray://ray-head:10001
+    volumes:
+      - model_weights:/models
+      - lakehouse_data:/data/lakehouse
+    depends_on:
+      - postgres
+      - mlflow
+      - ray-head
+    networks:
+      - tradegateway
+    restart: "no"  # Run once, scheduled by Dapr cron
+
+  # ── MinIO (S3-compatible artifact store for MLflow) ───────────────────────
+  minio:
+    image: minio/minio:RELEASE.2024-04-06T05-26-02Z
+    container_name: tradegateway-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: tradegateway
+      MINIO_ROOT_PASSWORD: tradegateway_minio_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  model_weights:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+  ray_data:
+    driver: local
+  minio_data:
+    driver: local
+  lakehouse_data:
+    driver: local
+
+networks:
+  tradegateway:
+    external: true
+    name: tradegateway_default
