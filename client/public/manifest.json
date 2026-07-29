@@ -1,11 +1,11 @@
 {
-  "name": "TradeGateway™ NGSWTP",
+  "name": "TradeGateway™ NGSWTP — Nigeria Single Window",
   "short_name": "TradeGateway",
-  "description": "Next Generation Single Window Trade Platform — End-to-End Implementation Specification",
-  "start_url": "/",
+  "description": "Nigeria's Next Generation Single Window Trade Platform — Customs Declarations, LPCO Management, Manifest Submission, and Real-Time Cargo Tracking",
+  "start_url": "/app/dashboard",
   "display": "standalone",
   "background_color": "#0A1628",
-  "theme_color": "#D4A017",
+  "theme_color": "#006400",
   "orientation": "any",
   "icons": [
     {
@@ -21,9 +21,42 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["business", "productivity", "government"],
+  "categories": ["business", "productivity", "government", "finance"],
   "lang": "en",
   "dir": "ltr",
   "scope": "/",
-  "prefer_related_applications": false
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "New Declaration",
+      "short_name": "Declaration",
+      "description": "Submit a new customs declaration",
+      "url": "/app/declarations/new",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Track Cargo",
+      "short_name": "Track",
+      "description": "Track your cargo in real-time",
+      "url": "/app/geo/cargo-tracking",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "My Payments",
+      "short_name": "Payments",
+      "description": "View and manage duty payments",
+      "url": "/app/payments",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "OGA Permits",
+      "short_name": "Permits",
+      "description": "Manage licenses, permits and certificates",
+      "url": "/app/oga/permits",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [],
+  "related_applications": [],
+  "id": "ng.gov.nsw.tradegateway"
 }

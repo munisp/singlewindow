@@ -107,6 +107,10 @@ import {
   batchErrorsRouter,
   conflictStatsRouter,
 } from "./routers/v138Features";
+import { ucrRouter } from "./routers/ucr";
+import { manifestsRouter } from "./routers/manifests";
+import { valuationRouter } from "./routers/valuation";
+import { crfRouter } from "./routers/crf";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -344,6 +348,10 @@ export const appRouter = router({
   watchlistAlerts: watchlistAlertsRouter,
   batchErrors: batchErrorsRouter,
   conflictStats: conflictStatsRouter,
+  ucr: ucrRouter,
+  manifests: manifestsRouter,
+  valuation: valuationRouter,
+  crf: crfRouter,
 });
 
 export type AppRouter = typeof appRouter;

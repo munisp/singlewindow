@@ -3173,3 +3173,173 @@ export const systemHeartbeatJobs = pgTable("system_heartbeat_jobs", {
 });
 export type SystemHeartbeatJob = typeof systemHeartbeatJobs.$inferSelect;
 export type InsertSystemHeartbeatJob = typeof systemHeartbeatJobs.$inferInsert;
+
+// ─── UCR — Unique Consignment Reference ──────────────────────────────────────
+export const ucrs = pgTable("ucrs", {
+  id: serial("id").primaryKey(),
+  ucrNumber: varchar("ucr_number", { length: 64 }).notNull().unique(),
+  traderId: integer("trader_id").notNull().references(() => users.id),
+  ucrType: varchar("ucr_type", { length: 16 }).notNull().default("SINGLE"),
+  consigneeRef: varchar("consignee_ref", { length: 128 }).notNull(),
+  portOfEntry: varchar("port_of_entry", { length: 64 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  status: varchar("status", { length: 32 }).notNull().default("CREATED"),
+  activatedAt: timestamp("activated_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_ucrs_trader_id").on(t.traderId),
+  index("idx_ucrs_status").on(t.status),
+  index("idx_ucrs_declaration_id").on(t.declarationId),
+]);
+export type UCR = typeof ucrs.$inferSelect;
+export type InsertUCR = typeof ucrs.$inferInsert;
+
+// ─── Manifests ────────────────────────────────────────────────────────────────
+export const manifests = pgTable("manifests", {
+  id: serial("id").primaryKey(),
+  manifestNumber: varchar("manifest_number", { length: 64 }).notNull().unique(),
+  manifestType: varchar("manifest_type", { length: 8 }).notNull(),
+  submittedBy: integer("submitted_by").notNull().references(() => users.id),
+  vesselName: varchar("vessel_name", { length: 128 }).notNull(),
+  voyageNumber: varchar("voyage_number", { length: 64 }).notNull(),
+  portOfLoading: varchar("port_of_loading", { length: 64 }).notNull(),
+  portOfDischarge: varchar("port_of_discharge", { length: 64 }).notNull(),
+  eta: timestamp("eta"),
+  ata: timestamp("ata"),
+  status: varchar("status", { length: 32 }).notNull().default("DRAFT"),
+  totalBLs: integer("total_bls").default(0),
+  acceptedAt: timestamp("accepted_at"),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_manifests_submitted_by").on(t.submittedBy),
+  index("idx_manifests_status").on(t.status),
+  index("idx_manifests_type").on(t.manifestType),
+  index("idx_manifests_port").on(t.portOfDischarge),
+]);
+export type Manifest = typeof manifests.$inferSelect;
+export type InsertManifest = typeof manifests.$inferInsert;
+
+// ─── Bills of Lading ─────────────────────────────────────────────────────────
+export const billsOfLading = pgTable("bills_of_lading", {
+  id: serial("id").primaryKey(),
+  manifestId: integer("manifest_id").notNull().references(() => manifests.id),
+  blNumber: varchar("bl_number", { length: 64 }).notNull(),
+  shipper: varchar("shipper", { length: 256 }).notNull(),
+  consignee: varchar("consignee", { length: 256 }).notNull(),
+  notifyParty: varchar("notify_party", { length: 256 }),
+  description: text("description").notNull(),
+  hsCode: varchar("hs_code", { length: 16 }),
+  weightKg: decimal("weight_kg", { precision: 12, scale: 2 }),
+  numPackages: integer("num_packages"),
+  containerNos: text("container_nos").array(),
+  status: varchar("status", { length: 32 }).notNull().default("ACTIVE"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_bls_manifest_id").on(t.manifestId),
+  index("idx_bls_bl_number").on(t.blNumber),
+]);
+export type BillOfLading = typeof billsOfLading.$inferSelect;
+export type InsertBillOfLading = typeof billsOfLading.$inferInsert;
+
+// ─── Valuation References ─────────────────────────────────────────────────────
+export const valuationReferences = pgTable("valuation_references", {
+  id: serial("id").primaryKey(),
+  hsCode: varchar("hs_code", { length: 10 }).notNull(),
+  description: text("description").notNull(),
+  referencePrice: decimal("reference_price", { precision: 14, scale: 4 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  unit: varchar("unit", { length: 32 }).notNull().default("kg"),
+  source: varchar("source", { length: 128 }).notNull().default("NCS"),
+  validFrom: timestamp("valid_from").notNull().defaultNow(),
+  validTo: timestamp("valid_to"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_valuation_hs_code").on(t.hsCode),
+]);
+export type ValuationReference = typeof valuationReferences.$inferSelect;
+export type InsertValuationReference = typeof valuationReferences.$inferInsert;
+
+// ─── CRF Documents ────────────────────────────────────────────────────────────
+export const crfDocuments = pgTable("crf_documents", {
+  id: serial("id").primaryKey(),
+  crfNumber: varchar("crf_number", { length: 64 }).notNull().unique(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  ucrNumber: varchar("ucr_number", { length: 64 }),
+  traderId: integer("trader_id").notNull().references(() => users.id),
+  reportingPeriod: varchar("reporting_period", { length: 16 }).notNull(),
+  hsCode: varchar("hs_code", { length: 16 }),
+  declaredValue: decimal("declared_value", { precision: 14, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  countryOfOrigin: varchar("country_of_origin", { length: 2 }),
+  portOfEntry: varchar("port_of_entry", { length: 64 }),
+  status: varchar("status", { length: 32 }).notNull().default("DRAFT"),
+  submittedAt: timestamp("submitted_at"),
+  acceptedAt: timestamp("accepted_at"),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_crf_trader_id").on(t.traderId),
+  index("idx_crf_status").on(t.status),
+  index("idx_crf_period").on(t.reportingPeriod),
+]);
+export type CRFDocument = typeof crfDocuments.$inferSelect;
+export type InsertCRFDocument = typeof crfDocuments.$inferInsert;
+
+// ─── Mojaloop Payments (Go service) ──────────────────────────────────────────
+export const mojaloopPayments = pgTable("mojaloop_payments", {
+  id: serial("id").primaryKey(),
+  paymentRef: varchar("payment_ref", { length: 64 }).notNull().unique(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  traderId: integer("trader_id").notNull().references(() => users.id),
+  paymentType: varchar("payment_type", { length: 32 }).notNull(),
+  amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  payerFsp: varchar("payer_fsp", { length: 64 }).notNull(),
+  quoteId: varchar("quote_id", { length: 64 }),
+  transferId: varchar("transfer_id", { length: 64 }),
+  status: varchar("status", { length: 32 }).notNull().default("PENDING"),
+  completedAt: timestamp("completed_at"),
+  failedAt: timestamp("failed_at"),
+  failureReason: text("failure_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_mj_payments_trader").on(t.traderId),
+  index("idx_mj_payments_status").on(t.status),
+  index("idx_mj_payments_declaration").on(t.declarationId),
+]);
+export type MojaloopPayment = typeof mojaloopPayments.$inferSelect;
+export type InsertMojaloopPayment = typeof mojaloopPayments.$inferInsert;
+
+// ─── LPCO Records ─────────────────────────────────────────────────────────────
+export const lpcoRecords = pgTable("lpco_records", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  traderId: integer("trader_id").notNull().references(() => users.id),
+  lpcoType: varchar("lpco_type", { length: 64 }).notNull(),
+  mda: varchar("mda", { length: 32 }).notNull(),
+  referenceNumber: varchar("reference_number", { length: 128 }).notNull(),
+  issueDate: timestamp("issue_date"),
+  expiryDate: timestamp("expiry_date"),
+  status: varchar("status", { length: 32 }).notNull().default("PENDING"),
+  validationStatus: varchar("validation_status", { length: 32 }).default("UNVALIDATED"),
+  validationMessage: text("validation_message"),
+  validatedAt: timestamp("validated_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_lpco_declaration_id").on(t.declarationId),
+  index("idx_lpco_trader_id").on(t.traderId),
+  index("idx_lpco_mda").on(t.mda),
+  index("idx_lpco_expiry").on(t.expiryDate),
+]);
+export type LPCORecord = typeof lpcoRecords.$inferSelect;
+export type InsertLPCORecord = typeof lpcoRecords.$inferInsert;

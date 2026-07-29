@@ -147,6 +147,8 @@ const AEORenewalComments = lazy(() => import("@/pages/app/AEORenewalComments"));
 const SanctionsEntitiesPage = lazy(() => import("@/pages/admin/SanctionsEntities"));
 const ScheduleAnalyticsPage = lazy(() => import("@/pages/app/ScheduleAnalytics"));
 const BatchValidationReportPage = lazy(() => import("@/pages/admin/BatchValidationReport"));
+const UCRManagement = lazy(() => import("@/pages/UCRManagement"));
+const ManifestManagement = lazy(() => import("@/pages/ManifestManagement"));
 
 
 const LazyFallback = () => <_PageSkeleton />;
@@ -610,6 +612,8 @@ function Router() {
         <Route path="/admin/sanctions-entities" component={SanctionsEntitiesPage} />
         <Route path="/app/schedule-analytics" component={ScheduleAnalyticsPage} />
         <Route path="/admin/batch-reports" component={BatchValidationReportPage} />
+        <Route path="/app/ucr">{() => <Suspense fallback={<LazyFallback />}><UCRManagement /></Suspense>}</Route>
+        <Route path="/app/manifests">{() => <Suspense fallback={<LazyFallback />}><ManifestManagement /></Suspense>}</Route>
         <Route component={NotFound} />
     </Switch>
   );

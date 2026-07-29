@@ -1,0 +1,177 @@
+# TradeGateway NGSWTP — APISIX Routes for Gap Services
+# Routes for: UCR Service, Manifest Service, Mojaloop Service,
+#             LPCO Rule Engine, Geospatial Service, OpenSearch Indexer,
+#             Lakehouse Pipeline
+
+# ─── Additional Upstreams ─────────────────────────────────────────────────────
+
+upstreams:
+  - id: "ucr-service"
+    name: "UCR Management Service (Go)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: ucr-service
+        port: 8097
+        weight: 100
+    health_check:
+      active:
+        type: http
+        http_path: /health
+        interval: 15
+
+  - id: "manifest-service"
+    name: "Manifest Management Service (Go)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: manifest-service
+        port: 8098
+        weight: 100
+
+  - id: "mojaloop-service"
+    name: "Mojaloop Payment Service (Go)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: mojaloop-service
+        port: 8099
+        weight: 100
+
+  - id: "lpco-rule-engine"
+    name: "LPCO Rule Engine (Rust)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: lpco-rule-engine
+        port: 8100
+        weight: 100
+
+  - id: "geospatial-service"
+    name: "Geospatial Analytics Service (Python)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: geospatial-service
+        port: 8101
+        weight: 100
+
+  - id: "opensearch-indexer"
+    name: "OpenSearch Indexer (Python)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: opensearch-indexer
+        port: 8102
+        weight: 100
+
+  - id: "lakehouse-pipeline"
+    name: "Lakehouse Pipeline (Python/Spark)"
+    type: roundrobin
+    scheme: http
+    nodes:
+      - host: lakehouse-pipeline
+        port: 8103
+        weight: 100
+
+# ─── Routes ───────────────────────────────────────────────────────────────────
+
+routes:
+  # UCR Service
+  - id: "ucr-api"
+    uri: "/api/ucr/*"
+    upstream_id: "ucr-service"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 100
+        time_window: 60
+        rejected_code: 429
+      ext-plugin-pre-req:
+        conf:
+          - name: "openappsec-waf"
+            value: '{"mode":"prevent"}'
+      prometheus: {}
+
+  # UCR Validation (public — no auth required)
+  - id: "ucr-validate-public"
+    uri: "/api/ucr/*/validate"
+    methods: ["GET"]
+    upstream_id: "ucr-service"
+    plugins:
+      limit-count:
+        count: 200
+        time_window: 60
+        rejected_code: 429
+
+  # Manifest Service
+  - id: "manifest-api"
+    uri: "/api/manifests/*"
+    upstream_id: "manifest-service"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 50
+        time_window: 60
+        rejected_code: 429
+      ext-plugin-pre-req:
+        conf:
+          - name: "openappsec-waf"
+            value: '{"mode":"prevent"}'
+
+  # Mojaloop Payment Service
+  - id: "mojaloop-api"
+    uri: "/api/payments/*"
+    upstream_id: "mojaloop-service"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 30
+        time_window: 60
+        rejected_code: 429
+      # Mojaloop callbacks do not require JWT
+      # The callback endpoint is protected by HMAC signature
+
+  # LPCO Rule Engine
+  - id: "lpco-api"
+    uri: "/api/lpco/*"
+    upstream_id: "lpco-rule-engine"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 200
+        time_window: 60
+        rejected_code: 429
+
+  # Geospatial Service
+  - id: "geo-api"
+    uri: "/api/geo/*"
+    upstream_id: "geospatial-service"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 300
+        time_window: 60
+        rejected_code: 429
+
+  # OpenSearch Search API (read-only, higher rate limit)
+  - id: "search-api"
+    uri: "/api/search/*"
+    upstream_id: "opensearch-indexer"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 500
+        time_window: 60
+        rejected_code: 429
+
+  # Lakehouse Pipeline (admin only)
+  - id: "lakehouse-api"
+    uri: "/api/lakehouse/*"
+    upstream_id: "lakehouse-pipeline"
+    plugins:
+      jwt-auth: {}
+      limit-count:
+        count: 20
+        time_window: 60
+        rejected_code: 429

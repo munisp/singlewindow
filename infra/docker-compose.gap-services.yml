@@ -1,0 +1,247 @@
+# TradeGateway NGSWTP — Gap Services Docker Compose
+# New microservices added to close the gap with the live NSW portal
+# Includes: UCR Service, Manifest Service, Mojaloop Service,
+#           LPCO Rule Engine, Geospatial Service, OpenSearch Indexer,
+#           Lakehouse Pipeline, Apache Sedona
+
+version: "3.9"
+
+services:
+  # ─── Go Microservices ─────────────────────────────────────────────────────────
+
+  ucr-service:
+    build:
+      context: ../microservices/ucr-service
+      dockerfile: Dockerfile
+    container_name: ucr-service
+    restart: unless-stopped
+    environment:
+      PORT: "8097"
+      DATABASE_URL: "${DATABASE_URL}"
+      KAFKA_BROKERS: "kafka:9092"
+      DAPR_HTTP_PORT: "3500"
+      COUNTRY_CODE: "NG"
+    ports:
+      - "8097:8097"
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - tradegateway
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ucr-service.rule=PathPrefix(`/api/ucr`)"
+
+  manifest-service:
+    build:
+      context: ../microservices/manifest-service
+      dockerfile: Dockerfile
+    container_name: manifest-service
+    restart: unless-stopped
+    environment:
+      PORT: "8098"
+      DATABASE_URL: "${DATABASE_URL}"
+      KAFKA_BROKERS: "kafka:9092"
+      DAPR_HTTP_PORT: "3500"
+    ports:
+      - "8098:8098"
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - tradegateway
+
+  mojaloop-service:
+    build:
+      context: ../microservices/mojaloop-service
+      dockerfile: Dockerfile
+    container_name: mojaloop-service
+    restart: unless-stopped
+    environment:
+      PORT: "8099"
+      DATABASE_URL: "${DATABASE_URL}"
+      MOJALOOP_URL: "${MOJALOOP_URL:-http://mojaloop-ml-api-adapter:3000}"
+      MOJALOOP_FSP_ID: "tradegateway-ng"
+      TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:50055"
+      KAFKA_BROKERS: "kafka:9092"
+      DAPR_HTTP_PORT: "3500"
+    ports:
+      - "8099:8099"
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - tradegateway
+
+  # ─── Rust Microservices ───────────────────────────────────────────────────────
+
+  lpco-rule-engine:
+    build:
+      context: ../services/rust/lpco-rule-engine
+      dockerfile: Dockerfile
+    container_name: lpco-rule-engine
+    restart: unless-stopped
+    environment:
+      PORT: "8100"
+      DATABASE_URL: "${DATABASE_URL}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+    ports:
+      - "8100:8100"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - tradegateway
+
+  # ─── Python Microservices ─────────────────────────────────────────────────────
+
+  geospatial-service:
+    build:
+      context: ../services/python/geospatial-service
+      dockerfile: Dockerfile
+    container_name: geospatial-service
+    restart: unless-stopped
+    environment:
+      PORT: "8101"
+      DATABASE_URL: "${DATABASE_URL}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+      GEOLIBRE_CACHE_DIR: "/tmp/geolibre_cache"
+    ports:
+      - "8101:8101"
+    volumes:
+      - geolibre_cache:/tmp/geolibre_cache
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - tradegateway
+
+  opensearch-indexer:
+    build:
+      context: ../services/python/opensearch-indexer
+      dockerfile: Dockerfile
+    container_name: opensearch-indexer
+    restart: unless-stopped
+    environment:
+      PORT: "8102"
+      DATABASE_URL: "${DATABASE_URL}"
+      OPENSEARCH_URL: "http://opensearch:9200"
+      OPENSEARCH_USER: "admin"
+      OPENSEARCH_PASSWORD: "${OPENSEARCH_PASSWORD:-TradeGateway_OS_2026!}"
+    ports:
+      - "8102:8102"
+    depends_on:
+      - postgres
+      - opensearch
+    networks:
+      - tradegateway
+
+  lakehouse-pipeline:
+    build:
+      context: ../services/python/lakehouse-pipeline
+      dockerfile: Dockerfile
+    container_name: lakehouse-pipeline
+    restart: unless-stopped
+    environment:
+      PORT: "8103"
+      DATABASE_URL: "${DATABASE_URL}"
+      MINIO_ENDPOINT: "http://minio:9000"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:-tradegateway}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:-tradegateway_minio_2026}"
+      LAKEHOUSE_BUCKET: "tradegateway-lakehouse"
+      SPARK_MASTER: "local[2]"
+    ports:
+      - "8103:8103"
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - tradegateway
+
+  # ─── Apache Sedona (Spark + Sedona) ──────────────────────────────────────────
+
+  sedona-spark:
+    image: apache/spark:3.5.1-python3
+    container_name: sedona-spark
+    restart: unless-stopped
+    environment:
+      SPARK_MODE: master
+      SPARK_MASTER_PORT: "7077"
+      SPARK_MASTER_WEBUI_PORT: "8080"
+    ports:
+      - "7077:7077"
+      - "4040:4040"
+    networks:
+      - tradegateway
+    volumes:
+      - spark_data:/opt/spark/data
+
+  # ─── OpenSearch ───────────────────────────────────────────────────────────────
+
+  opensearch:
+    image: opensearchproject/opensearch:2.13.0
+    container_name: opensearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-TradeGateway_OS_2026!}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    networks:
+      - tradegateway
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.13.0
+    container_name: opensearch-dashboards
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+    ports:
+      - "5601:5601"
+    depends_on:
+      - opensearch
+    networks:
+      - tradegateway
+
+  # ─── Dapr Sidecar for UCR Service ────────────────────────────────────────────
+
+  ucr-service-dapr:
+    image: "daprio/daprd:1.13.0"
+    container_name: ucr-service-dapr
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "ucr-service"
+      - "-app-port"
+      - "8097"
+      - "-dapr-http-port"
+      - "3510"
+      - "-components-path"
+      - "/components"
+      - "-config"
+      - "/config/config.yaml"
+    volumes:
+      - ../infra/dapr:/components
+      - ../infra/dapr/config:/config
+    depends_on:
+      - ucr-service
+    network_mode: "service:ucr-service"
+
+volumes:
+  geolibre_cache:
+  spark_data:
+  opensearch_data:
+
+networks:
+  tradegateway:
+    external: true
+    name: tradegateway_default

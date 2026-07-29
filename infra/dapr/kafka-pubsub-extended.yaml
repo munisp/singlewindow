@@ -1,0 +1,41 @@
+# Dapr Kafka Pub/Sub Component — Extended Topics for Gap Services
+# Covers all new topics added for UCR, Manifest, Mojaloop, Geospatial services
+
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kafka-pubsub
+  namespace: tradegateway
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    - name: brokers
+      value: "kafka:9092"
+    - name: consumerGroup
+      value: "tradegateway-dapr-consumers"
+    - name: authRequired
+      value: "false"
+    - name: initialOffset
+      value: "newest"
+    - name: maxMessageBytes
+      value: "1048576"
+
+# Topics managed by this component:
+# ─── Existing Topics ──────────────────────────────────────────────────────────
+#   declaration.events       — Declaration lifecycle events
+#   payment.events           — Payment status events
+#   kyc.events               — KYC verification events
+#   risk.events              — Risk scoring events
+#   audit.events             — Audit trail events
+#   notification.events      — Push notification events
+#   manifest.events          — Manifest submission events (NEW)
+#   ucr.events               — UCR lifecycle events (NEW)
+#   waf-events               — WAF/security events
+#   cargo.positions          — AIS vessel position updates (NEW)
+#   geofence.events          — Geofence entry/exit events (NEW)
+#   lpco.events              — LPCO validation events (NEW)
+#   crf.events               — CRF submission events (NEW)
+#   mojaloop.events          — Mojaloop payment events (NEW)
+#   lakehouse.ingest         — Lakehouse ingestion triggers (NEW)
+#   opensearch.index         — OpenSearch indexing events (NEW)

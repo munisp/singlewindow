@@ -1,0 +1,23 @@
+[package]
+name = "lpco-rule-engine"
+version = "1.0.0"
+edition = "2021"
+description = "TradeGateway NGSWTP — LPCO Validation Rule Engine"
+
+[dependencies]
+actix-web = "4.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.36", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+prometheus = { version = "0.13", features = ["process"] }
+env_logger = "0.11"
+log = "0.4"
+lazy_static = "1.4"
+uuid = { version = "1.8", features = ["v4"] }
+redis = { version = "0.25", features = ["tokio-comp"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

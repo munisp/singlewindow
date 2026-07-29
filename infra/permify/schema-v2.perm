@@ -1,0 +1,112 @@
+// TradeGateway NGSWTP — Permify Authorization Schema v2
+// Adds fine-grained permissions for UCR, Manifests, LPCO, CRF, and Valuation
+// Extends the base schema with new entity types and relationships.
+
+// ─── UCR Permissions ──────────────────────────────────────────────────────────
+
+entity ucr {
+    // Relations
+    relation owner @trader
+    relation customs_officer @customs_officer
+    relation admin @admin
+
+    // Actions
+    action generate = owner
+    action view = owner or customs_officer or admin
+    action link_declaration = owner
+    action activate = owner or customs_officer
+    action close = customs_officer or admin
+    action validate = owner or customs_officer or admin or oga_officer
+}
+
+// ─── Manifest Permissions ─────────────────────────────────────────────────────
+
+entity manifest {
+    // Relations
+    relation submitter @shipping_line or @airline or @freight_forwarder
+    relation customs_officer @customs_officer
+    relation npa_officer @oga_officer
+    relation admin @admin
+
+    // Actions
+    action submit = submitter
+    action view = submitter or customs_officer or npa_officer or admin
+    action add_bl = submitter
+    action amend = submitter
+    action accept = customs_officer or npa_officer
+    action reject = customs_officer or npa_officer
+}
+
+// ─── LPCO Permissions ─────────────────────────────────────────────────────────
+
+entity lpco {
+    // Relations
+    relation owner @trader
+    relation issuing_mda @oga_officer
+    relation customs_officer @customs_officer
+    relation admin @admin
+
+    // Actions
+    action submit = owner
+    action view = owner or issuing_mda or customs_officer or admin
+    action approve = issuing_mda
+    action reject = issuing_mda
+    action activate = owner
+    action validate = owner or customs_officer or issuing_mda
+}
+
+// ─── CRF Permissions ─────────────────────────────────────────────────────────
+
+entity crf {
+    // Relations
+    relation owner @trader
+    relation nbs_officer @oga_officer
+    relation admin @admin
+
+    // Actions
+    action create = owner
+    action view = owner or nbs_officer or admin
+    action submit = owner
+    action accept = nbs_officer
+    action reject = nbs_officer
+}
+
+// ─── Valuation Database Permissions ──────────────────────────────────────────
+
+entity valuation_reference {
+    // Relations
+    relation admin @admin
+    relation customs_officer @customs_officer
+
+    // Actions
+    action read = admin or customs_officer
+    action write = admin
+    action delete = admin
+}
+
+// ─── Geospatial Data Permissions ─────────────────────────────────────────────
+
+entity vessel_position {
+    // Relations
+    relation owner @shipping_line or @airline
+    relation port_authority @oga_officer
+    relation customs_officer @customs_officer
+    relation admin @admin
+
+    // Actions
+    action track = owner or port_authority or customs_officer or admin
+    action view = owner or port_authority or customs_officer or admin
+    action view_anomalies = customs_officer or admin
+}
+
+entity geofence {
+    // Relations
+    relation admin @admin
+    relation port_authority @oga_officer
+
+    // Actions
+    action create = admin or port_authority
+    action view = admin or port_authority
+    action delete = admin
+    action check = admin or port_authority or customs_officer
+}
