@@ -22,39 +22,6 @@ export const kafkaEventsRouter = router({
       }).optional()
     )
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const statuses = ["pending", "published", "failed"] as const;
-        const topics = [
-          "declaration.submitted",
-          "payment.completed",
-          "kyc.verified",
-          "oga.permit.approved",
-          "risk.scored",
-          "cargo.released",
-          "bond.lodged",
-          "audit.flagged",
-        ];
-        const rows = Array.from({ length: 20 }, (_, i) => ({
-          id: i + 1,
-          aggregateId: `AGG-${1000 + i}`,
-          topic: topics[i % topics.length],
-          payload: JSON.stringify({ declarationId: `DEC-${1000 + i}` }),
-          status: statuses[i % 3],
-          attempts: i % 3 === 2 ? 3 : 1,
-          errorMessage: i % 3 === 2 ? "Connection timeout" : null,
-          createdAt: new Date(Date.now() - i * 60_000),
-          publishedAt: i % 3 === 1 ? new Date(Date.now() - i * 55_000) : null,
-        }));
-        const filtered = rows.filter((r) => {
-          if (input?.status && r.status !== input.status) return false;
-          if (input?.topic && r.topic !== input.topic) return false;
-          return true;
-        });
-        return {
-          events: filtered.slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 100)),
-          total: filtered.length,
-        };
-      }
       const { getDb } = await import("../db");
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
@@ -85,9 +52,6 @@ export const kafkaEventsRouter = router({
       }).optional()
     )
     .mutation(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return { retried: input?.ids?.length ?? 5, status: "pending" };
-      }
       const { getDb } = await import("../db");
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
@@ -107,15 +71,6 @@ export const kafkaEventsRouter = router({
    * getKafkaTopicStats — summary of event counts per topic and status.
    */
   getKafkaTopicStats: adminProcedure.query(async (): Promise<Array<{ topic: string; pending: number; published: number; failed: number }>> => {
-    if (process.env.NODE_ENV !== "production") {
-      return [
-        { topic: "declaration.submitted", pending: 2, published: 145, failed: 1 },
-        { topic: "payment.completed", pending: 0, published: 87, failed: 0 },
-        { topic: "kyc.verified", pending: 1, published: 63, failed: 2 },
-        { topic: "oga.permit.approved", pending: 0, published: 42, failed: 0 },
-        { topic: "risk.scored", pending: 3, published: 201, failed: 0 },
-      ];
-    }
     const { getDb } = await import("../db");
     const db = await getDb();
     if (!db) return [];

@@ -1,12 +1,20 @@
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-psycopg2-binary==2.9.10
-kafka-python==2.0.2
-redis==5.2.0
-prometheus-client==0.21.0
-tenacity==9.0.0
-pydantic==2.10.0
-python-multipart==0.0.17
-httpx==0.28.0
-numpy==2.1.0
-scikit-learn==1.5.2
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pillow==11.1.0
+numpy==2.2.2
+pydantic==2.10.6
+python-multipart==0.0.20
+
+# Computer vision
+opencv-python-headless==4.10.0.84
+ultralytics==8.3.x  # YOLOv8
+# sam2 @ git+https://github.com/facebookresearch/sam2.git  # SAM2 (install from source)
+
+# OCR
+pytesseract==0.3.13
+pyzbar==0.1.9  # barcode/QR decoding
+
+# Utilities
+scipy==1.15.1
+scikit-learn==1.6.1

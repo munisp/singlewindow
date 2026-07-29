@@ -55,13 +55,6 @@ export const geoipRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const jobId = `seed-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
-      if (process.env.NODE_ENV !== "production") {
-        return {
-          jobId,
-          status: "pending",
-          message: `Seed job ${jobId} queued for ${input.filename} (dev stub)`,
-        };
-      }
       const { createGeoipSeedJob } = await import("../db");
       await createGeoipSeedJob({
         jobId,
@@ -79,9 +72,6 @@ export const geoipRouter = router({
   getSeedJobs: adminProcedure
     .input(z.object({ limit: z.number().int().min(1).max(100).default(20), offset: z.number().int().min(0).default(0) }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return { jobs: DEV_SEED_JOBS, total: DEV_SEED_JOBS.length };
-      }
       const { getGeoipSeedJobs } = await import("../db");
       const jobs = await getGeoipSeedJobs(input.limit, input.offset);
       return { jobs, total: jobs.length };
@@ -93,11 +83,6 @@ export const geoipRouter = router({
   getSeedJobById: adminProcedure
     .input(z.object({ jobId: z.string().min(1) }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const job = DEV_SEED_JOBS.find((j) => j.jobId === input.jobId);
-        if (!job) throw new TRPCError({ code: "NOT_FOUND", message: `Seed job ${input.jobId} not found` });
-        return job;
-      }
       const { getGeoipSeedJobById } = await import("../db");
       const job = await getGeoipSeedJobById(input.jobId);
       if (!job) throw new TRPCError({ code: "NOT_FOUND", message: `Seed job ${input.jobId} not found` });
@@ -109,15 +94,6 @@ export const geoipRouter = router({
    */
   getGeoipStats: adminProcedure
     .query(async () => {
-      if (process.env.NODE_ENV !== "production") {
-        return {
-          totalIps: 4_310_000,
-          countriesCount: 249,
-          asnsCount: 72_000,
-          seedJobs: { total: 2, completed: 2, failed: 0, pending: 0, totalRowsInserted: 4_310_000 },
-          lastSeedAt: new Date(Date.now() - 3_540_000),
-        };
-      }
       const { getGeoipSeedStats } = await import("../db");
       const seedStats = await getGeoipSeedStats();
       return {
@@ -140,17 +116,6 @@ export const geoipRouter = router({
       const geo = await getGeoIp(input.ip);
       if (geo) return geo;
       // Fallback: return a stub result when no GeoLite2 data has been seeded yet
-      if (process.env.NODE_ENV !== "production") {
-        return {
-          ip: input.ip,
-          country: "Singapore",
-          countryCode: "SG",
-          city: "Singapore",
-          asn: "AS4657",
-          asnOrg: "StarHub Ltd",
-          countryFlag: "🇸🇬",
-        };
-      }
       throw new TRPCError({ code: "NOT_FOUND", message: `No geolocation data for ${input.ip}` });
     }),
 });

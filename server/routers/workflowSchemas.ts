@@ -132,15 +132,6 @@ export const workflowSchemasRouter = router({
    */
   listWorkflowTypes: protectedProcedure
     .query(async () => {
-      if (process.env.NODE_ENV !== "production") {
-        return Object.entries(DEFAULT_SCHEMAS).map(([workflowType, { description, schema }]) => ({
-          workflowType,
-          description,
-          jsonSchema: schema,
-          version: 1,
-          isActive: true,
-        }));
-      }
       const { listWorkflowInputSchemas } = await import("../db");
       const rows = await listWorkflowInputSchemas();
       if (rows.length === 0) {
@@ -162,11 +153,6 @@ export const workflowSchemasRouter = router({
   getSchemaForType: protectedProcedure
     .input(z.object({ workflowType: z.string().min(1) }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const def = DEFAULT_SCHEMAS[input.workflowType];
-        if (!def) throw new TRPCError({ code: "NOT_FOUND", message: `No schema for workflow type: ${input.workflowType}` });
-        return { workflowType: input.workflowType, description: def.description, jsonSchema: def.schema, version: 1, isActive: true };
-      }
       const { getWorkflowInputSchema } = await import("../db");
       const schema = await getWorkflowInputSchema(input.workflowType);
       if (!schema) {
@@ -192,9 +178,6 @@ export const workflowSchemasRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return { workflowType: input.workflowType, version: input.version, message: "Schema updated (dev stub)" };
-      }
       const { upsertWorkflowInputSchema } = await import("../db");
       const result = await upsertWorkflowInputSchema({
         workflowType: input.workflowType,
@@ -211,9 +194,6 @@ export const workflowSchemasRouter = router({
    */
   seedDefaultSchemas: adminProcedure
     .mutation(async () => {
-      if (process.env.NODE_ENV !== "production") {
-        return { seeded: Object.keys(DEFAULT_SCHEMAS).length, message: "Default schemas seeded (dev stub)" };
-      }
       const { upsertWorkflowInputSchema } = await import("../db");
       let seeded = 0;
       for (const [workflowType, { description, schema }] of Object.entries(DEFAULT_SCHEMAS)) {

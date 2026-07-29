@@ -1,10 +1,18 @@
 /**
  * OpenAppSec WAF Events tRPC Router — Sprint v81
  * Admin/security procedures for WAF event monitoring and triage.
+ *
+ * All procedures read directly from the openAppSecEvents table in PostgreSQL.
+ * WAF events are ingested via the Kafka consumer (topic: waf-events) which
+ * receives events from the OpenAppSec agent running alongside APISIX.
+ * No mock data — returns empty results when no events exist.
  */
 import { z } from "zod";
 import { router, keycloakAdminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { getDb, getOpenAppSecEvents, acknowledgeOpenAppSecEvent, getOpenAppSecEventStats } from "../db";
+import { openAppSecEvents } from "../../drizzle/schema";
+import { gte, sql } from "drizzle-orm";
 
 const SEVERITIES = ["critical", "high", "medium", "low"] as const;
 const ATTACK_TYPES = [
@@ -20,58 +28,10 @@ const ATTACK_TYPES = [
   "MALFORMED_REQUEST",
 ] as const;
 
-const SOURCE_IPS = [
-  "192.168.1.45", "10.0.0.123", "172.16.0.88",
-  "203.0.113.42", "198.51.100.7", "185.220.101.3",
-];
-
-// Dev-mode GeoIP seed data keyed by IP
-const DEV_GEOIP: Record<string, { country: string; countryCode: string; city: string; asn: string; asnOrg: string }> = {
-  "192.168.1.45":   { country: "Ghana",          countryCode: "GH", city: "Accra",       asn: "AS37055", asnOrg: "Vodafone Ghana" },
-  "10.0.0.123":     { country: "Singapore",       countryCode: "SG", city: "Singapore",   asn: "AS9506",  asnOrg: "Singtel" },
-  "172.16.0.88":    { country: "Rwanda",          countryCode: "RW", city: "Kigali",      asn: "AS37243", asnOrg: "MTN Rwanda" },
-  "203.0.113.42":   { country: "Russia",          countryCode: "RU", city: "Moscow",      asn: "AS49505", asnOrg: "Selectel" },
-  "198.51.100.7":   { country: "China",           countryCode: "CN", city: "Beijing",     asn: "AS4134",  asnOrg: "CHINANET" },
-  "185.220.101.3":  { country: "Netherlands",     countryCode: "NL", city: "Amsterdam",   asn: "AS60729", asnOrg: "Tor Exit Node" },
-};
-
-const COUNTRY_FLAGS: Record<string, string> = {
-  GH: "🇬🇭", SG: "🇸🇬", RW: "🇷🇼", RU: "🇷🇺", CN: "🇨🇳", NL: "🇳🇱", US: "🇺🇸", GB: "🇬🇧",
-};
-
-function makeDevEvent(i: number) {
-  const severity = SEVERITIES[i % SEVERITIES.length];
-  const attackType = ATTACK_TYPES[i % ATTACK_TYPES.length];
-  const sourceIp = SOURCE_IPS[i % SOURCE_IPS.length];
-  const geo = DEV_GEOIP[sourceIp];
-  return {
-    id: i + 1,
-    eventId: `waf-evt-${(10000 + i).toString(16)}`,
-    attackType,
-    severity,
-    sourceIp,
-    targetPath: `/api/trpc/${["declarations", "payments", "kyc", "oga", "risk"][i % 5]}.${["list", "get", "create", "update"][i % 4]}`,
-    requestMethod: ["GET", "POST", "PUT", "DELETE"][i % 4],
-    userAgent: i % 2 === 0 ? "Mozilla/5.0 (compatible; Googlebot/2.1)" : "sqlmap/1.7.8",
-    payload: attackType === "SQL_INJECTION" ? "' OR 1=1 --" : attackType === "XSS" ? "<script>alert(1)</script>" : null,
-    ruleId: `OWASP-CRS-${900 + i}`,
-    action: severity === "critical" ? "BLOCK" : "LOG",
-    isAcknowledged: i % 5 === 0,
-    acknowledgedBy: i % 5 === 0 ? 1 : null,
-    createdAt: new Date(Date.now() - i * 900_000),
-    // Geolocation fields
-    country: geo?.country ?? null,
-    countryCode: geo?.countryCode ?? null,
-    countryFlag: geo?.countryCode ? (COUNTRY_FLAGS[geo.countryCode] ?? "🌐") : "🌐",
-    city: geo?.city ?? null,
-    asn: geo?.asn ?? null,
-    asnOrg: geo?.asnOrg ?? null,
-  };
-}
-
 export const openAppSecRouter = router({
   /**
-   * getWafEvents — paginated list of WAF security events.
+   * getWafEvents — paginated list of WAF security events from the database.
+   * Events are ingested from the OpenAppSec agent via Kafka → PostgreSQL.
    */
   getWafEvents: keycloakAdminProcedure
     .input(
@@ -85,21 +45,6 @@ export const openAppSecRouter = router({
       }).optional()
     )
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const rows = Array.from({ length: 80 }, (_, i) => makeDevEvent(i));
-        const filtered = rows.filter((r) => {
-          if (input?.severity && r.severity !== input.severity) return false;
-          if (input?.attackType && r.attackType !== input.attackType) return false;
-          if (input?.isAcknowledged !== undefined && r.isAcknowledged !== input.isAcknowledged) return false;
-          if (input?.sourceIp && r.sourceIp !== input.sourceIp) return false;
-          return true;
-        });
-        return {
-          events: filtered.slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50)),
-          total: filtered.length,
-        };
-      }
-      const { getOpenAppSecEvents } = await import("../db");
       const events = await getOpenAppSecEvents({
         limit: input?.limit,
         offset: input?.offset,
@@ -107,7 +52,22 @@ export const openAppSecRouter = router({
         attackType: input?.attackType,
         isAcknowledged: input?.isAcknowledged,
       });
-      return { events, total: events.length };
+
+      // Get total count for pagination
+      const db = await getDb();
+      let total = events.length;
+      if (db) {
+        try {
+          const [countRow] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(openAppSecEvents);
+          total = countRow?.count ?? events.length;
+        } catch {
+          // Non-fatal — use events.length as fallback
+        }
+      }
+
+      return { events, total };
     }),
 
   /**
@@ -116,10 +76,6 @@ export const openAppSecRouter = router({
   acknowledgeEvent: keycloakAdminProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .mutation(async ({ input, ctx }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return { success: true, id: input.id, acknowledgedBy: ctx.user.id };
-      }
-      const { acknowledgeOpenAppSecEvent } = await import("../db");
       const row = await acknowledgeOpenAppSecEvent(input.id, ctx.user.id);
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: `WAF event ${input.id} not found` });
       return { success: true, id: row.id, acknowledgedBy: row.acknowledgedBy };
@@ -131,12 +87,11 @@ export const openAppSecRouter = router({
   bulkAcknowledge: keycloakAdminProcedure
     .input(z.object({ ids: z.array(z.number().int().positive()).min(1).max(200) }))
     .mutation(async ({ input, ctx }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return { success: true, acknowledged: input.ids.length };
-      }
-      const { acknowledgeOpenAppSecEvent } = await import("../db");
-      await Promise.all(input.ids.map((id) => acknowledgeOpenAppSecEvent(id, ctx.user.id)));
-      return { success: true, acknowledged: input.ids.length };
+      const results = await Promise.allSettled(
+        input.ids.map((id) => acknowledgeOpenAppSecEvent(id, ctx.user.id))
+      );
+      const acknowledged = results.filter(r => r.status === "fulfilled" && r.value !== null).length;
+      return { success: true, acknowledged };
     }),
 
   /**
@@ -144,10 +99,6 @@ export const openAppSecRouter = router({
    */
   getWafStats: keycloakAdminProcedure
     .query(async () => {
-      if (process.env.NODE_ENV !== "production") {
-        return { critical: 3, high: 12, medium: 28, low: 47, unacknowledged: 64 };
-      }
-      const { getOpenAppSecEventStats } = await import("../db");
       const stats = await getOpenAppSecEventStats();
       return stats ?? { critical: 0, high: 0, medium: 0, low: 0, unacknowledged: 0 };
     }),
@@ -157,55 +108,58 @@ export const openAppSecRouter = router({
    */
   getAttackTypes: keycloakAdminProcedure
     .query(async () => {
+      // Return the canonical list; in production these are also distinct values from the DB
+      const db = await getDb();
+      if (db) {
+        try {
+          const rows = await db
+            .selectDistinct({ attackType: openAppSecEvents.attackType })
+            .from(openAppSecEvents)
+            .orderBy(openAppSecEvents.attackType);
+          const dbTypes = rows.map(r => r.attackType).filter(Boolean) as string[];
+          if (dbTypes.length > 0) return dbTypes;
+        } catch {
+          // Fall through to static list
+        }
+      }
       return [...ATTACK_TYPES];
     }),
 
   /**
    * getWafTrend — daily event counts by severity for the last N days.
+   * Aggregates from the openAppSecEvents table grouped by date and severity.
    */
   getWafTrend: keycloakAdminProcedure
     .input(z.object({ days: z.number().int().min(7).max(90).default(30) }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 30;
-      if (process.env.NODE_ENV !== "production") {
-        const trend = [];
-        for (let i = days - 1; i >= 0; i--) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          trend.push({
-            date: d.toISOString().split("T")[0],
-            critical: Math.floor(Math.random() * 5),
-            high: Math.floor(Math.random() * 15) + 2,
-            medium: Math.floor(Math.random() * 30) + 5,
-            low: Math.floor(Math.random() * 50) + 10,
-          });
-        }
-        return trend;
-      }
-      const { getDb } = await import("../db");
       const db = await getDb();
       if (!db) return [];
-      const { openAppSecEvents } = await import("../../drizzle/schema");
-      const { gte, sql } = await import("drizzle-orm");
+
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - days);
+
       const rows = await db
         .select({
           date: sql<string>`DATE(${openAppSecEvents.createdAt})`,
           severity: openAppSecEvents.severity,
-          count: sql<number>`COUNT(*)`,
+          count: sql<number>`COUNT(*)::int`,
         })
         .from(openAppSecEvents)
         .where(gte(openAppSecEvents.createdAt, cutoff))
         .groupBy(sql`DATE(${openAppSecEvents.createdAt})`, openAppSecEvents.severity)
         .orderBy(sql`DATE(${openAppSecEvents.createdAt})`);
+
       const map = new Map<string, { date: string; critical: number; high: number; medium: number; low: number }>();
       for (const row of rows) {
         if (!map.has(row.date)) map.set(row.date, { date: row.date, critical: 0, high: 0, medium: 0, low: 0 });
         const entry = map.get(row.date)!;
         const sev = (row.severity ?? "").toLowerCase();
-        if (["critical", "high", "medium", "low"].includes(sev)) (entry as unknown as Record<string, number>)[sev] = Number(row.count);
+        if (["critical", "high", "medium", "low"].includes(sev)) {
+          (entry as unknown as Record<string, number>)[sev] = Number(row.count);
+        }
       }
+
       return Array.from(map.values());
     }),
 });

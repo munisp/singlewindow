@@ -28,6 +28,12 @@ plugin_attr:
     export_addr:
       ip: 0.0.0.0
       port: 9091
+  # OpenAppSec WAF — ext-plugin integration
+  # The openappsec-agent sidecar listens on port 8119 and receives pre-request
+  # hooks from APISIX via the ext-plugin-pre-req mechanism.
+  ext-plugin-pre-req:
+    addr: openappsec-agent:8119
+    timeout: 2000  # 2s timeout — fail open to avoid blocking legitimate traffic
 
 plugins:
   - real-ip

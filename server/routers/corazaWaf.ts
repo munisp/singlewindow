@@ -389,21 +389,6 @@ export const corazaWafRouter = router({
     .input(z.object({ limit: z.number().int().min(1).max(50).default(10) }).optional())
     .query(async ({ input }) => {
       const limit = input?.limit ?? 10;
-      if (process.env.NODE_ENV !== "production") {
-        // Return seeded dev data correlated with OWASP_CRS_SEED rule IDs
-        return [
-          { ruleId: "942100", description: "SQL Injection via libinjection",     category: "OWASP-CRS", severity: "critical", eventCount: 47, enabled: true },
-          { ruleId: "941100", description: "XSS via libinjection",               category: "OWASP-CRS", severity: "high",     eventCount: 31, enabled: true },
-          { ruleId: "930100", description: "Path Traversal (/../)",              category: "OWASP-CRS", severity: "critical", eventCount: 22, enabled: true },
-          { ruleId: "932100", description: "Unix Command Injection",             category: "OWASP-CRS", severity: "critical", eventCount: 18, enabled: true },
-          { ruleId: "942110", description: "SQL Injection Testing Detected",     category: "OWASP-CRS", severity: "critical", eventCount: 15, enabled: true },
-          { ruleId: "941110", description: "XSS — Script Tag Vector",           category: "OWASP-CRS", severity: "high",     eventCount: 12, enabled: true },
-          { ruleId: "920350", description: "Host header is numeric IP",          category: "OWASP-CRS", severity: "medium",   eventCount: 9,  enabled: true },
-          { ruleId: "932150", description: "Direct Unix Command Execution",      category: "OWASP-CRS", severity: "critical", eventCount: 7,  enabled: false },
-          { ruleId: "930120", description: "OS File Access Attempt",             category: "OWASP-CRS", severity: "high",     eventCount: 5,  enabled: true },
-          { ruleId: "NGSWTP-001", description: "HS Code Injection Attempt",      category: "NGSWTP-Custom", severity: "high", eventCount: 4, enabled: true },
-        ].slice(0, limit);
-      }
       const db = await getDb();
       if (!db) return [];
       const { openAppSecEvents } = await import("../../drizzle/schema");
@@ -447,26 +432,6 @@ export const corazaWafRouter = router({
       limit: z.number().int().min(1).max(200).default(20),
     }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        // Return seeded dev events for the requested rule
-        const ATTACK_MAP: Record<string, string> = {
-          "942100": "SQL_INJECTION", "941100": "XSS", "930100": "PATH_TRAVERSAL",
-          "932100": "COMMAND_INJECTION", "NGSWTP-001": "SQL_INJECTION",
-        };
-        const attackType = ATTACK_MAP[input.ruleId] ?? "MALFORMED_REQUEST";
-        return Array.from({ length: Math.min(input.limit, 8) }, (_, i) => ({
-          id: i + 1,
-          eventId: `waf-rule-${input.ruleId}-${i}`,
-          attackType,
-          severity: ["critical", "high", "medium"][i % 3],
-          sourceIp: ["203.0.113.42", "185.220.101.3", "198.51.100.7"][i % 3],
-          targetPath: `/api/trpc/declarations.${["create", "list", "update"][i % 3]}`,
-          action: i % 3 === 0 ? "BLOCK" : "LOG",
-          isAcknowledged: i % 4 === 0,
-          createdAt: new Date(Date.now() - i * 1_800_000),
-          ruleId: `OWASP-CRS-${input.ruleId}`,
-        }));
-      }
       const db = await getDb();
       if (!db) return [];
       const { openAppSecEvents } = await import("../../drizzle/schema");
@@ -495,22 +460,6 @@ export const corazaWafRouter = router({
     }))
     .query(async ({ input }) => {
       const days = input.days;
-      if (process.env.NODE_ENV !== "production") {
-        // Dev: generate synthetic CSV rows
-        const headers = ["Rule ID", "Attack Type", "Severity", "Source IP", "Target Path", "Action", "Acknowledged", "Timestamp"];
-        const rows = Array.from({ length: 20 }, (_, i) => [
-          `OWASP-CRS-94${2100 + i}`,
-          ["SQL_INJECTION", "XSS", "PATH_TRAVERSAL", "COMMAND_INJECTION"][i % 4],
-          ["critical", "high", "medium", "low"][i % 4],
-          ["203.0.113.42", "185.220.101.3", "198.51.100.7"][i % 3],
-          `/api/trpc/declarations.${["create", "list", "update"][i % 3]}`,
-          i % 3 === 0 ? "BLOCK" : "LOG",
-          i % 4 === 0 ? "true" : "false",
-          new Date(Date.now() - i * 3_600_000).toISOString(),
-        ]);
-        const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-        return { csv, rowCount: rows.length, generatedAt: new Date().toISOString() };
-      }
       const db = await getDb();
       if (!db) return { csv: "", rowCount: 0, generatedAt: new Date().toISOString() };
       const { openAppSecEvents } = await import("../../drizzle/schema");
@@ -549,16 +498,6 @@ export const corazaWafRouter = router({
     .input(z.object({ days: z.number().int().min(1).max(90).default(7) }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 7;
-      if (process.env.NODE_ENV !== "production") {
-        const RULE_IDS = ["942100", "941100", "930100", "932100", "942110", "941110", "920350", "932150"];
-        return RULE_IDS.map((ruleId) => ({
-          ruleId,
-          totalEvents: Math.floor(Math.random() * 50) + 1,
-          blockedEvents: Math.floor(Math.random() * 30),
-          loggedEvents: Math.floor(Math.random() * 20),
-          lastEventAt: new Date(Date.now() - Math.random() * 86_400_000 * days).toISOString(),
-        }));
-      }
       const db = await getDb();
       if (!db) return [];
       const { openAppSecEvents } = await import("../../drizzle/schema");

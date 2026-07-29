@@ -68,195 +68,6 @@ async function runVisionAnalysis(
 
 // ─── Mock vision analysis for development ─────────────────────────────────
 
-function mockVisionAnalysis(analysisType: string): Record<string, unknown> {
-  const processingTimeMs = 2200; // deterministic processing time estimate
-
-  const baseResult = {
-    analysis_type: analysisType,
-    processing_time_ms: processingTimeMs,
-    model_versions: {
-      yolov8: "yolov8x-customs-v2.1",
-      sam2: "sam2-hiera-large",
-      vlm: "qwen2-vl-7b",
-    },
-    mock: true,
-  };
-
-  switch (analysisType) {
-    case "container_inspection":
-      return {
-        ...baseResult,
-        detections: [
-          {
-            class: "shipping_container",
-            confidence: 0.97,
-            bbox: [45, 120, 890, 650],
-            container_number: "MSCU7234891",
-            iso_type: "22G1",
-          },
-          {
-            class: "container_seal",
-            confidence: 0.94,
-            bbox: [820, 310, 870, 360],
-            seal_number: "SL-9847231",
-            seal_intact: true,
-          },
-        ],
-        container_analysis: {
-          container_number_detected: "MSCU7234891",
-          iso_type: "22G1",
-          condition: "GOOD",
-          damage_detected: false,
-          damage_areas: [],
-          seal_count: 1,
-          seals_intact: true,
-          customs_marks_visible: true,
-        },
-        risk_score: 12,
-        risk_level: "GREEN",
-        recommended_action: "RELEASE",
-        vlm_description:
-          "A standard 20-foot dry cargo container in good condition. Container number MSCU7234891 is clearly visible. One customs seal (SL-9847231) is present and appears intact. No visible damage, tampering, or unauthorized modifications detected. Container markings are consistent with declared specifications.",
-      };
-
-    case "seal_verification":
-      return {
-        ...baseResult,
-        detections: [
-          {
-            class: "bolt_seal",
-            confidence: 0.96,
-            bbox: [200, 150, 450, 380],
-            seal_number: "SL-9847231",
-            seal_type: "BOLT",
-            intact: true,
-            tamper_evident: false,
-          },
-        ],
-        container_analysis: {
-          seal_number: "SL-9847231",
-          seal_type: "BOLT",
-          seal_intact: true,
-          tamper_indicators: [],
-          color_match: true,
-          serial_number_readable: true,
-        },
-        risk_score: 5,
-        risk_level: "GREEN",
-        recommended_action: "RELEASE",
-        vlm_description:
-          "Bolt seal SL-9847231 is intact with no visible signs of tampering or damage. The seal color and markings are consistent with official customs seals. Serial number is clearly readable.",
-      };
-
-    case "cargo_manifest_match":
-      return {
-        ...baseResult,
-        detections: [
-          {
-            class: "cardboard_box",
-            confidence: 0.89,
-            count: 48,
-            estimated_dimensions: "60x40x30cm",
-          },
-          {
-            class: "pallet",
-            confidence: 0.95,
-            count: 4,
-          },
-        ],
-        manifest_match: {
-          declared_items: 48,
-          detected_items: 48,
-          match_confidence: 0.91,
-          discrepancies: [],
-          weight_estimate_kg: 1440,
-          declared_weight_kg: 1380,
-          weight_variance_pct: 4.3,
-        },
-        risk_score: 22,
-        risk_level: "YELLOW",
-        recommended_action: "DOCUMENT_CHECK",
-        vlm_description:
-          "Cargo contents appear consistent with declared goods. 48 cardboard boxes on 4 pallets detected, matching the manifest count. Minor weight discrepancy of 4.3% detected — within acceptable tolerance but warrants document verification. No prohibited items detected.",
-      };
-
-    case "damage_assessment":
-      return {
-        ...baseResult,
-        detections: [
-          {
-            class: "dent",
-            confidence: 0.78,
-            bbox: [320, 200, 480, 310],
-            severity: "MINOR",
-          },
-        ],
-        container_analysis: {
-          overall_condition: "FAIR",
-          damage_detected: true,
-          damage_areas: [
-            {
-              type: "DENT",
-              location: "FRONT_PANEL",
-              severity: "MINOR",
-              estimated_area_cm2: 450,
-            },
-          ],
-          structural_integrity: "INTACT",
-          weatherproofing: "ADEQUATE",
-        },
-        risk_score: 18,
-        risk_level: "YELLOW",
-        recommended_action: "DOCUMENT_CHECK",
-        vlm_description:
-          "Container shows minor denting on the front panel, likely from handling. The damage appears pre-existing and does not compromise structural integrity or weatherproofing. Contents should be verified for damage claims.",
-      };
-
-    case "prohibited_goods_screening":
-      return {
-        ...baseResult,
-        detections: [
-          {
-            class: "electronics",
-            confidence: 0.88,
-            count: 12,
-            dual_use_risk: false,
-          },
-          {
-            class: "machinery_parts",
-            confidence: 0.82,
-            count: 8,
-            dual_use_risk: false,
-          },
-        ],
-        manifest_match: {
-          prohibited_items_detected: false,
-          controlled_items_detected: false,
-          dual_use_items_detected: false,
-          cites_items_detected: false,
-          screening_categories: [
-            "WEAPONS", "NARCOTICS", "CITES", "DUAL_USE", "SANCTIONS",
-          ],
-          all_clear: true,
-        },
-        risk_score: 8,
-        risk_level: "GREEN",
-        recommended_action: "RELEASE",
-        vlm_description:
-          "Cargo screening completed. No prohibited, controlled, or dual-use items detected. Electronics and machinery parts are consistent with commercial goods declarations. All screening categories returned negative results.",
-      };
-
-    default:
-      return {
-        ...baseResult,
-        detections: [],
-        risk_score: 50,
-        risk_level: "YELLOW",
-        recommended_action: "DOCUMENT_CHECK",
-        vlm_description: "Image analysis completed. Manual review recommended.",
-      };
-  }
-}
 
 // ─── Router ───────────────────────────────────────────────────────────────
 
@@ -315,11 +126,10 @@ export const visionRouter = router({
             manifest_items: input.manifestItems,
           });
         } catch (e) {
-          console.warn(`[Vision] Service call failed: ${e}. Using mock.`);
-          analysis = mockVisionAnalysis(input.analysisType);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${e}` });
         }
       } else {
-        analysis = mockVisionAnalysis(input.analysisType);
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Vision AI service is currently unavailable. Please try again later." });
       }
 
       // Update record with results
@@ -343,8 +153,7 @@ export const visionRouter = router({
         recommendedAction: analysis.recommended_action,
         vlmDescription: analysis.vlm_description,
         detections: analysis.detections,
-        processingTimeMs: analysis.processing_time_ms,
-        isMock: !!(analysis.mock),
+        processingTimeMs: analysis.processing_time_ms
       };
     }),
 
@@ -420,10 +229,10 @@ export const visionRouter = router({
             expected_seal_number: input.expectedSealNumber,
           });
         } catch {
-          analysis = mockVisionAnalysis("seal_verification");
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${e}` });
         }
       } else {
-        analysis = mockVisionAnalysis("seal_verification");
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Vision AI service is currently unavailable. Please try again later." });
       }
 
       await updateVisionAnalysis(reportId, {
@@ -454,8 +263,7 @@ export const visionRouter = router({
         numberMatch,
         riskLevel: analysis.risk_level,
         recommendedAction: analysis.recommended_action,
-        vlmDescription: analysis.vlm_description,
-        isMock: !!(analysis.mock),
+        vlmDescription: analysis.vlm_description
       };
     }),
 
@@ -504,10 +312,10 @@ export const visionRouter = router({
             manifest_items: input.manifestItems,
           });
         } catch {
-          analysis = mockVisionAnalysis("cargo_manifest_match");
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${e}` });
         }
       } else {
-        analysis = mockVisionAnalysis("cargo_manifest_match");
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Vision AI service is currently unavailable. Please try again later." });
       }
 
       await updateVisionAnalysis(reportId, {
@@ -527,8 +335,7 @@ export const visionRouter = router({
         riskLevel: analysis.risk_level,
         riskScore: analysis.risk_score,
         recommendedAction: analysis.recommended_action,
-        vlmDescription: analysis.vlm_description,
-        isMock: !!(analysis.mock),
+        vlmDescription: analysis.vlm_description
       };
     }),
 

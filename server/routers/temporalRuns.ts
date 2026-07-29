@@ -68,19 +68,6 @@ export const temporalRunsRouter = router({
       }).optional()
     )
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const rows = Array.from({ length: 60 }, (_, i) => makeDevRun(i));
-        const filtered = rows.filter((r) => {
-          if (input?.status && r.status !== input.status) return false;
-          if (input?.workflowType && r.workflowType !== input.workflowType) return false;
-          if (input?.declarationId && r.declarationId !== input.declarationId) return false;
-          return true;
-        });
-        return {
-          runs: filtered.slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50)),
-          total: filtered.length,
-        };
-      }
       const { getTemporalRuns } = await import("../db");
       const runs = await getTemporalRuns({
         limit: input?.limit,
@@ -98,9 +85,6 @@ export const temporalRunsRouter = router({
   getWorkflowRunById: adminProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return makeDevRun(input.id - 1);
-      }
       const { getTemporalRunById } = await import("../db");
       const run = await getTemporalRunById(input.id);
       if (!run) throw new TRPCError({ code: "NOT_FOUND", message: `Workflow run ${input.id} not found` });
@@ -112,9 +96,6 @@ export const temporalRunsRouter = router({
    */
   getWorkflowStats: adminProcedure
     .query(async () => {
-      if (process.env.NODE_ENV !== "production") {
-        return { running: 4, completed: 312, failed: 7, timedOut: 2 };
-      }
       const { getTemporalRunStats } = await import("../db");
       const stats = await getTemporalRunStats();
       return stats ?? { running: 0, completed: 0, failed: 0, timedOut: 0 };
@@ -136,9 +117,6 @@ export const temporalRunsRouter = router({
       // In production: call Temporal client to start a new workflow run
       // For now, record the re-trigger in the DB and return a stub run ID
       const newRunId = `retrigger-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
-      if (process.env.NODE_ENV !== "production") {
-        return { success: true, newRunId, message: `Re-triggered ${input.workflowType} (dev stub)` };
-      }
       const { upsertTemporalRun } = await import("../db");
       await upsertTemporalRun({
         workflowId: `retrigger-${input.workflowType}-${Date.now()}`,

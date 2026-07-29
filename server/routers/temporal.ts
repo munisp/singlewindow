@@ -14,6 +14,12 @@
  *   temporal.triggerWorkflow    — Trigger a new workflow execution
  *   temporal.signalWorkflow     — Send a signal to a running workflow
  *   temporal.getSystemStatus    — Get Temporal cluster health
+ *
+ * Integration strategy:
+ *   1. Always try the live Temporal API first (via HTTP to temporal-ui or temporal-server)
+ *   2. On success, persist the result to the temporalWorkflows DB table for audit trail
+ *   3. On Temporal unavailability, fall back to the DB-persisted state
+ *   4. If neither is available, throw a proper error (no mock data)
  */
 
 import { TRPCError } from "@trpc/server";
@@ -25,9 +31,8 @@ import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { ENV } from "../_core/env";
 
 // R3 FIX: Use ENV for all Temporal config to ensure namespace consistency across the codebase.
-// ENV.temporalNamespace defaults to 'tradegateway' (not 'tradegate') — see env.ts line 45.
 const TEMPORAL_URL = ENV.temporalAddress ?? process.env.TEMPORAL_URL ?? "http://localhost:7233";
-const TEMPORAL_UI_URL = process.env.TEMPORAL_UI_URL ?? "http://localhost:8080";
+const TEMPORAL_UI_URL = process.env.TEMPORAL_UI_URL ?? "http://localhost:8088";
 const TEMPORAL_NAMESPACE = ENV.temporalNamespace ?? process.env.TEMPORAL_NAMESPACE ?? "tradegateway";
 
 // ─── Temporal service client ───────────────────────────────────────────────
@@ -55,113 +60,34 @@ const WORKFLOW_TYPES = {
   POST_CLEARANCE_AUDIT: "PostClearanceAuditWorkflow",
 } as const;
 
-// ─── Mock workflow state generator ─────────────────────────────────────────
-
-function generateMockWorkflow(workflowId: string, declarationId?: number) {
-  const now = Date.now();
-  const startedAt = now - 1800_000; // 30 min ago as deterministic fallback
-  type WorkflowStatus = "RUNNING" | "COMPLETED" | "FAILED" | "TIMED_OUT" | "CANCELLED";
-  const statuses: WorkflowStatus[] = ["RUNNING", "COMPLETED", "RUNNING", "RUNNING", "COMPLETED"];
-  const status: WorkflowStatus = statuses[0]; // deterministic fallback when Temporal is unavailable
-
-  const activities = [
-    {
-      id: "1",
-      name: "ValidateDeclaration",
-      status: "COMPLETED",
-      startedAt: new Date(startedAt).toISOString(),
-      completedAt: new Date(startedAt + 2_000).toISOString(),
-      attempt: 1,
-      result: { valid: true, warnings: [] },
-    },
-    {
-      id: "2",
-      name: "RunRiskAssessment",
-      status: "COMPLETED",
-      startedAt: new Date(startedAt + 2_500).toISOString(),
-      completedAt: new Date(startedAt + 7_000).toISOString(),
-      attempt: 1,
-      result: { riskScore: 23, riskLevel: "GREEN", lane: "GREEN" },
-    },
-    {
-      id: "3",
-      name: "NotifyOGAs",
-      status: "COMPLETED",
-      startedAt: new Date(startedAt + 7_500).toISOString(),
-      completedAt: new Date(startedAt + 9_000).toISOString(),
-      attempt: 1,
-      result: { notified: ["FDA", "CEPS", "GIPC"] },
-    },
-    {
-      id: "4",
-      name: "WaitForOGAApprovals",
-      status: status === "COMPLETED" ? "COMPLETED" : "RUNNING",
-      startedAt: new Date(startedAt + 9_500).toISOString(),
-      completedAt: status === "COMPLETED" ? new Date(startedAt + 1_800_000).toISOString() : undefined,
-      attempt: 1,
-      result: status === "COMPLETED" ? { approvals: ["FDA", "CEPS", "GIPC"], rejections: [] } : undefined,
-    },
-    {
-      id: "5",
-      name: "ProcessPayment",
-      status: status === "COMPLETED" ? "COMPLETED" : "PENDING",
-      startedAt: status === "COMPLETED" ? new Date(startedAt + 1_800_500).toISOString() : undefined,
-      completedAt: status === "COMPLETED" ? new Date(startedAt + 1_815_000).toISOString() : undefined,
-      attempt: 1,
-      result: status === "COMPLETED" ? { paymentConfirmed: true, transferId: `TRF-${Date.now()}` } : undefined,
-    },
-    {
-      id: "6",
-      name: "IssueClearancePermit",
-      status: status === "COMPLETED" ? "COMPLETED" : "PENDING",
-      startedAt: status === "COMPLETED" ? new Date(startedAt + 1_815_500).toISOString() : undefined,
-      completedAt: status === "COMPLETED" ? new Date(startedAt + 1_816_000).toISOString() : undefined,
-      attempt: 1,
-      result: status === "COMPLETED" ? { permitNumber: `CP-${declarationId ?? "000"}-${Date.now()}` } : undefined,
-    },
-  ];
-
-  return {
-    workflowId,
-    runId: `run-${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-    workflowType: WORKFLOW_TYPES.DECLARATION_CLEARANCE,
-    namespace: TEMPORAL_NAMESPACE,
-    taskQueue: "customs-clearance",
-    status,
-    startedAt: new Date(startedAt).toISOString(),
-    completedAt: status === "COMPLETED" ? new Date(startedAt + 1_816_500).toISOString() : null,
-    declarationId: declarationId ?? null,
-    activities,
-    pendingActivities: activities.filter(a => a.status === "RUNNING").map(a => a.name),
-    completedActivities: activities.filter(a => a.status === "COMPLETED").length,
-    totalActivities: activities.length,
-    currentActivity: activities.find(a => a.status === "RUNNING")?.name ?? null,
-    historyLength: activities.filter(a => a.status !== "PENDING").length * 3,
-    memo: {
-      declarationId: declarationId?.toString() ?? "unknown",
-      traderName: "Sample Trader Ltd",
-      hsCode: "8471.30",
-      riskLevel: "GREEN",
-    },
-    isMock: true,
-  };
-}
-
 // ─── DB-backed workflow persistence helpers ────────────────────────────────────
 
-async function saveWorkflowToDb(wf: ReturnType<typeof generateMockWorkflow> & { status?: string }) {
+interface WorkflowRecord {
+  workflowId: string;
+  runId?: string;
+  workflowType?: string;
+  declarationId?: number | null;
+  status?: string;
+  startedAt?: string;
+  completedAt?: string | null;
+  currentStep?: string | null;
+  activities?: unknown[];
+  memo?: Record<string, unknown>;
+}
+
+async function saveWorkflowToDb(wf: WorkflowRecord) {
   const db = await getDb();
   if (!db) return;
   try {
     const row = {
       workflowId: wf.workflowId,
-      runId: wf.runId,
-      workflowType: wf.workflowType,
+      runId: wf.runId ?? null,
+      workflowType: wf.workflowType ?? "DeclarationClearanceWorkflow",
       declarationId: typeof wf.declarationId === "number" ? wf.declarationId : null,
       status: (wf.status ?? "RUNNING") as any,
-      startTime: new Date(wf.startedAt),
+      startTime: wf.startedAt ? new Date(wf.startedAt) : new Date(),
       closeTime: wf.completedAt ? new Date(wf.completedAt) : null,
-      currentStep: (wf as any).currentActivity ?? null,
+      currentStep: wf.currentStep ?? null,
       steps: (wf.activities ?? []) as any,
       metadata: (wf.memo ?? {}) as any,
     };
@@ -193,6 +119,46 @@ async function getWorkflowFromDb(workflowId: string) {
   }
 }
 
+async function getWorkflowsFromDb(declarationId?: number, status?: string, limit = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  try {
+    const conditions = [];
+    if (declarationId) conditions.push(eq(temporalWorkflows.declarationId, declarationId));
+    if (status && status !== "ALL") conditions.push(eq(temporalWorkflows.status, status as any));
+    const query = db.select().from(temporalWorkflows)
+      .orderBy(desc(temporalWorkflows.startTime))
+      .limit(limit);
+    if (conditions.length > 0) {
+      return await query.where(and(...conditions));
+    }
+    return await query;
+  } catch {
+    return [];
+  }
+}
+
+// ─── Temporal API response normalizer ─────────────────────────────────────────
+
+function normalizeTemporalWorkflow(data: Record<string, unknown>) {
+  const execution = (data.workflowExecutionInfo ?? data) as Record<string, unknown>;
+  const execInfo = (execution.execution ?? execution) as Record<string, unknown>;
+  return {
+    workflowId: (execInfo.workflowId ?? (execution as any).workflowId ?? "") as string,
+    runId: (execInfo.runId ?? (execution as any).runId ?? "") as string,
+    workflowType: ((execution.type as any)?.name ?? (execution as any).workflowType ?? "Unknown") as string,
+    namespace: TEMPORAL_NAMESPACE,
+    taskQueue: ((execution.taskQueue as any)?.name ?? (execution as any).taskQueue ?? "customs-clearance") as string,
+    status: ((execution.status ?? (execution as any).status) ?? "RUNNING") as string,
+    startedAt: ((execution.startTime ?? (execution as any).startedAt) ?? new Date().toISOString()) as string,
+    completedAt: ((execution.closeTime ?? (execution as any).completedAt) ?? null) as string | null,
+    declarationId: null as number | null,
+    historyLength: ((execution.historyLength ?? (execution as any).historyLength) ?? 0) as number,
+    memo: ((execution.memo ?? (execution as any).memo) ?? {}) as Record<string, unknown>,
+    isMock: false,
+  };
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────
 
 export const temporalRouter = router({
@@ -202,9 +168,44 @@ export const temporalRouter = router({
   getSystemStatus: protectedProcedure.query(async () => {
     const available = await temporalAvailable();
 
+    let activeWorkflows = 0;
+    let completedWorkflows = 0;
+
+    if (available) {
+      try {
+        const res = await fetch(
+          `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=ExecutionStatus%3D"Running"&pageSize=1`,
+          { signal: AbortSignal.timeout(5_000) }
+        );
+        if (res.ok) {
+          const data = await res.json() as { executions?: unknown[] };
+          activeWorkflows = data.executions?.length ?? 0;
+        }
+      } catch {
+        // Non-fatal — stats are informational
+      }
+    } else {
+      // Fall back to DB counts
+      const db = await getDb();
+      if (db) {
+        try {
+          const [activeRow] = await db.select({ count: sql<number>`count(*)::int` })
+            .from(temporalWorkflows)
+            .where(eq(temporalWorkflows.status, "RUNNING"));
+          const [completedRow] = await db.select({ count: sql<number>`count(*)::int` })
+            .from(temporalWorkflows)
+            .where(eq(temporalWorkflows.status, "COMPLETED"));
+          activeWorkflows = activeRow?.count ?? 0;
+          completedWorkflows = completedRow?.count ?? 0;
+        } catch {
+          // Non-fatal
+        }
+      }
+    }
+
     return {
       connected: available,
-      mode: available ? "LIVE" : "SIMULATION",
+      mode: available ? "LIVE" : "DB_FALLBACK",
       temporalUrl: TEMPORAL_URL,
       uiUrl: TEMPORAL_UI_URL,
       namespace: TEMPORAL_NAMESPACE,
@@ -217,42 +218,52 @@ export const temporalRouter = router({
         "risk-assessment",
       ],
       stats: {
-        activeWorkflows: 0, // fetched from DB on demand
-        completedWorkflows: 0, // fetched from DB on demand
+        activeWorkflows,
+        completedWorkflows,
       },
     };
   }),
 
   /**
    * Get workflow execution details by workflowId.
+   * Tries live Temporal API first, then falls back to DB-persisted state.
    */
   getWorkflow: protectedProcedure
     .input(z.object({ workflowId: z.string() }))
     .query(async ({ input }) => {
-            // Check DB first
-      const dbWorkflow = await getWorkflowFromDb(input.workflowId);
-      if (dbWorkflow) return dbWorkflow;
-      // Try live Temporal API
+      // Try live Temporal API first
       const available = await temporalAvailable();
       if (available) {
         try {
           const res = await fetch(
-            `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${input.workflowId}`,
+            `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${encodeURIComponent(input.workflowId)}`,
             { signal: AbortSignal.timeout(5_000) }
           );
-          if (res.ok) return res.json();
-        } catch {
-          // fall through to mock
+          if (res.ok) {
+            const data = await res.json() as Record<string, unknown>;
+            const normalized = normalizeTemporalWorkflow(data);
+            // Persist to DB for audit trail
+            await saveWorkflowToDb(normalized);
+            return normalized;
+          }
+        } catch (e) {
+          console.warn(`[temporal] Live API failed for getWorkflow: ${e}`);
         }
       }
-      // Generate mock and persist
-      const workflow = generateMockWorkflow(input.workflowId);
-      await saveWorkflowToDb(workflow);
-      return workflow;
+
+      // Fall back to DB-persisted state
+      const dbWorkflow = await getWorkflowFromDb(input.workflowId);
+      if (dbWorkflow) return dbWorkflow;
+
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: `Workflow ${input.workflowId} not found. Temporal may be unavailable and no DB record exists.`,
+      });
     }),
 
   /**
    * List workflows associated with a declaration.
+   * Tries live Temporal API first, then falls back to DB-persisted state.
    */
   listWorkflows: protectedProcedure
     .input(z.object({
@@ -265,44 +276,44 @@ export const temporalRouter = router({
 
       if (available) {
         try {
-          const query = input.declarationId
-            ? `declarationId="${input.declarationId}"`
-            : "";
+          const queryParts: string[] = [];
+          if (input.declarationId) queryParts.push(`declarationId="${input.declarationId}"`);
+          if (input.status !== "ALL") queryParts.push(`ExecutionStatus="${input.status}"`);
+          const query = queryParts.join(" AND ");
           const res = await fetch(
             `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows?query=${encodeURIComponent(query)}&pageSize=${input.limit}`,
             { signal: AbortSignal.timeout(5_000) }
           );
           if (res.ok) {
-            return res.json();
+            const data = await res.json() as { executions?: Record<string, unknown>[]; nextPageToken?: string };
+            const workflows = (data.executions ?? []).map(normalizeTemporalWorkflow);
+            // Persist each to DB
+            await Promise.allSettled(workflows.map(wf => saveWorkflowToDb(wf)));
+            return {
+              workflows,
+              total: workflows.length,
+              nextPageToken: data.nextPageToken ?? null,
+              source: "temporal",
+            };
           }
-        } catch {
-          // fall through to mock
+        } catch (e) {
+          console.warn(`[temporal] Live API failed for listWorkflows: ${e}`);
         }
       }
 
-            // Generate mock workflows and persist them
-      const wfIds = Array.from({ length: Math.min(input.limit, 5) }, (_, i) =>
-        `DCL-${(input.declarationId ?? 1000) + i}-${Date.now() - i * 3600_000}`
-      );
-      const mockWorkflows = await Promise.all(wfIds.map(async (wfId) => {
-        const existing = await getWorkflowFromDb(wfId);
-        if (existing) return existing;
-        const wf = generateMockWorkflow(wfId, input.declarationId);
-        await saveWorkflowToDb(wf);
-        return wf;
-      }));
-      const filtered = input.status === "ALL"
-        ? mockWorkflows
-        : mockWorkflows.filter(w => (w as any).status === input.status);
+      // Fall back to DB
+      const dbWorkflows = await getWorkflowsFromDb(input.declarationId, input.status, input.limit);
       return {
-        workflows: filtered,
-        total: filtered.length,
-        isMock: true,
+        workflows: dbWorkflows,
+        total: dbWorkflows.length,
+        nextPageToken: null,
+        source: "db_fallback",
       };
     }),
 
   /**
    * Get the full event history for a workflow execution.
+   * Tries live Temporal API first, then reconstructs from DB steps.
    */
   getWorkflowHistory: protectedProcedure
     .input(z.object({
@@ -314,71 +325,84 @@ export const temporalRouter = router({
 
       if (available) {
         try {
+          const runParam = input.runId ? `?runId=${encodeURIComponent(input.runId)}` : "";
           const res = await fetch(
-            `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${input.workflowId}/history`,
-            { signal: AbortSignal.timeout(5_000) }
+            `${TEMPORAL_UI_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${encodeURIComponent(input.workflowId)}/history${runParam}`,
+            { signal: AbortSignal.timeout(10_000) }
           );
           if (res.ok) {
             return res.json();
           }
-        } catch {
-          // fall through to mock
+        } catch (e) {
+          console.warn(`[temporal] Live API failed for getWorkflowHistory: ${e}`);
         }
       }
 
-            const dbRow = await getWorkflowFromDb(input.workflowId);
-      const workflow: any = dbRow ?? generateMockWorkflow(input.workflowId);
-      // Generate synthetic event history
-      const events = [];
+      // Fall back to DB-reconstructed history
+      const dbRow = await getWorkflowFromDb(input.workflowId);
+      if (!dbRow) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Workflow ${input.workflowId} not found in Temporal or database.`,
+        });
+      }
+
+      // Reconstruct event history from persisted steps
+      const events: Array<Record<string, unknown>> = [];
       let eventId = 1;
-      const wfStartedAt = workflow.startedAt ?? workflow.startTime?.toISOString() ?? new Date().toISOString();
+      const wfStartedAt = dbRow.startTime?.toISOString() ?? new Date().toISOString();
+
       events.push({
         eventId: eventId++,
         eventType: "WorkflowExecutionStarted",
         timestamp: wfStartedAt,
         attributes: {
-          workflowType: workflow.workflowType,
-          taskQueue: workflow.taskQueue ?? "customs-clearance",
-          input: workflow.memo ?? workflow.metadata ?? {},
+          workflowType: dbRow.workflowType,
+          taskQueue: "customs-clearance",
+          input: dbRow.metadata ?? {},
         },
       });
-      const activities = workflow.activities ?? (Array.isArray(workflow.steps) ? workflow.steps : []);
-      for (const activity of activities) {
-        if (activity.status === "PENDING") continue;
 
+      const steps = Array.isArray(dbRow.steps) ? dbRow.steps as Array<Record<string, unknown>> : [];
+      for (const step of steps) {
+        if (step.status === "PENDING") continue;
         events.push({
           eventId: eventId++,
           eventType: "ActivityTaskScheduled",
-          timestamp: activity.startedAt ?? workflow.startedAt,
-          attributes: { activityType: activity.name, activityId: activity.id },
+          timestamp: step.startedAt ?? wfStartedAt,
+          attributes: { activityType: step.name, activityId: step.id },
         });
-
-        if (activity.startedAt) {
+        if (step.startedAt) {
           events.push({
             eventId: eventId++,
             eventType: "ActivityTaskStarted",
-            timestamp: activity.startedAt,
-            attributes: { activityId: activity.id, attempt: activity.attempt },
+            timestamp: step.startedAt,
+            attributes: { activityId: step.id, attempt: step.attempt ?? 1 },
           });
         }
-
-        if (activity.completedAt) {
+        if (step.completedAt) {
           events.push({
             eventId: eventId++,
             eventType: "ActivityTaskCompleted",
-            timestamp: activity.completedAt,
-            attributes: { activityId: activity.id, result: activity.result },
+            timestamp: step.completedAt,
+            attributes: { activityId: step.id, result: step.result },
           });
         }
       }
 
-      const wfCompletedAt = (workflow as any).completedAt ?? (workflow as any).closeTime?.toISOString() ?? null;
-      if (workflow.status === "COMPLETED" && wfCompletedAt) {
+      if (dbRow.status === "COMPLETED" && dbRow.closeTime) {
         events.push({
           eventId: eventId++,
           eventType: "WorkflowExecutionCompleted",
-          timestamp: wfCompletedAt,
+          timestamp: dbRow.closeTime.toISOString(),
           attributes: { result: { status: "CLEARED" } },
+        });
+      } else if (dbRow.status === "FAILED") {
+        events.push({
+          eventId: eventId++,
+          eventType: "WorkflowExecutionFailed",
+          timestamp: dbRow.closeTime?.toISOString() ?? new Date().toISOString(),
+          attributes: { failure: { message: "Workflow failed" } },
         });
       }
 
@@ -386,12 +410,14 @@ export const temporalRouter = router({
         workflowId: input.workflowId,
         events,
         totalCount: events.length,
-        isMock: true,
+        source: "db_fallback",
       };
     }),
 
   /**
    * Trigger a new workflow execution for a declaration.
+   * Uses the Temporal REST API to start the workflow on the cluster.
+   * Falls back to DB-only persistence if Temporal is unavailable.
    */
   triggerWorkflow: protectedProcedure
     .input(z.object({
@@ -406,7 +432,6 @@ export const temporalRouter = router({
     }))
     .mutation(async ({ input, ctx }) => {
       const workflowId = `${input.workflowType.replace("Workflow", "")}-${input.declarationId ?? "manual"}-${Date.now()}`;
-
       const available = await temporalAvailable();
 
       if (available) {
@@ -421,6 +446,12 @@ export const temporalRouter = router({
                 workflowType: { name: input.workflowType },
                 taskQueue: { name: "customs-clearance" },
                 input: { payloads: [{ data: Buffer.from(JSON.stringify(input.input ?? {})).toString("base64") }] },
+                memo: {
+                  fields: {
+                    declarationId: { data: Buffer.from(String(input.declarationId ?? "")).toString("base64") },
+                    triggeredBy: { data: Buffer.from(String(ctx.user.id)).toString("base64") },
+                  },
+                },
               }),
               signal: AbortSignal.timeout(10_000),
             }
@@ -428,28 +459,50 @@ export const temporalRouter = router({
 
           if (res.ok) {
             const data = await res.json() as Record<string, unknown>;
+            const runId = (data.runId ?? data.run_id ?? "") as string;
+            // Persist to DB
+            await saveWorkflowToDb({
+              workflowId,
+              runId,
+              workflowType: input.workflowType,
+              declarationId: input.declarationId,
+              status: "RUNNING",
+              startedAt: new Date().toISOString(),
+              memo: { triggeredBy: ctx.user.id, ...input.input },
+            });
             return {
               workflowId,
-              runId: (data as Record<string, unknown>).runId as string,
+              runId,
               status: "STARTED",
-              message: `Workflow ${input.workflowType} started successfully.`,
+              source: "temporal",
+              message: `Workflow ${input.workflowType} started on Temporal cluster.`,
             };
           }
+          const errText = await res.text().catch(() => "");
+          throw new Error(`Temporal API responded ${res.status}: ${errText}`);
         } catch (e) {
-          console.warn(`[Temporal] Workflow trigger failed: ${e}. Using simulation.`);
+          console.error(`[Temporal] Workflow trigger failed: ${e}`);
+          // Fall through to DB-only mode
         }
       }
 
-      // Simulation mode
-      const mockWf = generateMockWorkflow(workflowId, input.declarationId);
-      await saveWorkflowToDb({ ...mockWf, status: "RUNNING" });
+      // Temporal unavailable — persist to DB only (will be picked up when Temporal comes back)
+      await saveWorkflowToDb({
+        workflowId,
+        runId: `pending-${crypto.randomUUID()}`,
+        workflowType: input.workflowType,
+        declarationId: input.declarationId,
+        status: "RUNNING",
+        startedAt: new Date().toISOString(),
+        memo: { triggeredBy: ctx.user.id, pendingTemporalSubmit: true, ...input.input },
+      });
 
       return {
         workflowId,
-        runId: mockWf.runId,
-        status: "STARTED",
-        message: `Workflow ${input.workflowType} started (simulation mode).`,
-        isMock: !available,
+        runId: null,
+        status: "PENDING",
+        source: "db_only",
+        message: `Workflow ${input.workflowType} queued for execution. Temporal cluster is currently unavailable.`,
       };
     }),
 
@@ -475,7 +528,7 @@ export const temporalRouter = router({
       if (available) {
         try {
           const res = await fetch(
-            `${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${input.workflowId}/signal`,
+            `${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows/${encodeURIComponent(input.workflowId)}/signal`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -488,25 +541,58 @@ export const temporalRouter = router({
           );
 
           if (res.ok) {
-            return { success: true, message: `Signal '${input.signalName}' sent to workflow ${input.workflowId}` };
+            // Update DB record to reflect signal
+            const dbWorkflow = await getWorkflowFromDb(input.workflowId);
+            if (dbWorkflow && (input.signalName === "payment_confirmed" || input.signalName === "oga_approved")) {
+              await saveWorkflowToDb({
+                workflowId: input.workflowId,
+                runId: dbWorkflow.runId ?? undefined,
+                workflowType: dbWorkflow.workflowType ?? undefined,
+                declarationId: dbWorkflow.declarationId,
+                status: "RUNNING",
+                startedAt: dbWorkflow.startTime?.toISOString(),
+                currentStep: `signal:${input.signalName}`,
+              });
+            }
+            return { success: true, source: "temporal", message: `Signal '${input.signalName}' sent to workflow ${input.workflowId}` };
           }
+          const errText = await res.text().catch(() => "");
+          throw new Error(`Temporal API responded ${res.status}: ${errText}`);
         } catch (e) {
-          console.warn(`[Temporal] Signal failed: ${e}. Using simulation.`);
+          console.error(`[Temporal] Signal failed: ${e}`);
         }
       }
 
-      // Update in-memory state for simulation
+      // Temporal unavailable — update DB state only
       const workflow = await getWorkflowFromDb(input.workflowId);
-      if (workflow) {
-        if (input.signalName === "payment_confirmed" || input.signalName === "oga_approved") {
-          await saveWorkflowToDb({ ...generateMockWorkflow(input.workflowId), ...workflow as any, status: "COMPLETED" });
-        }
+      if (!workflow) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Workflow ${input.workflowId} not found.`,
+        });
       }
+
+      const terminalSignals = ["payment_confirmed", "oga_approved", "inspection_completed", "override_approved"];
+      const cancelSignals = ["cancel_workflow", "oga_rejected"];
+      const newStatus = terminalSignals.includes(input.signalName) ? "COMPLETED"
+        : cancelSignals.includes(input.signalName) ? "CANCELLED"
+        : "RUNNING";
+
+      await saveWorkflowToDb({
+        workflowId: input.workflowId,
+        runId: workflow.runId ?? undefined,
+        workflowType: workflow.workflowType ?? undefined,
+        declarationId: workflow.declarationId,
+        status: newStatus,
+        startedAt: workflow.startTime?.toISOString(),
+        completedAt: newStatus !== "RUNNING" ? new Date().toISOString() : undefined,
+        currentStep: `signal:${input.signalName}`,
+      });
 
       return {
         success: true,
-        message: `Signal '${input.signalName}' processed (simulation mode).`,
-        isMock: !available,
+        source: "db_only",
+        message: `Signal '${input.signalName}' recorded in DB. Temporal cluster is currently unavailable.`,
       };
     }),
 });

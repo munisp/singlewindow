@@ -83,71 +83,6 @@ async function analyseDocumentViaKYCService(
 
 // ─── Mock analysis for development (when KYC service is not running) ──────
 
-function mockDocumentAnalysis(documentType: string): Record<string, unknown> {
-  const baseResult = {
-    document_type: documentType,
-    authenticity_score: 0.87,
-    authenticity_verdict: "LIKELY_GENUINE",
-    ocr_confidence: 0.94,
-    processing_time_ms: 1200,
-    mock: true,
-  };
-
-  switch (documentType) {
-    case "national_id":
-    case "passport":
-      return {
-        ...baseResult,
-        extracted_fields: {
-          full_name: "SAMPLE NAME",
-          document_number: "A12345678",
-          date_of_birth: "1985-03-15",
-          nationality: "GH",
-          expiry_date: "2030-03-14",
-          issuing_authority: "Ghana Immigration Service",
-        },
-        face_detected: true,
-        mrz_valid: true,
-        security_features: ["UV_PATTERN", "MICROPRINT", "HOLOGRAM"],
-      };
-
-    case "business_registration":
-      return {
-        ...baseResult,
-        extracted_fields: {
-          company_name: "SAMPLE TRADING CO LTD",
-          registration_number: "CS-123456789",
-          registration_date: "2015-06-01",
-          registered_address: "123 Independence Ave, Accra, Ghana",
-          directors: ["SAMPLE DIRECTOR 1", "SAMPLE DIRECTOR 2"],
-          share_capital: "GHS 50,000",
-        },
-        official_seal_detected: true,
-        signature_detected: true,
-      };
-
-    case "tax_certificate":
-      return {
-        ...baseResult,
-        extracted_fields: {
-          tin: "C0012345678",
-          taxpayer_name: "SAMPLE TRADING CO LTD",
-          tax_type: "VAT",
-          valid_from: "2024-01-01",
-          valid_to: "2024-12-31",
-          issuing_authority: "Ghana Revenue Authority",
-        },
-        qr_code_valid: true,
-      };
-
-    default:
-      return {
-        ...baseResult,
-        extracted_fields: {},
-        raw_text: "Document text extracted successfully (mock mode)",
-      };
-  }
-}
 
 // ─── Router ───────────────────────────────────────────────────────────────
 
@@ -231,11 +166,10 @@ export const kycRouter = router({
             { extractText: true, verifyAuthenticity: input.runAuthenticity }
           );
         } catch (e) {
-          console.warn(`[KYC] Service call failed: ${e}. Using mock.`);
-          analysis = mockDocumentAnalysis(doc.documentType);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `KYC document analysis failed: ${e}` });
         }
       } else {
-        analysis = mockDocumentAnalysis(doc.documentType);
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "KYC document analysis service is currently unavailable. Please try again later." });
       }
 
       // Update document record with analysis results
@@ -546,21 +480,6 @@ export const kycRouter = router({
   getKycEventsByDeclaration: protectedProcedure
     .input(z.object({ declarationId: z.number().int().positive() }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const eventTypes = ["SUBMITTED", "DOCUMENT_VERIFIED", "RISK_SCORED", "APPROVED", "FLAGGED"];
-        return eventTypes.map((eventType, i) => ({
-          id: i + 1,
-          declarationId: input.declarationId,
-          userId: 1000 + i,
-          documentType: "passport",
-          eventType,
-          status: i < 4 ? "COMPLETED" : "PENDING",
-          riskScore: i === 2 ? "0.23" : null,
-          riskLevel: i === 4 ? "HIGH" : "LOW",
-          errorMessage: i === 4 ? "Flagged for manual review" : null,
-          createdAt: new Date(Date.now() - (4 - i) * 3_600_000),
-        }));
-      }
       const { getKycEventsByDeclaration } = await import("../db");
       return getKycEventsByDeclaration(input.declarationId);
     }),
@@ -572,12 +491,6 @@ export const kycRouter = router({
   getKycEventsByUser: adminProcedure
     .input(z.object({ userId: z.number().int().positive() }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return [
-          { id: 1, userId: input.userId, documentType: "passport", eventType: "SUBMITTED", status: "COMPLETED", createdAt: new Date(Date.now() - 86_400_000) },
-          { id: 2, userId: input.userId, documentType: "national_id", eventType: "APPROVED", status: "COMPLETED", createdAt: new Date(Date.now() - 43_200_000) },
-        ];
-      }
       const { getKycEventsByUser } = await import("../db");
       return getKycEventsByUser(input.userId);
     }),

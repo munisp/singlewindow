@@ -2,75 +2,42 @@
  * ogaPermitAudit.ts — tRPC router for OGA Permit Audit Trail
  * Sprint v79 — OGA Permit audit trail procedures.
  *
+ * All procedures read directly from the database (ogaPermitEvents table).
+ * No mock data — returns empty arrays when no events exist.
+ *
  * Procedures:
  *   ogaPermitAudit.getEventsByPermit       — event timeline for a specific permit
  *   ogaPermitAudit.getEventsByDeclaration  — all permit events for a declaration
  *   ogaPermitAudit.getRecentEvents         — admin: paginated recent events across all permits
+ *   ogaPermitAudit.getAgencyStats          — summary counts per agency
+ *   ogaPermitAudit.bulkApprovePermits      — admin: bulk approve multiple permits
  */
 
 import { z } from "zod";
 import { router, adminProcedure, protectedProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
-
-const AGENCIES = ["FDA", "EPA", "MOFEP", "CEPS", "NACOC", "GFZA", "GCAA", "NPA", "DVLA", "GSA"];
-const EVENT_TYPES = ["REQUESTED", "SUBMITTED", "UNDER_REVIEW", "APPROVED", "REJECTED", "EXPIRED", "RENEWED", "REVOKED"];
-const STATUS_PAIRS: Array<[string, string]> = [
-  ["", "REQUESTED"],
-  ["REQUESTED", "SUBMITTED"],
-  ["SUBMITTED", "UNDER_REVIEW"],
-  ["UNDER_REVIEW", "APPROVED"],
-];
-
-function mockPermitEvents(permitId: number) {
-  return STATUS_PAIRS.map(([prev, next], i) => ({
-    id: i + 1,
-    permitId,
-    declarationId: 1000 + permitId,
-    agencyCode: AGENCIES[permitId % AGENCIES.length],
-    eventType: EVENT_TYPES[i],
-    previousStatus: prev || null,
-    newStatus: next,
-    actorId: i > 1 ? 200 + i : null,
-    actorType: i > 1 ? "officer" : "system",
-    remarks: i === 3 ? "All documents verified. Permit approved." : null,
-    metadata: {},
-    kafkaOffset: 1000 + i,
-    kafkaPartition: 0,
-    createdAt: new Date(Date.now() - (3 - i) * 3_600_000),
-  }));
-}
+import { getDb, getOgaPermitEventsByPermit, getOgaPermitEventsByDeclaration } from "../db";
+import { ogaPermitEvents, ogaPermits } from "../../drizzle/schema";
+import { desc, eq, and, inArray, sql } from "drizzle-orm";
 
 export const ogaPermitAuditRouter = router({
   /**
    * getEventsByPermit — chronological event timeline for a specific OGA permit.
+   * Returns events from the ogaPermitEvents table ordered by creation time.
    */
   getEventsByPermit: protectedProcedure
     .input(z.object({ permitId: z.number().int().positive() }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        return mockPermitEvents(input.permitId);
-      }
-      const { getOgaPermitEventsByPermit } = await import("../db");
       return getOgaPermitEventsByPermit(input.permitId);
     }),
 
   /**
    * getEventsByDeclaration — all OGA permit events linked to a declaration.
+   * Joins through ogaPermits to find all events for permits on this declaration.
    */
   getEventsByDeclaration: protectedProcedure
     .input(z.object({ declarationId: z.number().int().positive() }))
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        // Return events for 3 mock permits
-        return [1, 2, 3].flatMap((permitId) =>
-          mockPermitEvents(permitId).map((e) => ({
-            ...e,
-            declarationId: input.declarationId,
-            permitId,
-          }))
-        );
-      }
-      const { getOgaPermitEventsByDeclaration } = await import("../db");
       return getOgaPermitEventsByDeclaration(input.declarationId);
     }),
 
@@ -90,41 +57,13 @@ export const ogaPermitAuditRouter = router({
       }).optional()
     )
     .query(async ({ input }) => {
-      if (process.env.NODE_ENV !== "production") {
-        const rows = Array.from({ length: 30 }, (_, i) => ({
-          id: i + 1,
-          permitId: 100 + i,
-          declarationId: 1000 + i,
-          agencyCode: AGENCIES[i % AGENCIES.length],
-          eventType: EVENT_TYPES[i % EVENT_TYPES.length],
-          previousStatus: i > 0 ? EVENT_TYPES[(i - 1) % EVENT_TYPES.length] : null,
-          newStatus: EVENT_TYPES[i % EVENT_TYPES.length],
-          actorId: i % 3 === 0 ? null : 200 + i,
-          actorType: i % 3 === 0 ? "system" : "officer",
-          remarks: i % 5 === 0 ? "Routine processing" : null,
-          metadata: {},
-          kafkaOffset: 5000 + i,
-          kafkaPartition: i % 3,
-          createdAt: new Date(Date.now() - i * 300_000),
-        }));
-        const filtered = rows.filter((r) => {
-          if (input?.agencyCode && r.agencyCode !== input.agencyCode) return false;
-          if (input?.eventType && r.eventType !== input.eventType) return false;
-          return true;
-        });
-        return {
-          events: filtered.slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50)),
-          total: filtered.length,
-        };
-      }
-      const { getDb } = await import("../db");
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-      const { ogaPermitEvents } = await import("../../drizzle/schema");
-      const { desc, eq, and } = await import("drizzle-orm");
-      const conditions: any[] = [];
+
+      const conditions: ReturnType<typeof eq>[] = [];
       if (input?.agencyCode) conditions.push(eq(ogaPermitEvents.agencyCode, input.agencyCode));
       if (input?.eventType) conditions.push(eq(ogaPermitEvents.eventType, input.eventType));
+
       const events = await db
         .select()
         .from(ogaPermitEvents)
@@ -132,11 +71,22 @@ export const ogaPermitAuditRouter = router({
         .orderBy(desc(ogaPermitEvents.createdAt))
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
-      return { events, total: events.length };
+
+      // Get total count for pagination
+      const [countRow] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(ogaPermitEvents)
+        .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+      return {
+        events,
+        total: countRow?.count ?? events.length,
+      };
     }),
 
   /**
    * getAgencyStats — summary of permit event counts per agency.
+   * Aggregates approved, rejected, and pending counts from the ogaPermitEvents table.
    */
   getAgencyStats: adminProcedure.query(async (): Promise<Array<{
     agencyCode: string;
@@ -145,20 +95,9 @@ export const ogaPermitAuditRouter = router({
     rejected: number;
     pending: number;
   }>> => {
-    if (process.env.NODE_ENV !== "production") {
-      return AGENCIES.slice(0, 6).map((agencyCode) => ({
-        agencyCode,
-        total: Math.floor(Math.random() * 100) + 20,
-        approved: Math.floor(Math.random() * 60) + 10,
-        rejected: Math.floor(Math.random() * 10) + 1,
-        pending: Math.floor(Math.random() * 20) + 2,
-      }));
-    }
-    const { getDb } = await import("../db");
     const db = await getDb();
     if (!db) return [];
-    const { ogaPermitEvents } = await import("../../drizzle/schema");
-    const { sql } = await import("drizzle-orm");
+
     const rows = await db.execute(
       sql`SELECT agency_code AS "agencyCode",
                COUNT(*) AS total,
@@ -169,8 +108,9 @@ export const ogaPermitAuditRouter = router({
           GROUP BY agency_code
           ORDER BY total DESC`
     );
-    return ((rows as unknown) as any[]).map((r) => ({
-      agencyCode: String(r.agencyCode),
+
+    return ((rows as unknown) as Array<Record<string, unknown>>).map((r) => ({
+      agencyCode: String(r.agencyCode ?? r.agency_code ?? ""),
       total: Number(r.total),
       approved: Number(r.approved),
       rejected: Number(r.rejected),
@@ -179,7 +119,8 @@ export const ogaPermitAuditRouter = router({
   }),
 
   /**
-   * v92: Bulk-approve multiple OGA permits in one operation (admin/customs_officer only).
+   * bulkApprovePermits — admin: approve multiple OGA permits in one operation.
+   * Requires admin, customs_officer, or oga_officer role.
    */
   bulkApprovePermits: protectedProcedure
     .input(z.object({
@@ -189,15 +130,20 @@ export const ogaPermitAuditRouter = router({
     .mutation(async ({ ctx, input }) => {
       const isAdmin = ["admin", "customs_officer", "oga_officer"].includes(ctx.user.role);
       if (!isAdmin) throw new TRPCError({ code: "FORBIDDEN" });
-      const { getDb } = await import("../db");
+
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-      const { ogaPermits } = await import("../../drizzle/schema");
-      const { inArray } = await import("drizzle-orm");
+
       const updated = await db.update(ogaPermits)
-        .set({ status: "approved", reviewNotes: input.reviewNotes ?? null, respondedAt: new Date(), updatedAt: new Date() })
+        .set({
+          status: "approved",
+          reviewNotes: input.reviewNotes ?? null,
+          respondedAt: new Date(),
+          updatedAt: new Date(),
+        })
         .where(inArray(ogaPermits.id, input.permitIds))
         .returning({ id: ogaPermits.id });
+
       return { approvedCount: updated.length, ids: updated.map(r => r.id) };
     }),
 });
