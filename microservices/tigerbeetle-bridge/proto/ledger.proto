@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package tradegateway.ledger.v1;
+
+option go_package = "github.com/tradegateway/tigerbeetle-bridge/proto";
+
+// LedgerService — double-entry financial ledger backed by TigerBeetle
+service LedgerService {
+  rpc CreateAccount(CreateAccountRequest) returns (AccountResponse);
+  rpc GetAccount(GetAccountRequest) returns (AccountResponse);
+  rpc GetBalance(GetBalanceRequest) returns (BalanceResponse);
+  rpc CreateTransfer(CreateTransferRequest) returns (TransferResponse);
+  rpc PostTransfer(PostTransferRequest) returns (TransferResponse);
+  rpc VoidTransfer(VoidTransferRequest) returns (TransferResponse);
+  rpc GetTransfer(GetTransferRequest) returns (TransferResponse);
+  rpc ListTransfers(ListTransfersRequest) returns (ListTransfersResponse);
+  rpc GetLedgerStats(LedgerStatsRequest) returns (LedgerStatsResponse);
+}
+
+message CreateAccountRequest {
+  string account_id   = 1; // Unique account identifier (e.g. "trader:12345")
+  string account_type = 2; // "trader" | "revenue" | "bond" | "drawback"
+  string ledger       = 3; // "primary" | "bond" | "drawback"
+  string currency     = 4; // ISO 4217 currency code
+  string metadata     = 5; // JSON metadata
+}
+
+message GetAccountRequest {
+  string account_id = 1;
+}
+
+message AccountResponse {
+  string account_id   = 1;
+  string account_type = 2;
+  string status       = 3;
+  int64  ledger       = 4;
+}
+
+message GetBalanceRequest {
+  string account_id = 1;
+}
+
+message BalanceResponse {
+  string account_id       = 1;
+  int64  credits_pending  = 2;
+  int64  credits_posted   = 3;
+  int64  debits_pending   = 4;
+  int64  debits_posted    = 5;
+  int64  net_balance      = 6;
+}
+
+message CreateTransferRequest {
+  string idempotency_key   = 1; // Unique key for exactly-once semantics
+  string debit_account_id  = 2;
+  string credit_account_id = 3;
+  int64  amount            = 4; // In minor currency units (kobo, pesewas)
+  string transfer_type     = 5; // "duty_payment" | "bond_release" | "drawback" | "refund"
+  string reference         = 6; // Human-readable reference
+  string metadata          = 7; // JSON metadata (declaration ID, trader ID, etc.)
+}
+
+message PostTransferRequest {
+  string pending_transfer_id = 1;
+  int64  amount              = 2; // Can be <= original pending amount
+}
+
+message VoidTransferRequest {
+  string pending_transfer_id = 1;
+  string reason              = 2;
+}
+
+message TransferResponse {
+  string transfer_id = 1;
+  string status      = 2; // "pending" | "posted" | "voided" | "already_posted"
+}
+
+message GetTransferRequest {
+  string transfer_id = 1;
+}
+
+message ListTransfersRequest {
+  string account_id = 1;
+  int32  limit      = 2;
+  int32  offset     = 3;
+}
+
+message ListTransfersResponse {
+  repeated TransferResponse transfers = 1;
+  int32 total = 2;
+}
+
+message LedgerStatsRequest {}
+
+message LedgerStatsResponse {
+  int64 total_accounts   = 1;
+  int64 total_transfers  = 2;
+  int64 pending_transfers = 3;
+  int64 posted_transfers  = 4;
+  int64 voided_transfers  = 5;
+}
