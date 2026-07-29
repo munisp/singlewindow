@@ -111,6 +111,10 @@ import { ucrRouter } from "./routers/ucr";
 import { manifestsRouter } from "./routers/manifests";
 import { valuationRouter } from "./routers/valuation";
 import { crfRouter } from "./routers/crf";
+import { wtoValuationRouter } from "./routers/wtoValuation";
+import { advanceRulingRouter } from "./routers/advanceRuling";
+import { tradeFinanceRouter } from "./routers/tradeFinance";
+import { tradeAnalyticsRouter } from "./routers/tradeAnalytics";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
@@ -352,6 +356,10 @@ export const appRouter = router({
   manifests: manifestsRouter,
   valuation: valuationRouter,
   crf: crfRouter,
+  wtoValuation: wtoValuationRouter,
+  advanceRuling: advanceRulingRouter,
+  tradeFinance: tradeFinanceRouter,
+  tradeAnalytics: tradeAnalyticsRouter,
 });
 
 export type AppRouter = typeof appRouter;
