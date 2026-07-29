@@ -407,6 +407,76 @@ func (s *Server) addBL(c *gin.Context) {
 	c.JSON(http.StatusCreated, bl)
 }
 
+func (s *Server) amendManifest(c *gin.Context) {
+	var id int64
+	if _, err := fmt.Sscan(c.Param("id"), &id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid manifest ID"})
+		return
+	}
+	var req struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx := c.Request.Context()
+	// Record the amendment request
+	_, err := s.store.pool.Exec(ctx, `
+		INSERT INTO manifest_amendments (manifest_id, reason, changes, requested_by, status)
+		VALUES ($1, $2, '{}', 0, 'PENDING')
+	`, id, req.Reason)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// Update manifest status to AMENDED
+	_, err = s.store.pool.Exec(ctx, `
+		UPDATE manifests SET status = 'AMENDED', updated_at = NOW() WHERE id = $1
+	`, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	publishManifestEvent(ctx, "MANIFEST_AMENDED", map[string]interface{}{"manifestId": id, "reason": req.Reason})
+	c.JSON(http.StatusOK, gin.H{"success": true, "manifestId": id, "status": "AMENDED", "reason": req.Reason})
+}
+
+func (s *Server) getBLs(c *gin.Context) {
+	var manifestID int64
+	if _, err := fmt.Sscan(c.Param("id"), &manifestID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid manifest ID"})
+		return
+	}
+	rows, err := s.store.pool.Query(c.Request.Context(), `
+		SELECT id, manifest_id, bl_number, shipper, consignee, notify_party,
+		       description, hs_code, weight_kg, num_packages, container_nos, created_at
+		FROM bills_of_lading WHERE manifest_id = $1 ORDER BY created_at DESC
+	`, manifestID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	var bls []BillOfLading
+	for rows.Next() {
+		var bl BillOfLading
+		var containerJSON []byte
+		if err := rows.Scan(&bl.ID, &bl.ManifestID, &bl.BLNumber, &bl.Shipper, &bl.Consignee,
+			&bl.NotifyParty, &bl.Description, &bl.HSCode, &bl.WeightKg, &bl.NumPackages,
+			&containerJSON, &bl.CreatedAt); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		_ = json.Unmarshal(containerJSON, &bl.ContainerNos)
+		bls = append(bls, bl)
+	}
+	if bls == nil {
+		bls = []BillOfLading{}
+	}
+	c.JSON(http.StatusOK, gin.H{"bls": bls, "total": len(bls)})
+}
+
 func main() {
 	dbURL := getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
 	port := getEnv("PORT", "8098")
@@ -438,6 +508,8 @@ func main() {
 	api.POST("", srv.submitManifest)
 	api.GET("/:id", srv.getManifest)
 	api.POST("/:id/bl", srv.addBL)
+	api.GET("/:id/bls", srv.getBLs)
+	api.POST("/:id/amend", srv.amendManifest)
 
 	httpSrv := &http.Server{Addr: ":" + port, Handler: r}
 	quit := make(chan os.Signal, 1)

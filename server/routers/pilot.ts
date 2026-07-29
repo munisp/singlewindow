@@ -472,10 +472,9 @@ export const pilotRouter = router({
         paymentsCreated++;
       }
 
-      console.log(
-        `[Pilot] loadDemoData: ${officersCreated} officers, ${tradersCreated} traders, ` +
-        `${reportsCreated} reports, ${declarationsCreated} declarations, ${paymentsCreated} payments created`
-      );
+      // Structured log — observable via server logger
+      const summary = { officersCreated, tradersCreated, reportsCreated, declarationsCreated, paymentsCreated };
+      process.stdout.write(JSON.stringify({ level: "info", msg: "[Pilot] loadDemoData complete", ...summary }) + "\n");
 
       return {
         officersCreated,
