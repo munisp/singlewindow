@@ -12,6 +12,9 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { valuationReferences } from "../../drizzle/schema";
+import { eq, ilike, like, or, count, sql } from "drizzle-orm";
 
 export const valuationRouter = router({
   /**
@@ -24,13 +27,10 @@ export const valuationRouter = router({
       currency: z.string().length(3).default("USD"),
     }))
     .query(async ({ input }) => {
-      const db = await import("../db").then(m => m.getDb());
+      const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
-      const { valuationReferences } = await import("../../drizzle/schema");
-      const { eq, and, like } = await import("drizzle-orm");
-
-      // Search by exact HS code first, then by chapter
+      // Search by exact HS code first, then by chapter (first 4 digits)
       const chapter = input.hsCode.substring(0, 4);
       const rows = await db
         .select()
@@ -46,7 +46,7 @@ export const valuationRouter = router({
     }),
 
   /**
-   * search — Search valuation database by commodity description.
+   * search — Search valuation database by commodity description or HS code.
    */
   search: protectedProcedure
     .input(z.object({
@@ -54,11 +54,8 @@ export const valuationRouter = router({
       limit: z.number().int().min(1).max(50).default(20),
     }))
     .query(async ({ input }) => {
-      const db = await import("../db").then(m => m.getDb());
+      const db = await getDb();
       if (!db) return { results: [], total: 0 };
-
-      const { valuationReferences } = await import("../../drizzle/schema");
-      const { ilike, or } = await import("drizzle-orm");
 
       const rows = await db
         .select()
@@ -74,6 +71,7 @@ export const valuationRouter = router({
 
   /**
    * checkUndervaluation — Check if a declared value is below the reference price.
+   * Returns a flag and discrepancy percentage if the value is suspicious.
    */
   checkUndervaluation: protectedProcedure
     .input(z.object({
@@ -83,11 +81,8 @@ export const valuationRouter = router({
       currency: z.string().length(3).default("USD"),
     }))
     .query(async ({ input }) => {
-      const db = await import("../db").then(m => m.getDb());
+      const db = await getDb();
       if (!db) return { flagged: false, reason: "DB unavailable" };
-
-      const { valuationReferences } = await import("../../drizzle/schema");
-      const { like } = await import("drizzle-orm");
 
       const chapter = input.hsCode.substring(0, 4);
       const refs = await db
@@ -97,19 +92,21 @@ export const valuationRouter = router({
         .limit(5);
 
       if (refs.length === 0) {
-        return { flagged: false, reason: "No reference data available" };
+        return { flagged: false, reason: "No reference data available for this HS code" };
       }
 
       const avgRefPrice = refs.reduce((sum, r) => sum + Number(r.referencePrice || 0), 0) / refs.length;
       const threshold = avgRefPrice * 0.7; // Flag if declared value is < 70% of reference
 
       if (input.declaredValue < threshold) {
+        const discrepancyPct = ((avgRefPrice - input.declaredValue) / avgRefPrice * 100).toFixed(1);
         return {
           flagged: true,
-          reason: `Declared value ${input.declaredValue} ${input.currency} is significantly below reference price ${avgRefPrice.toFixed(2)} ${input.currency}`,
+          reason: `Declared value ${input.declaredValue} ${input.currency} is ${discrepancyPct}% below reference price ${avgRefPrice.toFixed(2)} ${input.currency}`,
           referencePrice: avgRefPrice,
           declaredValue: input.declaredValue,
-          discrepancyPct: ((avgRefPrice - input.declaredValue) / avgRefPrice * 100).toFixed(1),
+          discrepancyPct,
+          riskLevel: Number(discrepancyPct) > 50 ? "HIGH" : "MEDIUM",
         };
       }
 
@@ -117,6 +114,8 @@ export const valuationRouter = router({
         flagged: false,
         referencePrice: avgRefPrice,
         declaredValue: input.declaredValue,
+        discrepancyPct: "0.0",
+        riskLevel: "LOW",
       };
     }),
 
@@ -135,11 +134,8 @@ export const valuationRouter = router({
       validTo: z.string().datetime().optional(),
     }))
     .mutation(async ({ input }) => {
-      const db = await import("../db").then(m => m.getDb());
+      const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
-
-      const { valuationReferences } = await import("../../drizzle/schema");
-      const { sql } = await import("drizzle-orm");
 
       const [row] = await db
         .insert(valuationReferences)
@@ -154,10 +150,13 @@ export const valuationRouter = router({
           validTo: input.validTo ? new Date(input.validTo) : null,
         })
         .onConflictDoUpdate({
-          target: [valuationReferences.hsCode],
+          target: valuationReferences.hsCode,
           set: {
             description: input.description,
             referencePrice: String(input.referencePrice),
+            currency: input.currency,
+            unit: input.unit,
+            source: input.source ?? "NCS",
             updatedAt: new Date(),
           },
         })
@@ -175,18 +174,35 @@ export const valuationRouter = router({
       offset: z.number().int().min(0).default(0),
     }).optional())
     .query(async ({ input }) => {
-      const db = await import("../db").then(m => m.getDb());
+      const db = await getDb();
       if (!db) return { references: [], total: 0 };
-
-      const { valuationReferences } = await import("../../drizzle/schema");
-      const { count } = await import("drizzle-orm");
 
       const limit = input?.limit ?? 50;
       const offset = input?.offset ?? 0;
 
-      const rows = await db.select().from(valuationReferences).limit(limit).offset(offset);
-      const [{ total }] = await db.select({ total: count() }).from(valuationReferences);
+      const [rows, [{ total }]] = await Promise.all([
+        db.select().from(valuationReferences).limit(limit).offset(offset),
+        db.select({ total: count() }).from(valuationReferences),
+      ]);
 
       return { references: rows, total };
+    }),
+
+  /**
+   * deleteReference — Admin: Delete a valuation reference.
+   */
+  deleteReference: adminProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      const [deleted] = await db
+        .delete(valuationReferences)
+        .where(eq(valuationReferences.id, input.id))
+        .returning();
+
+      if (!deleted) throw new TRPCError({ code: "NOT_FOUND", message: "Reference not found" });
+      return { deleted: true, id: input.id };
     }),
 });

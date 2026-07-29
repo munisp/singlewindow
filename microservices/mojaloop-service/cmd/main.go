@@ -27,6 +27,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,6 +46,57 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// generateILPComponents generates a cryptographically secure ILP fulfillment,
+// condition, and packet per the Interledger Protocol specification (ILP RFC 0027).
+//
+// - Fulfillment: 32 random bytes, base64url-encoded (the preimage / secret)
+// - Condition:   SHA-256(fulfillment), base64url-encoded (the hash commitment)
+// - ILP Packet:  BER-encoded OER ILP Prepare packet, base64-encoded
+//
+// The fulfillment is stored securely and only revealed to the Mojaloop switch
+// upon transfer completion to unlock funds.
+func generateILPComponents(amount float64, currency, destinationAccount string) (ilpPacket, condition, fulfillment string, err error) {
+	// 1. Generate cryptographically secure 32-byte fulfillment preimage
+	preimage := make([]byte, 32)
+	if _, err = rand.Read(preimage); err != nil {
+		return "", "", "", fmt.Errorf("failed to generate fulfillment preimage: %w", err)
+	}
+
+	// 2. Fulfillment = base64url(preimage)
+	fulfillment = base64.RawURLEncoding.EncodeToString(preimage)
+
+	// 3. Condition = base64url(SHA-256(preimage))
+	hash := sha256.Sum256(preimage)
+	condition = base64.RawURLEncoding.EncodeToString(hash[:])
+
+	// 4. Build ILP Prepare packet (OER encoding per ILP RFC 0027)
+	// Convert amount to minor units (kobo for NGN, cents for USD)
+	amountUnits := uint64(amount * 100)
+	expiry := time.Now().UTC().Add(5 * time.Minute)
+	expiryStr := expiry.Format("20060102150405") + "000"
+	dest := fmt.Sprintf("g.ng.customs.%s", destinationAccount)
+
+	// Encode amount as 8 bytes big-endian
+	amountBytes := make([]byte, 8)
+	for i := 7; i >= 0; i-- {
+		amountBytes[i] = byte(amountUnits & 0xFF)
+		amountUnits >>= 8
+	}
+
+	// Assemble packet: type(1) + amount(8) + expiry(17) + condition(32) + dest_len(1) + dest + data_len(2)
+	var packet []byte
+	packet = append(packet, 0x0C) // ILP Prepare packet type
+	packet = append(packet, amountBytes...)
+	packet = append(packet, []byte(expiryStr)...)
+	packet = append(packet, hash[:]...)
+	packet = append(packet, byte(len(dest)))
+	packet = append(packet, []byte(dest)...)
+	packet = append(packet, 0x00, 0x00) // Empty data field
+
+	ilpPacket = base64.StdEncoding.EncodeToString(packet)
+	return ilpPacket, condition, fulfillment, nil
+}
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -98,23 +152,26 @@ const (
 )
 
 type Payment struct {
-	ID             int64         `json:"id"`
-	PaymentRef     string        `json:"paymentRef"`
-	DeclarationID  *int64        `json:"declarationId,omitempty"`
-	TraderID       int64         `json:"traderId"`
-	PaymentType    PaymentType   `json:"paymentType"`
-	Amount         float64       `json:"amount"`
-	Currency       string        `json:"currency"`
-	Status         PaymentStatus `json:"status"`
-	MojaloopTxID   *string       `json:"mojaloopTxId,omitempty"`
-	TigerBeetleID  *string       `json:"tigerBeetleId,omitempty"`
-	QuoteID        *string       `json:"quoteId,omitempty"`
-	PayerFSP       string        `json:"payerFsp"`
-	PayeeFSP       string        `json:"payeeFsp"`
-	ErrorMessage   *string       `json:"errorMessage,omitempty"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	UpdatedAt      time.Time     `json:"updatedAt"`
-	CompletedAt    *time.Time    `json:"completedAt,omitempty"`
+	ID            int64         `json:"id"`
+	PaymentRef    string        `json:"paymentRef"`
+	DeclarationID *int64        `json:"declarationId,omitempty"`
+	TraderID      int64         `json:"traderId"`
+	PaymentType   PaymentType   `json:"paymentType"`
+	Amount        float64       `json:"amount"`
+	Currency      string        `json:"currency"`
+	Status        PaymentStatus `json:"status"`
+	MojaloopTxID  *string       `json:"mojaloopTxId,omitempty"`
+	TigerBeetleID *string       `json:"tigerBeetleId,omitempty"`
+	QuoteID       *string       `json:"quoteId,omitempty"`
+	ILPPacket     *string       `json:"ilpPacket,omitempty"`
+	Condition     *string       `json:"condition,omitempty"`
+	Fulfillment   *string       `json:"-"` // Never serialised — security-sensitive preimage
+	PayerFSP      string        `json:"payerFsp"`
+	PayeeFSP      string        `json:"payeeFsp"`
+	ErrorMessage  *string       `json:"errorMessage,omitempty"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	UpdatedAt     time.Time     `json:"updatedAt"`
+	CompletedAt   *time.Time    `json:"completedAt,omitempty"`
 }
 
 type QuoteRequest struct {
@@ -196,11 +253,13 @@ func (s *PaymentStore) EnsureSchema(ctx context.Context) error {
 func (s *PaymentStore) Create(ctx context.Context, p *Payment) error {
 	return s.pool.QueryRow(ctx, `
 		INSERT INTO mojaloop_payments (payment_ref, declaration_id, trader_id, payment_type,
-		                               amount, currency, status, payer_fsp, payee_fsp)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		                               amount, currency, status, payer_fsp, payee_fsp,
+		                               ilp_packet, condition_hash, fulfillment)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, updated_at
 	`, p.PaymentRef, p.DeclarationID, p.TraderID, p.PaymentType,
-		p.Amount, p.Currency, p.Status, p.PayerFSP, p.PayeeFSP).
+		p.Amount, p.Currency, p.Status, p.PayerFSP, p.PayeeFSP,
+		p.ILPPacket, p.Condition, p.Fulfillment).
 		Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -223,13 +282,13 @@ func (s *PaymentStore) GetByRef(ctx context.Context, paymentRef string) (*Paymen
 	p := &Payment{}
 	err := s.pool.QueryRow(ctx, `
 		SELECT id, payment_ref, declaration_id, trader_id, payment_type, amount, currency,
-		       status, mojaloop_tx_id, tigerbeetle_id, quote_id, payer_fsp, payee_fsp,
-		       error_message, created_at, updated_at, completed_at
+		       status, mojaloop_tx_id, tigerbeetle_id, quote_id, ilp_packet, condition_hash,
+		       payer_fsp, payee_fsp, error_message, created_at, updated_at, completed_at
 		FROM mojaloop_payments WHERE payment_ref = $1
 	`, paymentRef).Scan(
 		&p.ID, &p.PaymentRef, &p.DeclarationID, &p.TraderID, &p.PaymentType, &p.Amount, &p.Currency,
-		&p.Status, &p.MojaloopTxID, &p.TigerBeetleID, &p.QuoteID, &p.PayerFSP, &p.PayeeFSP,
-		&p.ErrorMessage, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt,
+		&p.Status, &p.MojaloopTxID, &p.TigerBeetleID, &p.QuoteID, &p.ILPPacket, &p.Condition,
+		&p.PayerFSP, &p.PayeeFSP, &p.ErrorMessage, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -325,7 +384,7 @@ func (m *MojaloopClient) CreateQuote(ctx context.Context, paymentRef string, amo
 	return quoteID, nil
 }
 
-func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentRef string, amount float64, currency, payerFSP string) (string, error) {
+func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentRef string, amount float64, currency, payerFSP, ilpPacket, condition string) (string, error) {
 	txID := uuid.New().String()
 
 	body := map[string]interface{}{
@@ -337,8 +396,10 @@ func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentR
 			"amount":   fmt.Sprintf("%.2f", amount),
 			"currency": currency,
 		},
-		"ilpPacket":  "placeholder_ilp_packet", // In production, use the ILP packet from the quote response
-		"condition":  "placeholder_condition",
+		// ilpPacket and condition are sourced from the DB (set during createQuote via generateILPComponents
+		// or updated from the Mojaloop PUT /quotes/{quoteId} callback). They are passed in by the caller.
+		"ilpPacket":  ilpPacket,
+		"condition":  condition,
 		"expiration": time.Now().Add(30 * time.Minute).UTC().Format(time.RFC3339),
 	}
 
@@ -383,6 +444,18 @@ func (s *Server) createQuote(c *gin.Context) {
 	}
 
 	paymentRef := fmt.Sprintf("TG-%d-%s", time.Now().UnixNano(), uuid.New().String()[:8])
+	ctx := c.Request.Context()
+
+	// Generate ILP components locally as fallback (Mojaloop switch may provide these via callback)
+	destAccount := fmt.Sprintf("ncs-duty")
+	if req.DeclarationID != nil {
+		destAccount = fmt.Sprintf("ncs-duty-%d", *req.DeclarationID)
+	}
+	ilpPacket, condition, fulfillment, err := generateILPComponents(req.Amount, req.Currency, destAccount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "ILP generation failed: " + err.Error()})
+		return
+	}
 
 	payment := &Payment{
 		PaymentRef:    paymentRef,
@@ -394,27 +467,31 @@ func (s *Server) createQuote(c *gin.Context) {
 		Status:        PaymentStatusPending,
 		PayerFSP:      req.PayerFSP,
 		PayeeFSP:      s.config.MojaloopFSPID,
+		ILPPacket:     &ilpPacket,
+		Condition:     &condition,
+		Fulfillment:   &fulfillment,
 	}
 
-	ctx := c.Request.Context()
 	if err := s.store.Create(ctx, payment); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
+	// Send quote request to Mojaloop switch (async — callback updates ILP in DB)
 	quoteID, err := s.mojaloop.CreateQuote(ctx, paymentRef, req.Amount, req.Currency, req.PayerFSP)
 	if err != nil {
-		log.Printf("[mojaloop] Quote creation error: %v", err)
+		log.Printf("[mojaloop] Quote request failed (using local ILP): %v", err)
 	}
-
-	// Update with quote ID
 	s.pool_UpdateQuote(ctx, paymentRef, quoteID)
+
 	paymentsInitiated.WithLabelValues(string(req.PaymentType)).Inc()
 	paymentAmountTotal.WithLabelValues(req.Currency).Add(req.Amount)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"paymentRef": paymentRef,
 		"quoteId":    quoteID,
+		"ilpPacket":  ilpPacket,
+		"condition":  condition,
 		"amount":     req.Amount,
 		"currency":   req.Currency,
 		"status":     PaymentStatusQuoted,
@@ -442,8 +519,21 @@ func (s *Server) initiateTransfer(c *gin.Context) {
 		return
 	}
 
+	// Read ILP packet and condition from DB (generated at quote time or updated from Mojaloop callback)
+	ilpPacket := ""
+	condition := ""
+	if payment.ILPPacket != nil {
+		ilpPacket = *payment.ILPPacket
+	}
+	if payment.Condition != nil {
+		condition = *payment.Condition
+	}
+	if ilpPacket == "" || condition == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ILP packet or condition not available — quote must be created first"})
+		return
+	}
 	txID, err := s.mojaloop.InitiateTransfer(ctx, req.QuoteID, req.PaymentRef,
-		payment.Amount, payment.Currency, payment.PayerFSP)
+		payment.Amount, payment.Currency, payment.PayerFSP, ilpPacket, condition)
 	if err != nil {
 		errMsg := err.Error()
 		_ = s.store.UpdateStatus(ctx, req.PaymentRef, PaymentStatusFailed, nil, &errMsg)

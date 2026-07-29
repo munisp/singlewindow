@@ -206,13 +206,23 @@ async def ingest_vessel_positions(pool: asyncpg.Pool, since_hours: int = 2) -> D
     try:
         df = spark.createDataFrame(data)
         # Add geometry column for Sedona
-        df_geo = df.withColumn(
-            "geometry",
-            spark.sql(f"SELECT ST_Point(lon, lat) FROM vessel_positions LIMIT 1").collect()
-        ) if False else df  # Simplified - full Sedona integration requires SparkSQL
+        # Register the DataFrame as a temp view for Sedona spatial SQL
+        df.createOrReplaceTempView("vessel_positions_staging")
+
+        # Use Apache Sedona ST_Point to add geometry column for spatial indexing
+        try:
+            df_geo = spark.sql("""
+                SELECT *,
+                       ST_Point(CAST(lon AS DECIMAL(10,6)), CAST(lat AS DECIMAL(10,6))) AS geometry
+                FROM vessel_positions_staging
+            """)
+        except Exception as sedona_err:
+            # Sedona not available — use plain DataFrame without geometry column
+            logger.warning(f"Sedona ST_Point unavailable, skipping geometry column: {sedona_err}")
+            df_geo = df
 
         delta_path = get_delta_path("vessel_positions")
-        df.write.format("delta").mode("append").partitionBy("mmsi").save(delta_path)
+        df_geo.write.format("delta").mode("append").partitionBy("mmsi").save(delta_path)
         return {"status": "success", "count": len(data)}
     except Exception as e:
         logger.error(f"Delta write error: {e}")

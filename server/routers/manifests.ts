@@ -4,11 +4,15 @@
  * TradeGateway NGSWTP — Handles pre-arrival manifest submission,
  * house manifest creation, and Bill of Lading management.
  *
- * Delegates to the Go manifest-service microservice.
+ * The manifest-service Go microservice handles creation and BL management.
+ * The list/search procedures query PostgreSQL directly via Drizzle for performance.
  */
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { manifests, billsOfLading } from "../../drizzle/schema";
+import { desc, eq, and, count } from "drizzle-orm";
 
 const MANIFEST_SERVICE_URL = process.env.MANIFEST_SERVICE_URL ?? "http://manifest-service:8098";
 
@@ -32,6 +36,7 @@ async function callManifestService(path: string, method = "GET", body?: unknown)
 export const manifestsRouter = router({
   /**
    * submit — Submit a master manifest (shipping lines/airlines).
+   * Delegates to the Go manifest-service for UCR generation and Kafka publishing.
    */
   submit: protectedProcedure
     .input(z.object({
@@ -60,7 +65,7 @@ export const manifestsRouter = router({
     }),
 
   /**
-   * addBillOfLading — Add or update a Bill of Lading within a manifest.
+   * addBillOfLading — Add a Bill of Lading to a manifest.
    */
   addBillOfLading: protectedProcedure
     .input(z.object({
@@ -82,19 +87,93 @@ export const manifestsRouter = router({
 
   /**
    * list — List manifests with optional filters.
+   * Queries PostgreSQL directly for performance.
    */
   list: protectedProcedure
     .input(z.object({
       status: z.enum(["DRAFT", "SUBMITTED", "ACCEPTED", "AMENDED", "REJECTED"]).optional(),
       manifestType: z.enum(["SEA", "AIR"]).optional(),
       limit: z.number().int().min(1).max(100).default(20),
+      offset: z.number().int().min(0).default(0),
     }).optional())
-    .query(async ({ ctx }) => {
-      const db = await import("../db").then(m => m.getDb());
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
       if (!db) return { manifests: [], total: 0 };
-      const { manifests } = await import("../../drizzle/schema");
-      const { desc } = await import("drizzle-orm");
-      const rows = await db.select().from(manifests).orderBy(desc(manifests.createdAt)).limit(50);
-      return { manifests: rows, total: rows.length };
+
+      const limit = input?.limit ?? 20;
+      const offset = input?.offset ?? 0;
+
+      const conditions = [eq(manifests.submittedBy, ctx.user.id)];
+      if (input?.status) conditions.push(eq(manifests.status, input.status));
+      if (input?.manifestType) conditions.push(eq(manifests.manifestType, input.manifestType));
+
+      const [rows, [{ total }]] = await Promise.all([
+        db.select().from(manifests)
+          .where(and(...conditions))
+          .orderBy(desc(manifests.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db.select({ total: count() }).from(manifests).where(and(...conditions)),
+      ]);
+
+      return { manifests: rows, total };
+    }),
+
+  /**
+   * listAll — Admin: List all manifests.
+   */
+  listAll: adminProcedure
+    .input(z.object({
+      status: z.string().optional(),
+      limit: z.number().int().min(1).max(500).default(100),
+      offset: z.number().int().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { manifests: [], total: 0 };
+
+      const limit = input?.limit ?? 100;
+      const offset = input?.offset ?? 0;
+
+      const [rows, [{ total }]] = await Promise.all([
+        db.select().from(manifests)
+          .orderBy(desc(manifests.createdAt))
+          .limit(limit)
+          .offset(offset),
+        db.select({ total: count() }).from(manifests),
+      ]);
+
+      return { manifests: rows, total };
+    }),
+
+  /**
+   * getBLs — Get all Bills of Lading for a manifest.
+   */
+  getBLs: protectedProcedure
+    .input(z.object({ manifestId: z.number().int().positive() }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return { bls: [], total: 0 };
+
+      const rows = await db.select()
+        .from(billsOfLading)
+        .where(eq(billsOfLading.manifestId, input.manifestId))
+        .orderBy(desc(billsOfLading.createdAt));
+
+      return { bls: rows, total: rows.length };
+    }),
+
+  /**
+   * amend — Amend a submitted manifest.
+   */
+  amend: protectedProcedure
+    .input(z.object({
+      id: z.number().int().positive(),
+      reason: z.string().min(1).max(512),
+    }))
+    .mutation(async ({ input }) => {
+      return callManifestService(`/api/manifests/${input.id}/amend`, "POST", {
+        reason: input.reason,
+      });
     }),
 });
