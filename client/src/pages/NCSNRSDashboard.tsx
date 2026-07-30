@@ -1,16 +1,33 @@
 import React, { useState } from "react";
 import { trpc } from "../utils/trpc";
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell,
+  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-
-const COLORS = ["#22c55e", "#f59e0b", "#ef4444", "#3b82f6", "#8b5cf6"];
 
 const formatNGN = (v: number) =>
   v >= 1_000_000_000 ? `₦${(v / 1_000_000_000).toFixed(2)}B`
   : v >= 1_000_000    ? `₦${(v / 1_000_000).toFixed(1)}M`
   : `₦${v.toLocaleString()}`;
+
+// Static Tailwind classes (no dynamic interpolation — prevents purge issues)
+const SEVERITY_CLASSES: Record<string, string> = {
+  HIGH:   "text-red-600 font-semibold",
+  MEDIUM: "text-yellow-600 font-semibold",
+  LOW:    "text-gray-500",
+};
+const EXCEPTION_BADGE: Record<string, string> = {
+  MISSING_TIN:    "bg-red-100 text-red-700",
+  TIN_MISMATCH:   "bg-yellow-100 text-yellow-700",
+  LATE_VISIBILITY:"bg-orange-100 text-orange-700",
+  NRS_PUSH_FAILED:"bg-purple-100 text-purple-700",
+  VAT_CALC_ERROR: "bg-red-100 text-red-800",
+};
+const KPI_BORDER: Record<string, string> = {
+  blue:   "border-l-4 border-blue-500",
+  green:  "border-l-4 border-green-500",
+  purple: "border-l-4 border-purple-500",
+  red:    "border-l-4 border-red-500",
+};
 
 export default function NCSNRSDashboard() {
   const now = new Date();
@@ -21,6 +38,8 @@ export default function NCSNRSDashboard() {
   const [tinSearchType, setTinSearchType] = useState<"TIN" | "CAC" | "NIN" | "NAME">("NAME");
   const [resolveId, setResolveId] = useState<string | null>(null);
   const [resolveNote, setResolveNote] = useState("");
+  const [auditDeclId, setAuditDeclId] = useState("");
+  const [auditSearched, setAuditSearched] = useState("");
 
   const reconciliation = trpc.ncsNrs.getReconciliation.useQuery({ period });
   const pipelineStats = trpc.ncsNrs.getPipelineStats.useQuery({ period });
@@ -30,21 +49,34 @@ export default function NCSNRSDashboard() {
     { query: tinQuery, searchType: tinSearchType },
     { enabled: tinQuery.length >= 3 }
   );
+  // Audit trail — only fires when user explicitly searches
+  const auditTrail = trpc.ncsNrs.getAuditTrail.useQuery(
+    { declarationId: auditSearched },
+    { enabled: auditSearched.length > 0 }
+  );
   const resolveException = trpc.ncsNrs.resolveException.useMutation({
     onSuccess: () => { setResolveId(null); setResolveNote(""); exceptions.refetch(); },
   });
 
-  const stats = pipelineStats.data as any ?? {};
-  const recon = reconciliation.data as any ?? {};
+  const stats = (pipelineStats.data as any) ?? {};
+  const totalDecl = Number(stats.total_declarations ?? 0);
+  const tinMatched = Number(stats.tin_matched ?? 0);
+  const tinMatchRate = totalDecl > 0 ? ((tinMatched / totalDecl) * 100).toFixed(1) : "0.0";
 
   const matchPieData = [
-    { name: "TIN Matched", value: Number(stats.tin_matched ?? 0) },
-    { name: "No Match", value: Number(stats.tin_unmatched ?? 0) },
+    { name: "TIN Matched", value: tinMatched },
+    { name: "No Match",    value: Number(stats.tin_unmatched ?? 0) },
   ];
-
   const slaData = [
     { name: "Within SLA (≤15 min)", value: Number(stats.prefills_sent ?? 0) - Number(stats.sla_breaches ?? 0) },
     { name: "SLA Breached (>15 min)", value: Number(stats.sla_breaches ?? 0) },
+  ];
+
+  const kpis = [
+    { label: "Declarations Ingested", value: totalDecl,                                 colorKey: "blue"   },
+    { label: "Import VAT Computed",   value: formatNGN(Number(stats.total_vat_ngn ?? 0)), colorKey: "green"  },
+    { label: "TIN Match Rate",        value: `${tinMatchRate}%`,                          colorKey: "purple" },
+    { label: "SLA Breaches (>15 min)",value: Number(stats.sla_breaches ?? 0),             colorKey: "red"    },
   ];
 
   return (
@@ -73,15 +105,10 @@ export default function NCSNRSDashboard() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {[
-          { label: "Declarations Ingested", value: stats.total_declarations ?? 0, color: "blue" },
-          { label: "Import VAT Computed", value: formatNGN(Number(stats.total_vat_ngn ?? 0)), color: "green" },
-          { label: "TIN Match Rate", value: `${((Number(stats.tin_matched ?? 0) / Math.max(Number(stats.total_declarations ?? 1), 1)) * 100).toFixed(1)}%`, color: "purple" },
-          { label: "SLA Breaches (>15 min)", value: stats.sla_breaches ?? 0, color: "red" },
-        ].map(kpi => (
-          <div key={kpi.label} className={`bg-white rounded-lg shadow p-4 border-l-4 border-${kpi.color}-500`}>
+        {kpis.map(kpi => (
+          <div key={kpi.label} className={`bg-white rounded-lg shadow p-4 ${KPI_BORDER[kpi.colorKey]}`}>
             <p className="text-xs text-gray-500">{kpi.label}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{kpi.value}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{String(kpi.value)}</p>
           </div>
         ))}
       </div>
@@ -89,14 +116,14 @@ export default function NCSNRSDashboard() {
       {/* Secondary KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: "Landing Cost Total", value: formatNGN(Number(stats.total_landing_cost_ngn ?? 0)) },
-          { label: "NRS Pre-fills Sent", value: stats.prefills_sent ?? 0 },
+          { label: "Landing Cost Total",  value: formatNGN(Number(stats.total_landing_cost_ngn ?? 0)) },
+          { label: "NRS Pre-fills Sent",  value: stats.prefills_sent ?? 0 },
           { label: "Avg Visibility Time", value: `${Number(stats.avg_visibility_min ?? 0).toFixed(1)} min` },
-          { label: "Open Exceptions", value: recon.exceptions_open ?? 0 },
+          { label: "Open Exceptions",     value: (reconciliation.data as any)?.exceptions_open ?? 0 },
         ].map(kpi => (
           <div key={kpi.label} className="bg-white rounded-lg shadow p-4">
             <p className="text-xs text-gray-500">{kpi.label}</p>
-            <p className="text-xl font-semibold text-gray-800 mt-1">{kpi.value}</p>
+            <p className="text-xl font-semibold text-gray-800 mt-1">{String(kpi.value)}</p>
           </div>
         ))}
       </div>
@@ -108,7 +135,9 @@ export default function NCSNRSDashboard() {
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
-              activeTab === tab ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
+              activeTab === tab
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
             {tab === "tin" ? "TIN Registry" : tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -116,16 +145,16 @@ export default function NCSNRSDashboard() {
         ))}
       </div>
 
-      {/* Overview Tab */}
+      {/* ── Overview Tab ── */}
       {activeTab === "overview" && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* TIN Match Pie */}
           <div className="bg-white rounded-lg shadow p-4">
             <h3 className="font-semibold text-gray-700 mb-3">Importer TIN Match Status</h3>
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={matchPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                  {matchPieData.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
+                  <Cell fill="#22c55e" />
+                  <Cell fill="#ef4444" />
                 </Pie>
                 <Tooltip />
                 <Legend />
@@ -133,13 +162,13 @@ export default function NCSNRSDashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* SLA Compliance Pie */}
           <div className="bg-white rounded-lg shadow p-4">
             <h3 className="font-semibold text-gray-700 mb-3">VAT Visibility SLA (≤15 min target)</h3>
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
                 <Pie data={slaData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
-                  {slaData.map((_, i) => <Cell key={i} fill={i === 0 ? "#22c55e" : "#ef4444"} />)}
+                  <Cell fill="#22c55e" />
+                  <Cell fill="#ef4444" />
                 </Pie>
                 <Tooltip />
                 <Legend />
@@ -147,32 +176,32 @@ export default function NCSNRSDashboard() {
             </ResponsiveContainer>
           </div>
 
-          {/* Pipeline Flow Summary */}
+          {/* Pipeline Flow */}
           <div className="bg-white rounded-lg shadow p-4 md:col-span-2">
             <h3 className="font-semibold text-gray-700 mb-3">NCS→NRS Pipeline Flow</h3>
-            <div className="flex items-center justify-between text-center text-sm">
+            <div className="flex items-center justify-between text-center text-sm flex-wrap gap-2">
               {[
-                { label: "Declarations Ingested", value: stats.total_declarations ?? 0, color: "bg-blue-100 text-blue-800" },
+                { label: "Declarations Ingested",  value: stats.total_declarations ?? 0,  cls: "bg-blue-100 text-blue-800"   },
                 { label: "→" },
-                { label: "Landing Costs Computed", value: stats.landing_costs_computed ?? 0, color: "bg-purple-100 text-purple-800" },
+                { label: "Landing Costs Computed", value: stats.landing_costs_computed ?? 0, cls: "bg-purple-100 text-purple-800" },
                 { label: "→" },
-                { label: "TIN Matched", value: stats.tin_matched ?? 0, color: "bg-green-100 text-green-800" },
+                { label: "TIN Matched",            value: stats.tin_matched ?? 0,           cls: "bg-green-100 text-green-800"  },
                 { label: "→" },
-                { label: "NRS Pre-fills Sent", value: stats.prefills_sent ?? 0, color: "bg-yellow-100 text-yellow-800" },
-              ].map((step, i) => (
-                "label" in step && "value" in step ? (
-                  <div key={i} className={`rounded-lg px-4 py-3 ${step.color}`}>
-                    <div className="text-2xl font-bold">{step.value}</div>
+                { label: "NRS Pre-fills Sent",     value: stats.prefills_sent ?? 0,         cls: "bg-yellow-100 text-yellow-800"},
+              ].map((step, i) =>
+                "cls" in step ? (
+                  <div key={i} className={`rounded-lg px-4 py-3 ${step.cls}`}>
+                    <div className="text-2xl font-bold">{String(step.value)}</div>
                     <div className="text-xs mt-1">{step.label}</div>
                   </div>
                 ) : (
-                  <div key={i} className="text-gray-400 text-xl">→</div>
+                  <div key={i} className="text-gray-400 text-xl">{step.label}</div>
                 )
-              ))}
+              )}
             </div>
           </div>
 
-          {/* Data Model Summary */}
+          {/* Data Model */}
           <div className="bg-white rounded-lg shadow p-4 md:col-span-2">
             <h3 className="font-semibold text-gray-700 mb-3">NCS–NRS Data Model (NSW Phase 1 ICD)</h3>
             <div className="overflow-x-auto">
@@ -217,7 +246,7 @@ export default function NCSNRSDashboard() {
         </div>
       )}
 
-      {/* Exceptions Tab */}
+      {/* ── Exceptions Tab ── */}
       {activeTab === "exceptions" && (
         <div className="bg-white rounded-lg shadow p-4">
           <div className="flex items-center justify-between mb-4">
@@ -252,42 +281,40 @@ export default function NCSNRSDashboard() {
                   <tr key={ex.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        ex.exception_type === "MISSING_TIN" ? "bg-red-100 text-red-700"
-                        : ex.exception_type === "TIN_MISMATCH" ? "bg-yellow-100 text-yellow-700"
-                        : ex.exception_type === "LATE_VISIBILITY" ? "bg-orange-100 text-orange-700"
-                        : "bg-gray-100 text-gray-700"
+                        EXCEPTION_BADGE[ex.exception_type] ?? "bg-gray-100 text-gray-700"
                       }`}>
                         {ex.exception_type}
                       </span>
                     </td>
                     <td className="px-3 py-2">
-                      <span className={`text-xs font-semibold ${
-                        ex.severity === "HIGH" ? "text-red-600"
-                        : ex.severity === "MEDIUM" ? "text-yellow-600"
-                        : "text-gray-500"
-                      }`}>{ex.severity}</span>
+                      <span className={`text-xs ${SEVERITY_CLASSES[ex.severity] ?? "text-gray-500"}`}>
+                        {ex.severity}
+                      </span>
                     </td>
                     <td className="px-3 py-2 text-gray-700 max-w-xs truncate">{ex.description}</td>
                     <td className="px-3 py-2 text-gray-500 text-xs">
                       {new Date(ex.created_at).toLocaleString()}
                     </td>
                     <td className="px-3 py-2">
-                      {ex.status === "OPEN" && (
+                      {ex.status === "OPEN" ? (
                         <button
                           onClick={() => setResolveId(ex.id)}
                           className="text-xs text-blue-600 hover:underline"
                         >
                           Resolve
                         </button>
-                      )}
-                      {ex.status === "RESOLVED" && (
+                      ) : (
                         <span className="text-xs text-green-600">✓ Resolved</span>
                       )}
                     </td>
                   </tr>
                 ))}
                 {((exceptions.data as any)?.exceptions ?? []).length === 0 && (
-                  <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-400">No {exceptionStatus.toLowerCase()} exceptions</td></tr>
+                  <tr>
+                    <td colSpan={5} className="px-3 py-8 text-center text-gray-400">
+                      No {exceptionStatus.toLowerCase()} exceptions
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -305,9 +332,17 @@ export default function NCSNRSDashboard() {
                   className="w-full border rounded p-2 text-sm h-24 mb-3"
                 />
                 <div className="flex gap-2 justify-end">
-                  <button onClick={() => setResolveId(null)} className="px-4 py-2 text-sm text-gray-600 border rounded">Cancel</button>
                   <button
-                    onClick={() => resolveException.mutate({ exceptionId: resolveId, resolutionNote: resolveNote })}
+                    onClick={() => setResolveId(null)}
+                    className="px-4 py-2 text-sm text-gray-600 border rounded"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => resolveException.mutate({
+                      exceptionId: resolveId,
+                      resolutionNote: resolveNote,
+                    })}
                     disabled={!resolveNote.trim() || resolveException.isPending}
                     className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-50"
                   >
@@ -320,7 +355,90 @@ export default function NCSNRSDashboard() {
         </div>
       )}
 
-      {/* TIN Registry Tab */}
+      {/* ── Audit Trail Tab (fully wired to tRPC) ── */}
+      {activeTab === "audit" && (
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold text-gray-700 mb-2">Reconciliation Audit Trail</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            100% audit trail of all NCS→NRS pipeline events per NSW Phase 1 ICD.
+            Enter a declaration number or UUID to view its complete event history.
+          </p>
+          <div className="flex gap-2 mb-6">
+            <input
+              type="text"
+              value={auditDeclId}
+              onChange={e => setAuditDeclId(e.target.value)}
+              placeholder="Declaration number (e.g. NCS-2026-001) or UUID..."
+              className="flex-1 border rounded px-3 py-2 text-sm"
+              onKeyDown={e => { if (e.key === "Enter") setAuditSearched(auditDeclId); }}
+            />
+            <button
+              onClick={() => setAuditSearched(auditDeclId)}
+              disabled={!auditDeclId.trim()}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-50"
+            >
+              Search
+            </button>
+          </div>
+
+          {auditTrail.isFetching && (
+            <div className="text-center text-gray-400 py-8">Loading audit trail...</div>
+          )}
+
+          {auditSearched && !auditTrail.isFetching && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="px-3 py-2 text-left">Timestamp</th>
+                    <th className="px-3 py-2 text-left">Event Type</th>
+                    <th className="px-3 py-2 text-left">Declaration</th>
+                    <th className="px-3 py-2 text-left">Importer</th>
+                    <th className="px-3 py-2 text-left">Event Data (preview)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {((auditTrail.data as any[]) ?? []).map((row: any, i: number) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">
+                        {new Date(row.created_at).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          row.event_type === "DECLARATION_INGESTED"   ? "bg-blue-100 text-blue-700"
+                          : row.event_type === "LANDING_COST_COMPUTED" ? "bg-purple-100 text-purple-700"
+                          : row.event_type === "TIN_MATCHED"           ? "bg-green-100 text-green-700"
+                          : row.event_type === "NRS_PREFILL_GENERATED" ? "bg-yellow-100 text-yellow-700"
+                          : row.event_type === "NRS_PREFILL_SENT"      ? "bg-teal-100 text-teal-700"
+                          : "bg-gray-100 text-gray-700"
+                        }`}>
+                          {row.event_type}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs font-mono">{row.declaration_number ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs">{row.importer_name ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs text-gray-500 max-w-xs truncate">
+                        {typeof row.event_data === "object"
+                          ? JSON.stringify(row.event_data).slice(0, 120) + "…"
+                          : String(row.event_data ?? "").slice(0, 120)}
+                      </td>
+                    </tr>
+                  ))}
+                  {((auditTrail.data as any[]) ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-8 text-center text-gray-400">
+                        No audit events found for "{auditSearched}"
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TIN Registry Tab ── */}
       {activeTab === "tin" && (
         <div className="bg-white rounded-lg shadow p-4">
           <h3 className="font-semibold text-gray-700 mb-4">FIRS TIN Registry Search</h3>
@@ -372,47 +490,19 @@ export default function NCSNRSDashboard() {
                     </tr>
                   ))}
                   {tinSearch.isFetching && (
-                    <tr><td colSpan={6} className="px-3 py-4 text-center text-gray-400">Searching...</td></tr>
+                    <tr>
+                      <td colSpan={6} className="px-3 py-4 text-center text-gray-400">Searching...</td>
+                    </tr>
                   )}
                   {!tinSearch.isFetching && ((tinSearch.data as any[]) ?? []).length === 0 && (
-                    <tr><td colSpan={6} className="px-3 py-4 text-center text-gray-400">No results found</td></tr>
+                    <tr>
+                      <td colSpan={6} className="px-3 py-4 text-center text-gray-400">No results found</td>
+                    </tr>
                   )}
                 </tbody>
               </table>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Audit Trail Tab */}
-      {activeTab === "audit" && (
-        <div className="bg-white rounded-lg shadow p-4">
-          <h3 className="font-semibold text-gray-700 mb-4">Reconciliation Audit Trail</h3>
-          <p className="text-sm text-gray-500 mb-4">
-            100% audit trail of all NCS→NRS pipeline events per NSW Phase 1 ICD requirement.
-            Enter a declaration number or ID to view its complete event history.
-          </p>
-          <div className="flex gap-2 mb-4">
-            <input
-              type="text"
-              placeholder="Declaration number or ID..."
-              className="flex-1 border rounded px-3 py-2 text-sm"
-              id="audit-decl-input"
-            />
-            <button
-              onClick={() => {
-                const val = (document.getElementById("audit-decl-input") as HTMLInputElement)?.value;
-                if (val) window.location.hash = `audit-${val}`;
-              }}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded"
-            >
-              Search
-            </button>
-          </div>
-          <div className="text-sm text-gray-400 italic">
-            Audit events include: DECLARATION_INGESTED, LANDING_COST_COMPUTED, TIN_MATCHED,
-            NRS_PREFILL_GENERATED, NRS_PREFILL_SENT, and exception events.
-          </div>
         </div>
       )}
     </div>

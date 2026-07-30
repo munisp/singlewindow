@@ -236,16 +236,6 @@ services:
       - ucr-service
     network_mode: "service:ucr-service"
 
-volumes:
-  geolibre_cache:
-  spark_data:
-  opensearch_data:
-
-networks:
-  tradegateway:
-    external: true
-    name: tradegateway_default
-
   wto-valuation-engine:
     build: ../services/rust/wto-valuation-engine
     ports: ["8095:8095"]
@@ -253,6 +243,7 @@ networks:
       DATABASE_URL: ${DATABASE_URL}
       CBN_USD_NGN_RATE: ${CBN_USD_NGN_RATE:-1580.0}
     depends_on: [postgres]
+    networks: [tradegateway]
     restart: unless-stopped
 
   aeo-mra-service:
@@ -261,6 +252,7 @@ networks:
     environment:
       DATABASE_URL: ${DATABASE_URL}
     depends_on: [postgres]
+    networks: [tradegateway]
     restart: unless-stopped
 
   trade-finance-service:
@@ -269,6 +261,7 @@ networks:
     environment:
       DATABASE_URL: ${DATABASE_URL}
     depends_on: [postgres]
+    networks: [tradegateway]
     restart: unless-stopped
 
   digital-trade-docs:
@@ -277,6 +270,7 @@ networks:
     environment:
       DATABASE_URL: ${DATABASE_URL}
     depends_on: [postgres]
+    networks: [tradegateway]
     restart: unless-stopped
 
   compliance-screening:
@@ -285,6 +279,7 @@ networks:
     environment:
       DATABASE_URL: ${DATABASE_URL}
     depends_on: [postgres]
+    networks: [tradegateway]
     restart: unless-stopped
 
   ncs-nrs-gateway:
@@ -296,4 +291,16 @@ networks:
       NCS_NRS_WEBHOOK_SECRET: ${NCS_NRS_WEBHOOK_SECRET:-change-me-in-production}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
     depends_on: [postgres, kafka]
+    networks: [tradegateway]
     restart: unless-stopped
+
+
+volumes:
+  geolibre_cache:
+  spark_data:
+  opensearch_data:
+
+networks:
+  tradegateway:
+    external: true
+    name: tradegateway_default

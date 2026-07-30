@@ -551,7 +551,7 @@ func (s *Server) pushToNRS(prefill NRSAssessmentPrefill) error {
 	mac.Write(payload)
 	sig := hex.EncodeToString(mac.Sum(nil))
 
-	req, err := http.NewRequest("POST", s.nrsWebhookURL+"/v1/ncs/vat-prefill", strings.NewReader(string(payload)))
+	req, err := http.NewRequest("POST", s.nrsWebhookURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return err
 	}
@@ -1108,12 +1108,19 @@ func parseEDIMessage(messageType, messageID, rawEDI string) NCSDeclaration {
 					}
 				}
 			}
-		case "LOC": // Location — port of entry
-			if len(parts) > 1 && parts[1] == "9" {
-				if len(parts) > 2 {
+		case "LOC": // Location — port of entry (qualifier 9) or country of origin (qualifier 35)
+			if len(parts) > 1 {
+				qualifier := parts[1]
+				if qualifier == "9" && len(parts) > 2 {
 					locParts := strings.Split(parts[2], ":")
 					if len(locParts) > 0 {
 						decl.PortOfEntry = strings.TrimSpace(locParts[0])
+					}
+				} else if qualifier == "35" && len(parts) > 2 {
+					// LOC+35 = country of origin
+					locParts := strings.Split(parts[2], ":")
+					if len(locParts) > 0 {
+						decl.CountryOfOrigin = strings.TrimSpace(locParts[0])
 					}
 				}
 			}
@@ -1145,13 +1152,6 @@ func parseEDIMessage(messageType, messageID, rawEDI string) NCSDeclaration {
 		case "FTX": // Free text — goods description
 			if len(parts) > 4 {
 				decl.GoodsDescription = strings.TrimSpace(parts[4])
-			}
-		case "LOC+35": // Country of origin
-			if len(parts) > 2 {
-				locParts := strings.Split(parts[2], ":")
-				if len(locParts) > 0 {
-					decl.CountryOfOrigin = strings.TrimSpace(locParts[0])
-				}
 			}
 		}
 	}
