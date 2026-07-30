@@ -150,6 +150,7 @@ const BatchValidationReportPage = lazy(() => import("@/pages/admin/BatchValidati
 const UCRManagement = lazy(() => import("@/pages/UCRManagement"));
 const ManifestManagement = lazy(() => import("@/pages/ManifestManagement"));
 const TradeAnalyticsDashboard = lazy(() => import("@/pages/TradeAnalyticsDashboard"));
+const NCSNRSDashboard = lazy(() => import("@/pages/NCSNRSDashboard"));
 
 
 const LazyFallback = () => <_PageSkeleton />;
@@ -616,6 +617,7 @@ function Router() {
         <Route path="/app/ucr">{() => <Suspense fallback={<LazyFallback />}><UCRManagement /></Suspense>}</Route>
         <Route path="/app/manifests">{() => <Suspense fallback={<LazyFallback />}><ManifestManagement /></Suspense>}</Route>
         <Route path="/app/trade-analytics">{() => <Suspense fallback={<LazyFallback />}><TradeAnalyticsDashboard /></Suspense>}</Route>
+        <Route path="/app/ncs-nrs">{() => <Suspense fallback={<LazyFallback />}><NCSNRSDashboard /></Suspense>}</Route>
         <Route component={NotFound} />
     </Switch>
   );

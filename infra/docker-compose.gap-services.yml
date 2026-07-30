@@ -286,3 +286,14 @@ networks:
       DATABASE_URL: ${DATABASE_URL}
     depends_on: [postgres]
     restart: unless-stopped
+
+  ncs-nrs-gateway:
+    build: ../microservices/ncs-nrs-gateway
+    ports: ["8101:8101"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      NRS_WEBHOOK_URL: ${NRS_WEBHOOK_URL:-}
+      NCS_NRS_WEBHOOK_SECRET: ${NCS_NRS_WEBHOOK_SECRET:-change-me-in-production}
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+    depends_on: [postgres, kafka]
+    restart: unless-stopped
