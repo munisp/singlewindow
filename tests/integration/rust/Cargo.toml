@@ -1,0 +1,8 @@
+[package]
+name = "tradegateway-rust-tests"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tradegateway-rust-tests"
+path = "src/main.rs"
