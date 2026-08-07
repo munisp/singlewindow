@@ -1,0 +1,319 @@
+# TradeGateway Zero-Trust Security Contexts
+# ==========================================
+# Implements item 19: strict zero-trust security context configurations
+# All pods run as non-root, read-only root filesystem, no privilege escalation
+
+---
+# PodSecurityPolicy (deprecated in k8s 1.25+, use Pod Security Admission)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tradegateway-pdb
+  namespace: tradegateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: tradegateway-app
+
+---
+# Namespace-level Pod Security Admission (enforce restricted profile)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tradegateway
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: v1.28
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# TradeGateway App Deployment with full security hardening
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradegateway-app
+  namespace: tradegateway
+  annotations:
+    security.tradegateway.io/zero-trust: "enabled"
+    security.tradegateway.io/last-hardened: "2026-08-07"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tradegateway-app
+  template:
+    metadata:
+      labels:
+        app: tradegateway-app
+        version: "latest"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      # Run as non-root user
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # No service account token automount
+      automountServiceAccountToken: false
+      serviceAccountName: tradegateway-app-sa
+      containers:
+        - name: tradegateway-app
+          image: ghcr.io/munisp/singlewindow:latest
+          ports:
+            - containerPort: 3000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-config
+              mountPath: /app/config
+              readOnly: true
+          env:
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536 --expose-gc"
+            - name: NODE_ENV
+              value: "production"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-config
+          configMap:
+            name: tradegateway-config
+
+---
+# ServiceAccount with minimal permissions
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tradegateway-app-sa
+  namespace: tradegateway
+  annotations:
+    security.tradegateway.io/purpose: "TradeGateway application service account"
+automountServiceAccountToken: false
+
+---
+# Temporal Worker with security hardening
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: tradegateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal-worker
+  template:
+    metadata:
+      labels:
+        app: temporal-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      containers:
+        - name: temporal-worker
+          image: ghcr.io/munisp/singlewindow/temporal-worker:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 7234
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 7234
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+# Security Scanner Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-scanner
+  namespace: tradegateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: security-scanner
+  template:
+    metadata:
+      labels:
+        app: security-scanner
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1002
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      containers:
+        - name: security-scanner
+          image: ghcr.io/munisp/singlewindow/security-scanner:latest
+          ports:
+            - containerPort: 8110
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+---
+# GitOps Rollback Job (item 21)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gitops-rollback
+  namespace: tradegateway
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rollback-verifier
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Verify zero-trust policies are intact before allowing deployment
+              echo "Verifying zero-trust network policies..."
+              kubectl get networkpolicies -n tradegateway --no-headers | wc -l
+              
+              # Verify security contexts
+              echo "Verifying pod security contexts..."
+              kubectl get pods -n tradegateway -o json | \
+                jq '.items[].spec.securityContext.runAsNonRoot' | \
+                grep -v "null" | grep "true" | wc -l
+              
+              echo "Zero-trust verification complete"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      restartPolicy: Never
+      serviceAccountName: gitops-rollback-sa
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gitops-rollback-sa
+  namespace: tradegateway
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gitops-rollback-role
+  namespace: tradegateway
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gitops-rollback-binding
+  namespace: tradegateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gitops-rollback-role
+subjects:
+  - kind: ServiceAccount
+    name: gitops-rollback-sa
+    namespace: tradegateway

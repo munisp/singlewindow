@@ -1,0 +1,297 @@
+# TradeGateway Prometheus Alerting Rules
+# ========================================
+# Implements items 20, 31, 39 from the checklist:
+#   20. Prometheus alerts + Grafana dashboards for zero-trust Kubernetes cluster
+#   31. Grafana alerting rules — sar_dead_letter_queue and consumer_errors_total
+#   39. TigerBeetle 37.5µs GC pause spike analysis
+
+groups:
+  # ─── AML / SAR Compliance Alerts ─────────────────────────────────────────────
+  - name: aml_compliance
+    interval: 30s
+    rules:
+      - alert: SARDeadLetterQueueHigh
+        expr: sar_dead_letter_queue_total > 10
+        for: 5m
+        labels:
+          severity: critical
+          team: compliance
+          component: nfiu-sar
+        annotations:
+          summary: "SAR Dead Letter Queue exceeds threshold"
+          description: "{{ $value }} SARs are in the dead-letter queue. NFIU regulatory filing is at risk. Immediate investigation required."
+          runbook: "https://wiki.tradegateway.ng/runbooks/sar-dlq-remediation"
+
+      - alert: SARRetryRateHigh
+        expr: rate(sar_retry_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          team: compliance
+        annotations:
+          summary: "SAR retry rate is elevated"
+          description: "SAR retry rate is {{ $value }}/s over the last 5 minutes. NFIU API may be degraded."
+
+      - alert: NFIUAPIDown
+        expr: up{job="compliance-audit"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: compliance
+        annotations:
+          summary: "NFIU compliance audit service is DOWN"
+          description: "The NFIU SAR filing service has been unreachable for 1 minute. All SAR submissions are queued."
+
+      - alert: PEPBypassAttemptDetected
+        expr: increase(pep_bypass_attempts_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+          component: aml
+        annotations:
+          summary: "PEP bypass attempt detected"
+          description: "{{ $value }} PEP screening bypass attempts detected in the last 5 minutes. Immediate AML review required."
+
+  # ─── Kafka / Fluvio Consumer Alerts ──────────────────────────────────────────
+  - name: kafka_consumers
+    interval: 30s
+    rules:
+      - alert: ConsumerErrorsHigh
+        expr: rate(consumer_errors_total[5m]) > 1
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Kafka consumer error rate is elevated"
+          description: "Consumer {{ $labels.consumer_group }} on topic {{ $labels.topic }} has {{ $value }} errors/s."
+
+      - alert: ConsumerLagHigh
+        expr: kafka_consumer_group_lag > 10000
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Kafka consumer lag is high"
+          description: "Consumer group {{ $labels.consumer_group }} is {{ $value }} messages behind on topic {{ $labels.topic }}."
+
+      - alert: LakehouseIngestionStopped
+        expr: rate(lakehouse_records_ingested_total[10m]) == 0
+        for: 10m
+        labels:
+          severity: critical
+          team: data
+        annotations:
+          summary: "Lakehouse data ingestion has stopped"
+          description: "No records have been ingested into the lakehouse for 10 minutes. Grafana dashboards may show stale data."
+
+      - alert: FluvioConsumerDown
+        expr: up{job="fluvio-consumer"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Fluvio consumer is DOWN"
+          description: "The Fluvio consumer service has been unreachable for 2 minutes."
+
+  # ─── TigerBeetle Ledger Alerts ────────────────────────────────────────────────
+  - name: tigerbeetle
+    interval: 10s
+    rules:
+      - alert: TigerBeetleGCPauseHigh
+        # Item 39: 37.5µs GC pause spike detection
+        expr: tigerbeetle_gc_pause_microseconds_p99 > 37.5
+        for: 30s
+        labels:
+          severity: warning
+          team: platform
+          component: tigerbeetle
+        annotations:
+          summary: "TigerBeetle GC pause spike detected (>37.5µs)"
+          description: "P99 GC pause is {{ $value }}µs. Recommended: increase --memory-size, enable huge pages, pin to isolated CPUs."
+          runbook: "https://wiki.tradegateway.ng/runbooks/tigerbeetle-gc-tuning"
+
+      - alert: TigerBeetleLatencyHigh
+        expr: tigerbeetle_transfer_latency_microseconds_p99 > 100
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+          component: tigerbeetle
+        annotations:
+          summary: "TigerBeetle transfer latency exceeds 100µs"
+          description: "P99 transfer latency is {{ $value }}µs. Sub-millisecond SLA is at risk."
+
+      - alert: TigerBeetleDown
+        expr: up{job="tigerbeetle-bridge"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          team: platform
+          component: tigerbeetle
+        annotations:
+          summary: "TigerBeetle bridge is DOWN"
+          description: "The TigerBeetle ledger bridge has been unreachable for 30 seconds. All financial transactions are blocked."
+
+      - alert: TigerBeetleLedgerInconsistency
+        expr: tigerbeetle_double_entry_violations_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: finance
+          component: tigerbeetle
+        annotations:
+          summary: "TigerBeetle double-entry ledger violation detected"
+          description: "{{ $value }} double-entry violations detected. Immediate financial audit required."
+
+  # ─── Zero-Trust Security Alerts ───────────────────────────────────────────────
+  - name: zero_trust_security
+    interval: 30s
+    rules:
+      - alert: WAFBlockRateLow
+        expr: rate(waf_requests_blocked_total[5m]) / rate(waf_requests_total[5m]) < 0.001
+        for: 10m
+        labels:
+          severity: info
+          team: security
+        annotations:
+          summary: "WAF block rate is unusually low"
+          description: "WAF is blocking {{ $value | humanizePercentage }} of requests. May indicate reduced attack traffic or WAF misconfiguration."
+
+      - alert: TenantIsolationViolation
+        expr: tenant_isolation_violations_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Tenant isolation violation detected"
+          description: "{{ $value }} cross-tenant data access violations detected. Immediate investigation required."
+
+      - alert: JWTValidationFailureHigh
+        expr: rate(jwt_validation_failures_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "JWT validation failure rate is elevated"
+          description: "{{ $value }} JWT validation failures/s. May indicate token replay attack or misconfigured clients."
+
+      - alert: PrivilegeEscalationAttempt
+        expr: increase(privilege_escalation_attempts_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Privilege escalation attempt detected"
+          description: "{{ $value }} privilege escalation attempts in the last 5 minutes."
+
+  # ─── Multi-Region DR Alerts ───────────────────────────────────────────────────
+  - name: multi_region_dr
+    interval: 30s
+    rules:
+      - alert: ReplicationLagHigh
+        expr: pg_replication_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          component: postgresql
+        annotations:
+          summary: "PostgreSQL replication lag exceeds 30 seconds"
+          description: "Replication lag to {{ $labels.replica }} is {{ $value }}s. DR failover may result in data loss."
+
+      - alert: QuorumLost
+        expr: quorum_fence_quorum_members < 2
+        for: 30s
+        labels:
+          severity: critical
+          team: platform
+          component: quorum-fence
+        annotations:
+          summary: "Quorum lost — split-brain risk"
+          description: "Only {{ $value }} quorum members are reachable. Circuit breaker should activate."
+
+      - alert: SplitBrainDetected
+        expr: quorum_fence_split_brain_detected == 1
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: quorum-fence
+        annotations:
+          summary: "Split-brain scenario detected"
+          description: "The quorum fence has detected a split-brain condition. Write operations are being blocked."
+
+      - alert: DRFailoverTimeHigh
+        expr: dr_failover_duration_seconds > 60
+        for: 0m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "DR failover took longer than 60 seconds"
+          description: "DR failover completed in {{ $value }}s. RTO target of 60s was exceeded."
+
+  # ─── Chaos Engineering Alerts ─────────────────────────────────────────────────
+  - name: chaos_engineering
+    interval: 60s
+    rules:
+      - alert: ChaosTestDataLoss
+        expr: chaos_test_data_loss_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Chaos test detected data loss"
+          description: "{{ $value }} data loss events detected during chaos testing. Idempotency fallback may be failing."
+
+      - alert: WorkflowRecoveryRateLow
+        expr: chaos_workflow_recovery_rate < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Workflow recovery rate below 95%"
+          description: "Only {{ $value | humanizePercentage }} of workflows recovered after chaos injection."
+
+  # ─── Platform Health Alerts ───────────────────────────────────────────────────
+  - name: platform_health
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "HTTP error rate exceeds 1%"
+          description: "Service {{ $labels.service }} has {{ $value | humanizePercentage }} error rate."
+
+      - alert: P99LatencyHigh
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "P99 latency exceeds 2 seconds"
+          description: "Service {{ $labels.service }} P99 latency is {{ $value }}s."
+
+      - alert: NodeMemoryPressure
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Node memory pressure — less than 10% available"
+          description: "Node {{ $labels.instance }} has only {{ $value | humanizePercentage }} memory available."

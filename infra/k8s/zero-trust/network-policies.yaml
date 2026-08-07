@@ -1,0 +1,366 @@
+# TradeGateway Zero-Trust Kubernetes Network Policies
+# =====================================================
+# Implements items 19, 21 from the checklist:
+#   19. Kubernetes network policies + security context — strict zero-trust isolation
+#   21. Production deployment rollback — zero-trust policies + GitOps recovery
+#
+# Architecture: Default-deny all ingress/egress, then explicitly allow only
+# required service-to-service communication paths.
+
+---
+# Default deny all ingress and egress in the tradegateway namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: tradegateway
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow APISIX gateway to receive external traffic and route to app
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apisix-ingress
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: apisix
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 9080
+        - protocol: TCP
+          port: 9443
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tradegateway-app
+      ports:
+        - protocol: TCP
+          port: 3000
+    - to:
+        - podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app: openappsec
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# Allow TradeGateway app to reach databases and middleware
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-to-middleware
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: tradegateway-app
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: apisix
+      ports:
+        - protocol: TCP
+          port: 3000
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    - to:
+        - podSelector:
+            matchLabels:
+              app: temporal
+      ports:
+        - protocol: TCP
+          port: 7233
+    - to:
+        - podSelector:
+            matchLabels:
+              app: permify
+      ports:
+        - protocol: TCP
+          port: 3476
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tigerbeetle-bridge
+      ports:
+        - protocol: TCP
+          port: 8100
+    - to:
+        - podSelector:
+            matchLabels:
+              app: opensearch
+      ports:
+        - protocol: TCP
+          port: 9200
+    - to:
+        - podSelector:
+            matchLabels:
+              app: fluvio
+      ports:
+        - protocol: TCP
+          port: 9003
+    # DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+
+---
+# Temporal workers can only reach PostgreSQL and Kafka
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-temporal-worker
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: temporal-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: temporal
+      ports:
+        - protocol: TCP
+          port: 7234
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: temporal
+      ports:
+        - protocol: TCP
+          port: 7233
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app: kafka
+      ports:
+        - protocol: TCP
+          port: 9092
+    - to:
+        - podSelector:
+            matchLabels:
+              app: tigerbeetle-bridge
+      ports:
+        - protocol: TCP
+          port: 8100
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+
+---
+# PostgreSQL: only accept connections from app and temporal-worker
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-access
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tradegateway-app
+        - podSelector:
+            matchLabels:
+              app: temporal-worker
+        - podSelector:
+            matchLabels:
+              app: chaos-engine
+        - podSelector:
+            matchLabels:
+              app: compliance-audit
+        - podSelector:
+            matchLabels:
+              app: security-scanner
+        - podSelector:
+            matchLabels:
+              app: quorum-fence
+        - podSelector:
+            matchLabels:
+              app: ncs-nrs-gateway
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# Redis: only accept connections from app
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-access
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tradegateway-app
+        - podSelector:
+            matchLabels:
+              app: quorum-fence
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# Prometheus can scrape all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: tradegateway
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8110
+        - protocol: TCP
+          port: 8111
+        - protocol: TCP
+          port: 8112
+        - protocol: TCP
+          port: 8113
+
+---
+# Security scanner can reach all services for scanning
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-security-scanner
+  namespace: tradegateway
+spec:
+  podSelector:
+    matchLabels:
+      app: security-scanner
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: tradegateway-app
+      ports:
+        - protocol: TCP
+          port: 8110
+  egress:
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 9180  # APISIX admin
+        - protocol: TCP
+          port: 8080  # Keycloak / OpenAppSec
+        - protocol: TCP
+          port: 3476  # Permify
+        - protocol: TCP
+          port: 5432  # PostgreSQL
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53

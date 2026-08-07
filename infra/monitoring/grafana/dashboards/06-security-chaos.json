@@ -1,0 +1,274 @@
+{
+  "title": "TradeGateway — Security, Chaos & AML Compliance",
+  "uid": "tg-security-chaos-aml",
+  "version": 1,
+  "schemaVersion": 38,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["security", "chaos", "aml", "compliance"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "WAF Block Rate (OpenAppSec)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "rate(waf_requests_blocked_total[5m]) / rate(waf_requests_total[5m]) * 100",
+        "legendFormat": "Block Rate %"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "SAR Dead Letter Queue Size",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "sar_dead_letter_queue_total",
+        "legendFormat": "DLQ Size"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "TigerBeetle P99 Latency (µs)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "tigerbeetle_transfer_latency_microseconds_p99",
+        "legendFormat": "P99 Latency µs"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 37.5 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Quorum Members Online",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [{
+        "expr": "quorum_fence_quorum_members",
+        "legendFormat": "Members"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "green", "value": 3 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "SAR Queue Status Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "sar_queue_pending_total", "legendFormat": "Pending" },
+        { "expr": "sar_queue_submitted_total", "legendFormat": "Submitted to NFIU" },
+        { "expr": "sar_dead_letter_queue_total", "legendFormat": "DLQ" },
+        { "expr": "sar_queue_retry_total", "legendFormat": "Retrying" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "DLQ" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Submitted to NFIU" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "title": "TigerBeetle GC Pause Histogram",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "tigerbeetle_gc_pause_microseconds_p50", "legendFormat": "P50 GC Pause µs" },
+        { "expr": "tigerbeetle_gc_pause_microseconds_p99", "legendFormat": "P99 GC Pause µs" },
+        { "expr": "tigerbeetle_gc_pause_microseconds_max", "legendFormat": "Max GC Pause µs" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "µs" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "P99 GC Pause µs" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "title": "Chaos Test Results",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "chaos_test_results_total",
+        "legendFormat": "{{scenario}} - {{status}}"
+      }],
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 8,
+      "title": "Security Scan Scores",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "security_scan_score{scan_type='WAF_INTRUSION_SIMULATION'}", "legendFormat": "WAF Score" },
+        { "expr": "security_scan_score{scan_type='APISIX_JWT_AUDIT'}", "legendFormat": "JWT Audit Score" },
+        { "expr": "security_scan_score{scan_type='PENTEST'}", "legendFormat": "Pentest Score" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Consumer Errors by Group",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "targets": [{
+        "expr": "rate(consumer_errors_total[5m])",
+        "legendFormat": "{{consumer_group}} - {{topic}}"
+      }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 10,
+      "title": "Replication Lag (Multi-Region DR)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "targets": [
+        { "expr": "pg_replication_lag_seconds{replica='london'}", "legendFormat": "Lagos → London" },
+        { "expr": "pg_replication_lag_seconds{replica='singapore'}", "legendFormat": "Lagos → Singapore" },
+        { "expr": "pg_replication_lag_seconds{replica='dr'}", "legendFormat": "Lagos → DR Region" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "PEP Screening Results",
+      "type": "piechart",
+      "gridPos": { "x": 0, "y": 28, "w": 8, "h": 8 },
+      "targets": [
+        { "expr": "pep_screening_cleared_total", "legendFormat": "Cleared" },
+        { "expr": "pep_screening_matched_total", "legendFormat": "PEP Matched" },
+        { "expr": "pep_bypass_attempts_total", "legendFormat": "Bypass Attempts" }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Tenant Isolation Violations",
+      "type": "stat",
+      "gridPos": { "x": 8, "y": 28, "w": 8, "h": 8 },
+      "targets": [{
+        "expr": "tenant_isolation_violations_total",
+        "legendFormat": "Violations"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Zero-Trust Policy Compliance",
+      "type": "gauge",
+      "gridPos": { "x": 16, "y": 28, "w": 8, "h": 8 },
+      "targets": [{
+        "expr": "zero_trust_compliance_score",
+        "legendFormat": "Compliance Score"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
