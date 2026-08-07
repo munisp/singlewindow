@@ -1,0 +1,41 @@
+[
+  {
+    "concurrency": 10,
+    "total_requests": 200,
+    "successful": 200,
+    "failed": 0,
+    "duration_s": 0.45111804897896945,
+    "throughput_rps": 443.34293529746077,
+    "p50_ms": 21.73704095184803,
+    "p95_ms": 26.172122918069363,
+    "p99_ms": 29.23818805720657,
+    "avg_ms": 22.100285780034028,
+    "error_rate_pct": 0.0
+  },
+  {
+    "concurrency": 50,
+    "total_requests": 1000,
+    "successful": 1000,
+    "failed": 0,
+    "duration_s": 1.6939684860408306,
+    "throughput_rps": 590.3297542076567,
+    "p50_ms": 81.65900700259954,
+    "p95_ms": 116.35405896231532,
+    "p99_ms": 128.52895993273705,
+    "avg_ms": 81.78491638880223,
+    "error_rate_pct": 0.0
+  },
+  {
+    "concurrency": 100,
+    "total_requests": 2000,
+    "successful": 2000,
+    "failed": 0,
+    "duration_s": 3.5632674200460315,
+    "throughput_rps": 561.2825994334613,
+    "p50_ms": 171.97159491479397,
+    "p95_ms": 229.80789002031088,
+    "p99_ms": 260.6663260376081,
+    "avg_ms": 172.1156842674245,
+    "error_rate_pct": 0.0
+  }
+]
