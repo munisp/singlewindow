@@ -258,8 +258,8 @@ async function recordScan(
     localityHash: latitude !== undefined && longitude !== undefined
       ? createHash("sha256").update(`${latitude.toFixed(2)}:${longitude.toFixed(2)}`).digest("hex")
       : null,
-    latitude,
-    longitude,
+    latitude: latitude === undefined ? undefined : Number(latitude.toFixed(2)),
+    longitude: longitude === undefined ? undefined : Number(longitude.toFixed(2)),
     previousScanId: previous?.id,
     impliedSpeedKmh,
     impossibleTravel,
