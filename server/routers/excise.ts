@@ -637,6 +637,9 @@ export const exciseRouter = router({
     .input(z.object({ orderId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       const lock = await acquireLock(`excise:pay:${input.orderId}`, 30_000);
+      if (lock.token === "no-redis") {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Payment idempotency lock is unavailable." });
+      }
       try {
        try {
         const db = await requireDb();
@@ -780,6 +783,9 @@ export const exciseRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const lock = await acquireLock(`excise:mint:${input.orderId}`, 60_000);
+      if (lock.token === "no-redis") {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Minting coordination is unavailable." });
+      }
       try {
        try {
         const db = await requireDb();
