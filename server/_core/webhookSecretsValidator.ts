@@ -36,6 +36,21 @@ const WEBHOOK_SECRETS: WebhookSecretConfig[] = [
   { envVar: "SANCTIONS_WEBHOOK_SECRET", description: "Sanctions screening result webhook" },
 ];
 
+export const EXCISE_UID_HMAC_ENV = "EXCISE_UID_HMAC_KEY";
+export const EXCISE_UID_KEY_ID_ENV = "EXCISE_UID_KEY_ID";
+
+export function validateExciseUidKey(): void {
+  const value = process.env[EXCISE_UID_HMAC_ENV];
+  const isProduction = process.env.NODE_ENV === "production";
+  const invalid = !value || value.trim() === "" || value.length < 32 ||
+    DEV_SECRET_PATTERNS.some((pattern) => value.toLowerCase().includes(pattern.toLowerCase()));
+  if (!invalid) return;
+
+  const message = `[ExciseUid] ${EXCISE_UID_HMAC_ENV} must be a strong random key of at least 32 characters.`;
+  if (isProduction) throw new Error(`=== FATAL: ${message} ===`);
+  console.warn(`[WARN] ${message} UID minting will remain unavailable.`);
+}
+
 /**
  * Validates all webhook secrets are set and not using known dev defaults.
  * In development (NODE_ENV !== 'production'), this only warns.

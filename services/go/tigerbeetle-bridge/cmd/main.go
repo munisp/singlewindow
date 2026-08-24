@@ -81,8 +81,8 @@ const (
 type TransferFlag string
 
 const (
-	FlagNone               TransferFlag = "none"
-	FlagPending            TransferFlag = "pending"
+	FlagNone                TransferFlag = "none"
+	FlagPending             TransferFlag = "pending"
 	FlagPostPendingTransfer TransferFlag = "post_pending_transfer"
 	FlagVoidPendingTransfer TransferFlag = "void_pending_transfer"
 )
@@ -121,12 +121,13 @@ type Transfer struct {
 	Reference       string          `json:"reference,omitempty"`
 	Description     string          `json:"description,omitempty"`
 	Metadata        interface{}     `json:"metadata,omitempty"`
+	IdempotencyKey  string          `json:"idempotencyKey,omitempty"`
 	// Timestamps (nanoseconds since epoch, as TigerBeetle stores them)
-	Timestamp  int64     `json:"timestamp"`
-	CreatedAt  time.Time `json:"createdAt"`
-	PostedAt   *time.Time `json:"postedAt,omitempty"`
-	VoidedAt   *time.Time `json:"voidedAt,omitempty"`
-	Status     string    `json:"status"`
+	Timestamp int64      `json:"timestamp"`
+	CreatedAt time.Time  `json:"createdAt"`
+	PostedAt  *time.Time `json:"postedAt,omitempty"`
+	VoidedAt  *time.Time `json:"voidedAt,omitempty"`
+	Status    string     `json:"status"`
 }
 
 // ─── In-memory store (simulates TigerBeetle until binary client is wired) ────
@@ -196,6 +197,15 @@ func (s *Store) GetAccount(id string) (*Account, bool) {
 func (s *Store) PostTransfer(t *Transfer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if t.IdempotencyKey != "" {
+		for _, existing := range s.transfers {
+			if existing.IdempotencyKey == t.IdempotencyKey {
+				*t = *existing
+				return nil
+			}
+		}
+	}
 
 	debit, ok := s.accounts[t.DebitAccountID]
 	if !ok {
@@ -268,6 +278,17 @@ func (s *Store) GetTransfer(id string) (*Transfer, bool) {
 	defer s.mu.RUnlock()
 	t, ok := s.transfers[id]
 	return t, ok
+}
+
+func (s *Store) GetTransferByIdempotencyKey(key string) (*Transfer, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, transfer := range s.transfers {
+		if transfer.IdempotencyKey == key {
+			return transfer, true
+		}
+	}
+	return nil, false
 }
 
 func (s *Store) GetTransfersByAccount(accountID string, limit int) []*Transfer {
@@ -395,17 +416,18 @@ func (b *TigerBeetleBridge) handleGetBalance(w http.ResponseWriter, r *http.Requ
 
 func (b *TigerBeetleBridge) handlePostTransfer(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		DebitAccountID  string `json:"debitAccountId"`
-		CreditAccountID string `json:"creditAccountId"`
-		Amount          string `json:"amount"`
-		Currency        string `json:"currency"`
-		Ledger          uint32 `json:"ledger"`
-		Code            uint16 `json:"code"`
-		Flag            string `json:"flag"`
-		PendingID       string `json:"pendingId,omitempty"`
-		Reference       string `json:"reference,omitempty"`
-		Description     string `json:"description,omitempty"`
+		DebitAccountID  string      `json:"debitAccountId"`
+		CreditAccountID string      `json:"creditAccountId"`
+		Amount          string      `json:"amount"`
+		Currency        string      `json:"currency"`
+		Ledger          uint32      `json:"ledger"`
+		Code            uint16      `json:"code"`
+		Flag            string      `json:"flag"`
+		PendingID       string      `json:"pendingId,omitempty"`
+		Reference       string      `json:"reference,omitempty"`
+		Description     string      `json:"description,omitempty"`
 		Metadata        interface{} `json:"metadata,omitempty"`
+		IdempotencyKey  string      `json:"idempotencyKey,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
@@ -414,6 +436,12 @@ func (b *TigerBeetleBridge) handlePostTransfer(w http.ResponseWriter, r *http.Re
 	if req.DebitAccountID == "" || req.CreditAccountID == "" || req.Amount == "" {
 		jsonError(w, "debitAccountId, creditAccountId, and amount are required", http.StatusBadRequest)
 		return
+	}
+	if req.IdempotencyKey != "" {
+		if existing, found := b.store.GetTransferByIdempotencyKey(req.IdempotencyKey); found {
+			jsonOK(w, existing)
+			return
+		}
 	}
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil || amount.IsNegative() || amount.IsZero() {
@@ -443,6 +471,7 @@ func (b *TigerBeetleBridge) handlePostTransfer(w http.ResponseWriter, r *http.Re
 		Reference:       req.Reference,
 		Description:     req.Description,
 		Metadata:        req.Metadata,
+		IdempotencyKey:  req.IdempotencyKey,
 	}
 	if err := b.store.PostTransfer(t); err != nil {
 		jsonError(w, err.Error(), http.StatusUnprocessableEntity)
@@ -460,12 +489,12 @@ func (b *TigerBeetleBridge) handlePostTransfer(w http.ResponseWriter, r *http.Re
 func (b *TigerBeetleBridge) handlePendingTransfer(w http.ResponseWriter, r *http.Request) {
 	// Convenience endpoint: always sets flag=pending
 	var req struct {
-		DebitAccountID  string `json:"debitAccountId"`
-		CreditAccountID string `json:"creditAccountId"`
-		Amount          string `json:"amount"`
-		Currency        string `json:"currency"`
-		Reference       string `json:"reference,omitempty"`
-		Description     string `json:"description,omitempty"`
+		DebitAccountID  string      `json:"debitAccountId"`
+		CreditAccountID string      `json:"creditAccountId"`
+		Amount          string      `json:"amount"`
+		Currency        string      `json:"currency"`
+		Reference       string      `json:"reference,omitempty"`
+		Description     string      `json:"description,omitempty"`
 		Metadata        interface{} `json:"metadata,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -511,7 +540,7 @@ func (b *TigerBeetleBridge) handlePostPending(w http.ResponseWriter, r *http.Req
 	t := &Transfer{
 		ID:              uuid.New().String(),
 		DebitAccountID:  pending.CreditAccountID, // reverse: pending credit becomes debit
-		CreditAccountID: "0000000000000003",       // customs_revenue_confirmed
+		CreditAccountID: "0000000000000003",      // customs_revenue_confirmed
 		Amount:          pending.Amount,
 		Currency:        pending.Currency,
 		Ledger:          1,
