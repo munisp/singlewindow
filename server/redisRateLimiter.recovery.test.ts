@@ -80,6 +80,18 @@ describe("Redis availability recovery", () => {
     await closeRedis();
   });
 
+  it("falls back promptly while Redis remains unavailable", async () => {
+    redisState.available = false;
+    vi.resetModules();
+    const { closeRedis, incrementRateLimit } = await import("./_core/redisRateLimiter");
+
+    const startedAt = Date.now();
+    await expect(incrementRateLimit("partition", 60_000)).resolves.toBe(1);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+
+    await closeRedis();
+  });
+
   it("recovers session revocation checks after a transient Redis outage", async () => {
     vi.resetModules();
     const { closeRedis, incrementRateLimit, isSessionRevoked } = await import("./_core/redisRateLimiter");

@@ -19,6 +19,7 @@ import Redis from "ioredis";
 // ─── Redis singleton ──────────────────────────────────────────────────────────
 
 let _redis: Redis | null = null;
+const REDIS_READINESS_TIMEOUT_MS = 500;
 
 function getRedis(): Redis | null {
   if (_redis) return _redis;
@@ -60,7 +61,7 @@ async function getReadyRedis(): Promise<Redis | null> {
     const onReady = () => finish(redis);
     const onError = () => finish(null);
     const onEnd = () => finish(null);
-    const timeout = setTimeout(() => finish(null), 3_000);
+    const timeout = setTimeout(() => finish(null), REDIS_READINESS_TIMEOUT_MS);
 
     redis.once("ready", onReady);
     redis.once("error", onError);

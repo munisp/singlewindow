@@ -1121,6 +1121,14 @@ export async function updateMojaloopTransaction(transferId: string, data: Partia
   return result[0];
 }
 
+export async function deleteMojaloopTransaction(transferId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  await db.delete(mojaloopTransactions)
+    .where(eq(mojaloopTransactions.transferId, transferId));
+}
+
 export async function getMojaloopTransactionsByDeclaration(declarationId: number) {
   const db = await getDb();
   if (!db) return [];

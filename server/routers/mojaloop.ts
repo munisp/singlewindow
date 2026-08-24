@@ -34,6 +34,7 @@ import {
   createMojaloopTransaction,
   getMojaloopTransactionByTransferId,
   updateMojaloopTransaction,
+  deleteMojaloopTransaction,
   getMojaloopTransactionsByDeclaration,
   getMojaloopTransactionsByUser,
   logAuditEvent,
@@ -268,6 +269,12 @@ export const mojaloopRouter = router({
           });
         }
       }
+
+      const available = await mojaloopAvailable();
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Mojaloop switch is unavailable" });
+      }
+
       // ─────────────────────────────────────────────────────────────────────────
       const transferId = `TRF-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
       const ilpPacket = generateILPPacket();
@@ -303,21 +310,7 @@ export const mojaloopRouter = router({
           expiresAt: idemExpiresAt,
         }).onConflictDoNothing();
       }
-      // Log audit event
-      await logAuditEvent({
-        entityType: "payment",
-        entityId: txRecord?.id ?? 0,
-        action: "mojaloop_payment_initiated",
-        actorId: ctx.user.id,
-        actorType: "trader",
-        newState: { transferId, fspId: input.fspId, amount: payableAmount, currency: input.currency },
-      });
-
       // Forward to live Mojaloop switch if available
-      const available = await mojaloopAvailable();
-      if (!available) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Mojaloop switch is unavailable" });
-      }
       try {
         const response = await fetch(`${MOJALOOP_URL}/transfers`, {
           method: "POST",
@@ -343,9 +336,24 @@ export const mojaloopRouter = router({
           throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Mojaloop transfer rejected (${response.status}): ${detail}` });
         }
       } catch (e) {
+        await deleteMojaloopTransaction(transferId).catch(() => {});
+        if (idemDb) {
+          await idemDb.delete(paymentIdempotencyKeys)
+            .where(eq(paymentIdempotencyKeys.keyHash, keyHash))
+            .catch(() => {});
+        }
         if (e instanceof TRPCError) throw e;
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Mojaloop transfer request failed" });
       }
+
+      await logAuditEvent({
+        entityType: "payment",
+        entityId: txRecord?.id ?? 0,
+        action: "mojaloop_payment_initiated",
+        actorId: ctx.user.id,
+        actorType: "trader",
+        newState: { transferId, fspId: input.fspId, amount: payableAmount, currency: input.currency },
+      });
 
       return {
         transferId,

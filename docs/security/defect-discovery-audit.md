@@ -220,6 +220,7 @@ With `MOJALOOP_WEBHOOK_SECRET` unset, `mojaloop.webhookCallback` accepts `"dev-w
 | #44 port map divergence | needs the owner to declare which deployment artifact is authoritative |
 | #42 upload content sniffing | needs a magic-byte/AV scanning dependency decision |
 | #23 session lifetime | reduced default; refresh-token flow still to be designed |
+| Redis outage session availability tradeoff | fail-closed session revocation logs out every user while Redis is unavailable; the client reconnects automatically within seconds after Redis returns (verified at runtime without a process restart), and rate limiting still degrades to memory. Failing open would preserve the original defect, allowing revoked sessions to survive the outage |
 
 ## Scores
 
