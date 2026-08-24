@@ -1121,6 +1121,14 @@ export async function updateMojaloopTransaction(transferId: string, data: Partia
   return result[0];
 }
 
+export async function deleteMojaloopTransaction(transferId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { mojaloopTransactions } = await import("../drizzle/schema");
+  await db.delete(mojaloopTransactions)
+    .where(eq(mojaloopTransactions.transferId, transferId));
+}
+
 export async function getMojaloopTransactionsByDeclaration(declarationId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -1166,6 +1174,49 @@ export async function getLedgerEntriesByPayment(paymentId: number) {
   return db.select().from(tigerBeetleLedgerEntries)
     .where(eq(tigerBeetleLedgerEntries.paymentId, paymentId))
     .orderBy(desc(tigerBeetleLedgerEntries.createdAt));
+}
+
+export async function getLedgerEntryByMojaloopTransferId(mojaloopTransferId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const { tigerBeetleLedgerEntries } = await import("../drizzle/schema");
+  const result = await db.select().from(tigerBeetleLedgerEntries)
+    .where(eq(tigerBeetleLedgerEntries.mojaloopTransferId, mojaloopTransferId))
+    .limit(1);
+  return result[0] ?? undefined;
+}
+
+export async function claimPaymentIdempotencyKey(data: {
+  keyHash: string;
+  transferId: string;
+  responseSnapshot: unknown;
+  expiresAt: Date;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { paymentIdempotencyKeys } = await import("../drizzle/schema");
+  const result = await db.insert(paymentIdempotencyKeys)
+    .values(data)
+    .onConflictDoNothing()
+    .returning();
+  return result[0] ?? undefined;
+}
+
+export async function releasePaymentIdempotencyKey(keyHash: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { paymentIdempotencyKeys } = await import("../drizzle/schema");
+  await db.delete(paymentIdempotencyKeys)
+    .where(eq(paymentIdempotencyKeys.keyHash, keyHash));
+}
+
+export async function completePaymentIdempotencyKey(keyHash: string, responseSnapshot: unknown) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const { paymentIdempotencyKeys } = await import("../drizzle/schema");
+  await db.update(paymentIdempotencyKeys)
+    .set({ responseSnapshot })
+    .where(eq(paymentIdempotencyKeys.keyHash, keyHash));
 }
 
 export async function getRecentLedgerEntries(limit = 50) {

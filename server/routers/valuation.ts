@@ -82,7 +82,7 @@ export const valuationRouter = router({
     }))
     .query(async ({ input }) => {
       const db = await getDb();
-      if (!db) return { flagged: false, reason: "DB unavailable" };
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Valuation database unavailable" });
 
       const chapter = input.hsCode.substring(0, 4);
       const refs = await db

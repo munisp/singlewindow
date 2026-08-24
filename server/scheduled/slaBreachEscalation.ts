@@ -12,7 +12,7 @@ export async function slaBreachEscalationHandler(req: Request, res: Response) {
   try {
     const db = await getDb();
     if (!db) {
-      return res.json({ ok: true, processed: 0, message: "DB unavailable" });
+      return res.status(503).json({ ok: false, processed: 0, message: "DB unavailable" });
     }
 
     const now = new Date();
@@ -64,7 +64,8 @@ export async function slaBreachEscalationHandler(req: Request, res: Response) {
     });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({
+    return res.status(503).json({
+      ok: false,
       error,
       context: { url: req.url, handler: "slaBreachEscalation" },
       timestamp: new Date().toISOString(),

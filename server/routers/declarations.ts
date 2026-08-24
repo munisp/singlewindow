@@ -44,7 +44,7 @@ async function computeRiskScore(
     traderId?: string;
     traderHistory?: { totalDeclarations: number; rejectionRate: number; amendmentRate: number; isAEO: boolean; monthsActive: number };
   }
-): Promise<{ score: number; lane: string; explanation: Record<string, unknown> }> {
+): Promise<{ score: number | null; lane: string; explanation: Record<string, unknown> }> {
   // ── 1. Python ML risk scorer (primary) ──────────────────────────────────────
   if (opts?.declarationId && opts?.traderId) {
     try {
@@ -151,13 +151,14 @@ Green: 0-30 (auto-clear), Yellow: 31-60 (doc review), Red: 61-100 (physical insp
   } catch (e) {
     console.error("[RiskScore] LLM error:", e);
   }
-  // Fallback: deterministic score based on HS code hash (no randomness)
-  const hsHash = data.hsCode ? data.hsCode.split("").reduce((a, c) => a + c.charCodeAt(0), 0) : 50;
-  const score = (hsHash % 40) + 10;
   return {
-    score,
-    lane: score < 30 ? "green" : score < 60 ? "yellow" : "red",
-    explanation: { summary: "Automated assessment", factors: [] }
+    score: null,
+    lane: "red",
+    explanation: {
+      source: "unavailable",
+      summary: "Automated risk scoring unavailable; manual inspection required",
+      factors: [],
+    }
   };
 }
 
@@ -263,7 +264,7 @@ export const declarationsRouter = router({
 
       const updated = await updateDeclaration(input.id, {
         status: "under_assessment",
-        riskScore: String(risk.score),
+        riskScore: risk.score === null ? null : String(risk.score),
         riskLane: risk.lane as any,
         aiExplanation: risk.explanation,
         dutyAmount: String(duty.toFixed(2)),
@@ -327,7 +328,7 @@ export const declarationsRouter = router({
         declarationType: decl.declarationType,
         status: 'under_assessment',
         riskLane: risk.lane,
-        riskScore: String(risk.score),
+        riskScore: risk.score === null ? null : String(risk.score),
         hsCode: decl.hsCode,
         goodsDescription: decl.goodsDescription,
         countryOfOrigin: decl.countryOfOrigin,

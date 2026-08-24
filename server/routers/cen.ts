@@ -14,17 +14,16 @@ async function cenFetch(path: string, options?: RequestInit) {
       ...options,
       headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
     });
-    const text = await res.text();
+      const text = await res.text();
     if (!res.ok) {
       let msg = text;
       try { msg = JSON.parse(text).error ?? text; } catch {}
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: msg });
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: msg });
     }
     return JSON.parse(text);
   } catch (err) {
     if (err instanceof TRPCError) throw err;
-    // Service unavailable — return graceful fallback
-    return null;
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "CEN service unavailable" });
   }
 }
 
@@ -42,8 +41,7 @@ export const cenRouter = router({
       const params = new URLSearchParams();
       if (input.region) params.set("region", input.region);
       if (input.activeOnly) params.set("activeOnly", "true");
-      const data = await cenFetch(`/partners?${params}`);
-      return data ?? { partners: [], total: 0 };
+      return cenFetch(`/partners?${params}`);
     }),
 
   // Send a risk alert to a partner customs administration
@@ -102,16 +100,14 @@ export const cenRouter = router({
       if (input.direction) params.set("direction", input.direction);
       if (input.priority) params.set("priority", input.priority);
       if (input.alertType) params.set("alertType", input.alertType);
-      const data = await cenFetch(`/alerts?${params}`);
-      return data ?? { alerts: [], total: 0 };
+      return cenFetch(`/alerts?${params}`);
     }),
 
   // Correlate an alert with existing alerts
   correlateAlert: protectedProcedure
     .input(z.object({ alertId: z.string() }))
     .query(async ({ input }) => {
-      const data = await cenFetch(`/alerts/${input.alertId}/correlate`);
-      return data ?? { alertId: input.alertId, matchedAlerts: [], correlationScore: 0, reason: "Service unavailable" };
+      return cenFetch(`/alerts/${input.alertId}/correlate`);
     }),
 
   // Acknowledge an inbound alert
@@ -126,13 +122,7 @@ export const cenRouter = router({
   // Get CEN statistics
   getStats: protectedProcedure
     .query(async () => {
-      const data = await cenFetch("/stats");
-      return data ?? {
-        total: 0, outbound: 0, inbound: 0,
-        high: 0, medium: 0, low: 0,
-        active: 0, acknowledged: 0,
-        activePartners: 0, totalPartners: 0,
-      };
+      return cenFetch("/stats");
     }),
 
   /**
@@ -148,20 +138,10 @@ export const cenRouter = router({
       originCountry: z.string().length(2).optional(),
     }))
     .query(async ({ input }) => {
-      const data = await cenFetch("/enrich/declaration", {
+      return cenFetch("/enrich/declaration", {
         method: "POST",
         body: JSON.stringify(input),
       });
-      if (data) return data;
-      // Offline fallback: return empty enrichment
-      return {
-        declarationId: input.declarationId,
-        matchedAlerts: [] as string[],
-        riskFlags: [] as string[],
-        enrichmentScore: 0,
-        source: "offline",
-        enrichedAt: new Date().toISOString(),
-      };
     }),
 
   /**
@@ -176,17 +156,7 @@ export const cenRouter = router({
     .query(async ({ input }) => {
       const params = new URLSearchParams({ traderRef: input.traderRef });
       if (input.includeHistory) params.set("includeHistory", "true");
-      const data = await cenFetch(`/risk/trader?${params}`);
-      if (data) return data;
-      return {
-        traderRef: input.traderRef,
-        riskLevel: "UNKNOWN" as string,
-        alertCount: 0,
-        highPriorityCount: 0,
-        lastAlertAt: null as string | null,
-        history: [] as unknown[],
-        source: "offline",
-      };
+      return cenFetch(`/risk/trader?${params}`);
     }),
 
   /**
@@ -204,23 +174,9 @@ export const cenRouter = router({
       })).min(1).max(50),
     }))
     .mutation(async ({ input }) => {
-      const data = await cenFetch("/enrich/bulk", {
+      return cenFetch("/enrich/bulk", {
         method: "POST",
         body: JSON.stringify({ declarations: input.declarations }),
       });
-      if (data) return data;
-      // Offline fallback: return empty enrichment for each declaration
-      return {
-        results: input.declarations.map((d) => ({
-          declarationId: d.declarationId,
-          matchedAlerts: [] as string[],
-          riskFlags: [] as string[],
-          enrichmentScore: 0,
-          source: "offline",
-          enrichedAt: new Date().toISOString(),
-        })),
-        processedAt: new Date().toISOString(),
-        source: "offline",
-      };
     }),
 });

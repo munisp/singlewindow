@@ -26,6 +26,7 @@ import { sanitizeMiddleware } from "./sanitize";
 import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 import { sdk } from "./sdk";
+import { validateWebhookSecrets } from "./webhookSecretsValidator";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // General tRPC API: 200 requests per minute per IP
@@ -1181,6 +1182,7 @@ async function runPermifySeedOnStartup() {
 }
 
 async function startServer() {
+  validateWebhookSecrets();
   const app = express();
   // Trust the reverse proxy (Manus/nginx) so express-rate-limit reads the correct client IP
   app.set('trust proxy', 1);
@@ -1296,6 +1298,9 @@ async function startServer() {
   app.use("/api/trpc/tenant", adminOperationRateLimit);
   app.use("/api/trpc/keycloak", adminOperationRateLimit);
 
+  const { registerMojaloopWebhookRoute } = await import("../webhooks/mojaloop");
+  registerMojaloopWebhookRoute(app);
+
   // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
@@ -1306,14 +1311,18 @@ async function startServer() {
   app.post("/api/webhooks/keycloak-event", express.json(), async (req, res) => {
     try {
       const secret = process.env.KEYCLOAK_WEBHOOK_SECRET;
-      if (secret) {
-        const sig = req.headers["x-keycloak-signature"] as string | undefined;
-        if (!sig) { res.status(401).json({ error: "Missing signature" }); return; }
-        const { createHmac } = await import("crypto");
-        const hmac = createHmac("sha256", secret);
-        hmac.update(JSON.stringify(req.body));
-        const expected = hmac.digest("hex");
-        if (sig !== expected) { res.status(401).json({ error: "Invalid signature" }); return; }
+      if (!secret) {
+        res.status(503).json({ error: "Webhook authentication unavailable" });
+        return;
+      }
+      const sig = req.headers["x-keycloak-signature"] as string | undefined;
+      if (!sig) { res.status(401).json({ error: "Missing signature" }); return; }
+      const { createHmac, timingSafeEqual } = await import("crypto");
+      const expected = createHmac("sha256", secret).update(JSON.stringify(req.body)).digest("hex");
+      const provided = Buffer.from(sig.replace(/^sha256=/, ""), "hex");
+      const expectedBuffer = Buffer.from(expected, "hex");
+      if (provided.length !== expectedBuffer.length || !timingSafeEqual(provided, expectedBuffer)) {
+        res.status(401).json({ error: "Invalid signature" }); return;
       }
       const event = req.body as {
         type?: string; realmId?: string; userId?: string;
@@ -1324,6 +1333,7 @@ async function startServer() {
       const actor = event.userId ?? "keycloak-system";
       const detail = JSON.stringify({ resourceType: event.resourceType, representation: event.representation });
       // Write to auditEvents
+      let auditPersisted = false;
       try {
         const dbModule = await import("../db");
         const db = await dbModule.getDb();
@@ -1338,9 +1348,14 @@ async function startServer() {
             metadata: { actor, detail },
             createdAt: event.time ? new Date(event.time) : new Date(),
           });
+          auditPersisted = true;
         }
       } catch (dbErr) {
         console.warn("[Keycloak Webhook] DB write failed:", dbErr);
+      }
+      if (!auditPersisted) {
+        res.status(503).json({ error: "Audit persistence unavailable" });
+        return;
       }
       // Index in OpenSearch
       try {
@@ -1426,11 +1441,13 @@ async function startServer() {
     const { registerE2eTestAuthRoute } = await import("../routes/e2eTestAuth");
     registerE2eTestAuthRoute(app);
   }
-  // Demo mode auth endpoint — only mounted when DEMO_MODE=true
+  // Demo mode auth endpoint — never mounted in production
   // Provides zero-friction demo access without OAuth for all 6 portal roles
-  if (process.env.DEMO_MODE === "true") {
+  if (process.env.NODE_ENV !== "production" && process.env.DEMO_MODE === "true") {
     const { registerDemoAuthRoute } = await import("../routes/demoAuth");
     registerDemoAuthRoute(app);
+  } else if (process.env.NODE_ENV === "production" && process.env.DEMO_MODE === "true") {
+    console.error("[DemoAuth] DEMO_MODE is disabled in production; demo session route not mounted");
   }
 
   // SSE endpoint for real-time anomaly alerts (insider threat monitoring)
@@ -1449,6 +1466,19 @@ async function startServer() {
   }
 
   // Scheduled Heartbeat handlers — must be before Vite/static fallthrough
+  app.use("/api/scheduled", async (req, res, next) => {
+    try {
+      const user = await sdk.authenticateRequest(req);
+      if (!user?.isCron || !user.taskUid) {
+        res.status(403).json({ error: "cron-only endpoint" });
+        return;
+      }
+      next();
+    } catch (error) {
+      console.error("[Scheduled] Cron authentication failed:", error);
+      res.status(503).json({ ok: false, error: "Cron authentication unavailable" });
+    }
+  });
   {
     const { bondExpiryDigestHandler } = await import("../scheduled/bondExpiryDigest");
     app.post("/api/scheduled/bond-expiry-digest", bondExpiryDigestHandler);

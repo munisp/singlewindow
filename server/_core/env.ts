@@ -168,6 +168,7 @@ export const ENV = {
 // ─── Production validation — logs warnings for missing secrets ────────────────
 if (ENV.isProduction) {
   const required: [string, string][] = [
+    ["JWT_SECRET", ENV.cookieSecret],
     ["KEYCLOAK_CLIENT_SECRET", ENV.keycloakClientSecret],
     ["NIGERIA_ID_CLIENT_ID", ENV.nigeriaIdClientId],
     ["NIGERIA_ID_CLIENT_SECRET", ENV.nigeriaIdClientSecret],
@@ -176,6 +177,6 @@ if (ENV.isProduction) {
     ["REDIS_PASSWORD", ENV.redisPassword],
   ];
   for (const [name, val] of required) {
-    if (!val) console.warn(`[ENV] WARNING: ${name} is not set in production`);
+    if (!val) throw new Error(`[ENV] ${name} is required in production`);
   }
 }

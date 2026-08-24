@@ -250,26 +250,6 @@ describe("bondedWarehouse.ts: Kafka publish for deposit and release", () => {
   });
 });
 
-// ─── 17. wazuh.ts: Kafka publish for security alerts ────────────────────────
-
-describe("wazuh.ts: Kafka publish for security alerts", () => {
-  const wazuhTs = readText("server/routers/wazuh.ts");
-
-  it("imports publishEvent from kafka.ts", () => {
-    expect(wazuhTs).toContain("publishEvent");
-  });
-
-  it("publishes SECURITY_ALERT in detectAnomaly", () => {
-    expect(wazuhTs).toContain("SECURITY_ALERT");
-  });
-
-  it("SECURITY_ALERT uses DomainEvent aggregateId", () => {
-    const idx = wazuhTs.indexOf("SECURITY_ALERT");
-    const window = wazuhTs.slice(idx, idx + 500);
-    expect(window).toContain("aggregateId");
-  });
-});
-
 // ─── 18. insiderThreat.ts: Kafka publish on threat detection ─────────────────
 
 describe("insiderThreat.ts: Kafka publish on insider threat detection", () => {

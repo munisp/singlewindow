@@ -8,9 +8,9 @@
  * Architecture:
  *   1. Poll payment_queue WHERE status='queued' AND next_retry_at <= NOW()
  *   2. Claim each row by setting status='processing' (optimistic lock via UPDATE … WHERE status='queued')
- *   3. Call the Mojaloop ILP switch (or simulate in dev mode)
+ *   3. Call the Mojaloop ILP switch
  *   4. On success: status='committed', update balance mirror, update mojaloop_transactions
- *   5. On failure: increment attempt_count, compute exp back-off, status='failed' or 'dead_letter'
+ *   5. On failure: increment attempt_count, compute exp back-off, requeue or dead-letter
  *
  * Exponential back-off: delay = min(2^attempt × 1_000ms, 3_600_000ms)
  * Dead-letter threshold: attempt_count >= max_attempts (default 5)
@@ -87,17 +87,7 @@ async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Pro
 }> {
   const available = await mojaloopAvailable();
 
-  if (!available) {
-    // Simulation mode: deterministic success after attempt 0
-    const simulatedSuccess = item.attemptCount === 0 || Math.random() > 0.1;
-    if (simulatedSuccess) {
-      return {
-        success: true,
-        fulfilment: deriveIlpFulfilment(item.transferId),
-      };
-    }
-    return { success: false, error: "Simulated transient failure" };
-  }
+  if (!available) return { success: false, error: "Mojaloop switch unavailable" };
 
   const condition = deriveIlpCondition(item.transferId);
   const fulfilment = deriveIlpFulfilment(item.transferId);
@@ -258,7 +248,7 @@ async function processItem(
     await db
       .update(paymentQueue)
       .set({
-        status: isDead ? "dead_letter" : "failed",
+        status: isDead ? "dead_letter" : "queued",
         attemptCount: newAttemptCount,
         lastError: error ?? "Unknown error",
         nextRetryAt,

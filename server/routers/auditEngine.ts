@@ -4,7 +4,8 @@
  * No in-memory stores.
  */
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import {
   auditTasks, auditFindings,
@@ -26,6 +27,11 @@ export type FindingType =
   | "duty_evasion" | "no_finding";
 
 const SENSITIVE_CHAPTERS = new Set(["24", "27", "36", "71", "87", "88", "93"]);
+const AUDIT_ROLES = new Set(["admin", "customs_officer", "oga_officer", "inspector", "finance", "auditor"]);
+
+function assertAuditOfficer(role: string): void {
+  if (!AUDIT_ROLES.has(role)) throw new TRPCError({ code: "FORBIDDEN", message: "Audit officer access required" });
+}
 
 export function selectForAudit(params: {
   riskScore: number; declaredValueUsd: number;
@@ -47,17 +53,18 @@ export function calculateDutyDiscrepancy(findings: { findingType: string; amount
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 export const auditEngineRouter = router({
-  getAuditTasks: publicProcedure
+  getAuditTasks: protectedProcedure
     .input(z.object({
       status: z.enum(["pending","assigned","in_progress","findings_submitted","closed","appealed"]).optional(),
       assignedOfficerId: z.string().optional(),
       limit: z.number().int().min(1).max(100).default(50),
       offset: z.number().int().min(0).default(0),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) return { total: 0, tasks: [] };
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const conditions: any[] = [];
+      if (!AUDIT_ROLES.has(ctx.user.role)) conditions.push(eq(auditTasks.assignedOfficerId, String(ctx.user.id)));
       if (input.status) conditions.push(eq(auditTasks.status, input.status));
       if (input.assignedOfficerId) conditions.push(eq(auditTasks.assignedOfficerId, input.assignedOfficerId));
       const [tasks, countResult] = await Promise.all([
@@ -86,29 +93,33 @@ export const auditEngineRouter = router({
       };
     }),
 
-  getAuditTask: publicProcedure
+  getAuditTask: protectedProcedure
     .input(z.object({ auditId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const [task] = await db.select().from(auditTasks).where(eq(auditTasks.id, input.auditId));
       if (!task) throw new Error(`Audit task ${input.auditId} not found`);
+      if (!AUDIT_ROLES.has(ctx.user.role) && task.assignedOfficerId !== String(ctx.user.id)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
       const findings = await db.select().from(auditFindings).where(eq(auditFindings.auditTaskId, input.auditId));
       return { ...task, findings, declaredValueUsd: Number(task.declaredValueUsd),
         dutyPaidUsd: Number(task.dutyPaidUsd), riskScore: Number(task.riskScore),
         dutyDiscrepancyUsd: Number(task.dutyDiscrepancyUsd ?? 0) };
     }),
 
-  createAuditTask: publicProcedure
+  createAuditTask: protectedProcedure
     .input(z.object({
       declarationId: z.string(), declarantName: z.string(), hsCode: z.string().optional(),
       declaredValueUsd: z.number(), dutyPaidUsd: z.number(),
       selectionReason: z.enum(["risk_score_high","random_sample","trader_tier_review","value_threshold","hs_chapter_sensitive","repeat_offender","post_green_lane"]),
       riskScore: z.number().min(0).max(100), dueAt: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const id = `audit-${crypto.randomBytes(6).toString("hex")}`;
       const dueAt = input.dueAt ? new Date(input.dueAt) : new Date(Date.now() + 14 * 24 * 3600_000);
       const [task] = await db.insert(auditTasks).values({
@@ -120,11 +131,12 @@ export const auditEngineRouter = router({
       return { ...task, findings: [] };
     }),
 
-  assignAuditTask: publicProcedure
+  assignAuditTask: protectedProcedure
     .input(z.object({ auditId: z.string(), officerId: z.string(), officerName: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const [updated] = await db.update(auditTasks)
         .set({ assignedOfficerId: input.officerId, assignedOfficerName: input.officerName, status: "assigned" })
         .where(eq(auditTasks.id, input.auditId)).returning();
@@ -132,7 +144,7 @@ export const auditEngineRouter = router({
       return updated;
     }),
 
-  submitFindings: publicProcedure
+  submitFindings: protectedProcedure
     .input(z.object({
       auditId: z.string(),
       findings: z.array(z.object({
@@ -140,9 +152,10 @@ export const auditEngineRouter = router({
         description: z.string(), amountUsd: z.number().min(0).default(0), evidenceUrl: z.string().default(""),
       })),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       await db.delete(auditFindings).where(eq(auditFindings.auditTaskId, input.auditId));
       const newFindings = input.findings.map((f) => ({
         id: `finding-${crypto.randomBytes(4).toString("hex")}`,
@@ -157,11 +170,12 @@ export const auditEngineRouter = router({
       return { ...updated, findings: newFindings };
     }),
 
-  closeAudit: publicProcedure
+  closeAudit: protectedProcedure
     .input(z.object({ auditId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const [updated] = await db.update(auditTasks)
         .set({ status: "closed", closedAt: new Date() })
         .where(eq(auditTasks.id, input.auditId)).returning();
@@ -169,11 +183,12 @@ export const auditEngineRouter = router({
       return updated;
     }),
 
-  appealAudit: publicProcedure
+  appealAudit: protectedProcedure
     .input(z.object({ auditId: z.string(), appealNotes: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const [updated] = await db.update(auditTasks)
         .set({ status: "appealed", appealNotes: input.appealNotes })
         .where(eq(auditTasks.id, input.auditId)).returning();
@@ -181,11 +196,12 @@ export const auditEngineRouter = router({
       return updated;
     }),
 
-  getDutyDiscrepancyReport: publicProcedure
+  getDutyDiscrepancyReport: protectedProcedure
     .input(z.object({ fromDate: z.string().optional(), toDate: z.string().optional() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) return { totalAudited: 0, withFindings: 0, totalDiscrepancyUsd: 0, averageDiscrepancyUsd: 0, byFindingType: {}, topDiscrepancies: [] };
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const conditions: any[] = [inArray(auditTasks.status, ["closed","findings_submitted"])];
       if (input.fromDate) conditions.push(gte(auditTasks.createdAt, new Date(input.fromDate)));
       if (input.toDate) conditions.push(lte(auditTasks.createdAt, new Date(input.toDate)));
@@ -209,9 +225,10 @@ export const auditEngineRouter = router({
       };
     }),
 
-  getAuditStats: publicProcedure.query(async () => {
+  getAuditStats: protectedProcedure.query(async ({ ctx }) => {
+    assertAuditOfficer(ctx.user.role);
     const db = await getDb();
-    if (!db) return { total: 0, byStatus: {}, byReason: {}, totalDiscrepancyUsd: 0, overdueTasks: 0 };
+    if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
     const tasks = await db.select().from(auditTasks);
     const byStatus: Record<string, number> = {};
     const byReason: Record<string, number> = {};
@@ -227,7 +244,7 @@ export const auditEngineRouter = router({
     return { total: tasks.length, byStatus, byReason, totalDiscrepancyUsd: totalDiscrepancy, overdueTasks };
   }),
 
-  runAuditSelection: publicProcedure
+  runAuditSelection: protectedProcedure
     .input(z.object({
       declarations: z.array(z.object({
         declarationId: z.string(), declarantName: z.string(), hsCode: z.string(),
@@ -235,9 +252,10 @@ export const auditEngineRouter = router({
         traderTier: z.enum(["new","standard","aeo"]), laneAssigned: z.enum(["GREEN","YELLOW","RED"]),
       })),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      assertAuditOfficer(ctx.user.role);
       const db = await getDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Audit database unavailable" });
       const selected = [];
       for (const decl of input.declarations) {
         const seed = Math.random();

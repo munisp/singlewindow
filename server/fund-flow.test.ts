@@ -32,6 +32,13 @@ vi.mock("redis", () => ({
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
+beforeEach(() => {
+  mockFetch.mockImplementation(async () => ({
+    ok: true,
+    json: async () => ({ can: "CHECK_RESULT_ALLOWED" }),
+  }));
+});
+
 // Mock getDb
 const mockDbSelect = vi.fn();
 const mockDbInsert = vi.fn();
@@ -67,11 +74,19 @@ function makeTraderCtx(overrides: Record<string, unknown> = {}) {
 function mockTemporalSuccess(workflowId = "wf-test-001", runId = "run-001") {
   mockFetch.mockResolvedValueOnce({
     ok: true,
+    json: async () => ({ can: "CHECK_RESULT_ALLOWED" }),
+  });
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
     json: async () => ({ workflowId, runId }),
   });
 }
 
 function mockTemporalFailure(status = 500, body = "Internal Server Error") {
+  mockFetch.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ can: "CHECK_RESULT_ALLOWED" }),
+  });
   mockFetch.mockResolvedValueOnce({
     ok: false,
     text: async () => body,
@@ -183,7 +198,10 @@ describe("Scenario 1: Import Duty Collection", () => {
     const result = await caller.collectImportDuty({ declarationId: 42 });
 
     expect(result.idempotent).toBe(true);
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/workflows/trigger"),
+      expect.anything(),
+    );
   });
 
   it("throws NOT_FOUND for missing declaration", async () => {
@@ -212,7 +230,7 @@ describe("Scenario 1: Import Duty Collection", () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
     const caller = fundFlowRouter.createCaller(makeTraderCtx() as never);
     await expect(caller.collectImportDuty({ declarationId: 42 }))
-      .rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" });
+      .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 });
 
@@ -372,7 +390,10 @@ describe("Scenario 5: Bond Guarantee Lodgement", () => {
     });
 
     expect(result.idempotent).toBe(true);
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/workflows/trigger"),
+      expect.anything(),
+    );
   });
 });
 
@@ -790,7 +811,7 @@ describe("Scenario 20: Trader Account Provisioning", () => {
     mockTemporalSuccess("wf-provision-001");
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
-    const caller = fundFlowRouter.createCaller(makeTraderCtx() as never);
+    const caller = fundFlowRouter.createCaller(makeAdminCtx() as never);
     const result = await caller.provisionTraderAccount({ currency: "NGN" });
     expect(result.workflowId).toBe("wf-provision-001");
     expect(result.idempotent).toBe(false);
@@ -800,7 +821,7 @@ describe("Scenario 20: Trader Account Provisioning", () => {
     mockRedisDuplicate();
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
-    const caller = fundFlowRouter.createCaller(makeTraderCtx() as never);
+    const caller = fundFlowRouter.createCaller(makeAdminCtx() as never);
     const result = await caller.provisionTraderAccount({ currency: "NGN" });
     expect(result.idempotent).toBe(true);
     expect(result.message).toContain("already provisioned");
@@ -811,7 +832,7 @@ describe("Scenario 20: Trader Account Provisioning", () => {
     mockTemporalSuccess("wf-provision-002");
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
-    const caller = fundFlowRouter.createCaller(makeTraderCtx() as never);
+    const caller = fundFlowRouter.createCaller(makeAdminCtx() as never);
     const result = await caller.provisionTraderAccount({});
     expect(result.workflowId).toBe("wf-provision-002");
   });
@@ -825,6 +846,10 @@ describe("Cross-cutting: getWorkflowStatus", () => {
   it("returns workflow status from Temporal service", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
+      json: async () => ({ can: "CHECK_RESULT_ALLOWED" }),
+    });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
       json: async () => ({ status: "COMPLETED", result: { tigerBeetleTxId: "tb-999" } }),
     });
 
@@ -836,6 +861,10 @@ describe("Cross-cutting: getWorkflowStatus", () => {
   });
 
   it("throws NOT_FOUND for unknown workflow", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ can: "CHECK_RESULT_ALLOWED" }),
+    });
     mockFetch.mockResolvedValueOnce({
       ok: false,
       json: async () => ({ error: "Not found" }),
@@ -860,7 +889,10 @@ describe("Atomicity Guarantees", () => {
     const caller = fundFlowRouter.createCaller(makeTraderCtx() as never);
     await caller.collectExportLevy({ declarationId: 1, levyAmountMinor: 1000 });
 
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("/workflows/trigger"),
+      expect.anything(),
+    );
   });
 
   it("does NOT write to DB if Temporal workflow trigger fails", async () => {

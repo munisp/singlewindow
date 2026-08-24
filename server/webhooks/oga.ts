@@ -13,13 +13,12 @@ import { getDb } from "../db";
 import { ogaPermits, declarations } from "../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
-
-const OGA_WEBHOOK_SECRET = process.env.OGA_WEBHOOK_SECRET ?? "tradegateway-oga-webhook-secret-dev";
+import { getWebhookSecret } from "../_core/webhookSecretsValidator";
 
 // Verify HMAC-SHA256 signature from OGA system
-function verifySignature(payload: string, signature: string): boolean {
+function verifySignature(payload: string, signature: string, secret: string): boolean {
   const expected = crypto
-    .createHmac("sha256", OGA_WEBHOOK_SECRET)
+    .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
   try {
@@ -58,12 +57,16 @@ export function registerOgaWebhookRoute(app: express.Application) {
     "/api/webhooks/oga",
     express.raw({ type: "application/json" }),
     async (req: Request, res: Response) => {
+      let secret: string;
+      try {
+        secret = getWebhookSecret("OGA_WEBHOOK_SECRET");
+      } catch {
+        return res.status(503).json({ error: "Webhook authentication unavailable" });
+      }
       const rawBody = req.body instanceof Buffer ? req.body.toString("utf8") : JSON.stringify(req.body);
       const signature = (req.headers["x-oga-signature"] as string) ?? "";
 
-      // In production: enforce signature verification
-      // In dev: skip if no signature provided (allows testing without HMAC)
-      if (signature && !verifySignature(rawBody, signature)) {
+      if (!signature || !verifySignature(rawBody, signature, secret)) {
         return res.status(401).json({ error: "Invalid signature" });
       }
 

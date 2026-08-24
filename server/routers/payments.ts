@@ -17,7 +17,7 @@ import { eq, desc, and, gte, lte, count, sql, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { assertCan, setOwner } from "../_core/permify";
 import { getDb } from "../db";
-import { emitPaymentInitiated, emitPaymentCompleted } from "../_core/kafkaEventPublisher";
+import { emitPaymentInitiated } from "../_core/kafkaEventPublisher";
 import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
 
 export const paymentsRouter = router({
@@ -60,54 +60,60 @@ export const paymentsRouter = router({
       await updateDeclaration(input.declarationId, { status: "payment_pending" });
 
       // Enqueue into batchPayments for async Mojaloop ILP processing
+      const db = await getDb();
       try {
-        const db = await getDb();
-        if (db) {
-          const { paymentQueue, paymentIdempotencyKeys } = await import("../../drizzle/schema");
-          const amountMinorUnits = BigInt(Math.round(parseFloat(decl.totalDue ?? "0") * 100));
-          const debitAccountId = input.debitAccountId ?? traderAccountId;
-          const creditAccountId = input.creditAccountId ?? SYSTEM_ACCOUNTS.NCS_REVENUE;
-          const transferId = `tg-${reference}`;
-
-          // Idempotency check — inline sha256 to avoid circular import
-          const keyHash = await (async (s: string) => {
-            const enc = new TextEncoder();
-            const buf = await crypto.subtle.digest("SHA-256", enc.encode(s));
-            return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
-          })(`enqueue:${transferId}`);
-          const [existing] = await db.select().from(paymentIdempotencyKeys)
-            .where(eq(paymentIdempotencyKeys.keyHash, keyHash)).limit(1);
-
-          if (!existing) {
-            const [inserted] = await db.insert(paymentQueue).values({
-              transferId,
-              debitAccountId,
-              creditAccountId,
-              amountMinorUnits,
-              currency: (decl.invoiceCurrency ?? "USD").substring(0, 3),
-              ledger: 1,
-              metadata: {
-                declarationId: input.declarationId,
-                declarationNumber: decl.declarationNumber,
-                paymentId: payment?.id,
-                paymentMethod: input.paymentMethod,
-                traderId: ctx.user.id,
-              },
-              status: "queued",
-              attemptCount: 0,
-            }).returning({ id: paymentQueue.id });
-
-            const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-            await db.insert(paymentIdempotencyKeys).values({
-              keyHash,
-              transferId,
-              responseSnapshot: { queueId: inserted.id, status: "queued", paymentId: payment?.id },
-              expiresAt,
-            });
-          }
+        if (!db) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Payment queue unavailable" });
         }
-      } catch {
-        // Non-blocking: payment record already created, queue failure is recoverable
+        const { paymentQueue, paymentIdempotencyKeys } = await import("../../drizzle/schema");
+        const amountMinorUnits = BigInt(Math.round(parseFloat(decl.totalDue ?? "0") * 100));
+        const debitAccountId = input.debitAccountId ?? traderAccountId;
+        const creditAccountId = input.creditAccountId ?? SYSTEM_ACCOUNTS.NCS_REVENUE;
+        const transferId = `tg-${reference}`;
+
+        // Idempotency check — inline sha256 to avoid circular import
+        const keyHash = await (async (s: string) => {
+          const enc = new TextEncoder();
+          const buf = await crypto.subtle.digest("SHA-256", enc.encode(s));
+          return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+        })(`enqueue:${transferId}`);
+        const [existing] = await db.select().from(paymentIdempotencyKeys)
+          .where(eq(paymentIdempotencyKeys.keyHash, keyHash)).limit(1);
+
+        if (!existing) {
+          const [inserted] = await db.insert(paymentQueue).values({
+            transferId,
+            debitAccountId,
+            creditAccountId,
+            amountMinorUnits,
+            currency: (decl.invoiceCurrency ?? "USD").substring(0, 3),
+            ledger: 1,
+            metadata: {
+              declarationId: input.declarationId,
+              declarationNumber: decl.declarationNumber,
+              paymentId: payment?.id,
+              paymentMethod: input.paymentMethod,
+              traderId: ctx.user.id,
+            },
+            status: "queued",
+            attemptCount: 0,
+          }).returning({ id: paymentQueue.id });
+
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          await db.insert(paymentIdempotencyKeys).values({
+            keyHash,
+            transferId,
+            responseSnapshot: { queueId: inserted.id, status: "queued", paymentId: payment?.id },
+            expiresAt,
+          });
+        }
+      } catch (error) {
+        if (db) {
+          await db.delete(payments).where(eq(payments.id, payment.id)).catch(() => {});
+        }
+        throw error instanceof TRPCError
+          ? error
+          : new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Payment could not be queued" });
       }
 
       await logAuditEvent({
@@ -133,12 +139,10 @@ export const paymentsRouter = router({
       return { ...payment, queuedForProcessing: true };
     }),
 
-    // ── CONFIRM PAYMENT (Mojaloop webhook → Temporal saga → TigerBeetle post) ────
-  // Called by the Mojaloop switch when a transfer is COMMITTED.
-  // Triggers ConfirmPaymentWorkflow which atomically:
-  //   1. Posts the pending TigerBeetle transfer (irrevocable settlement)
-  //   2. Marks the payment confirmed in PostgreSQL
-  //   3. Emits payment.confirmed to Kafka via transactional outbox
+  // ── CONFIRM PAYMENT (Mojaloop webhook → Temporal saga → TigerBeetle post) ────
+  // Starts ConfirmPaymentWorkflow after authorization. The workflow's payment
+  // service activity posts the pending TigerBeetle transfer, updates the
+  // payment-service invoice, and publishes payment.confirmed after settlement.
   //
   // Security: HMAC-SHA256 signature verification prevents spoofed callbacks.
   // Idempotency: Redis cache prevents duplicate processing of the same transferId.
@@ -147,14 +151,13 @@ export const paymentsRouter = router({
       paymentId: z.number().int().positive(),
       mojaloopTransferId: z.string().optional(),
       tbPendingTransferId: z.string().optional(),
-      signature: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
 
       // Acquire distributed lock — prevents concurrent double-confirmation
-      const { acquireLock, releaseLock, getIdempotencyKey, setIdempotencyKey } = await import("../_core/distributedLock");
+      const { acquireLock, releaseLock, getIdempotencyKey } = await import("../_core/distributedLock");
       const lock = await acquireLock(`payment:update:${input.paymentId}`, 30_000);
       try {
         // Idempotency check
@@ -184,76 +187,45 @@ export const paymentsRouter = router({
         const TEMPORAL_URL = process.env.TEMPORAL_URL ?? "http://localhost:7233";
         const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? "default";
 
-        // Trigger Temporal ConfirmPaymentWorkflow (atomic: PostTB + ConfirmDB)
+        // Trigger Temporal ConfirmPaymentWorkflow; settlement remains pending
+        // until the workflow completes successfully.
         const workflowId = `confirm-payment-${input.paymentId}-${mojaloopTxId}`;
-        await fetch(`${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            workflow_type: { name: "ConfirmPaymentWorkflow" },
-            workflow_id: workflowId,
-            task_queue: { name: "tradegateway-main" },
-            input: { payloads: [{ data: Buffer.from(JSON.stringify({
-              invoiceId: input.paymentId,
-              mojaloopTxId,
-              tbTxId: input.tbPendingTransferId ?? "",
-              method: "manual",
-            })).toString("base64") }] },
-          }),
-          signal: AbortSignal.timeout(10_000),
-        }).catch((err) => {
-          // Temporal unavailable — fall back to direct DB update
-          console.error("[payments] Temporal unavailable, falling back to direct confirm:", err.message);
-        });
+        let temporalResponse: Response;
+        try {
+          temporalResponse = await fetch(`${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workflow_type: { name: "ConfirmPaymentWorkflow" },
+              workflow_id: workflowId,
+              task_queue: { name: "tradegateway-main" },
+              input: { payloads: [{ data: Buffer.from(JSON.stringify({
+                invoiceId: input.paymentId,
+                mojaloopTxId,
+                tbTxId: input.tbPendingTransferId ?? "",
+                method: "manual",
+              })).toString("base64") }] },
+            }),
+            signal: AbortSignal.timeout(10_000),
+          });
+        } catch {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Temporal confirmation workflow unavailable" });
+        }
+        if (!temporalResponse.ok) {
+          const detail = await temporalResponse.text().catch(() => temporalResponse.statusText);
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `Temporal confirmation workflow unavailable (${temporalResponse.status}): ${detail}`,
+          });
+        }
 
-        // Direct DB update (also executed by Temporal workflow — idempotent via ON CONFLICT)
-        const updated = await updatePayment(input.paymentId, {
-          status: "confirmed",
-          confirmedAt: new Date(),
-          mojalooopTransferId: mojaloopTxId,
-        });
-        if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
-
-        await updateDeclaration(updated.declarationId, { status: "payment_confirmed" });
-
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: input.paymentId,
-          action: "payment_confirmed",
-          actorId: ctx.user.id,
-          actorType: "system",
-          newState: { status: "confirmed", mojaloopTxId, workflowId },
-        });
-
-        await createNotification({
-          userId: updated.traderId,
-          type: "payment_confirmed",
-          title: "Payment Confirmed",
-          message: `Payment of ${updated.amount} ${updated.currency} confirmed. Your declaration is now queued for examination.`,
-          entityType: "payment",
-          entityId: input.paymentId,
-        });
-
-        await createUserNotification({
-          userId: updated.traderId,
-          type: "payment_confirmed",
-          title: "Payment Confirmed ✓",
-          body: `Your payment of ${updated.amount} ${updated.currency} (Ref: ${updated.reference}) has been confirmed. Your declaration is now queued for examination.`,
-          declarationId: updated.declarationId,
-        }).catch(() => {});
-
-        await emitPaymentCompleted({
+        return {
           paymentId: input.paymentId,
-          declarationId: updated.declarationId,
-          traderId: updated.traderId,
-          amount: parseFloat(updated.amount ?? '0'),
-          currency: updated.currency ?? 'NGN',
-          mojalooopTransferId: updated.mojalooopTransferId ?? undefined,
-        }).catch(() => {});
+          status: existing.status,
+          workflowId,
+          accepted: true,
+        };
 
-        const result = { ...updated, workflowId };
-        await setIdempotencyKey(idempotencyKey, result);
-        return result;
       } finally {
         await releaseLock(lock);
       }

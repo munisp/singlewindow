@@ -158,6 +158,9 @@ export const rulesOfOriginRouter = router({
         .from(originCertificates)
         .where(eq(originCertificates.id, input.id));
       if (!cert) throw new TRPCError({ code: "NOT_FOUND" });
+      if (cert.status !== "submitted" && cert.status !== "under_review") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Certificate is no longer reviewable" });
+      }
       const [updated] = await (await getDb())!
         .update(originCertificates)
         .set({

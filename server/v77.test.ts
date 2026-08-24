@@ -160,11 +160,12 @@ describe("TB-09 to TB-12: tRPC ledger procedures", () => {
     expect(ledgerSrc).toContain("postBondDeposit:");
   });
 
-  it("TB-09: postBondDeposit has offline stub (createLedgerEntry fallback)", () => {
+  it("TB-09: postBondDeposit fails closed when the bridge is unavailable", () => {
     const idx = ledgerSrc.indexOf("postBondDeposit:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("SERVICE_UNAVAILABLE");
+    expect(window).not.toContain("createLedgerEntry");
+    expect(window).not.toContain("offline-stub");
   });
 
   it("TB-09: postBondDeposit calls /bond/deposit on bridge", () => {
@@ -177,11 +178,12 @@ describe("TB-09 to TB-12: tRPC ledger procedures", () => {
     expect(ledgerSrc).toContain("releaseBond:");
   });
 
-  it("TB-10: releaseBond has offline stub", () => {
+  it("TB-10: releaseBond fails closed when the bridge is unavailable", () => {
     const idx = ledgerSrc.indexOf("releaseBond:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("SERVICE_UNAVAILABLE");
+    expect(window).not.toContain("createLedgerEntry");
+    expect(window).not.toContain("offline-stub");
   });
 
   it("TB-10: releaseBond calls /bond/release on bridge", () => {
@@ -194,11 +196,12 @@ describe("TB-09 to TB-12: tRPC ledger procedures", () => {
     expect(ledgerSrc).toContain("postPenalty:");
   });
 
-  it("TB-11: postPenalty has offline stub", () => {
+  it("TB-11: postPenalty fails closed when the bridge is unavailable", () => {
     const idx = ledgerSrc.indexOf("postPenalty:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("SERVICE_UNAVAILABLE");
+    expect(window).not.toContain("createLedgerEntry");
+    expect(window).not.toContain("offline-stub");
   });
 
   it("TB-11: postPenalty calls /penalty on bridge", () => {
@@ -211,11 +214,12 @@ describe("TB-09 to TB-12: tRPC ledger procedures", () => {
     expect(ledgerSrc).toContain("postTransitGuarantee:");
   });
 
-  it("TB-12: postTransitGuarantee has offline stub", () => {
+  it("TB-12: postTransitGuarantee fails closed when the bridge is unavailable", () => {
     const idx = ledgerSrc.indexOf("postTransitGuarantee:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("SERVICE_UNAVAILABLE");
+    expect(window).not.toContain("createLedgerEntry");
+    expect(window).not.toContain("offline-stub");
   });
 
   it("TB-12: postTransitGuarantee calls /transit-guarantee on bridge", () => {

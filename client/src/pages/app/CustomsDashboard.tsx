@@ -633,6 +633,7 @@ function LiveCargoStream() {
     { limit: 10 },
     { refetchInterval: wsInfo?.pollingIntervalMs ?? false, enabled: !wsInfo?.wsUrl }
   );
+  const streamUnavailable = initialEvents?.unavailable === true || polled?.unavailable === true;
   useEffect(() => {
     if (!wsInfo?.wsUrl && polled?.events) {
       setEvents(polled.events.slice(0, 20));
@@ -660,6 +661,8 @@ function LiveCargoStream() {
         <div ref={listRef} className="max-h-72 overflow-y-auto divide-y">
           {isLoading ? (
             Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-10 mx-4 my-1" />)
+          ) : streamUnavailable ? (
+            <p className="p-4 text-sm text-amber-700 text-center">Cargo event stream unavailable — live events cannot be displayed.</p>
           ) : events.length === 0 ? (
             <p className="p-4 text-sm text-muted-foreground text-center">No events yet — waiting for stream…</p>
           ) : (

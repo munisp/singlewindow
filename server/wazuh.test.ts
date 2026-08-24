@@ -3,7 +3,7 @@
  * All procedures are adminProcedure.
  * External Wazuh API calls will fail in test env — we verify graceful handling.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
@@ -113,6 +113,19 @@ describe("wazuh.triggerPlaybook", () => {
     expect(result).toBeDefined();
   });
 
+  it("does not report a completed playbook when Wazuh is unavailable", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Wazuh unavailable"));
+    try {
+      const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
+      await expect(caller.wazuh.triggerPlaybook({
+        playbookId: "PB-ISOLATE-HOST",
+        alertId: "ALERT-001",
+      })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("throws for non-admin role", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "customs_officer" }));
     await expect(
@@ -145,6 +158,31 @@ describe("wazuh.detectAnomaly", () => {
       ],
     }).catch(e => e);
     expect(result).toBeDefined();
+  });
+
+  it("fails closed without returning a fabricated anomaly when Wazuh is unavailable", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Wazuh unavailable"));
+    try {
+      const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
+      await expect(caller.wazuh.detectAnomaly({
+        events: [
+          { userId: "user-001", ipAddress: "192.168.1.100", timestamp: new Date().toISOString(), success: false },
+        ],
+      })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("fails closed for an empty anomaly request when Wazuh is unavailable", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Wazuh unavailable"));
+    try {
+      const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
+      await expect(caller.wazuh.detectAnomaly({ events: [] }))
+        .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   it("throws or returns for empty events array", async () => {

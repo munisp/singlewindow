@@ -29,34 +29,6 @@ async function fluvioAvailable(): Promise<boolean> {
   }
 }
 
-// Synthetic fallback events when the Fluvio consumer is unavailable
-function generateFallbackEvents(limit: number, declarationId?: number): object[] {
-  const eventTypes = [
-    "VESSEL_ARRIVED", "CONTAINER_GATE_IN", "INSPECTION_STARTED",
-    "CUSTOMS_HOLD_PLACED", "PAYMENT_RECEIVED", "CLEARANCE_PERMIT_ISSUED",
-    "CONTAINER_GATE_OUT", "VESSEL_DEPARTED", "AIS_POSITION_UPDATE",
-  ];
-  const portCodes = ["GHTEM", "GHKSI", "GHKDI"];
-  const severities = ["INFO", "INFO", "INFO", "WARNING", "CRITICAL"];
-  const now = Date.now();
-  return Array.from({ length: Math.min(limit, 20) }, (_, i) => ({
-    event_id: `FALLBACK-${now - i * 3000}`,
-    event_type: eventTypes[i % eventTypes.length],
-    declaration_id: declarationId ?? (i % 3 === 0 ? 1000 + i : null),
-    ucr: declarationId ? `GH${String(declarationId).padStart(10, "0")}` : `GH${String(1000 + i).padStart(10, "0")}`,
-    container_ref: `GHCU${String(i * 1234567 % 9999999).padStart(7, "0")}`,
-    port_code: portCodes[i % portCodes.length],
-    location: "Tema Container Terminal",
-    actor: "PORT_OPERATOR",
-    message: `Simulated event ${i + 1} (fluvio-consumer offline)`,
-    severity: severities[i % severities.length],
-    timestamp: new Date(now - i * 3000).toISOString(),
-    partition: 0,
-    offset: 500 - i,
-    _fallback: true,
-  }));
-}
-
 export const streamRouter = router({
   /**
    * Get recent cargo events from the ring buffer.
@@ -70,11 +42,7 @@ export const streamRouter = router({
     .query(async ({ input }) => {
       const available = await fluvioAvailable();
       if (!available) {
-        return {
-          events: generateFallbackEvents(input.limit, input.declarationId),
-          count: Math.min(input.limit, 20),
-          source: "fallback",
-        };
+        return { events: [], count: 0, source: "unavailable", unavailable: true, reason: "Fluvio consumer unavailable" };
       }
       const params = new URLSearchParams({ limit: String(input.limit) });
       if (input.declarationId) params.set("declarationId", String(input.declarationId));
@@ -120,8 +88,8 @@ export const streamRouter = router({
       return {
         available: false,
         topic: "cargo-events",
-        mode: "fallback",
-        message: "Fluvio consumer is offline — using synthetic event fallback",
+        mode: "unavailable",
+        message: "Fluvio consumer is unavailable",
       };
     }
     const res = await fetch(`${FLUVIO_SVC_URL}/health`, {

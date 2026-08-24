@@ -91,16 +91,16 @@ export function validateWebhookSecrets(): void {
 }
 
 /**
- * Returns a safe webhook secret for the given env var.
- * In production, throws if the secret is not set or uses a dev default.
- * In development, returns the value (even if it's a dev default) with a warning.
+ * Returns a configured webhook secret for the given env var.
+ * Throws when no secret is configured or a production secret uses a dev default.
+ * A development fallback is permitted only when explicitly supplied by a caller.
  */
-export function getWebhookSecret(envVar: string, devDefault: string): string {
+export function getWebhookSecret(envVar: string, devDefault?: string): string {
   const value = process.env[envVar];
   const isProduction = process.env.NODE_ENV === "production";
 
   if (!value || value.trim() === "") {
-    if (isProduction) {
+    if (isProduction || devDefault === undefined) {
       throw new Error(`[WebhookSecrets] ${envVar} must be set in production.`);
     }
     console.warn(`[WebhookSecrets] ${envVar} not set, using dev default. DO NOT use in production.`);

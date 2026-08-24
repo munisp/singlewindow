@@ -1,4 +1,4 @@
-import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { AXIOS_TIMEOUT_MS, COOKIE_NAME, SEVEN_DAYS_MS } from "@shared/const";
 import { ForbiddenError } from "@shared/_core/errors";
 import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
@@ -208,7 +208,7 @@ class SDKServer {
     options: { expiresInMs?: number } = {}
   ): Promise<string> {
     const issuedAt = Date.now();
-    const expiresInMs = options.expiresInMs ?? ONE_YEAR_MS;
+    const expiresInMs = options.expiresInMs ?? SEVEN_DAYS_MS;
     const expirationSeconds = Math.floor((issuedAt + expiresInMs) / 1000);
     const secretKey = this.getSessionSecret();
     // R3 FIX: Include a JTI (JWT ID) so individual sessions can be revoked via Redis.
@@ -259,7 +259,8 @@ class SDKServer {
             return null;
           }
         } catch {
-          // Redis unavailable — fail-open, allow session
+          console.warn("[Auth] Session revocation check unavailable");
+          return null;
         }
       }
 
@@ -323,9 +324,10 @@ class SDKServer {
           if (kcUser) return kcUser;
         }
       } catch (err) {
-        // Keycloak path failed — fall through to Manus session cookie path
-        console.debug("[Auth] Keycloak Bearer path failed, falling back to session cookie:", String(err));
+        console.debug("[Auth] Keycloak Bearer path failed:", String(err));
+        throw new Error("Invalid Bearer token", { cause: err });
       }
+      throw new Error("Bearer token did not identify a user");
     }
 
     // ── Path 2: Manus session cookie (HS256) ──────────────────────────────────

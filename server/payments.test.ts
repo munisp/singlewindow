@@ -138,13 +138,11 @@ describe("payments router", () => {
       ).rejects.toThrow();
     });
 
-    it("initiates payment for a valid declaration", async () => {
-      const result = await traderCaller.payments.initiate({
+    it("fails closed when the payment queue is unavailable", async () => {
+      await expect(traderCaller.payments.initiate({
         declarationId: 1,
         paymentMethod: "mobile_money",
-      });
-      expect(result).toHaveProperty("id");
-      expect(result).toHaveProperty("status", "pending");
+      })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     });
   });
 });
