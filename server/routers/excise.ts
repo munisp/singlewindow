@@ -641,7 +641,6 @@ export const exciseRouter = router({
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Payment idempotency lock is unavailable." });
       }
       try {
-       try {
         const db = await requireDb();
         let [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, input.orderId)).limit(1);
         if (!order) throw new TRPCError({ code: "NOT_FOUND" });
@@ -714,7 +713,6 @@ export const exciseRouter = router({
         return updated;
       } catch (error) {
         return unavailable("Excise stamp payment is unavailable.", error);
-      }
       } finally {
         await releaseLock(lock);
       }
