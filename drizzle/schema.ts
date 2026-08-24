@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid, date
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date, check
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -10,6 +10,7 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin", "customs_offic
 
 export const stakeholderTypeEnum = pgEnum("stakeholder_type", [
   "trader", "customs_officer", "oga_officer", "freight_forwarder",
+  "shipping_line", "shipping_company", "airline_gha",
   "bank_officer", "port_authority", "system_admin", "auditor"
 ]);
 
@@ -47,6 +48,14 @@ export const documentStatusEnum = pgEnum("document_status", [
 
 export const permitStatusEnum = pgEnum("permit_status", [
   "pending", "under_review", "approved", "rejected", "not_required"
+]);
+
+export const regulatoryRestrictionTypeEnum = pgEnum("regulatory_restriction_type", [
+  "prohibition", "restriction"
+]);
+
+export const declarationFormalityStatusEnum = pgEnum("declaration_formality_status", [
+  "required", "satisfied", "blocked"
 ]);
 
 export const paymentMethodEnum = pgEnum("payment_method", [
@@ -137,6 +146,58 @@ export const stakeholderProfiles = pgTable("stakeholder_profiles", {
 
 export type StakeholderProfile = typeof stakeholderProfiles.$inferSelect;
 
+// ─── NSW PARTY REGISTRATIONS & AGENT MANDATES ────────────────────────────────
+
+export const stakeholderRegistrations = pgTable("stakeholder_registrations", {
+  id: serial("id").primaryKey(),
+  referenceNumber: varchar("reference_number", { length: 32 }).notNull().unique(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  stakeholderType: stakeholderTypeEnum("stakeholder_type").notNull(),
+  organizationName: varchar("organization_name", { length: 255 }).notNull(),
+  organizationCode: varchar("organization_code", { length: 64 }),
+  licenseNumber: varchar("license_number", { length: 128 }),
+  licenseExpiresAt: timestamp("license_expires_at"),
+  taxId: varchar("tax_id", { length: 64 }),
+  country: varchar("country", { length: 2 }).notNull(),
+  phone: varchar("phone", { length: 32 }),
+  kycDocumentIds: json("kyc_document_ids").$type<number[]>().default([]),
+  status: profileStatusEnum("status").default("pending").notNull(),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+  metadata: json("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_stakeholder_reg_user_id").on(t.userId),
+  index("idx_stakeholder_reg_status").on(t.status),
+  index("idx_stakeholder_reg_type").on(t.stakeholderType),
+]);
+
+export type StakeholderRegistration = typeof stakeholderRegistrations.$inferSelect;
+export type InsertStakeholderRegistration = typeof stakeholderRegistrations.$inferInsert;
+
+export const stakeholderMandates = pgTable("stakeholder_mandates", {
+  id: serial("id").primaryKey(),
+  referenceNumber: varchar("reference_number", { length: 32 }).notNull().unique(),
+  principalUserId: integer("principal_user_id").notNull().references(() => users.id),
+  agentUserId: integer("agent_user_id").notNull().references(() => users.id),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: integer("revoked_by").references(() => users.id),
+  revocationReason: text("revocation_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_stakeholder_mandate_principal").on(t.principalUserId),
+  index("idx_stakeholder_mandate_agent").on(t.agentUserId),
+  index("idx_stakeholder_mandate_window").on(t.validFrom, t.validUntil),
+]);
+
+export type StakeholderMandate = typeof stakeholderMandates.$inferSelect;
+export type InsertStakeholderMandate = typeof stakeholderMandates.$inferInsert;
+
 // ─── DECLARATIONS ────────────────────────────────────────────────────────────
 
 export const declarations = pgTable("declarations", {
@@ -144,6 +205,10 @@ export const declarations = pgTable("declarations", {
   declarationNumber: varchar("declaration_number", { length: 32 }).notNull().unique(),
   ucr: varchar("ucr", { length: 64 }).unique(),
   traderId: integer("trader_id").notNull(),
+  principalId: integer("principal_id").references(() => users.id),
+  actingAgentId: integer("acting_agent_id").references(() => users.id),
+  billOfLadingId: integer("bill_of_lading_id").references(() => billsOfLading.id, { onDelete: "set null" }),
+  billOfLadingNumber: varchar("bill_of_lading_number", { length: 64 }),
   declarationType: declarationTypeEnum("declaration_type").notNull(),
   status: declarationStatusEnum("status").default("draft").notNull(),
   riskLane: riskLaneEnum("risk_lane").default("green"),
@@ -178,6 +243,7 @@ export const declarations = pgTable("declarations", {
   index("idx_decl_submitted_at").on(t.submittedAt),
   index("idx_decl_risk_lane_status").on(t.riskLane, t.status),
   index("idx_decl_assigned_officer").on(t.assignedOfficerId),
+  index("idx_decl_bill_of_lading_id").on(t.billOfLadingId),
 ]);
 
 export type Declaration = typeof declarations.$inferSelect;
@@ -216,11 +282,126 @@ export const ogaPermits = pgTable("oga_permits", {
   expiresAt: timestamp("expires_at"),
   slaDeadline: timestamp("sla_deadline"),
   respondedAt: timestamp("responded_at"),
+  hsCode: varchar("hs_code", { length: 12 }),
+  origin: varchar("origin", { length: 3 }),
+  destination: varchar("destination", { length: 3 }),
+  consigneeId: integer("consignee_id").references(() => users.id),
+  permittedQuantity: decimal("permitted_quantity", { precision: 18, scale: 3 }),
+  usedQuantity: decimal("used_quantity", { precision: 18, scale: 3 }).default("0").notNull(),
+  validFrom: timestamp("valid_from"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_oga_declaration_id").on(t.declarationId),
   index("idx_oga_status").on(t.status),
+]);
+
+// ─── REGULATORY OBLIGATIONS (SW4/SW5/SW6) ────────────────────────────────────
+
+export const regulatoryFormalities = pgTable("regulatory_formalities", {
+  id: serial("id").primaryKey(),
+  hsCodePrefix: varchar("hs_code_prefix", { length: 12 }).notNull(),
+  origin: varchar("origin", { length: 3 }),
+  destination: varchar("destination", { length: 3 }),
+  regime: varchar("regime", { length: 32 }),
+  agencyCode: varchar("agency_code", { length: 32 }).notNull(),
+  agencyName: varchar("agency_name", { length: 128 }).notNull(),
+  permitType: varchar("permit_type", { length: 128 }).notNull(),
+  requiredQuantity: decimal("required_quantity", { precision: 18, scale: 3 }).default("1").notNull(),
+  quantityUnit: varchar("quantity_unit", { length: 32 }),
+  legalInstrument: text("legal_instrument").notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_reg_formality_match").on(t.hsCodePrefix, t.origin, t.destination, t.regime),
+  index("idx_reg_formality_dates").on(t.validFrom, t.validUntil),
+]);
+
+export const regulatoryRestrictions = pgTable("regulatory_restrictions", {
+  id: serial("id").primaryKey(),
+  hsCodePrefix: varchar("hs_code_prefix", { length: 12 }).notNull(),
+  origin: varchar("origin", { length: 3 }),
+  regime: varchar("regime", { length: 32 }),
+  restrictionType: regulatoryRestrictionTypeEnum("restriction_type").notNull(),
+  description: text("description").notNull(),
+  legalInstrument: text("legal_instrument").notNull(),
+  agencyCode: varchar("agency_code", { length: 32 }),
+  agencyName: varchar("agency_name", { length: 128 }),
+  permitType: varchar("permit_type", { length: 128 }),
+  requiredQuantity: decimal("required_quantity", { precision: 18, scale: 3 }).default("1").notNull(),
+  quantityUnit: varchar("quantity_unit", { length: 32 }),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_reg_restriction_match").on(t.hsCodePrefix, t.origin, t.regime),
+  index("idx_reg_restriction_dates").on(t.validFrom, t.validUntil),
+]);
+
+export const declarationFormalities = pgTable("declaration_formalities", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id, { onDelete: "cascade" }),
+  formalityId: integer("formality_id").references(() => regulatoryFormalities.id),
+  restrictionId: integer("restriction_id").references(() => regulatoryRestrictions.id),
+  agencyCode: varchar("agency_code", { length: 32 }),
+  agencyName: varchar("agency_name", { length: 128 }),
+  permitType: varchar("permit_type", { length: 128 }),
+  legalInstrument: text("legal_instrument").notNull(),
+  requiredQuantity: decimal("required_quantity", { precision: 18, scale: 3 }).notNull(),
+  satisfiedQuantity: decimal("satisfied_quantity", { precision: 18, scale: 3 }).default("0").notNull(),
+  satisfiedByPermitId: integer("satisfied_by_permit_id").references(() => ogaPermits.id),
+  status: declarationFormalityStatusEnum("status").default("required").notNull(),
+  evaluatedAt: timestamp("evaluated_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_decl_formality_declaration").on(t.declarationId),
+  index("idx_decl_formality_status").on(t.status),
+  uniqueIndex("uq_decl_formality_formality").on(t.declarationId, t.formalityId)
+    .where(sql`${t.formalityId} IS NOT NULL`),
+  uniqueIndex("uq_decl_formality_restriction").on(t.declarationId, t.restrictionId)
+    .where(sql`${t.restrictionId} IS NOT NULL`),
+]);
+
+export const tariffQuotas = pgTable("tariff_quotas", {
+  id: serial("id").primaryKey(),
+  quotaCode: varchar("quota_code", { length: 64 }).notNull().unique(),
+  hsCodePrefix: varchar("hs_code_prefix", { length: 12 }).notNull(),
+  origin: varchar("origin", { length: 3 }),
+  regime: varchar("regime", { length: 32 }),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  totalQuantity: decimal("total_quantity", { precision: 18, scale: 3 }).notNull(),
+  quantityUnit: varchar("quantity_unit", { length: 32 }).notNull(),
+  ledgerAccountId: varchar("ledger_account_id", { length: 128 }).notNull(),
+  allocatedLedgerAccountId: varchar("allocated_ledger_account_id", { length: 128 }).notNull(),
+  legalInstrument: text("legal_instrument").notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tariff_quota_match").on(t.hsCodePrefix, t.origin, t.regime),
+  index("idx_tariff_quota_period").on(t.periodStart, t.periodEnd),
+]);
+
+export const tariffQuotaAllocations = pgTable("tariff_quota_allocations", {
+  id: serial("id").primaryKey(),
+  quotaId: integer("quota_id").notNull().references(() => tariffQuotas.id),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  quantity: decimal("quantity", { precision: 18, scale: 3 }).notNull(),
+  transferId: varchar("transfer_id", { length: 128 }).notNull().unique(),
+  reversedAt: timestamp("reversed_at"),
+  reversalTransferId: varchar("reversal_transfer_id", { length: 128 }).unique(),
+  allocatedAt: timestamp("allocated_at").defaultNow().notNull(),
+  allocatedBy: integer("allocated_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("uq_tariff_active_declaration").on(t.quotaId, t.declarationId)
+    .where(sql`${t.reversedAt} IS NULL`),
+  index("idx_tariff_allocation_quota").on(t.quotaId),
+  index("idx_tariff_allocation_declaration").on(t.declarationId),
 ]);
 
 // ─── PAYMENTS ────────────────────────────────────────────────────────────────
@@ -229,6 +410,7 @@ export const payments = pgTable("payments", {
   id: serial("id").primaryKey(),
   declarationId: integer("declaration_id").notNull().references(() => declarations.id),
   traderId: integer("trader_id").notNull(),
+  actingAgentId: integer("acting_agent_id").references(() => users.id),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   currency: varchar("currency", { length: 3 }).default("USD").notNull(),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
@@ -941,7 +1123,7 @@ export type InsertMojaloopTransaction = typeof mojaloopTransactions.$inferInsert
 export const tbEntryTypeEnum = pgEnum("tb_entry_type", [
   "duty_payment", "vat_payment", "levy_payment",
   "penalty", "bond_deposit", "bond_release",
-  "drawback_credit", "refund", "adjustment",
+  "drawback_credit", "refund", "adjustment", "excise_stamp_liability",
 ]);
 
 export const tbEntryStatusEnum = pgEnum("tb_entry_status", [
@@ -3204,6 +3386,8 @@ export const manifests = pgTable("manifests", {
   submittedBy: integer("submitted_by").notNull().references(() => users.id),
   vesselName: varchar("vessel_name", { length: 128 }).notNull(),
   voyageNumber: varchar("voyage_number", { length: 64 }).notNull(),
+  mmsi: varchar("mmsi", { length: 16 }),
+  imo: varchar("imo", { length: 16 }),
   portOfLoading: varchar("port_of_loading", { length: 64 }).notNull(),
   portOfDischarge: varchar("port_of_discharge", { length: 64 }).notNull(),
   eta: timestamp("eta"),
@@ -3220,6 +3404,8 @@ export const manifests = pgTable("manifests", {
   index("idx_manifests_status").on(t.status),
   index("idx_manifests_type").on(t.manifestType),
   index("idx_manifests_port").on(t.portOfDischarge),
+  index("idx_manifests_mmsi").on(t.mmsi),
+  index("idx_manifests_imo").on(t.imo),
 ]);
 export type Manifest = typeof manifests.$inferSelect;
 export type InsertManifest = typeof manifests.$inferInsert;
@@ -3343,3 +3529,321 @@ export const lpcoRecords = pgTable("lpco_records", {
 ]);
 export type LPCORecord = typeof lpcoRecords.$inferSelect;
 export type InsertLPCORecord = typeof lpcoRecords.$inferInsert;
+
+// ─── EXCISE LICENSING AND DIGITAL TAX STAMPS ─────────────────────────────────
+
+export const exciseLicenseeTypeEnum = pgEnum("excise_licensee_type", [
+  "manufacturer", "importer", "distributor", "retailer",
+]);
+export const exciseLicenseStatusEnum = pgEnum("excise_license_status", [
+  "pending", "active", "suspended", "expired", "revoked",
+]);
+export const exciseApprovalStatusEnum = pgEnum("excise_approval_status", [
+  "pending", "approved", "rejected",
+]);
+export const exciseSchemeTypeEnum = pgEnum("excise_scheme_type", [
+  "specific", "ad_valorem", "hybrid",
+]);
+export const exciseOrderStatusEnum = pgEnum("excise_order_status", [
+  "ordered", "assessed", "payment", "fulfilment", "delivery", "cancelled",
+]);
+export const exciseMarkStatusEnum = pgEnum("excise_mark_status", [
+  "issued", "active", "retired",
+]);
+export const exciseRetirementReasonEnum = pgEnum("excise_retirement_reason", [
+  "wastage", "spoilage", "destruction", "seizure", "other",
+]);
+export const exciseAggregateTypeEnum = pgEnum("excise_aggregate_type", [
+  "carton", "case", "pallet",
+]);
+export const exciseMovementTypeEnum = pgEnum("excise_movement_type", [
+  "dispatch", "receipt", "export", "re_entry", "seizure", "destruction",
+  "disaggregation",
+]);
+export const exciseScanSourceEnum = pgEnum("excise_scan_source", [
+  "public", "enforcement",
+]);
+
+export const exciseLicences = pgTable("excise_licences", {
+  id: serial("id").primaryKey(),
+  licenseNumber: varchar("license_number", { length: 128 }).notNull().unique(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  licenseeType: exciseLicenseeTypeEnum("licensee_type").notNull(),
+  economicOperatorId: varchar("economic_operator_id", { length: 64 }).notNull().unique(),
+  productCategories: json("product_categories").$type<string[]>().notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until").notNull(),
+  status: exciseLicenseStatusEnum("status").default("pending").notNull(),
+  suspendedBy: integer("suspended_by").references(() => users.id),
+  suspendedAt: timestamp("suspended_at"),
+  suspensionReason: text("suspension_reason"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  revokedBy: integer("revoked_by").references(() => users.id),
+  revokedAt: timestamp("revoked_at"),
+  revocationReason: text("revocation_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_licence_user").on(t.userId),
+  index("idx_excise_licence_status").on(t.status),
+  index("idx_excise_licence_validity").on(t.validFrom, t.validUntil),
+]);
+export type ExciseLicence = typeof exciseLicences.$inferSelect;
+export type InsertExciseLicence = typeof exciseLicences.$inferInsert;
+
+export const exciseLicenceSuspensions = pgTable("excise_licence_suspensions", {
+  id: serial("id").primaryKey(),
+  licenceId: integer("licence_id").notNull().references(() => exciseLicences.id),
+  suspendedBy: integer("suspended_by").notNull().references(() => users.id),
+  suspendedAt: timestamp("suspended_at").defaultNow().notNull(),
+  reason: text("reason").notNull(),
+  liftedAt: timestamp("lifted_at"),
+  liftedBy: integer("lifted_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_suspension_licence").on(t.licenceId),
+]);
+
+export const exciseFacilities = pgTable("excise_facilities", {
+  id: serial("id").primaryKey(),
+  licenceId: integer("licence_id").notNull().references(() => exciseLicences.id),
+  facilityIdentifier: varchar("facility_identifier", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  address: text("address"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_facility_licence").on(t.licenceId),
+]);
+export type ExciseFacility = typeof exciseFacilities.$inferSelect;
+
+export const exciseMarkingMachines = pgTable("excise_marking_machines", {
+  id: serial("id").primaryKey(),
+  facilityId: integer("facility_id").notNull().references(() => exciseFacilities.id),
+  machineIdentifier: varchar("machine_identifier", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_machine_facility").on(t.facilityId),
+]);
+export type ExciseMarkingMachine = typeof exciseMarkingMachines.$inferSelect;
+
+export const exciseTaxSchemes = pgTable("excise_tax_schemes", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 64 }).notNull().unique(),
+  schemeType: exciseSchemeTypeEnum("scheme_type").notNull(),
+  specificAmount: decimal("specific_amount", { precision: 15, scale: 6 }),
+  specificUnitOfMeasure: varchar("specific_unit_of_measure", { length: 32 }),
+  adValoremRate: decimal("ad_valorem_rate", { precision: 9, scale: 6 }),
+  hybridWhicheverGreater: boolean("hybrid_whichever_greater").default(false).notNull(),
+  currency: varchar("currency", { length: 3 }),
+  active: boolean("active").default(true).notNull(),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type ExciseTaxScheme = typeof exciseTaxSchemes.$inferSelect;
+
+export const exciseProducts = pgTable("excise_products", {
+  id: serial("id").primaryKey(),
+  licenceId: integer("licence_id").notNull().references(() => exciseLicences.id),
+  sku: varchar("sku", { length: 128 }).notNull().unique(),
+  brand: varchar("brand", { length: 255 }).notNull(),
+  packSize: integer("pack_size").notNull(),
+  unitContent: decimal("unit_content", { precision: 15, scale: 6 }).notNull(),
+  unitOfMeasure: varchar("unit_of_measure", { length: 32 }).notNull(),
+  strength: decimal("strength", { precision: 15, scale: 6 }),
+  schemeId: integer("scheme_id").notNull().references(() => exciseTaxSchemes.id),
+  approvalStatus: exciseApprovalStatusEnum("approval_status").default("pending").notNull(),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_product_licence").on(t.licenceId),
+  index("idx_excise_product_status").on(t.approvalStatus),
+]);
+export type ExciseProduct = typeof exciseProducts.$inferSelect;
+
+export const exciseStampOrders = pgTable("excise_stamp_orders", {
+  id: serial("id").primaryKey(),
+  orderNumber: varchar("order_number", { length: 64 }).notNull().unique(),
+  licenceId: integer("licence_id").notNull().references(() => exciseLicences.id),
+  productId: integer("product_id").notNull().references(() => exciseProducts.id),
+  facilityId: integer("facility_id").notNull().references(() => exciseFacilities.id),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  quantity: integer("quantity").notNull(),
+  declaredValue: decimal("declared_value", { precision: 15, scale: 2 }),
+  liability: decimal("liability", { precision: 15, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).notNull(),
+  status: exciseOrderStatusEnum("status").default("ordered").notNull(),
+  paymentIdempotencyKey: varchar("payment_idempotency_key", { length: 128 }).unique(),
+  ledgerTransferId: varchar("ledger_transfer_id", { length: 128 }),
+  assessedAt: timestamp("assessed_at"),
+  paidAt: timestamp("paid_at"),
+  fulfilledAt: timestamp("fulfilled_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_order_licence").on(t.licenceId),
+  index("idx_excise_order_declaration").on(t.declarationId),
+  index("idx_excise_order_status").on(t.status),
+]);
+export type ExciseStampOrder = typeof exciseStampOrders.$inferSelect;
+
+export const exciseStampMarks = pgTable("excise_stamp_marks", {
+  id: serial("id").primaryKey(),
+  uid: varchar("uid", { length: 192 }).notNull().unique(),
+  payload: varchar("payload", { length: 128 }).notNull(),
+  signature: varchar("signature", { length: 64 }).notNull(),
+  keyId: varchar("key_id", { length: 32 }).notNull(),
+  orderId: integer("order_id").notNull().references(() => exciseStampOrders.id),
+  productId: integer("product_id").notNull().references(() => exciseProducts.id),
+  facilityId: integer("facility_id").notNull().references(() => exciseFacilities.id),
+  machineId: integer("machine_id").references(() => exciseMarkingMachines.id),
+  status: exciseMarkStatusEnum("status").default("issued").notNull(),
+  issuedAt: timestamp("issued_at").defaultNow().notNull(),
+  activatedAt: timestamp("activated_at"),
+  retiredAt: timestamp("retired_at"),
+  retirementReason: exciseRetirementReasonEnum("retirement_reason"),
+  retirementDetails: text("retirement_details"),
+}, (t) => [
+  index("idx_excise_mark_order").on(t.orderId),
+  index("idx_excise_mark_status").on(t.status),
+]);
+export type ExciseStampMark = typeof exciseStampMarks.$inferSelect;
+
+export const exciseMarkActivations = pgTable("excise_mark_activations", {
+  id: serial("id").primaryKey(),
+  markId: integer("mark_id").notNull().unique().references(() => exciseStampMarks.id),
+  activatedBy: integer("activated_by").notNull().references(() => users.id),
+  activatedAt: timestamp("activated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const exciseProductionReports = pgTable("excise_production_reports", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull().references(() => exciseStampOrders.id),
+  productId: integer("product_id").notNull().references(() => exciseProducts.id),
+  facilityId: integer("facility_id").notNull().references(() => exciseFacilities.id),
+  quantity: integer("quantity").notNull(),
+  reportedBy: integer("reported_by").notNull().references(() => users.id),
+  reportedAt: timestamp("reported_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const exciseRetirements = pgTable("excise_retirements", {
+  id: serial("id").primaryKey(),
+  markId: integer("mark_id").notNull().references(() => exciseStampMarks.id),
+  reason: exciseRetirementReasonEnum("reason").notNull(),
+  details: text("details"),
+  retiredBy: integer("retired_by").notNull().references(() => users.id),
+  retiredAt: timestamp("retired_at").defaultNow().notNull(),
+});
+
+export const exciseAggregates = pgTable("excise_aggregates", {
+  id: serial("id").primaryKey(),
+  aggregateUid: varchar("aggregate_uid", { length: 192 }).notNull().unique(),
+  aggregateType: exciseAggregateTypeEnum("aggregate_type").notNull(),
+  licenceId: integer("licence_id").notNull().references(() => exciseLicences.id),
+  parentAggregateId: integer("parent_aggregate_id"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const exciseAggregateChildren = pgTable("excise_aggregate_children", {
+  id: serial("id").primaryKey(),
+  aggregateId: integer("aggregate_id").notNull().references(() => exciseAggregates.id),
+  childMarkId: integer("child_mark_id").references(() => exciseStampMarks.id),
+  childAggregateId: integer("child_aggregate_id").references(() => exciseAggregates.id),
+  addedBy: integer("added_by").notNull().references(() => users.id),
+  addedAt: timestamp("added_at").defaultNow().notNull(),
+  removedBy: integer("removed_by").references(() => users.id),
+  removedAt: timestamp("removed_at"),
+}, (t) => [
+  uniqueIndex("uq_excise_active_child_mark").on(t.childMarkId).where(sql`${t.removedAt} IS NULL`),
+  uniqueIndex("uq_excise_active_child_aggregate").on(t.childAggregateId).where(sql`${t.removedAt} IS NULL`),
+  index("idx_excise_children_aggregate").on(t.aggregateId),
+  check("ck_excise_aggregate_child_exactly_one", sql`(child_mark_id IS NOT NULL) <> (child_aggregate_id IS NOT NULL)`),
+]);
+
+export const exciseMovementEvents = pgTable("excise_movement_events", {
+  id: serial("id").primaryKey(),
+  markId: integer("mark_id").references(() => exciseStampMarks.id),
+  aggregateId: integer("aggregate_id").references(() => exciseAggregates.id),
+  eventType: exciseMovementTypeEnum("event_type").notNull(),
+  actorId: integer("actor_id").notNull().references(() => users.id),
+  location: text("location"),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+  metadata: json("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_movement_mark").on(t.markId),
+  index("idx_excise_movement_aggregate").on(t.aggregateId),
+  index("idx_excise_movement_time").on(t.occurredAt),
+  check("ck_excise_movement_subject_exactly_one", sql`(mark_id IS NOT NULL) <> (aggregate_id IS NOT NULL)`),
+]);
+
+export const exciseScans = pgTable("excise_scans", {
+  id: serial("id").primaryKey(),
+  uid: varchar("uid", { length: 192 }).notNull(),
+  markId: integer("mark_id").references(() => exciseStampMarks.id),
+  source: exciseScanSourceEnum("source").notNull(),
+  scannedBy: integer("scanned_by").references(() => users.id),
+  localityHash: varchar("locality_hash", { length: 128 }),
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+  scannedAt: timestamp("scanned_at").defaultNow().notNull(),
+  previousScanId: integer("previous_scan_id"),
+  impliedSpeedKmh: decimal("implied_speed_kmh", { precision: 12, scale: 2 }),
+  impossibleTravel: boolean("impossible_travel").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_excise_scan_uid").on(t.uid),
+  index("idx_excise_scan_mark").on(t.markId),
+  index("idx_excise_scan_time").on(t.scannedAt),
+]);
+
+export const exciseSeizures = pgTable("excise_seizures", {
+  id: serial("id").primaryKey(),
+  markId: integer("mark_id").notNull().references(() => exciseStampMarks.id),
+  seizedBy: integer("seized_by").notNull().references(() => users.id),
+  location: text("location"),
+  reason: text("reason").notNull(),
+  seizedAt: timestamp("seized_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const exciseReconciliationReports = pgTable("excise_reconciliation_reports", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").notNull().references(() => exciseStampOrders.id),
+  issuedQuantity: integer("issued_quantity").notNull(),
+  activatedQuantity: integer("activated_quantity").notNull(),
+  everActivatedQuantity: integer("ever_activated_quantity").default(0).notNull(),
+  retiredQuantity: integer("retired_quantity").notNull(),
+  stillIssuedQuantity: integer("still_issued_quantity").notNull(),
+  reportedProductionQuantity: integer("reported_production_quantity").notNull(),
+  stampVariance: integer("stamp_variance").notNull(),
+  productionVariance: integer("production_variance").notNull(),
+  computedAt: timestamp("computed_at").defaultNow().notNull(),
+  computedBy: integer("computed_by").notNull().references(() => users.id),
+});
+
+export const exciseAnomalies = pgTable("excise_anomalies", {
+  id: serial("id").primaryKey(),
+  markId: integer("mark_id").references(() => exciseStampMarks.id),
+  orderId: integer("order_id").references(() => exciseStampOrders.id),
+  anomalyType: varchar("anomaly_type", { length: 64 }).notNull(),
+  details: json("details"),
+  detectedAt: timestamp("detected_at").defaultNow().notNull(),
+});

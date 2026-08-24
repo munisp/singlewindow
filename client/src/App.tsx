@@ -8,7 +8,7 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import { AdminGuard, CustomsGuard, OGAGuard, FinanceGuard, SecurityGuard, ExecutiveGuard } from "./components/RoleGuard";
+import RoleGuard, { AdminGuard, CustomsGuard, OGAGuard, FinanceGuard, SecurityGuard, ExecutiveGuard } from "./components/RoleGuard";
 import Home from "./pages/Home";
 import TraderDashboard from "./pages/app/TraderDashboard";
 import NewDeclaration from "./pages/app/NewDeclaration";
@@ -100,6 +100,12 @@ const AdminProductionChecklist = lazy(() => import('./pages/app/AdminProductionC
 const ServiceHealth = lazy(() => import('./pages/app/ServiceHealth'));
 const AuditLog = lazy(() => import('./pages/app/AuditLog'));
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
+const ApplicationTracker = lazy(() => import('./pages/public/ApplicationTracker'));
+const ShipmentTracker = lazy(() => import('./pages/public/ShipmentTracker'));
+const PermitValidation = lazy(() => import('./pages/public/PermitValidation'));
+const StakeholderRegistration = lazy(() => import('./pages/app/StakeholderRegistration'));
+const StakeholderRegistrationReview = lazy(() => import('./pages/app/StakeholderRegistrationReview'));
+const MandateManagement = lazy(() => import('./pages/app/MandateManagement'));
 const SystemStatus = lazy(() => import('./pages/SystemStatus'));
 const DemoLogin = lazy(() => import('./pages/DemoLogin'));
 const NLFinancialQuery = lazy(() => import('./pages/app/NLFinancialQuery'));
@@ -167,8 +173,26 @@ function Router() {
       <Route path="/" component={Home} />
 
       {/* Sprint 80 — Public certificate verification (no auth required, QR-scannable) */}
+      <Route path="/verify/permit/:permitNumber">
+        <Suspense fallback={<LazyFallback />}><PermitValidation /></Suspense>
+      </Route>
+      <Route path="/verify/permit">
+        <Suspense fallback={<LazyFallback />}><PermitValidation /></Suspense>
+      </Route>
       <Route path="/verify/:certNumber">
         <Suspense fallback={<LazyFallback />}><CertVerify /></Suspense>
+      </Route>
+      <Route path="/track-application/:referenceNumber">
+        <Suspense fallback={<LazyFallback />}><ApplicationTracker /></Suspense>
+      </Route>
+      <Route path="/track-application">
+        <Suspense fallback={<LazyFallback />}><ApplicationTracker /></Suspense>
+      </Route>
+      <Route path="/track-shipment/:declarationRef">
+        <Suspense fallback={<LazyFallback />}><ShipmentTracker /></Suspense>
+      </Route>
+      <Route path="/track-shipment">
+        <Suspense fallback={<LazyFallback />}><ShipmentTracker /></Suspense>
       </Route>
 
       {/* Public system status page — no authentication required */}
@@ -429,6 +453,17 @@ function Router() {
       {/* Sprint 67 — Trader Onboarding Wizard */}
       <Route path="/app/onboarding">
         <Suspense fallback={<LazyFallback />}><TraderOnboarding /></Suspense>
+      </Route>
+      <Route path="/app/stakeholder-registration">
+        <Suspense fallback={<LazyFallback />}><StakeholderRegistration /></Suspense>
+      </Route>
+      <Route path="/app/mandates">
+        <Suspense fallback={<LazyFallback />}><MandateManagement /></Suspense>
+      </Route>
+      <Route path="/app/admin/stakeholder-registrations">
+        <RoleGuard allowedRoles={["admin", "customs_officer", "oga_officer"]}>
+          <Suspense fallback={<LazyFallback />}><StakeholderRegistrationReview /></Suspense>
+        </RoleGuard>
       </Route>
 
       {/* Sprint 68 — OpenAPI Explorer */}

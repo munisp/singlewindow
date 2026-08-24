@@ -12,13 +12,13 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 export type VesselPosition = {
   mmsi: string;
-  vesselName: string;
+  vesselName: string | null;
   lat: number;
   lon: number;
-  speed: number;
-  heading: number;
-  status: string;
-  riskFlag: "green" | "amber" | "red";
+  speed: number | null;
+  heading: number | null;
+  status: string | null;
+  riskFlag: "green" | "amber" | "red" | null;
   lastUpdate: string;
 };
 

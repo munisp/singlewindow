@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
 import { fetchWithResilience } from "../_core/middlewareClients";
+import { resolveActingPrincipal } from "../_core/mandateAuthorization";
 
 const TRADE_FINANCE_URL = process.env.TRADE_FINANCE_SERVICE_URL ?? "http://localhost:8097";
 
@@ -16,6 +17,7 @@ export const tradeFinanceRouter = router({
     .input(z.object({
       declarationId:      z.string().uuid().optional(),
       applicantId:        z.string(),
+      principalUserId:    z.number().int().positive().optional(),
       applicantName:      z.string(),
       beneficiaryName:    z.string(),
       beneficiaryCountry: z.string().length(3),
@@ -31,9 +33,10 @@ export const tradeFinanceRouter = router({
       incoterms:          z.string().default("CIF"),
     }))
     .mutation(async ({ input, ctx }) => {
-      const applicantId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role)
+      const resolved = await resolveActingPrincipal(input.principalUserId, ctx.user);
+      const applicantId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role) && !input.principalUserId
         ? input.applicantId
-        : String(ctx.user.id);
+        : String(resolved.principalUserId);
       const res = await fetchWithResilience(
         `${TRADE_FINANCE_URL}/v1/letters-of-credit`,
         {
@@ -42,6 +45,7 @@ export const tradeFinanceRouter = router({
           body: JSON.stringify({
             declaration_id:      input.declarationId,
             applicant_id:        applicantId,
+            acting_agent_id:     resolved.actingAgentId,
             applicant_name:      input.applicantName,
             beneficiary_name:    input.beneficiaryName,
             beneficiary_country: input.beneficiaryCountry,
@@ -67,6 +71,7 @@ export const tradeFinanceRouter = router({
     .input(z.object({
       declarationId: z.string().uuid().optional(),
       traderId:      z.string(),
+      principalUserId: z.number().int().positive().optional(),
       issuingBank:   z.string(),
       guaranteeType: z.enum(["customs_bond", "duty_deferment", "transit"]),
       amount:        z.number().positive(),
@@ -75,9 +80,10 @@ export const tradeFinanceRouter = router({
       dutyAmount:    z.number().min(0).default(0),
     }))
     .mutation(async ({ input, ctx }) => {
-      const traderId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role)
+      const resolved = await resolveActingPrincipal(input.principalUserId, ctx.user);
+      const traderId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role) && !input.principalUserId
         ? input.traderId
-        : String(ctx.user.id);
+        : String(resolved.principalUserId);
       const res = await fetchWithResilience(
         `${TRADE_FINANCE_URL}/v1/bank-guarantees`,
         {
@@ -86,6 +92,7 @@ export const tradeFinanceRouter = router({
           body: JSON.stringify({
             declaration_id: input.declarationId,
             trader_id:      traderId,
+            acting_agent_id: resolved.actingAgentId,
             issuing_bank:   input.issuingBank,
             guarantee_type: input.guaranteeType,
             amount:         input.amount,

@@ -87,6 +87,27 @@ const PORTALS = [
   },
 ];
 
+const PUBLIC_UTILITIES = [
+  {
+    title: "Track your Application",
+    description: "Check the status and latest update for a submitted application.",
+    href: "/track-application",
+    icon: Clock,
+  },
+  {
+    title: "Permit / COO Validation",
+    description: "Verify a government permit or certificate of origin before relying on it.",
+    href: "/verify/permit",
+    icon: ShieldCheck,
+  },
+  {
+    title: "Track your Shipment",
+    description: "Find the latest available vessel position for a declaration or UCR.",
+    href: "/track-shipment",
+    icon: MapPin,
+  },
+];
+
 const CAPABILITIES = [
   {
     icon: Clock,
@@ -277,6 +298,45 @@ export default function Home() {
                 <div className="text-xs text-muted-foreground">{s.sub}</div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Public eServices ── */}
+      <section className="py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-10">
+            <Badge className="mb-4 text-xs tracking-wider uppercase" variant="outline">Public eServices</Badge>
+            <h2
+              className="text-3xl lg:text-4xl font-black text-foreground mb-3"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Verify and track with confidence
+            </h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto">
+              Use official registry services to check an application or validate a trade document.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl mx-auto">
+            {PUBLIC_UTILITIES.map((utility) => {
+              const Icon = utility.icon;
+              return (
+                <Link key={utility.href} href={utility.href}>
+                  <div className="group flex h-full items-start gap-4 rounded-2xl border border-border/60 bg-card p-6 transition-all hover:border-[var(--color-gold)] hover:shadow-lg cursor-pointer">
+                    <div className="rounded-xl bg-[var(--color-gold)]/10 p-3 text-[var(--color-gold)]">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-foreground group-hover:text-[var(--color-gold)] transition-colors">
+                        {utility.title}
+                      </h3>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{utility.description}</p>
+                    </div>
+                    <ChevronRight className="ml-auto mt-1 h-4 w-4 shrink-0 text-muted-foreground group-hover:text-[var(--color-gold)]" />
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       </section>

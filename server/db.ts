@@ -1,8 +1,9 @@
-import { eq, desc, and, gte, lte, sql, count, inArray, like } from "drizzle-orm";
+import { eq, desc, and, or, gte, lte, gt, isNull, isNotNull, sql, count, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
   InsertUser, users, stakeholderProfiles, declarations,
+  stakeholderRegistrations, stakeholderMandates, manifests, billsOfLading,
   declarationDocuments, ogaPermits, payments, auditEvents,
   securityAlerts, sanctionsChecks, aeoApplications, notifications,
   kycDocuments, kycVerifications, visionAnalyses,
@@ -205,6 +206,209 @@ export async function getAllProfiles(limit = 50, offset = 0) {
     .orderBy(desc(stakeholderProfiles.createdAt));
 }
 
+// ─── NSW STAKEHOLDER REGISTRATION & MANDATE QUERIES ──────────────────────────
+
+export async function createStakeholderRegistration(
+  data: typeof stakeholderRegistrations.$inferInsert,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.insert(stakeholderRegistrations).values(data).returning();
+  return registration;
+}
+
+export async function getStakeholderRegistrationById(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.select().from(stakeholderRegistrations)
+    .where(eq(stakeholderRegistrations.id, id)).limit(1);
+  return registration;
+}
+
+export async function getStakeholderRegistrationByReference(referenceNumber: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.select().from(stakeholderRegistrations)
+    .where(eq(stakeholderRegistrations.referenceNumber, referenceNumber)).limit(1);
+  return registration;
+}
+
+export async function getStakeholderRegistrationsByUser(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select().from(stakeholderRegistrations)
+    .where(eq(stakeholderRegistrations.userId, userId))
+    .orderBy(desc(stakeholderRegistrations.createdAt));
+}
+
+export async function getPendingStakeholderRegistrationForUser(
+  userId: number,
+  stakeholderType: typeof stakeholderRegistrations.$inferSelect.stakeholderType,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.select().from(stakeholderRegistrations)
+    .where(and(
+      eq(stakeholderRegistrations.userId, userId),
+      eq(stakeholderRegistrations.stakeholderType, stakeholderType),
+      eq(stakeholderRegistrations.status, "pending"),
+    ))
+    .orderBy(desc(stakeholderRegistrations.createdAt))
+    .limit(1);
+  return registration;
+}
+
+export async function getPendingStakeholderRegistrations() {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select().from(stakeholderRegistrations)
+    .where(eq(stakeholderRegistrations.status, "pending"))
+    .orderBy(desc(stakeholderRegistrations.createdAt));
+}
+
+export async function updateStakeholderRegistration(
+  id: number,
+  data: Partial<typeof stakeholderRegistrations.$inferInsert>,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.update(stakeholderRegistrations)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(stakeholderRegistrations.id, id))
+    .returning();
+  return registration;
+}
+
+export async function getApprovedAgentRegistration(agentUserId: number, at = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.select().from(stakeholderRegistrations)
+    .where(and(
+      eq(stakeholderRegistrations.userId, agentUserId),
+      eq(stakeholderRegistrations.stakeholderType, "freight_forwarder"),
+      eq(stakeholderRegistrations.status, "approved"),
+      gt(stakeholderRegistrations.licenseExpiresAt, at),
+    ))
+    .orderBy(desc(stakeholderRegistrations.approvedAt))
+    .limit(1);
+  return registration;
+}
+
+export async function getApprovedAgentRegistrations(at = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select({
+    userId: stakeholderRegistrations.userId,
+    organizationName: stakeholderRegistrations.organizationName,
+    licenseNumber: stakeholderRegistrations.licenseNumber,
+    licenseExpiresAt: stakeholderRegistrations.licenseExpiresAt,
+  }).from(stakeholderRegistrations)
+    .where(and(
+      eq(stakeholderRegistrations.stakeholderType, "freight_forwarder"),
+      eq(stakeholderRegistrations.status, "approved"),
+      isNotNull(stakeholderRegistrations.licenseNumber),
+      isNotNull(stakeholderRegistrations.licenseExpiresAt),
+      gt(stakeholderRegistrations.licenseExpiresAt, at),
+    ))
+    .orderBy(stakeholderRegistrations.organizationName);
+}
+
+export async function getApprovedTraderProfile(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [profile] = await db.select().from(stakeholderProfiles)
+    .where(and(
+      eq(stakeholderProfiles.userId, userId),
+      eq(stakeholderProfiles.stakeholderType, "trader"),
+      eq(stakeholderProfiles.status, "approved"),
+    ))
+    .limit(1);
+  return profile;
+}
+
+export async function createStakeholderMandate(
+  data: typeof stakeholderMandates.$inferInsert,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [mandate] = await db.insert(stakeholderMandates).values(data).returning();
+  return mandate;
+}
+
+export async function getStakeholderMandateById(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [mandate] = await db.select().from(stakeholderMandates)
+    .where(eq(stakeholderMandates.id, id)).limit(1);
+  return mandate;
+}
+
+export async function getStakeholderMandateByReference(referenceNumber: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [mandate] = await db.select().from(stakeholderMandates)
+    .where(eq(stakeholderMandates.referenceNumber, referenceNumber)).limit(1);
+  return mandate;
+}
+
+export async function getStakeholderMandatesByPrincipal(principalUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select().from(stakeholderMandates)
+    .where(eq(stakeholderMandates.principalUserId, principalUserId))
+    .orderBy(desc(stakeholderMandates.createdAt));
+}
+
+export async function getStakeholderMandatesByAgent(agentUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select().from(stakeholderMandates)
+    .where(eq(stakeholderMandates.agentUserId, agentUserId))
+    .orderBy(desc(stakeholderMandates.createdAt));
+}
+
+export async function revokeStakeholderMandate(
+  id: number,
+  revokedBy: number,
+  revocationReason?: string,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [mandate] = await db.update(stakeholderMandates)
+    .set({
+      revokedAt: new Date(),
+      revokedBy,
+      revocationReason: revocationReason ?? null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(stakeholderMandates.id, id), isNull(stakeholderMandates.revokedAt)))
+    .returning();
+  return mandate;
+}
+
+export async function getActiveStakeholderMandate(
+  principalUserId: number,
+  agentUserId: number,
+  at = new Date(),
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [mandate] = await db.select().from(stakeholderMandates)
+    .where(and(
+      eq(stakeholderMandates.principalUserId, principalUserId),
+      eq(stakeholderMandates.agentUserId, agentUserId),
+      lte(stakeholderMandates.validFrom, at),
+      gt(stakeholderMandates.validUntil, at),
+      isNull(stakeholderMandates.revokedAt),
+    ))
+    .orderBy(desc(stakeholderMandates.createdAt))
+    .limit(1);
+  if (!mandate) return undefined;
+
+  const registration = await getApprovedAgentRegistration(agentUserId, at);
+  return registration ? mandate : undefined;
+}
+
 // ─── DECLARATION QUERIES ──────────────────────────────────────────────────────
 
 export async function createDeclaration(data: typeof declarations.$inferInsert) {
@@ -227,6 +431,54 @@ export async function getDeclarationByNumber(declarationNumber: string) {
   const result = await db.select().from(declarations)
     .where(eq(declarations.declarationNumber, declarationNumber)).limit(1);
   return result[0] ?? undefined;
+}
+
+export class AmbiguousBillOfLadingError extends Error {
+  constructor(blNumber: string) {
+    super(`Bill of lading ${blNumber} matches multiple records; provide a manifest number.`);
+    this.name = "AmbiguousBillOfLadingError";
+  }
+}
+
+export async function resolveBillOfLadingReference(
+  blNumber: string,
+  manifestNumber?: string,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const conditions = [eq(billsOfLading.blNumber, blNumber)];
+  if (manifestNumber) {
+    conditions.push(eq(manifests.manifestNumber, manifestNumber));
+  }
+  const rows = await db.select({ id: billsOfLading.id })
+    .from(billsOfLading)
+    .innerJoin(manifests, eq(billsOfLading.manifestId, manifests.id))
+    .where(and(...conditions));
+  if (rows.length > 1) {
+    throw new AmbiguousBillOfLadingError(blNumber);
+  }
+  return rows[0]?.id ?? null;
+}
+
+export async function getPublicDeclarationTracking(reference: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [declaration] = await db.select({
+    declarationNumber: declarations.declarationNumber,
+    ucr: declarations.ucr,
+    declarationType: declarations.declarationType,
+    status: declarations.status,
+    createdAt: declarations.createdAt,
+    updatedAt: declarations.updatedAt,
+    submittedAt: declarations.submittedAt,
+    clearedAt: declarations.clearedAt,
+  }).from(declarations)
+    .where(or(
+      eq(declarations.declarationNumber, reference),
+      eq(declarations.ucr, reference),
+    ))
+    .limit(1);
+  return declaration;
 }
 
 export async function getDeclarationsByTrader(traderId: number, limit = 20, offset = 0) {
@@ -364,6 +616,23 @@ export async function getPermitsByDeclaration(declarationId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(ogaPermits).where(eq(ogaPermits.declarationId, declarationId));
+}
+
+export async function getPublicPermitTracking(permitNumber: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [permit] = await db.select({
+    permitNumber: ogaPermits.permitNumber,
+    permitType: ogaPermits.permitType,
+    status: ogaPermits.status,
+    createdAt: ogaPermits.createdAt,
+    updatedAt: ogaPermits.updatedAt,
+    respondedAt: ogaPermits.respondedAt,
+    expiresAt: ogaPermits.expiresAt,
+  }).from(ogaPermits)
+    .where(eq(ogaPermits.permitNumber, permitNumber))
+    .limit(1);
+  return permit;
 }
 
 export async function updateOgaPermit(id: number, data: Partial<typeof ogaPermits.$inferInsert>) {

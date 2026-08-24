@@ -5,7 +5,8 @@ import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
-  getLatestKYCVerification, withRlsContext, getDb
+  getLatestKYCVerification, withRlsContext, getDb,
+  resolveBillOfLadingReference, AmbiguousBillOfLadingError
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
@@ -17,6 +18,8 @@ import { publishEvent, TOPICS } from "../_core/kafka";
 import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
 import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
 import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
+import { resolveActingPrincipal, requireDeclarationActor } from "../_core/mandateAuthorization";
+import { assertDeclarationFormalitiesSatisfied, evaluateDeclarationRegulations } from "./regulatory";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -177,6 +180,9 @@ export const declarationsRouter = router({
       numberOfPackages: z.number().int().positive(),
       invoiceValue: z.number().positive(),
       invoiceCurrency: z.string().length(3).default("USD"),
+      principalUserId: z.number().int().positive().optional(),
+      billOfLadingNumber: z.string().min(1).max(64).optional(),
+      manifestNumber: z.string().min(1).max(64).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Business Rule: Validate HS code format (WCO Harmonised System)
@@ -184,14 +190,36 @@ export const declarationsRouter = router({
       if (!hsValidation.valid) {
         throw new TRPCError({ code: "BAD_REQUEST", message: hsValidation.error ?? "Invalid HS code" });
       }
-      const profile = await getProfileByUserId(ctx.user.id);
+      const { principalUserId, actingAgentId } = await resolveActingPrincipal(input.principalUserId, ctx.user);
+      const profile = await getProfileByUserId(principalUserId);
       if (!profile || profile.status !== "approved") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Your trader profile must be approved before submitting declarations." });
+      }
+      let billOfLadingId: number | null = null;
+      try {
+        if (input.manifestNumber && !input.billOfLadingNumber) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A bill of lading number is required when a manifest number is provided.",
+          });
+        }
+        if (input.billOfLadingNumber) {
+          billOfLadingId = await resolveBillOfLadingReference(input.billOfLadingNumber, input.manifestNumber);
+        }
+      } catch (error) {
+        if (error instanceof AmbiguousBillOfLadingError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
       }
       const decl = await createDeclaration({
         declarationNumber: generateDeclarationNumber(),
         ucr: generateUCR(),
-        traderId: ctx.user.id,
+        traderId: principalUserId,
+        principalId: principalUserId,
+        actingAgentId,
+        billOfLadingId,
+        billOfLadingNumber: input.billOfLadingNumber ?? null,
         declarationType: input.declarationType,
         status: "draft",
         hsCode: input.hsCode,
@@ -210,11 +238,11 @@ export const declarationsRouter = router({
         entityId: decl!.id,
         action: "created",
         actorId: ctx.user.id,
-        actorType: "trader",
+        actorType: actingAgentId ? "freight_forwarder" : "trader",
         newState: decl,
       });
       // Permify: register trader as owner of this declaration
-      await setOwner("declaration", decl!.id, ctx.user.id);
+      await setOwner("declaration", decl!.id, principalUserId);
       return decl;
     }),
 
@@ -224,12 +252,12 @@ export const declarationsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const decl = await getDeclarationById(input.id);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
-      if (decl.traderId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
+      const { principalUserId, actingAgentId } = await requireDeclarationActor(decl, ctx.user);
       if (decl.status !== "draft") throw new TRPCError({ code: "BAD_REQUEST", message: "Only draft declarations can be submitted." });
 
       // B5 FIX: KYC gate — trader must have an approved KYC verification before submitting.
       // This prevents unverified traders from injecting declarations into the customs workflow.
-      const kycRecord = await getLatestKYCVerification(ctx.user.id);
+      const kycRecord = await getLatestKYCVerification(principalUserId);
       if (!kycRecord || kycRecord.status !== 'APPROVED') {
         throw new TRPCError({
           code: 'FORBIDDEN',
@@ -237,6 +265,17 @@ export const declarationsRouter = router({
             `Current KYC status: ${kycRecord?.status ?? 'not started'}.`,
         });
       }
+
+      await evaluateDeclarationRegulations({
+        declarationId: input.id,
+        importerId: principalUserId,
+        hsCode: decl.hsCode ?? "",
+        origin: decl.countryOfOrigin ?? "",
+        destination: decl.countryOfDestination ?? undefined,
+        regime: decl.declarationType,
+        quantity: String(decl.numberOfPackages ?? 1),
+        at: new Date(),
+      });
 
       // Run AI risk scoring — Python ML scorer (primary) with LLM fallback
       const risk = await computeRiskScore(
@@ -249,7 +288,7 @@ export const declarationsRouter = router({
         },
         {
           declarationId: String(input.id),
-          traderId: String(ctx.user.id),
+          traderId: String(principalUserId),
         }
       );
 
@@ -278,13 +317,13 @@ export const declarationsRouter = router({
         entityId: input.id,
         action: "submitted",
         actorId: ctx.user.id,
-        actorType: "trader",
+        actorType: actingAgentId ? "freight_forwarder" : "trader",
         previousState: { status: "draft" },
         newState: { status: "under_assessment", riskScore: risk.score, riskLane: risk.lane },
       });
 
       await createNotification({
-        userId: ctx.user.id,
+        userId: principalUserId,
         type: "declaration_submitted",
         title: "Declaration Submitted",
         message: `Your declaration ${decl.declarationNumber} has been submitted. Risk lane: ${risk.lane.toUpperCase()}. Total duties: ${total.toFixed(2)} ${decl.invoiceCurrency}.`,
@@ -294,7 +333,7 @@ export const declarationsRouter = router({
 
       // In-app Notification Centre entry
       await createUserNotification({
-        userId: ctx.user.id,
+        userId: principalUserId,
         type: "declaration_submitted",
         title: "Declaration Submitted ✓",
         body: `Your declaration ${decl.declarationNumber} has been submitted for assessment. Risk lane assigned: ${risk.lane.toUpperCase()}. Estimated duties: ${total.toFixed(2)} ${decl.invoiceCurrency ?? "USD"}.`,
@@ -308,7 +347,7 @@ export const declarationsRouter = router({
         payload: {
           declarationId: input.id,
           declarationNumber: decl.declarationNumber,
-          traderId: ctx.user.id,
+          traderId: principalUserId,
           riskLane: risk.lane,
           riskScore: risk.score,
           hsCode: decl.hsCode,
@@ -324,7 +363,7 @@ export const declarationsRouter = router({
         id: input.id,
         declarationNumber: decl.declarationNumber,
         ucr: decl.ucr,
-        traderId: ctx.user.id,
+        traderId: principalUserId,
         declarationType: decl.declarationType,
         status: 'under_assessment',
         riskLane: risk.lane,
@@ -540,6 +579,9 @@ export const declarationsRouter = router({
       const permifyAction = input.status === "cleared" ? "release" :
         input.status === "under_examination" ? "hold" : "assess";
       await assertCan(String(ctx.user.id), "declaration", String(input.id), permifyAction);
+      if (input.status === "cleared") {
+        await assertDeclarationFormalitiesSatisfied(input.id);
+      }
 
       const updateData: Record<string, unknown> = { status: input.status };
       if (input.status === "cleared") updateData.clearedAt = new Date();

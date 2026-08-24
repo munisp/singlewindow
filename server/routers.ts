@@ -56,6 +56,8 @@ import { portCongestionRouter } from "./routers/portCongestion";
 import { traderScorecardRouter } from "./routers/traderScorecard";
 import { cargoTrackingRouter } from "./routers/cargoTracking";
 import { onboardingRouter } from "./routers/onboarding";
+import { stakeholderRegistrationsRouter } from "./routers/stakeholderRegistrations";
+import { applicationTrackingRouter } from "./routers/applicationTracking";
 import { geofencesRouter } from "./routers/geofences";
 import { webhooksRouter } from "./routers/webhooks";
 import { apiChangelogRouter } from "./routers/apiChangelog";
@@ -78,6 +80,7 @@ import { redisRouter } from "./routers/redis";
 import { kafkaEventsRouter } from "./routers/kafkaEvents";
 import { ogaPermitAuditRouter } from "./routers/ogaPermitAudit";
 import { temporalRunsRouter } from "./routers/temporalRuns";
+import { exciseRouter } from "./routers/excise";
 import { openAppSecRouter } from "./routers/openAppSec";
 import { corazaWafRouter } from "./routers/corazaWaf";
 import { heartbeatAdminRouter } from "./routers/heartbeatAdmin";
@@ -118,9 +121,11 @@ import { tradeAnalyticsRouter } from "./routers/tradeAnalytics";
 import { ncsNrsRouter } from "./routers/ncsNrs";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
+import { regulatoryRouter } from "./routers/regulatory";
 
 export const appRouter = router({
   complianceReporting: complianceReportingRouter,
+  regulatory: regulatoryRouter,
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
@@ -307,6 +312,8 @@ export const appRouter = router({
   traderScorecard: traderScorecardRouter,
   cargoTracking: cargoTrackingRouter,
   onboarding: onboardingRouter,
+  stakeholderRegistrations: stakeholderRegistrationsRouter,
+  applicationTracking: applicationTrackingRouter,
   geofences: geofencesRouter,
   webhooks: webhooksRouter,
   apiChangelog: apiChangelogRouter,
@@ -329,6 +336,7 @@ export const appRouter = router({
   kafkaEvents: kafkaEventsRouter,
   ogaPermitAudit: ogaPermitAuditRouter,
   temporalRuns: temporalRunsRouter,
+  excise: exciseRouter,
   openAppSec: openAppSecRouter,
   corazaWaf: corazaWafRouter,
   heartbeatAdmin: heartbeatAdminRouter,
