@@ -19,30 +19,53 @@ import Redis from "ioredis";
 // ─── Redis singleton ──────────────────────────────────────────────────────────
 
 let _redis: Redis | null = null;
-let _redisFailed = false;
 
 function getRedis(): Redis | null {
-  if (_redisFailed) return null;
   if (_redis) return _redis;
 
   const url = process.env.REDIS_URL ?? "redis://localhost:6379";
   try {
     _redis = new Redis(url, {
-      lazyConnect: true,
+      lazyConnect: false,
       connectTimeout: 3_000,
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
+      retryStrategy: (times) => Math.min(times * 200, 2_000),
     });
     _redis.on("error", (err) => {
       console.warn("[Redis] Connection error (rate limiter falling back to in-memory):", err.message);
-      _redisFailed = true;
-      _redis = null;
     });
     return _redis;
   } catch {
-    _redisFailed = true;
     return null;
   }
+}
+
+async function getReadyRedis(): Promise<Redis | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+  if (redis.status === "ready") return redis;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: Redis | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      redis.removeListener("ready", onReady);
+      redis.removeListener("error", onError);
+      redis.removeListener("end", onEnd);
+      resolve(result);
+    };
+    const onReady = () => finish(redis);
+    const onError = () => finish(null);
+    const onEnd = () => finish(null);
+    const timeout = setTimeout(() => finish(null), 3_000);
+
+    redis.once("ready", onReady);
+    redis.once("error", onError);
+    redis.once("end", onEnd);
+  });
 }
 
 // ─── In-memory fallback ───────────────────────────────────────────────────────
@@ -67,7 +90,7 @@ function memIncr(key: string, windowMs: number): number {
  * Returns the current count (1 = first request in window).
  */
 export async function incrementRateLimit(key: string, windowMs: number): Promise<number> {
-  const redis = getRedis();
+  const redis = await getReadyRedis();
   if (!redis) return memIncr(key, windowMs);
 
   try {
@@ -176,7 +199,7 @@ const SESSION_REVOCATION_TTL_S = 24 * 60 * 60; // 24 hours (matches JWT expiry)
  * Called on logout to immediately invalidate the JWT.
  */
 export async function revokeSession(sessionId: string): Promise<void> {
-  const redis = getRedis();
+  const redis = await getReadyRedis();
   if (!redis) {
     console.warn("[Redis] Session revocation skipped — Redis unavailable");
     return;
@@ -194,7 +217,7 @@ export async function revokeSession(sessionId: string): Promise<void> {
  * Throws if Redis cannot be queried so callers cannot accept an unchecked session.
  */
 export async function isSessionRevoked(sessionId: string): Promise<boolean> {
-  const redis = getRedis();
+  const redis = await getReadyRedis();
   if (!redis) throw new Error("Redis unavailable");
   try {
     const val = await redis.get(`revoked:${sessionId}`);
@@ -216,7 +239,7 @@ export async function setIdempotencyKey(
   key: string,
   responseSnapshot: unknown
 ): Promise<boolean> {
-  const redis = getRedis();
+  const redis = await getReadyRedis();
   if (!redis) return true; // fail-open
 
   try {
@@ -234,7 +257,7 @@ export async function setIdempotencyKey(
  * Returns null if not found or Redis is unavailable.
  */
 export async function getIdempotencyKey(key: string): Promise<unknown | null> {
-  const redis = getRedis();
+  const redis = await getReadyRedis();
   if (!redis) return null;
 
   try {
@@ -248,7 +271,7 @@ export async function getIdempotencyKey(key: string): Promise<unknown | null> {
 // ─── Redis health check ───────────────────────────────────────────────────────
 
 export async function redisHealthCheck(): Promise<{ ok: boolean; latencyMs?: number }> {
-  const redis = getRedis();
+  const redis = await getReadyRedis();
   if (!redis) return { ok: false };
   try {
     const start = Date.now();

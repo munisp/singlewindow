@@ -324,9 +324,10 @@ class SDKServer {
           if (kcUser) return kcUser;
         }
       } catch (err) {
-        // Keycloak path failed — fall through to Manus session cookie path
-        console.debug("[Auth] Keycloak Bearer path failed, falling back to session cookie:", String(err));
+        console.debug("[Auth] Keycloak Bearer path failed:", String(err));
+        throw new Error("Invalid Bearer token", { cause: err });
       }
+      throw new Error("Bearer token did not identify a user");
     }
 
     // ── Path 2: Manus session cookie (HS256) ──────────────────────────────────
