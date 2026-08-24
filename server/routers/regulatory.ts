@@ -604,16 +604,32 @@ export const regulatoryRouter = router({
       asAt: z.coerce.date().optional(),
       declarationId: z.number().int().positive().optional(),
     }))
-    .query(async ({ ctx, input }) => clearanceGraph({
-      hsCode: input.hsCode,
-      origin: input.origin,
-      destination: input.destination,
-      regime: input.regime,
-      quantity: input.quantity,
-      importerId: ctx.user.id,
-      declarationId: input.declarationId,
-      at: asDate(input.asAt),
-    })),
+    .query(async ({ ctx, input }) => {
+      let importerId = ctx.user.id;
+      if (input.declarationId) {
+        const db = await requireRegulatoryDb();
+        const [declaration] = await db.select().from(declarations)
+          .where(eq(declarations.id, input.declarationId))
+          .limit(1);
+        if (!declaration) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found." });
+        }
+        if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer") {
+          await requireDeclarationActor(declaration, ctx.user);
+        }
+        importerId = declaration.principalId ?? declaration.traderId;
+      }
+      return clearanceGraph({
+        hsCode: input.hsCode,
+        origin: input.origin,
+        destination: input.destination,
+        regime: input.regime,
+        quantity: input.quantity,
+        importerId,
+        declarationId: input.declarationId,
+        at: asDate(input.asAt),
+      });
+    }),
 
   allocateQuota: protectedProcedure
     .input(z.object({ quotaId: z.number().int().positive(), declarationId: z.number().int().positive(), quantity: z.string().regex(/^\d+(\.\d{1,3})?$/) }))
