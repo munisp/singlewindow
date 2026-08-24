@@ -184,11 +184,11 @@ describe("Sprint 68 — OpenAPI Specification", () => {
   });
 
   it("cargo tracking procedures are in catalogue", () => {
-    const cargoProcs = ["getLiveVessels", "getVesselRoute", "getPortArrivals", "getVesselStats"];
+    const cargoProcs = ["getShipmentPosition", "getLiveVessels", "getVesselRoute", "getPortArrivals", "getVesselStats"];
     for (const proc of cargoProcs) {
       expect(proc).toBeTruthy();
     }
-    expect(cargoProcs.length).toBe(4);
+    expect(cargoProcs.length).toBe(5);
   });
 
   it("onboarding procedures are in catalogue", () => {

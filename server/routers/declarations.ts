@@ -5,7 +5,8 @@ import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
-  getLatestKYCVerification, withRlsContext, getDb
+  getLatestKYCVerification, withRlsContext, getDb,
+  resolveBillOfLadingReference, AmbiguousBillOfLadingError
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
@@ -179,6 +180,8 @@ export const declarationsRouter = router({
       invoiceValue: z.number().positive(),
       invoiceCurrency: z.string().length(3).default("USD"),
       principalUserId: z.number().int().positive().optional(),
+      billOfLadingNumber: z.string().min(1).max(64).optional(),
+      manifestNumber: z.string().min(1).max(64).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Business Rule: Validate HS code format (WCO Harmonised System)
@@ -191,12 +194,31 @@ export const declarationsRouter = router({
       if (!profile || profile.status !== "approved") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Your trader profile must be approved before submitting declarations." });
       }
+      let billOfLadingId: number | null = null;
+      try {
+        if (input.manifestNumber && !input.billOfLadingNumber) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "A bill of lading number is required when a manifest number is provided.",
+          });
+        }
+        if (input.billOfLadingNumber) {
+          billOfLadingId = await resolveBillOfLadingReference(input.billOfLadingNumber, input.manifestNumber);
+        }
+      } catch (error) {
+        if (error instanceof AmbiguousBillOfLadingError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
       const decl = await createDeclaration({
         declarationNumber: generateDeclarationNumber(),
         ucr: generateUCR(),
         traderId: principalUserId,
         principalId: principalUserId,
         actingAgentId,
+        billOfLadingId,
+        billOfLadingNumber: input.billOfLadingNumber ?? null,
         declarationType: input.declarationType,
         status: "draft",
         hsCode: input.hsCode,

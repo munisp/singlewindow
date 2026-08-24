@@ -101,6 +101,7 @@ const ServiceHealth = lazy(() => import('./pages/app/ServiceHealth'));
 const AuditLog = lazy(() => import('./pages/app/AuditLog'));
 const CertVerify = lazy(() => import('./pages/public/CertVerify'));
 const ApplicationTracker = lazy(() => import('./pages/public/ApplicationTracker'));
+const ShipmentTracker = lazy(() => import('./pages/public/ShipmentTracker'));
 const PermitValidation = lazy(() => import('./pages/public/PermitValidation'));
 const StakeholderRegistration = lazy(() => import('./pages/app/StakeholderRegistration'));
 const StakeholderRegistrationReview = lazy(() => import('./pages/app/StakeholderRegistrationReview'));
@@ -186,6 +187,12 @@ function Router() {
       </Route>
       <Route path="/track-application">
         <Suspense fallback={<LazyFallback />}><ApplicationTracker /></Suspense>
+      </Route>
+      <Route path="/track-shipment/:declarationRef">
+        <Suspense fallback={<LazyFallback />}><ShipmentTracker /></Suspense>
+      </Route>
+      <Route path="/track-shipment">
+        <Suspense fallback={<LazyFallback />}><ShipmentTracker /></Suspense>
       </Route>
 
       {/* Public system status page — no authentication required */}

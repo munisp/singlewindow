@@ -46,12 +46,16 @@ export const manifestsRouter = router({
       portOfLoading: z.string().min(1).max(64),
       portOfDischarge: z.string().min(1).max(64),
       eta: z.string().datetime(),
+      mmsi: z.string().min(1).max(16).optional(),
+      imo: z.string().min(1).max(16).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
       return callManifestService("/api/manifests", "POST", {
         ...input,
         submittedBy: ctx.user.id,
         eta: new Date(input.eta).toISOString(),
+        mmsi: input.mmsi,
+        imo: input.imo,
       });
     }),
 

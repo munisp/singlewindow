@@ -70,6 +70,7 @@ vi.mock("./db", () => ({
     companyName: "Test Co",
     tinNumber: "TIN-001",
   }),
+  resolveBillOfLadingReference: vi.fn().mockResolvedValue(42),
   getUserById: vi.fn().mockResolvedValue(null),
   createNotification: vi.fn().mockResolvedValue(undefined),
   getNotificationsByUser: vi.fn().mockResolvedValue([]),
@@ -202,6 +203,29 @@ describe("declarations router — create", () => {
     expect(result).toHaveProperty("id");
     expect(result).toHaveProperty("declarationNumber");
     expect(result).toHaveProperty("ucr");
+  });
+
+  it("stores a declared bill of lading number and its resolved record id", async () => {
+    const { createDeclaration, resolveBillOfLadingReference } = await import("./db");
+    const caller = appRouter.createCaller(createTraderCtx());
+    await caller.declarations.create({
+      hsCode: "8471.30",
+      goodsDescription: "Laptop computers",
+      countryOfOrigin: "US",
+      portOfEntry: "GHTEM",
+      grossWeight: 50,
+      netWeight: 45,
+      numberOfPackages: 10,
+      invoiceValue: 5000,
+      declarationType: "import",
+      billOfLadingNumber: "BL-42",
+      manifestNumber: "MAN-42",
+    });
+    expect(resolveBillOfLadingReference).toHaveBeenCalledWith("BL-42", "MAN-42");
+    expect(createDeclaration).toHaveBeenLastCalledWith(expect.objectContaining({
+      billOfLadingId: 42,
+      billOfLadingNumber: "BL-42",
+    }));
   });
 
   it("rejects create for trader without approved profile", async () => {

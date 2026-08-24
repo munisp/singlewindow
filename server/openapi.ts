@@ -56,6 +56,19 @@ const ROUTER_CATALOGUE: Record<string, Record<string, ProcedureMeta>> = {
     getVesselPositions: { type: "query", summary: "Get vessel positions", description: "Returns current AIS positions for tracked vessels.", tags: ["Geospatial"], requiresAuth: true },
   },
   cargoTracking: {
+    getShipmentPosition: {
+      type: "query",
+      summary: "Track shipment vessel position",
+      description: "Returns the latest persisted vessel position linked to a declaration number or UCR without disclosing consignment details.",
+      tags: ["Cargo Tracking"],
+      requiresAuth: false,
+      requestExample: { declarationRef: "TG-2026-AB12CD34" },
+      responseExample: {
+        trackingStatus: "unavailable",
+        reason: "no_ais_position",
+        message: "No current AIS position is available for this vessel.",
+      },
+    },
     getLiveVessels: { type: "query", summary: "Get live vessel positions", description: "Returns persisted AIS positions when available. Successful queries may return an empty vessel collection.", tags: ["Cargo Tracking"], requiresAuth: false, responseExample: { vessels: [], totalCount: 0, lastRefresh: "2026-03-09T15:00:00Z", sourceService: "vessel_tracking_events" } },
     getVesselRoute: { type: "query", summary: "Get vessel route polyline", description: "Returns historical track waypoints for a specific vessel identified by MMSI.", tags: ["Cargo Tracking"], requiresAuth: false, requestExample: { mmsi: "636091234" } },
     getPortArrivals: { type: "query", summary: "Get upcoming port arrivals", description: "Returns the list of vessels with upcoming ETAs at the home port.", tags: ["Cargo Tracking"], requiresAuth: false },

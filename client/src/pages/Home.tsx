@@ -100,6 +100,12 @@ const PUBLIC_UTILITIES = [
     href: "/verify/permit",
     icon: ShieldCheck,
   },
+  {
+    title: "Track your Shipment",
+    description: "Find the latest available vessel position for a declaration or UCR.",
+    href: "/track-shipment",
+    icon: MapPin,
+  },
 ];
 
 const CAPABILITIES = [

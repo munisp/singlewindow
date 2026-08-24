@@ -199,6 +199,8 @@ export const declarations = pgTable("declarations", {
   traderId: integer("trader_id").notNull(),
   principalId: integer("principal_id").references(() => users.id),
   actingAgentId: integer("acting_agent_id").references(() => users.id),
+  billOfLadingId: integer("bill_of_lading_id").references(() => billsOfLading.id, { onDelete: "set null" }),
+  billOfLadingNumber: varchar("bill_of_lading_number", { length: 64 }),
   declarationType: declarationTypeEnum("declaration_type").notNull(),
   status: declarationStatusEnum("status").default("draft").notNull(),
   riskLane: riskLaneEnum("risk_lane").default("green"),
@@ -233,6 +235,7 @@ export const declarations = pgTable("declarations", {
   index("idx_decl_submitted_at").on(t.submittedAt),
   index("idx_decl_risk_lane_status").on(t.riskLane, t.status),
   index("idx_decl_assigned_officer").on(t.assignedOfficerId),
+  index("idx_decl_bill_of_lading_id").on(t.billOfLadingId),
 ]);
 
 export type Declaration = typeof declarations.$inferSelect;
@@ -3260,6 +3263,8 @@ export const manifests = pgTable("manifests", {
   submittedBy: integer("submitted_by").notNull().references(() => users.id),
   vesselName: varchar("vessel_name", { length: 128 }).notNull(),
   voyageNumber: varchar("voyage_number", { length: 64 }).notNull(),
+  mmsi: varchar("mmsi", { length: 16 }),
+  imo: varchar("imo", { length: 16 }),
   portOfLoading: varchar("port_of_loading", { length: 64 }).notNull(),
   portOfDischarge: varchar("port_of_discharge", { length: 64 }).notNull(),
   eta: timestamp("eta"),
@@ -3276,6 +3281,8 @@ export const manifests = pgTable("manifests", {
   index("idx_manifests_status").on(t.status),
   index("idx_manifests_type").on(t.manifestType),
   index("idx_manifests_port").on(t.portOfDischarge),
+  index("idx_manifests_mmsi").on(t.mmsi),
+  index("idx_manifests_imo").on(t.imo),
 ]);
 export type Manifest = typeof manifests.$inferSelect;
 export type InsertManifest = typeof manifests.$inferInsert;

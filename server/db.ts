@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
   InsertUser, users, stakeholderProfiles, declarations,
-  stakeholderRegistrations, stakeholderMandates,
+  stakeholderRegistrations, stakeholderMandates, manifests, billsOfLading,
   declarationDocuments, ogaPermits, payments, auditEvents,
   securityAlerts, sanctionsChecks, aeoApplications, notifications,
   kycDocuments, kycVerifications, visionAnalyses,
@@ -431,6 +431,33 @@ export async function getDeclarationByNumber(declarationNumber: string) {
   const result = await db.select().from(declarations)
     .where(eq(declarations.declarationNumber, declarationNumber)).limit(1);
   return result[0] ?? undefined;
+}
+
+export class AmbiguousBillOfLadingError extends Error {
+  constructor(blNumber: string) {
+    super(`Bill of lading ${blNumber} matches multiple records; provide a manifest number.`);
+    this.name = "AmbiguousBillOfLadingError";
+  }
+}
+
+export async function resolveBillOfLadingReference(
+  blNumber: string,
+  manifestNumber?: string,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const conditions = [eq(billsOfLading.blNumber, blNumber)];
+  if (manifestNumber) {
+    conditions.push(eq(manifests.manifestNumber, manifestNumber));
+  }
+  const rows = await db.select({ id: billsOfLading.id })
+    .from(billsOfLading)
+    .innerJoin(manifests, eq(billsOfLading.manifestId, manifests.id))
+    .where(and(...conditions));
+  if (rows.length > 1) {
+    throw new AmbiguousBillOfLadingError(blNumber);
+  }
+  return rows[0]?.id ?? null;
 }
 
 export async function getPublicDeclarationTracking(reference: string) {
