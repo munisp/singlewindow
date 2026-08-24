@@ -25,28 +25,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 interface Vessel {
   id: string;
   mmsi: string;
-  imo: string;
-  vesselName: string;
-  vesselType: string;
-  flag: string;
-  callSign: string;
+  imo: string | null;
+  vesselName: string | null;
+  vesselType: string | null;
+  flag: string | null;
+  callSign: string | null;
   lat: number;
   lon: number;
-  speed: number;
-  heading: number;
-  course: number;
-  status: string;
-  cargoStatus: string;
+  speed: number | null;
+  heading: number | null;
+  course: number | null;
+  status: string | null;
+  cargoStatus: string | null;
   declarationRef: string | null;
   riskFlag: string | null;
   eta: string | null;
-  destination: string;
-  draught: number;
-  length: number;
+  destination: string | null;
+  draught: number | null;
+  length: number | null;
   lastUpdate: string;
-  originPort: string;
-  originLat: number;
-  originLon: number;
+  originPort: string | null;
+  originLat: number | null;
+  originLon: number | null;
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -121,17 +121,17 @@ export default function CargoTrackingMap() {
 
   // ─── DATA FETCHING (polling fallback) ────────────────────────────────────────────────
 
-  const { data: vesselData, refetch: refetchVessels } = trpc.cargoTracking.getLiveVessels.useQuery(
+  const { data: vesselData, isError: vesselsUnavailable, refetch: refetchVessels } = trpc.cargoTracking.getLiveVessels.useQuery(
     { riskFilter, statusFilter },
     // Only poll when WebSocket is not live
     { refetchInterval: isWsLive ? false : 30000 }
   );
 
-  const { data: statsData } = trpc.cargoTracking.getVesselStats.useQuery(undefined, {
+  const { data: statsData, isError: statsUnavailable } = trpc.cargoTracking.getVesselStats.useQuery(undefined, {
     refetchInterval: 30000,
   });
 
-  const { data: arrivalsData } = trpc.cargoTracking.getPortArrivals.useQuery(undefined, {
+  const { data: arrivalsData, isError: arrivalsUnavailable } = trpc.cargoTracking.getPortArrivals.useQuery(undefined, {
     refetchInterval: 60000,
   });
 
@@ -169,7 +169,7 @@ export default function CargoTrackingMap() {
     vessels.forEach(vessel => {
       const position = { lat: vessel.lat, lng: vessel.lon };
       const riskColor = vessel.riskFlag ? RISK_COLORS[vessel.riskFlag] : "#6b7280";
-      const icon = VESSEL_ICONS[vessel.vesselType] ?? "🚢";
+      const icon = VESSEL_ICONS[vessel.vesselType ?? "general"] ?? "🚢";
 
       // Create marker element
       const el = document.createElement("div");
@@ -185,7 +185,7 @@ export default function CargoTrackingMap() {
         width: 36px; height: 36px; display: flex; align-items: center;
         justify-content: center; font-size: 18px; border: 2px solid white;
         box-shadow: 0 0 0 2px ${riskColor}40;
-        transform: rotate(${vessel.heading}deg);
+        ${vessel.heading === null ? "" : `transform: rotate(${vessel.heading}deg);`}
       `;
       bubble.textContent = icon;
 
@@ -209,7 +209,7 @@ export default function CargoTrackingMap() {
         const marker = new google.maps.marker.AdvancedMarkerElement({
           map: mapRef.current!,
           position,
-          title: vessel.vesselName,
+          title: vessel.vesselName ?? vessel.mmsi,
           content: el,
         });
         marker.addListener("click", () => setSelectedVessel(vessel));
@@ -300,12 +300,12 @@ export default function CargoTrackingMap() {
   // v100: Apply/remove heatmap layer when toggle changes
   useEffect(() => {
     if (!mapReady || typeof google === 'undefined') return;
-    if (showHeatmap && heatmapData && heatmapData.length > 0) {
+    if (showHeatmap && heatmapData && heatmapData.points.length > 0) {
       if (heatmapLayerRef.current) {
         heatmapLayerRef.current.setMap(null);
       }
-      const points = heatmapData.map((p: { lat: number; lng: number; weight: number }) =>
-        new google.maps.LatLng(p.lat, p.lng)
+      const points = heatmapData.points.flatMap((p: { lat: number; lng: number; weight: number | null }) =>
+        p.weight === null ? [] : [new google.maps.LatLng(p.lat, p.lng)]
       );
       heatmapLayerRef.current = new (google.maps.visualization as any).HeatmapLayer({
         data: points,
@@ -326,13 +326,13 @@ export default function CargoTrackingMap() {
         {/* ── HEADER STATS ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           {[
-            { label: "Total Vessels", value: statsData?.total ?? 0, icon: Ship, color: "text-blue-400" },
-            { label: "Underway", value: statsData?.underway ?? 0, icon: Navigation, color: "text-blue-400" },
-            { label: "Moored", value: statsData?.moored ?? 0, icon: Anchor, color: "text-purple-400" },
-            { label: "Anchored", value: statsData?.anchored ?? 0, icon: Anchor, color: "text-yellow-400" },
-            { label: "Red Flag", value: statsData?.redFlag ?? 0, icon: AlertTriangle, color: "text-red-400" },
-            { label: "Amber Flag", value: statsData?.amberFlag ?? 0, icon: AlertTriangle, color: "text-yellow-400" },
-            { label: "Declared", value: statsData?.withDeclaration ?? 0, icon: Package, color: "text-green-400" },
+            { label: "Total Vessels", value: statsUnavailable ? "—" : statsData?.total ?? "—", icon: Ship, color: "text-blue-400" },
+            { label: "Underway", value: statsUnavailable ? "—" : statsData?.underway ?? "—", icon: Navigation, color: "text-blue-400" },
+            { label: "Moored", value: statsUnavailable ? "—" : statsData?.moored ?? "—", icon: Anchor, color: "text-purple-400" },
+            { label: "Anchored", value: statsUnavailable ? "—" : statsData?.anchored ?? "—", icon: Anchor, color: "text-yellow-400" },
+            { label: "Red Flag", value: statsUnavailable ? "—" : statsData?.redFlag ?? "—", icon: AlertTriangle, color: "text-red-400" },
+            { label: "Amber Flag", value: statsUnavailable ? "—" : statsData?.amberFlag ?? "—", icon: AlertTriangle, color: "text-yellow-400" },
+            { label: "Declared", value: statsUnavailable ? "—" : statsData?.withDeclaration ?? "—", icon: Package, color: "text-green-400" },
           ].map(stat => (
             <Card key={stat.label} className="bg-card/50">
               <CardContent className="p-3 flex items-center gap-2">
@@ -406,16 +406,30 @@ export default function CargoTrackingMap() {
         </div>
 
         {/* ── MAIN CONTENT ── */}
+        {vesselsUnavailable && (
+          <Card className="border-amber-500/50 bg-amber-950/20">
+            <CardContent className="p-4 text-sm text-amber-200">
+              Cargo tracking is unavailable. The persisted AIS source could not be reached; this is not an empty result.
+            </CardContent>
+          </Card>
+        )}
         <div className="flex gap-4 flex-1 min-h-0">
 
           {/* MAP */}
           <div className="flex-1 min-w-0 rounded-lg overflow-hidden border border-border">
-            <MapView
-              className="w-full h-full min-h-[500px]"
-              initialCenter={{ lat: -4.05, lng: 39.67 }}
-              initialZoom={10}
-              onMapReady={handleMapReady}
-            />
+            <div className="relative h-full min-h-[500px]">
+              <MapView
+                className="w-full h-full min-h-[500px]"
+                initialCenter={{ lat: -4.05, lng: 39.67 }}
+                initialZoom={10}
+                onMapReady={handleMapReady}
+              />
+              {vesselsUnavailable && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/80 p-6 text-center text-sm text-amber-200">
+                  Persisted vessel positions are unavailable.
+                </div>
+              )}
+            </div>
           </div>
 
           {/* SIDE PANEL */}
@@ -428,11 +442,11 @@ export default function CargoTrackingMap() {
                   <div className="flex items-start justify-between">
                     <div>
                       <CardTitle className="text-sm flex items-center gap-2">
-                        <span>{VESSEL_ICONS[selectedVessel.vesselType] ?? "🚢"}</span>
-                        <span>{selectedVessel.vesselName}</span>
+                        <span>{VESSEL_ICONS[selectedVessel.vesselType ?? "general"] ?? "🚢"}</span>
+                        <span>{selectedVessel.vesselName ?? selectedVessel.mmsi}</span>
                       </CardTitle>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {flagEmoji(selectedVessel.flag)} {selectedVessel.flag} · {selectedVessel.callSign}
+                        {flagEmoji(selectedVessel.flag ?? "")} {selectedVessel.flag ?? "Flag unavailable"} · {selectedVessel.callSign ?? "Call sign unavailable"}
                       </p>
                     </div>
                     <Button variant="ghost" size="icon" className="h-6 w-6 -mt-1" onClick={() => setSelectedVessel(null)}>
@@ -452,12 +466,12 @@ export default function CargoTrackingMap() {
                     <Badge
                       variant="outline"
                       className="text-xs"
-                      style={{ borderColor: STATUS_COLORS[selectedVessel.status] ?? "#6b7280", color: STATUS_COLORS[selectedVessel.status] ?? "#6b7280" }}
+                        style={{ borderColor: STATUS_COLORS[selectedVessel.status ?? ""] ?? "#6b7280", color: STATUS_COLORS[selectedVessel.status ?? ""] ?? "#6b7280" }}
                     >
-                      {selectedVessel.status.toUpperCase()}
+                      {selectedVessel.status?.toUpperCase() ?? "STATUS UNAVAILABLE"}
                     </Badge>
                     <Badge variant="secondary" className="text-xs capitalize">
-                      {selectedVessel.cargoStatus.replace("-", " ")}
+                      {selectedVessel.cargoStatus ? selectedVessel.cargoStatus.replace("-", " ") : "Cargo status unavailable"}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -465,11 +479,11 @@ export default function CargoTrackingMap() {
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                     {[
                       { label: "MMSI", value: selectedVessel.mmsi, icon: Radio },
-                      { label: "IMO", value: selectedVessel.imo, icon: Ship },
-                      { label: "Speed", value: `${selectedVessel.speed} kn`, icon: Gauge },
-                      { label: "Heading", value: `${selectedVessel.heading}°`, icon: Compass },
-                      { label: "Draught", value: `${selectedVessel.draught} m`, icon: TrendingUp },
-                      { label: "Length", value: `${selectedVessel.length} m`, icon: Ship },
+                      { label: "IMO", value: selectedVessel.imo ?? "—", icon: Ship },
+                      { label: "Speed", value: selectedVessel.speed === null ? "—" : `${selectedVessel.speed} kn`, icon: Gauge },
+                      { label: "Heading", value: selectedVessel.heading === null ? "—" : `${selectedVessel.heading}°`, icon: Compass },
+                      { label: "Draught", value: selectedVessel.draught === null ? "—" : `${selectedVessel.draught} m`, icon: TrendingUp },
+                      { label: "Length", value: selectedVessel.length === null ? "—" : `${selectedVessel.length} m`, icon: Ship },
                     ].map(item => (
                       <div key={item.label} className="flex items-center gap-1.5">
                         <item.icon className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -483,12 +497,12 @@ export default function CargoTrackingMap() {
                     <div className="flex items-center gap-1.5">
                       <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
                       <span className="text-muted-foreground">Origin:</span>
-                      <span className="font-medium">{selectedVessel.originPort}</span>
+                      <span className="font-medium">{selectedVessel.originPort ?? "—"}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <MapPin className="h-3 w-3 text-green-400 shrink-0" />
                       <span className="text-muted-foreground">Destination:</span>
-                      <span className="font-medium">{selectedVessel.destination}</span>
+                      <span className="font-medium">{selectedVessel.destination ?? "—"}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -546,10 +560,12 @@ export default function CargoTrackingMap() {
                     }}
                     className={`w-full text-left flex items-center gap-2 p-2 rounded hover:bg-accent transition-colors text-xs ${selectedVessel?.id === v.id ? "bg-accent" : ""}`}
                   >
-                    <span className="text-base">{VESSEL_ICONS[v.vesselType] ?? "🚢"}</span>
+                    <span className="text-base">{VESSEL_ICONS[v.vesselType ?? "general"] ?? "🚢"}</span>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{v.vesselName}</p>
-                      <p className="text-muted-foreground capitalize">{v.status} · {v.speed} kn</p>
+                      <p className="font-medium truncate">{v.vesselName ?? v.mmsi}</p>
+                      <p className="text-muted-foreground capitalize">
+                        {v.status ?? "Status unavailable"} · {v.speed === null ? "Speed unavailable" : `${v.speed} kn`}
+                      </p>
                     </div>
                     {v.riskFlag && (
                       <div

@@ -188,7 +188,7 @@ function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) 
   // Dynamic port list from DB
   const { data: portList, isError} = trpc.portCongestion.listPorts.useQuery();
 
-  const { data: vessels, isLoading } = trpc.geospatial.getVesselTrack.useQuery(
+  const { data: vessels, isLoading, isError: vesselsUnavailable } = trpc.geospatial.getVesselTrack.useQuery(
     { portCode: portFilter || undefined, limit: 100 },
     { refetchInterval: 30_000 }
   );
@@ -241,6 +241,11 @@ function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) 
       <CardContent className="p-0">
         {isLoading ? (
           <div className="p-4 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
+        ) : vesselsUnavailable ? (
+          <div className="p-8 text-center text-amber-700 text-sm">
+            <WifiOff className="h-8 w-8 mx-auto mb-2 opacity-60" />
+            Vessel tracking is unavailable — persisted AIS events cannot be reached.
+          </div>
         ) : filtered.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground text-sm">
             <Ship className="h-8 w-8 mx-auto mb-2 opacity-30" />
@@ -556,6 +561,10 @@ export default function PortHeatmap() {
               <CardContent className="p-0 overflow-hidden rounded-lg">
                 {isLoading ? (
                   <Skeleton className="h-[500px] w-full" />
+                ) : isError ? (
+                  <div className="flex h-[500px] items-center justify-center bg-amber-50 p-6 text-center text-sm text-amber-800">
+                    Port congestion data is unavailable. The map is intentionally not shown as empty.
+                  </div>
                 ) : (
                   <MapView
                     className="h-[500px] w-full"
@@ -577,7 +586,12 @@ export default function PortHeatmap() {
                   <div className="p-4 space-y-2">
                     {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
                   </div>
+                ) : isError ? (
+                  <p className="p-6 text-center text-sm text-amber-800">Port status is unavailable.</p>
                 ) : (
+                  (heatmapData ?? []).length === 0 ? (
+                    <p className="p-6 text-center text-sm text-muted-foreground">No persisted port congestion records are available.</p>
+                  ) : (
                   <div className="divide-y">
                     {(heatmapData ?? []).map((port) => (
                       <button
@@ -605,6 +619,7 @@ export default function PortHeatmap() {
                       </button>
                     ))}
                   </div>
+                  )
                 )}
               </CardContent>
             </Card>

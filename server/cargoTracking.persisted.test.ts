@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ rows: [] as any[] }));
+const state = vi.hoisted(() => ({ rows: [] as any[], queryError: null as Error | null }));
 
 vi.mock("./db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./db")>();
@@ -9,6 +9,7 @@ vi.mock("./db", async (importOriginal) => {
     getDb: vi.fn(async () => ({})),
     getPool: vi.fn(() => ({
       query: vi.fn(async (query: string) => {
+        if (state.queryError) throw state.queryError;
         if (query.includes("COUNT(DISTINCT mmsi)")) {
           return {
             rows: state.rows.length
@@ -20,6 +21,16 @@ vi.mock("./db", async (importOriginal) => {
       }),
     })),
   };
+});
+
+vi.mock("./_core/kafka", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./_core/kafka")>();
+  return { ...actual, publishEvent: vi.fn() };
+});
+
+afterEach(() => {
+  state.rows = [];
+  state.queryError = null;
 });
 
 describe("persisted cargo tracking", () => {
@@ -42,18 +53,56 @@ describe("persisted cargo tracking", () => {
     const caller = cargoTrackingRouter.createCaller({} as any);
     const result = await caller.getLiveVessels({ riskFilter: "all", statusFilter: "all" });
     expect(result.vessels).toHaveLength(1);
-    expect(result.vessels[0]).toMatchObject({ mmsi: "123456789", vesselName: "Persisted Vessel", lat: 6.4 });
+    expect(result.vessels[0]).toMatchObject({
+      mmsi: "123456789",
+      vesselName: "Persisted Vessel",
+      lat: 6.4,
+      riskFlag: null,
+      cargoStatus: null,
+      callSign: null,
+      draught: null,
+      length: null,
+      originLat: null,
+      originLon: null,
+    });
     expect(result.vessels[0].declarationRef).toBeNull();
     expect(result.sourceService).toBe("vessel_tracking_events");
   });
 
-  it("returns explicit unavailability when no persisted tracking rows exist", async () => {
+  it("returns successful empty results when no persisted tracking rows exist", async () => {
     const { cargoTrackingRouter } = await import("./routers/cargoTracking");
-    state.rows = [];
+    const caller = cargoTrackingRouter.createCaller({} as any);
+    await expect(caller.getLiveVessels({ riskFilter: "all", statusFilter: "all" }))
+      .resolves.toMatchObject({ vessels: [], totalCount: 0, sourceService: "vessel_tracking_events" });
+    await expect(caller.searchVessels({ q: "missing" })).resolves.toEqual([]);
+    await expect(caller.getVesselRoute({ mmsi: "missing" }))
+      .resolves.toMatchObject({ waypoints: [], vessel: null, sourceService: "vessel_tracking_events" });
+    await expect(caller.getVesselStats())
+      .resolves.toMatchObject({ total: 0, redFlag: null, amberFlag: null, greenFlag: null, withDeclaration: null });
+  });
+
+  it("maps persisted query failures to service unavailability", async () => {
+    const { cargoTrackingRouter } = await import("./routers/cargoTracking");
+    state.queryError = new Error("database offline");
     const caller = cargoTrackingRouter.createCaller({} as any);
     await expect(caller.getLiveVessels({ riskFilter: "all", statusFilter: "all" }))
       .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
-    await expect(caller.getVesselStats())
-      .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("does not report cargo-event success when Kafka publication fails", async () => {
+    const kafka = await import("./_core/kafka");
+    const publish = vi.mocked(kafka.publishEvent).mockRejectedValueOnce(new Error("Kafka offline"));
+    const { cargoTrackingRouter } = await import("./routers/cargoTracking");
+    const caller = cargoTrackingRouter.createCaller({
+      user: { id: 42 },
+      req: { method: "GET" },
+    } as any);
+    await expect(caller.logCargoEvent({
+      mmsi: "123456789",
+      vesselName: "Persisted Vessel",
+      eventType: "arrived",
+      portCode: "NGAPP",
+    })).rejects.toThrow("Kafka offline");
+    expect(publish).toHaveBeenCalledOnce();
   });
 });

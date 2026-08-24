@@ -1,9 +1,8 @@
 /**
  * Cargo tracking backed by persisted AIS events.
  *
- * A tracking response is never synthesized when the persisted source has no
- * data. Callers receive SERVICE_UNAVAILABLE so they can render that tracking
- * is unavailable instead of an empty or fabricated map.
+ * A tracking response is never synthesized. Persisted-source failures are
+ * surfaced as unavailable, while successful empty queries remain empty.
  */
 
 import { z } from "zod";
@@ -14,41 +13,41 @@ import { getDb, getPool } from "../db";
 
 export type VesselStatus = "underway" | "moored" | "anchored" | "restricted" | "aground";
 export type CargoStatus = "pre-arrival" | "arrived" | "berthed" | "loading" | "unloading" | "departed";
-export type RiskFlag = "green" | "amber" | "red";
+export type RiskFlag = "green" | "amber" | "red" | null;
 export type VesselType = "container" | "bulk" | "tanker" | "general" | "roro" | "passenger";
 
 export interface LiveVessel {
   id: string;
   mmsi: string;
-  imo: string;
-  vesselName: string;
-  vesselType: VesselType;
-  flag: string;
-  callSign: string;
+  imo: string | null;
+  vesselName: string | null;
+  vesselType: VesselType | null;
+  flag: string | null;
+  callSign: string | null;
   lat: number;
   lon: number;
-  speed: number;
-  heading: number;
-  course: number;
-  status: VesselStatus;
-  cargoStatus: CargoStatus;
+  speed: number | null;
+  heading: number | null;
+  course: number | null;
+  status: VesselStatus | null;
+  cargoStatus: CargoStatus | null;
   declarationRef: string | null;
   riskFlag: RiskFlag;
   eta: string | null;
-  destination: string;
-  draught: number;
-  length: number;
+  destination: string | null;
+  draught: number | null;
+  length: number | null;
   lastUpdate: string;
-  originPort: string;
-  originLat: number;
-  originLon: number;
+  originPort: string | null;
+  originLat: number | null;
+  originLon: number | null;
 }
 
 export interface RouteWaypoint {
   lat: number;
   lon: number;
   timestamp: string;
-  speed: number;
+  speed: number | null;
 }
 
 type VesselRow = {
@@ -96,35 +95,32 @@ function vesselType(cargoType: string | null): VesselType | null {
 }
 
 function mapVessel(row: VesselRow): LiveVessel {
-  const speed = Number(row.speed ?? 0);
-  const flag = String(row.flag_country ?? "");
-  const highRisk = ["IRN", "PRK", "SYR", "RUS", "BLR"];
-  const mediumRisk = ["LBY", "SOM", "SDN", "YEM", "MMR"];
+  const speed = row.speed === null ? null : Number(row.speed);
   return {
     id: String(row.mmsi),
     mmsi: String(row.mmsi),
-    imo: String(row.imo_number ?? ""),
-    vesselName: String(row.vessel_name ?? ""),
-    vesselType: vesselType(row.cargo_type) ?? "general",
-    flag,
-    callSign: "",
+    imo: row.imo_number,
+    vesselName: row.vessel_name,
+    vesselType: vesselType(row.cargo_type),
+    flag: row.flag_country,
+    callSign: null,
     lat: Number(row.latitude),
     lon: Number(row.longitude),
     speed,
-    heading: Number(row.heading ?? 0),
-    course: Number(row.heading ?? 0),
-    status: speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway",
-    cargoStatus: "" as CargoStatus,
+    heading: row.heading === null ? null : Number(row.heading),
+    course: row.heading === null ? null : Number(row.heading),
+    status: speed === null ? null : speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway",
+    cargoStatus: null,
     declarationRef: null,
-    riskFlag: highRisk.includes(flag) ? "red" : mediumRisk.includes(flag) ? "amber" : "green",
+    riskFlag: null,
     eta: row.eta ? new Date(row.eta).toISOString() : null,
-    destination: String(row.destination_port ?? ""),
-    draught: 0,
-    length: 0,
+    destination: row.destination_port,
+    draught: null,
+    length: null,
     lastUpdate: new Date(row.recorded_at).toISOString(),
-    originPort: "",
-    originLat: 0,
-    originLon: 0,
+    originPort: null,
+    originLat: null,
+    originLon: null,
   };
 }
 
@@ -143,9 +139,6 @@ export const cargoTrackingRouter = router({
     }))
     .query(async ({ input }) => {
       const rows = await persistedQuery<VesselRow>(latestVesselsQuery);
-      if (rows.length === 0) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cargo tracking is unavailable." });
-      }
       let vessels = rows.map(mapVessel);
       if (input.riskFilter !== "all") vessels = vessels.filter(v => v.riskFlag === input.riskFilter);
       if (input.statusFilter !== "all") vessels = vessels.filter(v => v.status === input.statusFilter);
@@ -168,7 +161,11 @@ export const cargoTrackingRouter = router({
         ORDER BY recorded_at ASC
       `, [input.mmsi]);
       if (rows.length === 0) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cargo tracking is unavailable." });
+        return {
+          waypoints: [],
+          vessel: null,
+          sourceService: "vessel_tracking_events",
+        };
       }
       const latest = mapVessel(rows[rows.length - 1]);
       return {
@@ -176,19 +173,10 @@ export const cargoTrackingRouter = router({
           lat: Number(row.latitude),
           lon: Number(row.longitude),
           timestamp: new Date(row.recorded_at).toISOString(),
-          speed: Number(row.speed ?? 0),
+          speed: row.speed === null ? null : Number(row.speed),
         })),
         vessel: latest,
       };
-    }),
-
-  getShipmentPosition: publicProcedure
-    .input(z.object({ declarationRef: z.string().min(1) }))
-    .query(async () => {
-      throw new TRPCError({
-        code: "SERVICE_UNAVAILABLE",
-        message: "Shipment cargo tracking is unavailable.",
-      });
     }),
 
   getPortArrivals: publicProcedure.query(async () => {
@@ -229,9 +217,6 @@ export const cargoTrackingRouter = router({
       FROM vessel_tracking_events
       ORDER BY mmsi, recorded_at DESC
     `);
-    if (rows.length === 0) {
-      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cargo tracking is unavailable." });
-    }
     const arrivals = rows.filter(row => row.eta && new Date(row.eta) >= new Date());
     return {
       arrivals: arrivals.map(row => {
@@ -255,32 +240,24 @@ export const cargoTrackingRouter = router({
   getVesselStats: publicProcedure.query(async () => {
     const [stats] = await persistedQuery<{
       total: string; moored: string; anchored: string; underway: string;
-      red_flag: string; amber_flag: string;
     }>(`
       SELECT
         COUNT(DISTINCT mmsi) AS total,
         SUM(CASE WHEN speed < 0.5 THEN 1 ELSE 0 END) AS moored,
         SUM(CASE WHEN speed >= 0.5 AND speed < 2 THEN 1 ELSE 0 END) AS anchored,
-        SUM(CASE WHEN speed >= 2 THEN 1 ELSE 0 END) AS underway,
-        SUM(CASE WHEN flag_country IN ('IRN','PRK','SYR','RUS','BLR') THEN 1 ELSE 0 END) AS red_flag,
-        SUM(CASE WHEN flag_country IN ('LBY','SOM','SDN','YEM','MMR') THEN 1 ELSE 0 END) AS amber_flag
+        SUM(CASE WHEN speed >= 2 THEN 1 ELSE 0 END) AS underway
       FROM (${latestVesselsQuery}) latest
     `);
     const total = Number(stats?.total ?? 0);
-    if (!stats || total === 0) {
-      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cargo tracking is unavailable." });
-    }
-    const redFlag = Number(stats.red_flag ?? 0);
-    const amberFlag = Number(stats.amber_flag ?? 0);
     return {
       total,
       underway: Number(stats.underway ?? 0),
       moored: Number(stats.moored ?? 0),
       anchored: Number(stats.anchored ?? 0),
-      redFlag,
-      amberFlag,
-      greenFlag: Math.max(0, total - redFlag - amberFlag),
-      withDeclaration: 0,
+      redFlag: null,
+      amberFlag: null,
+      greenFlag: null,
+      withDeclaration: null,
       sourceService: "vessel_tracking_events",
     };
   }),
@@ -309,7 +286,7 @@ export const cargoTrackingRouter = router({
           lon: input.lon ?? null,
           loggedBy: ctx.user.id,
         },
-      }).catch(() => {});
+      });
       return { success: true, eventType: input.eventType, mmsi: input.mmsi };
     }),
 
@@ -323,9 +300,6 @@ export const cargoTrackingRouter = router({
         WHERE vessel_name ILIKE $1 OR mmsi ILIKE $1 OR imo_number ILIKE $1
         ORDER BY mmsi, recorded_at DESC LIMIT 20
       `, [`%${input.q}%`]);
-      if (rows.length === 0) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cargo tracking is unavailable." });
-      }
       return rows.map(mapVessel);
     }),
 
@@ -344,16 +318,16 @@ export const cargoTrackingRouter = router({
         ORDER BY recorded_at DESC
         LIMIT $2
       `, [input.hours, input.limit]);
-      if (rows.length === 0) {
-        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Cargo tracking is unavailable." });
-      }
-      return rows.map(row => ({
-        lat: Number(row.lat),
-        lng: Number(row.lng),
-        weight: row.speed === null ? 0.5 : Math.min(Number(row.speed) / 30, 1),
-        vesselId: row.mmsi,
-        timestamp: row.recorded_at,
-      }));
+      return {
+        points: rows.map(row => ({
+          lat: Number(row.lat),
+          lng: Number(row.lng),
+          weight: row.speed === null ? null : Math.min(Number(row.speed) / 30, 1),
+          vesselId: row.mmsi,
+          timestamp: row.recorded_at,
+        })),
+        sourceService: "vessel_tracking_events",
+      };
     }),
 });
 

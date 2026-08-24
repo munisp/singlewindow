@@ -56,9 +56,8 @@ const ROUTER_CATALOGUE: Record<string, Record<string, ProcedureMeta>> = {
     getVesselPositions: { type: "query", summary: "Get vessel positions", description: "Returns current AIS positions for tracked vessels.", tags: ["Geospatial"], requiresAuth: true },
   },
   cargoTracking: {
-    getLiveVessels: { type: "query", summary: "Get live vessel positions", description: "Returns current AIS positions for all tracked vessels in the East Africa corridor. Refreshes every 30 seconds.", tags: ["Cargo Tracking"], requiresAuth: false, responseExample: { vessels: [{ mmsi: "636091234", vesselName: "MSC NAIROBI", lat: -4.0435, lon: 39.6682, speed: 12.4, heading: 285, status: "underway", riskFlag: "green" }], totalCount: 8, lastRefresh: "2026-03-09T15:00:00Z", sourceService: "sedona-svc" } },
+    getLiveVessels: { type: "query", summary: "Get live vessel positions", description: "Returns persisted AIS positions when available. Successful queries may return an empty vessel collection.", tags: ["Cargo Tracking"], requiresAuth: false, responseExample: { vessels: [], totalCount: 0, lastRefresh: "2026-03-09T15:00:00Z", sourceService: "vessel_tracking_events" } },
     getVesselRoute: { type: "query", summary: "Get vessel route polyline", description: "Returns historical track waypoints for a specific vessel identified by MMSI.", tags: ["Cargo Tracking"], requiresAuth: false, requestExample: { mmsi: "636091234" } },
-    getShipmentPosition: { type: "query", summary: "Get shipment position by declaration", description: "Returns the current vessel position linked to a specific declaration reference.", tags: ["Cargo Tracking"], requiresAuth: true, requestExample: { declarationRef: "URN-2026-001234" } },
     getPortArrivals: { type: "query", summary: "Get upcoming port arrivals", description: "Returns the list of vessels with upcoming ETAs at the home port.", tags: ["Cargo Tracking"], requiresAuth: false },
     getVesselStats: { type: "query", summary: "Get vessel statistics", description: "Returns summary statistics: total vessels, underway/moored/anchored counts, risk flag breakdown.", tags: ["Cargo Tracking"], requiresAuth: false },
   },
