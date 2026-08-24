@@ -19,6 +19,7 @@ import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValid
 import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
 import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
 import { resolveActingPrincipal, requireDeclarationActor } from "../_core/mandateAuthorization";
+import { assertDeclarationFormalitiesSatisfied, evaluateDeclarationRegulations } from "../regulatory";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -264,6 +265,17 @@ export const declarationsRouter = router({
             `Current KYC status: ${kycRecord?.status ?? 'not started'}.`,
         });
       }
+
+      await evaluateDeclarationRegulations({
+        declarationId: input.id,
+        importerId: principalUserId,
+        hsCode: decl.hsCode ?? "",
+        origin: decl.countryOfOrigin ?? "",
+        destination: decl.countryOfDestination ?? undefined,
+        regime: decl.declarationType,
+        quantity: String(decl.numberOfPackages ?? 1),
+        at: new Date(),
+      });
 
       // Run AI risk scoring — Python ML scorer (primary) with LLM fallback
       const risk = await computeRiskScore(
@@ -567,6 +579,9 @@ export const declarationsRouter = router({
       const permifyAction = input.status === "cleared" ? "release" :
         input.status === "under_examination" ? "hold" : "assess";
       await assertCan(String(ctx.user.id), "declaration", String(input.id), permifyAction);
+      if (input.status === "cleared") {
+        await assertDeclarationFormalitiesSatisfied(input.id);
+      }
 
       const updateData: Record<string, unknown> = { status: input.status };
       if (input.status === "cleared") updateData.clearedAt = new Date();

@@ -50,6 +50,14 @@ export const permitStatusEnum = pgEnum("permit_status", [
   "pending", "under_review", "approved", "rejected", "not_required"
 ]);
 
+export const regulatoryRestrictionTypeEnum = pgEnum("regulatory_restriction_type", [
+  "prohibition", "restriction"
+]);
+
+export const declarationFormalityStatusEnum = pgEnum("declaration_formality_status", [
+  "required", "satisfied", "blocked"
+]);
+
 export const paymentMethodEnum = pgEnum("payment_method", [
   "bank_transfer", "mobile_money", "card", "bond"
 ]);
@@ -274,11 +282,121 @@ export const ogaPermits = pgTable("oga_permits", {
   expiresAt: timestamp("expires_at"),
   slaDeadline: timestamp("sla_deadline"),
   respondedAt: timestamp("responded_at"),
+  hsCode: varchar("hs_code", { length: 12 }),
+  origin: varchar("origin", { length: 3 }),
+  destination: varchar("destination", { length: 3 }),
+  consigneeId: integer("consignee_id").references(() => users.id),
+  permittedQuantity: decimal("permitted_quantity", { precision: 18, scale: 3 }),
+  usedQuantity: decimal("used_quantity", { precision: 18, scale: 3 }).default("0").notNull(),
+  validFrom: timestamp("valid_from"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_oga_declaration_id").on(t.declarationId),
   index("idx_oga_status").on(t.status),
+]);
+
+// ─── REGULATORY OBLIGATIONS (SW4/SW5/SW6) ────────────────────────────────────
+
+export const regulatoryFormalities = pgTable("regulatory_formalities", {
+  id: serial("id").primaryKey(),
+  hsCodePrefix: varchar("hs_code_prefix", { length: 12 }).notNull(),
+  origin: varchar("origin", { length: 3 }),
+  destination: varchar("destination", { length: 3 }),
+  regime: varchar("regime", { length: 32 }),
+  agencyCode: varchar("agency_code", { length: 32 }).notNull(),
+  agencyName: varchar("agency_name", { length: 128 }).notNull(),
+  permitType: varchar("permit_type", { length: 128 }).notNull(),
+  requiredQuantity: decimal("required_quantity", { precision: 18, scale: 3 }).default("1").notNull(),
+  quantityUnit: varchar("quantity_unit", { length: 32 }),
+  legalInstrument: text("legal_instrument").notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_reg_formality_match").on(t.hsCodePrefix, t.origin, t.destination, t.regime),
+  index("idx_reg_formality_dates").on(t.validFrom, t.validUntil),
+]);
+
+export const regulatoryRestrictions = pgTable("regulatory_restrictions", {
+  id: serial("id").primaryKey(),
+  hsCodePrefix: varchar("hs_code_prefix", { length: 12 }).notNull(),
+  origin: varchar("origin", { length: 3 }),
+  regime: varchar("regime", { length: 32 }),
+  restrictionType: regulatoryRestrictionTypeEnum("restriction_type").notNull(),
+  description: text("description").notNull(),
+  legalInstrument: text("legal_instrument").notNull(),
+  agencyCode: varchar("agency_code", { length: 32 }),
+  agencyName: varchar("agency_name", { length: 128 }),
+  permitType: varchar("permit_type", { length: 128 }),
+  requiredQuantity: decimal("required_quantity", { precision: 18, scale: 3 }).default("1").notNull(),
+  quantityUnit: varchar("quantity_unit", { length: 32 }),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_reg_restriction_match").on(t.hsCodePrefix, t.origin, t.regime),
+  index("idx_reg_restriction_dates").on(t.validFrom, t.validUntil),
+]);
+
+export const declarationFormalities = pgTable("declaration_formalities", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id, { onDelete: "cascade" }),
+  formalityId: integer("formality_id").references(() => regulatoryFormalities.id),
+  restrictionId: integer("restriction_id").references(() => regulatoryRestrictions.id),
+  agencyCode: varchar("agency_code", { length: 32 }),
+  agencyName: varchar("agency_name", { length: 128 }),
+  permitType: varchar("permit_type", { length: 128 }),
+  legalInstrument: text("legal_instrument").notNull(),
+  requiredQuantity: decimal("required_quantity", { precision: 18, scale: 3 }).notNull(),
+  satisfiedQuantity: decimal("satisfied_quantity", { precision: 18, scale: 3 }).default("0").notNull(),
+  satisfiedByPermitId: integer("satisfied_by_permit_id").references(() => ogaPermits.id),
+  status: declarationFormalityStatusEnum("status").default("required").notNull(),
+  evaluatedAt: timestamp("evaluated_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_decl_formality_declaration").on(t.declarationId),
+  index("idx_decl_formality_status").on(t.status),
+]);
+
+export const tariffQuotas = pgTable("tariff_quotas", {
+  id: serial("id").primaryKey(),
+  quotaCode: varchar("quota_code", { length: 64 }).notNull().unique(),
+  hsCodePrefix: varchar("hs_code_prefix", { length: 12 }).notNull(),
+  origin: varchar("origin", { length: 3 }),
+  regime: varchar("regime", { length: 32 }),
+  periodStart: timestamp("period_start").notNull(),
+  periodEnd: timestamp("period_end").notNull(),
+  totalQuantity: decimal("total_quantity", { precision: 18, scale: 3 }).notNull(),
+  quantityUnit: varchar("quantity_unit", { length: 32 }).notNull(),
+  ledgerAccountId: varchar("ledger_account_id", { length: 128 }).notNull(),
+  legalInstrument: text("legal_instrument").notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tariff_quota_match").on(t.hsCodePrefix, t.origin, t.regime),
+  index("idx_tariff_quota_period").on(t.periodStart, t.periodEnd),
+]);
+
+export const tariffQuotaAllocations = pgTable("tariff_quota_allocations", {
+  id: serial("id").primaryKey(),
+  quotaId: integer("quota_id").notNull().references(() => tariffQuotas.id),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  quantity: decimal("quantity", { precision: 18, scale: 3 }).notNull(),
+  transferId: varchar("transfer_id", { length: 128 }).notNull().unique(),
+  reversedAt: timestamp("reversed_at"),
+  reversalTransferId: varchar("reversal_transfer_id", { length: 128 }).unique(),
+  allocatedAt: timestamp("allocated_at").defaultNow().notNull(),
+  allocatedBy: integer("allocated_by").notNull().references(() => users.id),
+}, (t) => [
+  uniqueIndex("uq_tariff_active_declaration").on(t.quotaId, t.declarationId)
+    .where(sql`${t.reversedAt} IS NULL`),
+  index("idx_tariff_allocation_quota").on(t.quotaId),
+  index("idx_tariff_allocation_declaration").on(t.declarationId),
 ]);
 
 // ─── PAYMENTS ────────────────────────────────────────────────────────────────
@@ -3706,6 +3824,7 @@ export const exciseReconciliationReports = pgTable("excise_reconciliation_report
   orderId: integer("order_id").notNull().references(() => exciseStampOrders.id),
   issuedQuantity: integer("issued_quantity").notNull(),
   activatedQuantity: integer("activated_quantity").notNull(),
+  everActivatedQuantity: integer("ever_activated_quantity").default(0).notNull(),
   retiredQuantity: integer("retired_quantity").notNull(),
   stillIssuedQuantity: integer("still_issued_quantity").notNull(),
   reportedProductionQuantity: integer("reported_production_quantity").notNull(),

@@ -904,14 +904,15 @@ export const exciseRouter = router({
         const marks = await db.select().from(exciseStampMarks).where(eq(exciseStampMarks.orderId, order.id));
         const reports = await db.select().from(exciseProductionReports).where(eq(exciseProductionReports.orderId, order.id));
         const issuedQuantity = marks.length;
-        const activatedQuantity = marks.filter((mark) => mark.status === "active" || mark.activatedAt !== null).length;
+        const activatedQuantity = marks.filter((mark) => mark.status === "active").length;
+        const everActivatedQuantity = marks.filter((mark) => mark.activatedAt !== null).length;
         const retiredQuantity = marks.filter((mark) => mark.status === "retired").length;
         const stillIssuedQuantity = marks.filter((mark) => mark.status === "issued").length;
         const reportedProductionQuantity = reports.reduce((sum, report) => sum + report.quantity, 0);
         const stampVariance = issuedQuantity - activatedQuantity - retiredQuantity - stillIssuedQuantity;
-        const productionVariance = activatedQuantity - reportedProductionQuantity;
+        const productionVariance = everActivatedQuantity - reportedProductionQuantity;
         const [report] = await db.insert(exciseReconciliationReports).values({
-          orderId: order.id, issuedQuantity, activatedQuantity, retiredQuantity, stillIssuedQuantity,
+          orderId: order.id, issuedQuantity, activatedQuantity, everActivatedQuantity, retiredQuantity, stillIssuedQuantity,
           reportedProductionQuantity, stampVariance, productionVariance, computedBy: ctx.user.id,
         }).returning();
         return report;
@@ -1177,6 +1178,7 @@ export const exciseRouter = router({
         const [markStats] = await db.select({
           issued: count(exciseStampMarks.id),
           activated: sql<number>`count(*) filter (where ${exciseStampMarks.status} = 'active')`,
+          everActivated: sql<number>`count(*) filter (where ${exciseStampMarks.activatedAt} is not null)`,
           retired: sql<number>`count(*) filter (where ${exciseStampMarks.status} = 'retired')`,
           stillIssued: sql<number>`count(*) filter (where ${exciseStampMarks.status} = 'issued')`,
         }).from(exciseStampMarks).where(input?.orderId ? eq(exciseStampMarks.orderId, input.orderId) : undefined);
@@ -1190,6 +1192,7 @@ export const exciseRouter = router({
           : await db.select({ anomalies: count(exciseAnomalies.id) }).from(exciseAnomalies);
         const issued = Number(markStats?.issued ?? 0);
         const activated = Number(markStats?.activated ?? 0);
+        const everActivated = Number(markStats?.everActivated ?? 0);
         const retired = Number(markStats?.retired ?? 0);
         const stillIssued = Number(markStats?.stillIssued ?? 0);
         const reportedProduction = Number(productionStats?.reported ?? 0);
@@ -1201,7 +1204,8 @@ export const exciseRouter = router({
           paid: Number(orderStats?.paid ?? 0),
           reportedProduction,
           stampAccountabilityVariance: issued - activated - retired - stillIssued,
-          productionAccountabilityVariance: activated - reportedProduction,
+          productionAccountabilityVariance: everActivated - reportedProduction,
+          everActivated,
           anomalies: Number(anomalyStats?.anomalies ?? 0),
         };
       } catch (error) {

@@ -7,6 +7,16 @@ import type { TrpcContext } from "./_core/context";
 // stats is admin-only
 // create requires an approved trader profile
 vi.mock("./db", () => ({
+  // The regulatory evaluator sees an available, empty register in this unit test.
+  getDb: vi.fn().mockResolvedValue({
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => Promise.resolve([]),
+        }),
+      }),
+    }),
+  }),
   createDeclaration: vi.fn().mockResolvedValue({
     id: 1,
     declarationNumber: "DEC-001",

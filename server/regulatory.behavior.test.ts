@@ -1,0 +1,248 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { appRouter } from "./routers";
+import { getDb } from "./db";
+import type { TrpcContext } from "./_core/context";
+import { evaluateDeclarationRegulations } from "./regulatory";
+import {
+  declarations,
+  declarationFormalities,
+  ogaPermits,
+  regulatoryFormalities,
+  regulatoryRestrictions,
+  tariffQuotaAllocations,
+  tariffQuotas,
+} from "../drizzle/schema";
+
+const ledgerMocks = vi.hoisted(() => ({
+  available: vi.fn(async () => true),
+  fetch: vi.fn(async () => ({ id: `regulatory-transfer-${randomUUID()}` })),
+}));
+
+vi.mock("./routers/ledger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./routers/ledger")>();
+  return { ...actual, tbBridgeAvailable: ledgerMocks.available, tbFetch: ledgerMocks.fetch };
+});
+
+function caller(role: "user" | "admin" | "customs_officer" = "user", userId = 1) {
+  const context: TrpcContext = {
+    user: {
+      id: userId,
+      openId: `regulatory-behaviour-${userId}`,
+      name: "Regulatory Behaviour Test",
+      email: "regulatory-behaviour@example.test",
+      loginMethod: "test",
+      role,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastSignedIn: new Date(),
+    },
+    req: { method: "POST", headers: {}, cookies: {} } as TrpcContext["req"],
+    res: { clearCookie: vi.fn(), cookie: vi.fn() } as unknown as TrpcContext["res"],
+  };
+  return appRouter.createCaller(context);
+}
+
+async function database() {
+  const db = await getDb();
+  if (!db) throw new Error("Postgres is required for regulatory behaviour tests.");
+  return db;
+}
+
+const created = {
+  declarations: [] as number[],
+  formalities: [] as number[],
+  restrictions: [] as number[],
+  quotas: [] as number[],
+  permits: [] as number[],
+};
+
+async function declaration(hsCode: string, createdAt = new Date()) {
+  const db = await database();
+  const [row] = await db.insert(declarations).values({
+    declarationNumber: `REG-${randomUUID().slice(0, 20)}`,
+    ucr: `REG-UCR-${randomUUID()}`,
+    traderId: 1,
+    declarationType: "import",
+    hsCode,
+    countryOfOrigin: "GH",
+    countryOfDestination: "NG",
+    numberOfPackages: 5,
+    createdAt,
+  }).returning();
+  created.declarations.push(row.id);
+  return row;
+}
+
+afterEach(async () => {
+  ledgerMocks.available.mockResolvedValue(true);
+  ledgerMocks.fetch.mockClear();
+  const db = await database();
+  if (created.declarations.length) await db.delete(declarationFormalities).where(inArray(declarationFormalities.declarationId, created.declarations));
+  if (created.permits.length) await db.delete(ogaPermits).where(inArray(ogaPermits.id, created.permits));
+  if (created.quotas.length) await db.delete(tariffQuotaAllocations).where(inArray(tariffQuotaAllocations.quotaId, created.quotas));
+  if (created.declarations.length) await db.delete(declarations).where(inArray(declarations.id, created.declarations));
+  if (created.formalities.length) await db.delete(regulatoryFormalities).where(inArray(regulatoryFormalities.id, created.formalities));
+  if (created.restrictions.length) await db.delete(regulatoryRestrictions).where(inArray(regulatoryRestrictions.id, created.restrictions));
+  if (created.quotas.length) await db.delete(tariffQuotas).where(inArray(tariffQuotas.id, created.quotas));
+  created.declarations.length = 0;
+  created.formalities.length = 0;
+  created.restrictions.length = 0;
+  created.quotas.length = 0;
+  created.permits.length = 0;
+});
+
+describe.sequential("regulatory obligation behaviour", () => {
+  it("matches HS prefixes and requires declaration-covering permits", async () => {
+    const db = await database();
+    const now = new Date();
+    const [formality] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "1234",
+      origin: "GH",
+      destination: "NG",
+      regime: "import",
+      agencyCode: "OGA-1",
+      agencyName: "OGA One",
+      permitType: "IMPORT",
+      requiredQuantity: "5",
+      legalInstrument: "Instrument REG-1",
+      validFrom: new Date(now.getTime() - 60_000),
+      createdBy: 4,
+    }).returning();
+    created.formalities.push(formality.id);
+    const matching = await declaration("123456");
+    const miss = await declaration("999999");
+    const required = await caller().regulatory.clearanceGraph({
+      declarationId: matching.id, hsCode: matching.hsCode!, origin: "GH", destination: "NG", regime: "import", quantity: "5",
+    });
+    expect(required.obligations).toHaveLength(1);
+    expect(required.obligations[0]?.blocking).toBe(true);
+    const noMatch = await caller().regulatory.clearanceGraph({
+      declarationId: miss.id, hsCode: miss.hsCode!, origin: "GH", destination: "NG", regime: "import", quantity: "5",
+    });
+    expect(noMatch.obligations).toHaveLength(0);
+
+    const [wrongPermit] = await db.insert(ogaPermits).values({
+      declarationId: matching.id,
+      agencyCode: "OGA-1",
+      agencyName: "OGA One",
+      permitType: "IMPORT",
+      status: "approved",
+      hsCode: "9999",
+      origin: "GH",
+      destination: "NG",
+      consigneeId: 1,
+      permittedQuantity: "5",
+      validFrom: new Date(now.getTime() - 60_000),
+    }).returning();
+    created.permits.push(wrongPermit.id);
+    const stillBlocked = await caller().regulatory.clearanceGraph({
+      declarationId: matching.id, hsCode: matching.hsCode!, origin: "GH", destination: "NG", regime: "import", quantity: "5",
+    });
+    expect(stillBlocked.obligations[0]?.satisfied).toBe(false);
+
+    const [permit] = await db.insert(ogaPermits).values({
+      declarationId: matching.id,
+      agencyCode: "OGA-1",
+      agencyName: "OGA One",
+      permitType: "IMPORT",
+      status: "approved",
+      hsCode: "1234",
+      origin: "GH",
+      destination: "NG",
+      consigneeId: 1,
+      permittedQuantity: "5",
+      validFrom: new Date(now.getTime() - 60_000),
+    }).returning();
+    created.permits.push(permit.id);
+    const satisfied = await caller().regulatory.clearanceGraph({
+      declarationId: matching.id, hsCode: matching.hsCode!, origin: "GH", destination: "NG", regime: "import", quantity: "5",
+    });
+    expect(satisfied.obligations[0]?.satisfied).toBe(true);
+    expect(satisfied.obligations[0]?.satisfiedByPermitId).toBe(permit.id);
+    await evaluateDeclarationRegulations({
+      declarationId: matching.id, importerId: 1, hsCode: matching.hsCode!, origin: "GH",
+      destination: "NG", regime: "import", quantity: "5", at: now,
+    });
+    const [consumed] = await db.select({ usedQuantity: ogaPermits.usedQuantity })
+      .from(ogaPermits).where(eq(ogaPermits.id, permit.id));
+    expect(consumed?.usedQuantity).toBe("5.000");
+  });
+
+  it("cites prohibitions, converts restrictions, and evaluates historical rules", async () => {
+    const db = await database();
+    const now = new Date();
+    const oldDate = new Date(now.getTime() - 86_400_000);
+    const [oldRule] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "5678", agencyCode: "OLD", agencyName: "Old Agency", permitType: "OLD-PERMIT",
+      legalInstrument: "Instrument OLD", validFrom: new Date(oldDate.getTime() - 60_000), validUntil: new Date(oldDate.getTime() + 60_000), createdBy: 4,
+    }).returning();
+    const [newRule] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "5678", agencyCode: "NEW", agencyName: "New Agency", permitType: "NEW-PERMIT",
+      legalInstrument: "Instrument NEW", validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.formalities.push(oldRule.id, newRule.id);
+    const historical = await caller().regulatory.clearanceGraph({
+      hsCode: "567890", origin: "GH", regime: "import", asAt: oldDate,
+    });
+    expect(historical.obligations).toHaveLength(1);
+    expect(historical.obligations[0]?.legalInstrument).toBe("Instrument OLD");
+
+    const [restriction] = await db.insert(regulatoryRestrictions).values({
+      hsCodePrefix: "5678", origin: "GH", regime: "import", restrictionType: "restriction",
+      description: "Restricted goods", legalInstrument: "Instrument RESTRICT",
+      agencyCode: "RESTRICT", agencyName: "Restriction Agency", permitType: "RESTRICT-PERMIT",
+      validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.restrictions.push(restriction.id);
+    const restricted = await declaration("567890");
+    await evaluateDeclarationRegulations({
+      declarationId: restricted.id, importerId: 1, hsCode: restricted.hsCode!, origin: "GH",
+      destination: "NG", regime: "import", quantity: "1", at: now,
+    });
+    const obligations = await db.select().from(declarationFormalities).where(eq(declarationFormalities.declarationId, restricted.id));
+    expect(obligations.some((entry) => entry.restrictionId === restriction.id && entry.status === "required")).toBe(true);
+
+    const [prohibition] = await db.insert(regulatoryRestrictions).values({
+      hsCodePrefix: "9999", origin: "GH", regime: "import", restrictionType: "prohibition",
+      description: "Prohibited goods", legalInstrument: "Instrument PROHIBIT",
+      validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.restrictions.push(prohibition.id);
+    await expect(evaluateDeclarationRegulations({
+      importerId: 1, hsCode: "999900", origin: "GH", destination: "NG", regime: "import", quantity: "1", at: now,
+    })).rejects.toMatchObject({ code: "FORBIDDEN", message: expect.stringContaining("Instrument PROHIBIT") });
+  });
+
+  it("serializes ledger-backed quota drawdown and fails closed on ledger outage", async () => {
+    const db = await database();
+    const now = new Date();
+    const [quota] = await db.insert(tariffQuotas).values({
+      quotaCode: `Q-${randomUUID()}`, hsCodePrefix: "7777", origin: "GH", regime: "import",
+      periodStart: new Date(now.getTime() - 60_000), periodEnd: new Date(now.getTime() + 60_000),
+      totalQuantity: "10", quantityUnit: "kg", ledgerAccountId: "quota-ledger-test",
+      legalInstrument: "Instrument QUOTA", validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.quotas.push(quota.id);
+    const first = await declaration("777700");
+    const second = await declaration("777701");
+    const results = await Promise.allSettled([
+      caller().regulatory.allocateQuota({ quotaId: quota.id, declarationId: first.id, quantity: "6" }),
+      caller().regulatory.allocateQuota({ quotaId: quota.id, declarationId: second.id, quantity: "6" }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const allocations = await db.select().from(tariffQuotaAllocations).where(and(
+      eq(tariffQuotaAllocations.quotaId, quota.id),
+      isNull(tariffQuotaAllocations.reversedAt),
+    ));
+    expect(allocations).toHaveLength(1);
+    expect(Number(allocations[0]?.quantity)).toBe(6);
+    ledgerMocks.available.mockResolvedValue(false);
+    const outage = await declaration("777702");
+    await expect(caller().regulatory.allocateQuota({
+      quotaId: quota.id, declarationId: outage.id, quantity: "1",
+    })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+});
