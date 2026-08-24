@@ -18,6 +18,7 @@
 import { anomalyBus, SSE_EVENT_ANOMALY, SSE_EVENT_BLOCKED, SSE_EVENT_FOUR_EYES } from "./sse";
 import { getDb } from "./db";
 import { insiderThreatEvents, openAppSecEvents } from "../drizzle/schema";
+import { wafEventSchema } from "./wafEventSchema";
 
 // Lazy singleton DB instance
 const getDbInstance = (() => {
@@ -73,6 +74,7 @@ let consumerStarted = false;
 const WAF_INGESTION_FRESHNESS_MS = Number(process.env.WAF_INGESTION_FRESHNESS_MS ?? 900_000);
 let wafIngestionStatus: "unconfigured" | "unavailable" | "healthy" | "stale" = process.env.KAFKA_BROKERS ? "unavailable" : "unconfigured";
 let wafLastEventAt: Date | null = null;
+let wafIngestionReason: string | null = process.env.KAFKA_BROKERS ? null : "kafka_not_configured";
 
 export function getWafIngestionHealth() {
   const status = wafIngestionStatus === "healthy" &&
@@ -84,6 +86,7 @@ export function getWafIngestionHealth() {
     configured: Boolean(process.env.KAFKA_BROKERS),
     status,
     lastEventAt: wafLastEventAt?.toISOString() ?? null,
+    reason: wafIngestionReason,
   };
 }
 
@@ -97,6 +100,7 @@ export async function startInsiderThreatKafkaConsumer(): Promise<void> {
 
   if (!process.env.KAFKA_BROKERS) {
     wafIngestionStatus = "unconfigured";
+    wafIngestionReason = "kafka_not_configured";
     console.warn("[KafkaConsumer] Kafka is not configured");
     return;
   }
@@ -143,6 +147,7 @@ export async function startInsiderThreatKafkaConsumer(): Promise<void> {
     });
 
     wafIngestionStatus = "healthy";
+    wafIngestionReason = null;
     console.log("[KafkaConsumer] Consumer started — topics: insider.threat.detected, insider.threat.blocked, insider.four_eyes, waf-events");
   } catch (err) {
     // Kafka unavailable in dev/test — log and continue
@@ -152,32 +157,47 @@ export async function startInsiderThreatKafkaConsumer(): Promise<void> {
 }
 
 export async function handleWafMessage(data: unknown): Promise<void> {
-  if (typeof data !== "object" || data === null) return;
-  const event = data as Record<string, unknown>;
-  const eventId = typeof event.event_id === "string" ? event.event_id : typeof event.eventId === "string" ? event.eventId : null;
-  const severity = typeof event.severity === "string" ? event.severity : null;
-  const attackType = typeof event.attack_type === "string" ? event.attack_type : typeof event.attackType === "string" ? event.attackType : null;
-  if (!eventId || !severity || !attackType) {
-    console.error("[KafkaConsumer] Rejected WAF event without event_id, severity, or attack_type");
+  const parsed = wafEventSchema.safeParse(data);
+  if (!parsed.success) {
+    console.error("[KafkaConsumer] Rejected invalid WAF event:", parsed.error.issues.map((issue) => issue.message).join(", "));
+    return;
+  }
+  const event = parsed.data;
+  const eventId = event.event_id ?? event.eventId;
+  const attackType = event.attack_type ?? event.attackType;
+  if (!eventId || !attackType) {
+    console.error("[KafkaConsumer] Rejected WAF event without event_id or attack_type");
     return;
   }
   const db = await getDbInstance();
-  if (!db) return;
-  await db.insert(openAppSecEvents).values({
-    eventId,
-    severity,
-    attackType,
-    sourceIp: typeof event.source_ip === "string" ? event.source_ip : null,
-    targetPath: typeof event.target_path === "string" ? event.target_path : null,
-    httpMethod: typeof event.http_method === "string" ? event.http_method : null,
-    requestHeaders: typeof event.request_headers === "object" && event.request_headers !== null ? event.request_headers : {},
-    requestBody: typeof event.request_body === "string" ? event.request_body : null,
-    action: typeof event.action === "string" ? event.action : "block",
-    confidence: typeof event.confidence === "number" ? event.confidence : null,
-    waapVersion: typeof event.waap_version === "string" ? event.waap_version : null,
-  }).onConflictDoNothing({ target: openAppSecEvents.eventId });
-  wafIngestionStatus = "healthy";
-  wafLastEventAt = new Date();
+  if (!db) {
+    wafIngestionStatus = "unavailable";
+    wafIngestionReason = "waf_database_unavailable";
+    console.error("[KafkaConsumer] WAF event dropped: database unavailable");
+    return;
+  }
+  try {
+    await db.insert(openAppSecEvents).values({
+      eventId,
+      severity: event.severity,
+      attackType,
+      sourceIp: event.source_ip ?? null,
+      targetPath: event.target_path ?? null,
+      httpMethod: event.http_method ?? null,
+      requestHeaders: event.request_headers ?? {},
+      requestBody: event.request_body ?? null,
+      action: event.action ?? "block",
+      confidence: event.confidence ?? null,
+      waapVersion: event.waap_version ?? null,
+    }).onConflictDoNothing({ target: openAppSecEvents.eventId });
+    wafIngestionStatus = "healthy";
+    wafIngestionReason = null;
+    wafLastEventAt = new Date();
+  } catch (error) {
+    wafIngestionStatus = "unavailable";
+    wafIngestionReason = "waf_persistence_failed";
+    console.error("[KafkaConsumer] WAF event persistence failed:", error);
+  }
 }
 
 /**

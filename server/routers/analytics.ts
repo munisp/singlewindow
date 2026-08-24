@@ -44,7 +44,14 @@ export const analyticsRouter = router({
           total_declarations: number;
           total_value_usd?: number;
           total_duty_usd?: number;
+          average_clearance_hours?: number;
+          clearance_observation_count?: number;
+          green_lane_count?: number;
+          lane_observation_count?: number;
         };
+        lane_distribution: Array<{ lane: string; declaration_count: number }>;
+        clearance: { average_clearance_hours?: number; clearance_observation_count?: number };
+        as_of: string;
         time_series: Array<{
           date: string;
           declaration_count: number;
@@ -67,6 +74,7 @@ export const analyticsRouter = router({
         }>;
         total_chapters: number;
         period: string;
+        as_of: string;
       }>(`/hs-code-volume?period=${input.period}`);
     }),
 
@@ -80,9 +88,12 @@ export const analyticsRouter = router({
           declaration_count: number;
           total_value_usd?: number;
           total_duty_usd?: number;
+          average_clearance_hours?: number;
+          green_lane_rate?: number;
         }>;
         total_traders: number;
         period: string;
+        as_of: string;
       }>(`/trader-metrics?period=${input.period}&limit=${input.limit}`);
     }),
 
@@ -100,6 +111,7 @@ export const analyticsRouter = router({
         }>;
         total_routes: number;
         period: string;
+        as_of: string;
       }>(`/route-flow?period=${input.period}`);
     }),
 
@@ -111,6 +123,7 @@ export const analyticsRouter = router({
         period: string;
         total_duty_revenue_usd?: number;
         time_series: Array<{ date: string; duty_revenue_usd: number }>;
+        as_of: string;
       }>(`/duty-revenue?period=${input.period}`);
     }),
 
@@ -122,6 +135,7 @@ export const analyticsRouter = router({
       total_duty_revenue_usd: number;
       origin_countries?: number;
       destination_countries?: number;
+      as_of: string;
     }>("/stats");
   }),
 
@@ -132,6 +146,7 @@ export const analyticsRouter = router({
       service: string;
       source: string;
       declarations_available: number;
+      as_of: string;
     }>("/health");
     return { online: result.status === "ok", ...result };
   }),

@@ -47,6 +47,8 @@ app.add_middleware(
 
 LAKEHOUSE_ROOT = Path(os.getenv("LAKEHOUSE_ROOT", "/var/lib/tradegateway/lakehouse"))
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+LAKEHOUSE_MAX_AGE_SECONDS = float(os.getenv("LAKEHOUSE_MAX_AGE_SECONDS", "900"))
+_last_export_at: datetime | None = None
 
 
 def _period_cutoff(period: str) -> datetime:
@@ -60,7 +62,15 @@ def _parquet_files() -> list[str]:
     return [str(path) for path in LAKEHOUSE_ROOT.glob("date=*/declarations.parquet")]
 
 
+def _source_as_of(files: list[str]) -> str:
+    if not files:
+        return (_last_export_at or datetime.now(timezone.utc)).isoformat()
+    newest_mtime = max(Path(path).stat().st_mtime for path in files)
+    return datetime.fromtimestamp(newest_mtime, timezone.utc).isoformat()
+
+
 def _export_declarations() -> int:
+    global _last_export_at
     if not DATABASE_URL:
         raise RuntimeError("postgres_not_configured")
     with psycopg2.connect(DATABASE_URL) as connection:
@@ -68,7 +78,8 @@ def _export_declarations() -> int:
             cursor.execute(
                 """
                 SELECT id, created_at, hs_code, country_of_origin,
-                       country_of_destination, invoice_value, duty_amount, trader_id
+                       country_of_destination, invoice_value, duty_amount, trader_id,
+                       risk_lane, submitted_at, cleared_at
                 FROM declarations
                 ORDER BY created_at, id
                 """
@@ -90,16 +101,23 @@ def _export_declarations() -> int:
         partition = LAKEHOUSE_ROOT / f"date={date_key}"
         partition.mkdir(parents=True, exist_ok=True)
         pq.write_table(pa.Table.from_pylist(records), partition / "declarations.parquet")
+    _last_export_at = datetime.now(timezone.utc)
     return len(rows)
 
 
 def _ensure_source() -> list[str]:
     files = _parquet_files()
-    if files:
+    needs_refresh = not files or any(
+        datetime.now(timezone.utc).timestamp() - Path(path).stat().st_mtime > LAKEHOUSE_MAX_AGE_SECONDS
+        for path in files
+    )
+    if not needs_refresh:
         return files
     try:
         _export_declarations()
     except Exception as exc:
+        if files:
+            return files
         raise HTTPException(
             status_code=503,
             detail={"reason": "analytics_source_unavailable", "cause": str(exc)},
@@ -138,7 +156,12 @@ def _source_summary() -> dict[str, object]:
                sum(invoice_value)::DOUBLE AS total_value_usd,
                sum(duty_amount)::DOUBLE AS total_duty_usd,
                count(DISTINCT country_of_origin)::BIGINT AS origin_countries,
-               count(DISTINCT country_of_destination)::BIGINT AS destination_countries
+               count(DISTINCT country_of_destination)::BIGINT AS destination_countries,
+               avg(EXTRACT(EPOCH FROM (cleared_at - submitted_at)) / 3600)
+                 FILTER (WHERE submitted_at IS NOT NULL AND cleared_at IS NOT NULL) AS average_clearance_hours,
+               count(*) FILTER (WHERE submitted_at IS NOT NULL AND cleared_at IS NOT NULL)::BIGINT AS clearance_observation_count,
+               count(*) FILTER (WHERE risk_lane = 'green')::BIGINT AS green_lane_count,
+               count(risk_lane)::BIGINT AS lane_observation_count
         FROM read_parquet($1, union_by_name=true)
         """
     )
@@ -158,22 +181,29 @@ def _base_query(period: str) -> tuple[str, list[object]]:
 
 @app.get("/health")
 def health() -> dict[str, object]:
-    _ensure_source()
+    files = _ensure_source()
     summary = _source_summary()
     return {
         "status": "ok",
         "service": "deltalake-svc",
         "source": "postgresql_exported_parquet",
         "declarations_available": int(summary.get("total_declarations") or 0),
+        "as_of": _source_as_of(files),
     }
 
 @app.get("/trade-stats")
 def get_trade_stats(period: str = Query("monthly", enum=["daily", "weekly", "monthly", "quarterly"])) -> dict[str, object]:
+    files = _ensure_source()
     from_clause, parameters = _base_query(period)
     summary_rows = _query(
         f"""SELECT count(*)::BIGINT AS total_declarations,
                    sum(invoice_value)::DOUBLE AS total_value_usd,
-                   sum(duty_amount)::DOUBLE AS total_duty_usd
+                   sum(duty_amount)::DOUBLE AS total_duty_usd,
+                   avg(EXTRACT(EPOCH FROM (cleared_at - submitted_at)) / 3600)
+                     FILTER (WHERE submitted_at IS NOT NULL AND cleared_at IS NOT NULL)::DOUBLE AS average_clearance_hours,
+                   count(*) FILTER (WHERE submitted_at IS NOT NULL AND cleared_at IS NOT NULL)::BIGINT AS clearance_observation_count,
+                   count(*) FILTER (WHERE risk_lane = 'green')::BIGINT AS green_lane_count,
+                   count(risk_lane)::BIGINT AS lane_observation_count
             {from_clause}""",
         parameters,
     )
@@ -188,6 +218,19 @@ def get_trade_stats(period: str = Query("monthly", enum=["daily", "weekly", "mon
         parameters,
     )
     summary = dict(summary_rows[0]) if summary_rows else {"total_declarations": 0}
+    lane_rows = _query(
+        f"""SELECT risk_lane AS lane, count(*)::BIGINT AS declaration_count
+            {from_clause} AND risk_lane IS NOT NULL
+            GROUP BY risk_lane ORDER BY declaration_count DESC""",
+        parameters,
+    )
+    clearance_rows = _query(
+        f"""SELECT avg(EXTRACT(EPOCH FROM (cleared_at - submitted_at)) / 3600)::DOUBLE AS average_clearance_hours,
+                   count(*)::BIGINT AS clearance_observation_count
+            {from_clause} AND submitted_at IS NOT NULL AND cleared_at IS NOT NULL""",
+        parameters,
+    )
+    clearance = clearance_rows[0] if clearance_rows else {}
     return {
         "period": period,
         "summary": {key: value for key, value in summary.items() if value is not None},
@@ -196,10 +239,14 @@ def get_trade_stats(period: str = Query("monthly", enum=["daily", "weekly", "mon
             for row in series[-30:]
         ],
         "source": "declarations",
+        "lane_distribution": lane_rows,
+        "clearance": {key: value for key, value in clearance.items() if value is not None},
+        "as_of": _source_as_of(files),
     }
 
 @app.get("/hs-code-volume")
 def get_hs_code_volume(period: str = Query("monthly", enum=["daily", "weekly", "monthly", "quarterly"])) -> dict[str, object]:
+    files = _ensure_source()
     from_clause, parameters = _base_query(period)
     rows = _query(
         f"""SELECT hs_code,
@@ -216,26 +263,37 @@ def get_hs_code_volume(period: str = Query("monthly", enum=["daily", "weekly", "
         "total_chapters": len(rows),
         "period": period,
         "source": "declarations",
+        "as_of": _source_as_of(files),
     }
 
 @app.get("/trader-metrics")
 def get_trader_metrics(period: str = Query("monthly", enum=["daily", "weekly", "monthly", "quarterly"]), limit: int = Query(20, ge=1, le=100)) -> dict[str, object]:
+    files = _ensure_source()
     from_clause, parameters = _base_query(period)
     rows = _query(
         f"""SELECT trader_id,
                    count(*)::BIGINT AS declaration_count,
                    sum(invoice_value)::DOUBLE AS total_value_usd,
-                   sum(duty_amount)::DOUBLE AS total_duty_usd
+                   sum(duty_amount)::DOUBLE AS total_duty_usd,
+                   (avg(EXTRACT(EPOCH FROM (cleared_at - submitted_at)) / 3600)
+                     FILTER (WHERE submitted_at IS NOT NULL AND cleared_at IS NOT NULL))::DOUBLE AS average_clearance_hours,
+                   count(*) FILTER (WHERE risk_lane = 'green')::BIGINT AS green_lane_count,
+                   count(risk_lane)::BIGINT AS lane_observation_count
             {from_clause} AND trader_id IS NOT NULL
             GROUP BY trader_id
             ORDER BY declaration_count DESC
             LIMIT {limit}""",
         parameters,
     )
-    return {"traders": rows, "total_traders": len(rows), "period": period, "source": "declarations"}
+    for row in rows:
+        lane_count = int(row.pop("lane_observation_count") or 0)
+        green_count = int(row.pop("green_lane_count") or 0)
+        row["green_lane_rate"] = green_count / lane_count if lane_count else None
+    return {"traders": rows, "total_traders": len(rows), "period": period, "source": "declarations", "as_of": _source_as_of(files)}
 
 @app.get("/route-flow")
 def get_route_flow(period: str = Query("monthly", enum=["daily", "weekly", "monthly", "quarterly"])) -> dict[str, object]:
+    files = _ensure_source()
     from_clause, parameters = _base_query(period)
     rows = _query(
         f"""SELECT country_of_origin AS origin,
@@ -255,10 +313,12 @@ def get_route_flow(period: str = Query("monthly", enum=["daily", "weekly", "mont
         "total_routes": len(rows),
         "period": period,
         "source": "declarations",
+        "as_of": _source_as_of(files),
     }
 
 @app.get("/duty-revenue")
 def get_duty_revenue(period: str = Query("monthly", enum=["daily", "weekly", "monthly", "quarterly"])) -> dict[str, object]:
+    files = _ensure_source()
     from_clause, parameters = _base_query(period)
     rows = _query(
         f"""SELECT CAST(created_at AS DATE)::VARCHAR AS date,
@@ -276,6 +336,7 @@ def get_duty_revenue(period: str = Query("monthly", enum=["daily", "weekly", "mo
         "period": period,
         "time_series": rows[-30:],
         "source": "declarations",
+        "as_of": _source_as_of(files),
     }
     if total and total[0].get("total_duty_revenue_usd") is not None:
         result["total_duty_revenue_usd"] = total[0]["total_duty_revenue_usd"]
@@ -354,6 +415,7 @@ def write_postgres(req: PostgresWriteBackRequest) -> PostgresWriteBackResponse:
 
 @app.get("/stats")
 def get_stats() -> dict[str, object]:
+    files = _ensure_source()
     summary = _source_summary()
     return {
         key: value
@@ -364,6 +426,7 @@ def get_stats() -> dict[str, object]:
             "origin_countries": summary.get("origin_countries"),
             "destination_countries": summary.get("destination_countries"),
             "source": "declarations",
+            "as_of": _source_as_of(files),
         }.items()
         if value is not None
     }

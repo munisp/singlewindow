@@ -3,11 +3,26 @@
  * Provides read access to fluvio_topic_offsets table and service-only offset reporting.
  */
 import { z } from "zod";
+import { timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
 
 const OFFSET_FRESHNESS_MS = Number(process.env.FLUVIO_OFFSET_FRESHNESS_MS ?? 300_000);
 const FLUVIO_SERVICE_TOKEN = process.env.FLUVIO_SERVICE_TOKEN ?? "";
+
+function hasStrongServiceToken(token: string): boolean {
+  if (token.length < 32) return false;
+  if (process.env.NODE_ENV !== "production") return true;
+  const lower = token.toLowerCase();
+  return !["dev", "secret", "password", "placeholder", "example", "test"].some((value) => lower.includes(value));
+}
+
+function tokensMatch(provided: string, expected: string): boolean {
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(providedBuffer, expectedBuffer);
+}
 
 export function classifyOffsetFreshness(lastUpdatedAt: Date, now = Date.now()): "current" | "stale" {
   return now - lastUpdatedAt.getTime() <= OFFSET_FRESHNESS_MS ? "current" : "stale";
@@ -26,7 +41,10 @@ export const fluvioRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const authorization = ctx.req.headers.authorization;
-      if (!FLUVIO_SERVICE_TOKEN || authorization !== `Bearer ${FLUVIO_SERVICE_TOKEN}`) {
+      const providedToken = authorization?.startsWith("Bearer ")
+        ? authorization.slice("Bearer ".length)
+        : "";
+      if (!hasStrongServiceToken(FLUVIO_SERVICE_TOKEN) || !tokensMatch(providedToken, FLUVIO_SERVICE_TOKEN)) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Fluvio consumer service authentication required" });
       }
       const { upsertFluvioOffset } = await import("../db");

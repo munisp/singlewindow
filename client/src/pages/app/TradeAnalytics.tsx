@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer,
+  Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import {
   TrendingUp, DollarSign, FileText, Clock, BarChart2,
@@ -25,6 +25,11 @@ import {
 
 const fmt = (n: number | undefined) =>
   n === undefined ? "—" : n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `$${(n / 1_000).toFixed(0)}K` : `$${n.toFixed(0)}`;
+const LANE_COLORS: Record<string, string> = {
+  green: "#10B981",
+  yellow: "#F59E0B",
+  red: "#EF4444",
+};
 
 export default function TradeAnalytics() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly" | "quarterly">("monthly");
@@ -44,6 +49,9 @@ export default function TradeAnalytics() {
   const unavailableError = [statsError, hsQuery.error, traderQuery.error, routeQuery.error, dutyQuery.error, pipelineQuery.error]
     .find((error) => error instanceof Error);
   const unavailableReason = unavailableError?.message ?? "source unavailable";
+  const greenLaneRate = stats?.summary.lane_observation_count
+    ? ((stats.summary.green_lane_count ?? 0) / stats.summary.lane_observation_count) * 100
+    : undefined;
 
   return (
     <DashboardLayout>
@@ -63,6 +71,9 @@ export default function TradeAnalytics() {
             <p className="text-sm text-muted-foreground mt-1">
               Delta Lake — real-time trade statistics pipeline
             </p>
+            {stats?.as_of && (
+              <p className="text-xs text-muted-foreground mt-1">as of {new Date(stats.as_of).toLocaleString()}</p>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <Badge variant={svcStatus?.online ? "default" : "destructive"} className="text-xs">
@@ -152,13 +163,18 @@ export default function TradeAnalytics() {
             <Card>
               <CardContent className="p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Avg Clearance</p>
-                <p className="text-sm font-bold">Not available from declarations</p>
+                <p className="text-xl font-bold">
+                  {stats.clearance.average_clearance_hours?.toFixed(1) ?? "—"}{stats.clearance.average_clearance_hours !== undefined ? "h" : ""}
+                </p>
+                <p className="text-[10px] text-muted-foreground">
+                  {stats.clearance.clearance_observation_count ?? 0} observed clearances
+                </p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Green Lane %</p>
-                <p className="text-sm font-bold">Not available from declarations</p>
+                <p className="text-xl font-bold">{greenLaneRate?.toFixed(1) ?? "—"}{greenLaneRate !== undefined ? "%" : ""}</p>
               </CardContent>
             </Card>
           </div>
@@ -189,7 +205,7 @@ export default function TradeAnalytics() {
                 </ResponsiveContainer>
               ) : (
                 <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
-                  No data — pipeline offline or no events ingested
+                  No declarations in selected period
                 </div>
               )}
             </CardContent>
@@ -232,9 +248,20 @@ export default function TradeAnalytics() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="h-44 flex items-center justify-center text-muted-foreground text-sm">
-                Clearance lanes are not present in declarations
-              </div>
+              {stats?.lane_distribution?.length ? (
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie data={stats.lane_distribution} dataKey="declaration_count" nameKey="lane" cx="50%" cy="50%" outerRadius={65} label>
+                      {stats.lane_distribution.map((entry) => (
+                        <Cell key={entry.lane} fill={LANE_COLORS[entry.lane] ?? "#64748B"} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-44 flex items-center justify-center text-muted-foreground text-sm">No declarations in selected period</div>
+              )}
             </CardContent>
           </Card>
 
@@ -282,6 +309,8 @@ export default function TradeAnalytics() {
                       <th className="text-right py-2 pr-4">Declarations</th>
                       <th className="text-right py-2 pr-4">Trade Value</th>
                       <th className="text-right py-2 pr-4">Duty Paid</th>
+                      <th className="text-right py-2 pr-4">Avg Clearance</th>
+                      <th className="text-right py-2">Green Lane</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -291,6 +320,8 @@ export default function TradeAnalytics() {
                         <td className="text-right py-2 pr-4">{t.declaration_count.toLocaleString()}</td>
                         <td className="text-right py-2 pr-4">{fmt(t.total_value_usd)}</td>
                         <td className="text-right py-2 pr-4">{fmt(t.total_duty_usd)}</td>
+                        <td className="text-right py-2 pr-4">{t.average_clearance_hours?.toFixed(1) ?? "—"}{t.average_clearance_hours !== undefined ? "h" : ""}</td>
+                        <td className="text-right py-2">{t.green_lane_rate?.toFixed(1) ?? "—"}{t.green_lane_rate !== undefined ? "%" : ""}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -43,4 +43,21 @@ describe("operational data safeguards", () => {
     expect(classifyOffsetFreshness(new Date(now - 299_999), now)).toBe("current");
     expect(classifyOffsetFreshness(new Date(now - 300_001), now)).toBe("stale");
   });
+
+  it("rejects WAF events outside the declared severity and attack-type sets", async () => {
+    const { handleWafMessage } = await import("./kafkaConsumer");
+
+    await handleWafMessage({
+      event_id: "waf-invalid-severity",
+      severity: "urgent",
+      attack_type: "XSS",
+    });
+    await handleWafMessage({
+      event_id: "waf-invalid-attack",
+      severity: "high",
+      attack_type: "MADE_UP_ATTACK",
+    });
+
+    expect(insert).not.toHaveBeenCalled();
+  });
 });

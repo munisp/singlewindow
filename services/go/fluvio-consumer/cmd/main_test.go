@@ -7,25 +7,20 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 func buildTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	logger := zap.NewNop()
 	ring := newRingBuffer(50)
-	hub := newHub(logger)
 	r := gin.New()
 	r.GET("/health", healthHandler)
 	r.GET("/api/stream/events", recentEventsHandler(ring))
-	r.POST("/api/stream/publish", publishHandler(ring, hub))
 	return r
 }
 
@@ -43,8 +38,8 @@ func TestHealthEndpoint(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode health response: %v", err)
 	}
-	if body["status"] != "ok" {
-		t.Errorf("expected status=ok, got %v", body["status"])
+	if body["status"] != "unconfigured" {
+		t.Errorf("expected status=unconfigured, got %v", body["status"])
 	}
 }
 
@@ -56,42 +51,25 @@ func TestGetEventsEmpty(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var events []interface{}
-	if err := json.NewDecoder(w.Body).Decode(&events); err != nil {
+	var response struct {
+		Events []interface{} `json:"events"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("failed to decode events response: %v", err)
 	}
-	if len(events) != 0 {
-		t.Errorf("expected empty events, got %d", len(events))
+	if len(response.Events) != 0 {
+		t.Errorf("expected empty events, got %d", len(response.Events))
 	}
 }
 
-func TestPublishAndRetrieveEvent(t *testing.T) {
+func TestSyntheticPublishEndpointRemoved(t *testing.T) {
 	r := buildTestRouter()
 
-	// Publish a synthetic event
-	payload := `{"declarationId":1,"eventType":"CARGO_ARRIVED","port":"APAPA","timestamp":"` +
-		time.Now().UTC().Format(time.RFC3339) + `"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/stream/publish", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodPost, "/api/stream/publish", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("publish failed with %d: %s", w.Code, w.Body.String())
-	}
-
-	// Retrieve events
-	req2 := httptest.NewRequest(http.MethodGet, "/api/stream/events?limit=10", nil)
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusOK {
-		t.Fatalf("get events failed with %d", w2.Code)
-	}
-	var events []map[string]interface{}
-	if err := json.NewDecoder(w2.Body).Decode(&events); err != nil {
-		t.Fatalf("failed to decode events: %v", err)
-	}
-	if len(events) == 0 {
-		t.Error("expected at least 1 event after publish")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected publish endpoint to be removed, got %d", w.Code)
 	}
 }
 

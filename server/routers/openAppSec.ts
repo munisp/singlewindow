@@ -14,20 +14,7 @@ import { getDb, getOpenAppSecEvents, acknowledgeOpenAppSecEvent, getOpenAppSecEv
 import { openAppSecEvents } from "../../drizzle/schema";
 import { gte, sql } from "drizzle-orm";
 import { getWafIngestionHealth } from "../kafkaConsumer";
-
-const SEVERITIES = ["critical", "high", "medium", "low"] as const;
-const ATTACK_TYPES = [
-  "SQL_INJECTION",
-  "XSS",
-  "PATH_TRAVERSAL",
-  "COMMAND_INJECTION",
-  "CSRF",
-  "BROKEN_AUTH",
-  "SENSITIVE_DATA_EXPOSURE",
-  "RATE_LIMIT_EXCEEDED",
-  "BOT_DETECTED",
-  "MALFORMED_REQUEST",
-] as const;
+import { WAF_ATTACK_TYPES, WAF_SEVERITIES } from "../wafEventSchema";
 
 export const openAppSecRouter = router({
   /**
@@ -39,7 +26,7 @@ export const openAppSecRouter = router({
       z.object({
         limit: z.number().int().min(1).max(500).default(50),
         offset: z.number().int().min(0).default(0),
-        severity: z.enum(SEVERITIES).optional(),
+        severity: z.enum(WAF_SEVERITIES).optional(),
         attackType: z.string().optional(),
         isAcknowledged: z.boolean().optional(),
         sourceIp: z.string().optional(),
@@ -133,7 +120,7 @@ export const openAppSecRouter = router({
           // Fall through to static list
         }
       }
-      return [...ATTACK_TYPES];
+      return [...WAF_ATTACK_TYPES];
     }),
 
   /**

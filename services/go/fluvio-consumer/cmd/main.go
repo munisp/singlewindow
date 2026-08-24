@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -60,27 +61,27 @@ var (
 		}
 		return n
 	}()
-	sourceConnected bool
+	sourceConnected atomic.Bool
 )
 
 // ─── Event model ──────────────────────────────────────────────────────────────
 
 // CargoEvent represents a single event from the Fluvio cargo-events topic.
 type CargoEvent struct {
-	EventID       string    `json:"event_id"`
-	EventType     string    `json:"event_type"`     // VESSEL_ARRIVED, GATE_IN, INSPECTION_STARTED, etc.
-	DeclarationID *int64    `json:"declaration_id"` // nil for port-wide events
-	UCR           string    `json:"ucr"`
-	ContainerRef  string    `json:"container_ref"`
-	PortCode      string    `json:"port_code"`
-	Location      string    `json:"location"`
-	Actor         string    `json:"actor"`
-	Message       string    `json:"message"`
-	Severity      string    `json:"severity"` // INFO, WARNING, CRITICAL
+	EventID       string          `json:"event_id"`
+	EventType     string          `json:"event_type"`     // VESSEL_ARRIVED, GATE_IN, INSPECTION_STARTED, etc.
+	DeclarationID *int64          `json:"declaration_id"` // nil for port-wide events
+	UCR           string          `json:"ucr"`
+	ContainerRef  string          `json:"container_ref"`
+	PortCode      string          `json:"port_code"`
+	Location      string          `json:"location"`
+	Actor         string          `json:"actor"`
+	Message       string          `json:"message"`
+	Severity      string          `json:"severity"` // INFO, WARNING, CRITICAL
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
-	Timestamp     time.Time `json:"timestamp"`
-	Partition     int       `json:"partition"`
-	Offset        int64     `json:"offset"`
+	Timestamp     time.Time       `json:"timestamp"`
+	Partition     int             `json:"partition"`
+	Offset        int64           `json:"offset"`
 }
 
 type SourceStatus struct {
@@ -163,6 +164,21 @@ func (h *Hub) Register(c *Client) {
 	h.logger.Info("WebSocket client connected", zap.Int("total", len(h.clients)))
 }
 
+func marshalSourceStatus() []byte {
+	status := SourceStatus{Status: "unconfigured", Reason: "fluvio_source_not_configured"}
+	if fluvioProxy != "" || fluvioEndpoint != "" {
+		status = SourceStatus{Status: "unavailable", Reason: "fluvio_source_not_connected"}
+		if sourceConnected.Load() {
+			status = SourceStatus{Status: "connected"}
+		}
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
 	delete(h.clients, c)
@@ -210,7 +226,7 @@ func (h *Hub) BroadcastStatus(status SourceStatus) {
 
 func (h *Hub) serveWS(c *gin.Context) {
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin:     func(r *http.Request) bool { return true },
 		ReadBufferSize:  1024,
 		WriteBufferSize: 4096,
 	}
@@ -230,6 +246,9 @@ func (h *Hub) serveWS(c *gin.Context) {
 
 	client := &Client{conn: conn, send: make(chan []byte, 256), declarationID: declID}
 	h.Register(client)
+	if status := marshalSourceStatus(); status != nil {
+		client.send <- status
+	}
 
 	// Writer goroutine
 	go func() {
@@ -269,13 +288,13 @@ func (h *Hub) serveWS(c *gin.Context) {
 
 func startConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, logger *zap.Logger) {
 	if fluvioProxy == "" && fluvioEndpoint == "" {
-		sourceConnected = false
+		sourceConnected.Store(false)
 		logger.Warn("Fluvio source is unconfigured")
 		hub.BroadcastStatus(SourceStatus{Status: "unconfigured", Reason: "fluvio_source_not_configured"})
 		return
 	}
 	if fluvioProxy == "" {
-		sourceConnected = false
+		sourceConnected.Store(false)
 		logger.Warn("Fluvio HTTP proxy is not configured")
 		hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_http_proxy_not_configured"})
 		return
@@ -283,6 +302,7 @@ func startConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, logger *zap.
 	client := &http.Client{Timeout: 10 * time.Second}
 	go func() {
 		offset := int64(0)
+		retryDelay := 3 * time.Second
 		for {
 			select {
 			case <-ctx.Done():
@@ -292,28 +312,31 @@ func startConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, logger *zap.
 			url := strings.TrimRight(fluvioProxy, "/") + "/api/topics/" + fluvioTopic + "/consume?offset=" + strconv.FormatInt(offset, 10)
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 			if err != nil {
-				sourceConnected = false
+				sourceConnected.Store(false)
 				hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_request_invalid"})
-				time.Sleep(3 * time.Second)
+				waitForRetry(ctx, retryDelay)
+				retryDelay = minDuration(retryDelay*2, 30*time.Second)
 				continue
 			}
 			res, err := client.Do(req)
 			if err != nil || res.StatusCode >= http.StatusBadRequest {
-				sourceConnected = false
+				sourceConnected.Store(false)
 				if res != nil {
 					res.Body.Close()
 				}
 				hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_source_unreachable"})
-				time.Sleep(3 * time.Second)
+				waitForRetry(ctx, retryDelay)
+				retryDelay = minDuration(retryDelay*2, 30*time.Second)
 				continue
 			}
 			var events []CargoEvent
 			err = json.NewDecoder(res.Body).Decode(&events)
 			res.Body.Close()
 			if err != nil {
-				sourceConnected = false
+				sourceConnected.Store(false)
 				hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_payload_invalid"})
-				time.Sleep(3 * time.Second)
+				waitForRetry(ctx, retryDelay)
+				retryDelay = minDuration(retryDelay*2, 30*time.Second)
 				continue
 			}
 			last := time.Time{}
@@ -327,15 +350,32 @@ func startConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, logger *zap.
 					last = event.Timestamp
 				}
 			}
-			sourceConnected = true
+			sourceConnected.Store(true)
+			retryDelay = 3 * time.Second
 			status := SourceStatus{Status: "connected"}
 			if !last.IsZero() {
 				status.LastEvent = last
 			}
 			hub.BroadcastStatus(status)
-			time.Sleep(3 * time.Second)
+			waitForRetry(ctx, 3*time.Second)
 		}
 	}()
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+func minDuration(left, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
@@ -346,7 +386,7 @@ func healthHandler(c *gin.Context) {
 	if fluvioProxy != "" || fluvioEndpoint != "" {
 		status = "unavailable"
 		reason = "fluvio_source_not_connected"
-		if sourceConnected {
+		if sourceConnected.Load() {
 			status = "connected"
 			reason = ""
 		}
