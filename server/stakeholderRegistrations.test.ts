@@ -79,6 +79,15 @@ vi.mock("./db", async (importOriginal) => {
         status: "approved",
       };
     }),
+    getApprovedAgentRegistrations: vi.fn(async () => {
+      if (dbState.unavailable) throw new Error("database unavailable");
+      return [{
+        userId: 2,
+        organizationName: "Licensed Clearing Ltd",
+        licenseNumber: "LIC-001",
+        licenseExpiresAt: new Date("2030-01-01T00:00:00.000Z"),
+      }];
+    }),
     createStakeholderMandate: vi.fn(async (data: any) => {
       if (dbState.unavailable) throw new Error("database unavailable");
       return { ...dbState.mandate, ...data };
@@ -191,6 +200,18 @@ describe("NSW stakeholder registrations and mandates", () => {
     expect(held[0].revocationReason).toBe("Engagement ended");
   });
 
+  it("lists only the approved agent directory fields needed to grant a mandate", async () => {
+    const agents = await appRouter.createCaller(context(1)).stakeholderRegistrations.approvedAgents();
+    expect(agents).toEqual([{
+      userId: 2,
+      organizationName: "Licensed Clearing Ltd",
+      licenseNumber: "LIC-001",
+      licenseExpiresAt: new Date("2030-01-01T00:00:00.000Z"),
+    }]);
+    expect(agents[0]).not.toHaveProperty("email");
+    expect(agents[0]).not.toHaveProperty("role");
+  });
+
   it("fails closed when registration persistence is unavailable", async () => {
     dbState.unavailable = true;
     await expect(
@@ -218,6 +239,9 @@ describe("NSW stakeholder registrations and mandates", () => {
     dbState.unavailable = true;
     await expect(
       appRouter.createCaller(context(2)).stakeholderRegistrations.mine(),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    await expect(
+      appRouter.createCaller(context(2)).stakeholderRegistrations.approvedAgents(),
     ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     dbState.unavailable = false;
   });

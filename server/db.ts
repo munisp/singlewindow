@@ -1,4 +1,4 @@
-import { eq, desc, and, or, gte, lte, gt, isNull, sql, count, inArray, like } from "drizzle-orm";
+import { eq, desc, and, or, gte, lte, gt, isNull, isNotNull, sql, count, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -292,6 +292,25 @@ export async function getApprovedAgentRegistration(agentUserId: number, at = new
     .orderBy(desc(stakeholderRegistrations.approvedAt))
     .limit(1);
   return registration;
+}
+
+export async function getApprovedAgentRegistrations(at = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select({
+    userId: stakeholderRegistrations.userId,
+    organizationName: stakeholderRegistrations.organizationName,
+    licenseNumber: stakeholderRegistrations.licenseNumber,
+    licenseExpiresAt: stakeholderRegistrations.licenseExpiresAt,
+  }).from(stakeholderRegistrations)
+    .where(and(
+      eq(stakeholderRegistrations.stakeholderType, "freight_forwarder"),
+      eq(stakeholderRegistrations.status, "approved"),
+      isNotNull(stakeholderRegistrations.licenseNumber),
+      isNotNull(stakeholderRegistrations.licenseExpiresAt),
+      gt(stakeholderRegistrations.licenseExpiresAt, at),
+    ))
+    .orderBy(stakeholderRegistrations.organizationName);
 }
 
 export async function getApprovedTraderProfile(userId: number) {

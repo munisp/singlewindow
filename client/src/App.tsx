@@ -172,6 +172,12 @@ function Router() {
       <Route path="/" component={Home} />
 
       {/* Sprint 80 — Public certificate verification (no auth required, QR-scannable) */}
+      <Route path="/verify/permit/:permitNumber">
+        <Suspense fallback={<LazyFallback />}><PermitValidation /></Suspense>
+      </Route>
+      <Route path="/verify/permit">
+        <Suspense fallback={<LazyFallback />}><PermitValidation /></Suspense>
+      </Route>
       <Route path="/verify/:certNumber">
         <Suspense fallback={<LazyFallback />}><CertVerify /></Suspense>
       </Route>
@@ -180,12 +186,6 @@ function Router() {
       </Route>
       <Route path="/track-application">
         <Suspense fallback={<LazyFallback />}><ApplicationTracker /></Suspense>
-      </Route>
-      <Route path="/verify/permit/:permitNumber">
-        <Suspense fallback={<LazyFallback />}><PermitValidation /></Suspense>
-      </Route>
-      <Route path="/verify/permit">
-        <Suspense fallback={<LazyFallback />}><PermitValidation /></Suspense>
       </Route>
 
       {/* Public system status page — no authentication required */}

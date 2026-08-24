@@ -15,6 +15,7 @@ import {
   getStakeholderMandatesByPrincipal,
   getStakeholderMandatesByAgent,
   getApprovedAgentRegistration,
+  getApprovedAgentRegistrations,
   getApprovedTraderProfile,
   logAuditEvent,
 } from "../db";
@@ -264,6 +265,14 @@ export const stakeholderRegistrationsRouter = router({
         return serviceUnavailable("Mandate history is unavailable.", error);
       }
     }),
+
+  approvedAgents: protectedProcedure.query(async () => {
+    try {
+      return await getApprovedAgentRegistrations();
+    } catch (error) {
+      return serviceUnavailable("Approved agent directory is unavailable.", error);
+    }
+  }),
 
   revokeMandate: protectedProcedure
     .input(z.object({ mandateId: z.number().int().positive(), reason: z.string().max(1024).optional() }))
