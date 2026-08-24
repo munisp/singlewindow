@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, publicRateLimitedProcedure, router } from "../_core/trpc";
 import {
   createOgaPermit, getPermitsByDeclaration, updateOgaPermit,
   getPermitsByOfficer, getDeclarationById, logAuditEvent, createNotification,
@@ -61,6 +61,49 @@ function getRequiredOGAs(hsCode: string): typeof OGA_AGENCIES {
 }
 
 export const ogaRouter = router({
+  validatePermit: publicRateLimitedProcedure
+    .input(z.object({ permitNumber: z.string().min(1).max(64) }))
+    .query(async ({ input }) => {
+      try {
+        const db = await getDb();
+        if (!db) throw new Error("Database unavailable");
+        const [permit] = await db.select({
+          permitNumber: ogaPermits.permitNumber,
+          agencyCode: ogaPermits.agencyCode,
+          agencyName: ogaPermits.agencyName,
+          permitType: ogaPermits.permitType,
+          status: ogaPermits.status,
+          createdAt: ogaPermits.createdAt,
+          expiresAt: ogaPermits.expiresAt,
+        }).from(ogaPermits)
+          .where(eq(ogaPermits.permitNumber, input.permitNumber))
+          .limit(1);
+        if (!permit) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Application not found." });
+        }
+        const now = new Date();
+        const isExpired = permit.expiresAt !== null && permit.expiresAt <= now;
+        return {
+          permitNumber: permit.permitNumber,
+          agencyCode: permit.agencyCode,
+          agencyName: permit.agencyName,
+          permitType: permit.permitType,
+          status: permit.status,
+          issuedAt: permit.createdAt,
+          expiresAt: permit.expiresAt,
+          isExpired,
+          isValid: permit.status === "approved" && !isExpired,
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Permit validation is unavailable.",
+          cause: error,
+        });
+      }
+    }),
+
   // Create permits for a declaration (called on submission)
   createForDeclaration: protectedProcedure
     .input(z.object({ declarationId: z.number() }))

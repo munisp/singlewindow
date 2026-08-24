@@ -28,6 +28,7 @@ const dbState = vi.hoisted(() => ({
     updatedAt: new Date(),
   },
   unavailable: false,
+  pendingDuplicate: undefined as unknown,
 }));
 
 vi.mock("./db", async (importOriginal) => {
@@ -45,6 +46,10 @@ vi.mock("./db", async (importOriginal) => {
     getStakeholderRegistrationById: vi.fn(async () => {
       if (dbState.unavailable) throw new Error("database unavailable");
       return dbState.registration;
+    }),
+    getPendingStakeholderRegistrationForUser: vi.fn(async () => {
+      if (dbState.unavailable) throw new Error("database unavailable");
+      return dbState.pendingDuplicate;
     }),
     getStakeholderRegistrationsByUser: vi.fn(async () => {
       if (dbState.unavailable) throw new Error("database unavailable");
@@ -80,6 +85,13 @@ vi.mock("./db", async (importOriginal) => {
     }),
     getStakeholderMandateById: vi.fn(async () => dbState.mandate),
     getStakeholderMandateByReference: vi.fn(async () => dbState.mandate),
+    getStakeholderMandatesByPrincipal: vi.fn(async () => [dbState.mandate]),
+    getStakeholderMandatesByAgent: vi.fn(async () => [{
+      ...dbState.mandate,
+      revokedAt: new Date("2026-06-01T00:00:00.000Z"),
+      revokedBy: 1,
+      revocationReason: "Engagement ended",
+    }]),
     revokeStakeholderMandate: vi.fn(async (_id: number, revokedBy: number, reason?: string) => ({
       ...dbState.mandate,
       revokedAt: new Date(),
@@ -133,6 +145,23 @@ describe("NSW stakeholder registrations and mandates", () => {
     expect(result.approvedBy).toBe(1);
   });
 
+  it("rejects a duplicate pending registration and points to the existing reference", async () => {
+    dbState.pendingDuplicate = dbState.registration;
+    await expect(
+      appRouter.createCaller(context(2)).stakeholderRegistrations.register({
+        stakeholderType: "freight_forwarder",
+        organizationName: "Licensed Clearing Ltd",
+        licenseNumber: "LIC-001",
+        licenseExpiresAt: "2030-01-01T00:00:00.000Z",
+        country: "NG",
+      }),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining(dbState.registration.referenceNumber),
+    });
+    dbState.pendingDuplicate = undefined;
+  });
+
   it("creates and revokes a durable principal-to-agent mandate", async () => {
     const principal = appRouter.createCaller(context(1));
     const mandate = await principal.stakeholderRegistrations.createMandate({
@@ -150,6 +179,16 @@ describe("NSW stakeholder registrations and mandates", () => {
     });
     expect(revoked.revokedBy).toBe(1);
     expect(revoked.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it("lists historical mandates from both relationship sides", async () => {
+    const granted = await appRouter.createCaller(context(1)).stakeholderRegistrations.mineMandates({ side: "principal" });
+    expect(granted[0].principalUserId).toBe(1);
+
+    const held = await appRouter.createCaller(context(2)).stakeholderRegistrations.mineMandates({ side: "agent" });
+    expect(held[0].revokedAt).toBeInstanceOf(Date);
+    expect(held[0].revokedBy).toBe(1);
+    expect(held[0].revocationReason).toBe("Engagement ended");
   });
 
   it("fails closed when registration persistence is unavailable", async () => {

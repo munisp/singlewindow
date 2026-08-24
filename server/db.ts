@@ -1,4 +1,4 @@
-import { eq, desc, and, gte, lte, gt, isNull, sql, count, inArray, like } from "drizzle-orm";
+import { eq, desc, and, or, gte, lte, gt, isNull, sql, count, inArray, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import {
@@ -241,6 +241,23 @@ export async function getStakeholderRegistrationsByUser(userId: number) {
     .orderBy(desc(stakeholderRegistrations.createdAt));
 }
 
+export async function getPendingStakeholderRegistrationForUser(
+  userId: number,
+  stakeholderType: typeof stakeholderRegistrations.$inferSelect.stakeholderType,
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [registration] = await db.select().from(stakeholderRegistrations)
+    .where(and(
+      eq(stakeholderRegistrations.userId, userId),
+      eq(stakeholderRegistrations.stakeholderType, stakeholderType),
+      eq(stakeholderRegistrations.status, "pending"),
+    ))
+    .orderBy(desc(stakeholderRegistrations.createdAt))
+    .limit(1);
+  return registration;
+}
+
 export async function getPendingStakeholderRegistrations() {
   const db = await getDb();
   if (!db) throw new Error("Database unavailable");
@@ -315,6 +332,22 @@ export async function getStakeholderMandateByReference(referenceNumber: string) 
   return mandate;
 }
 
+export async function getStakeholderMandatesByPrincipal(principalUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select().from(stakeholderMandates)
+    .where(eq(stakeholderMandates.principalUserId, principalUserId))
+    .orderBy(desc(stakeholderMandates.createdAt));
+}
+
+export async function getStakeholderMandatesByAgent(agentUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  return db.select().from(stakeholderMandates)
+    .where(eq(stakeholderMandates.agentUserId, agentUserId))
+    .orderBy(desc(stakeholderMandates.createdAt));
+}
+
 export async function revokeStakeholderMandate(
   id: number,
   revokedBy: number,
@@ -379,6 +412,27 @@ export async function getDeclarationByNumber(declarationNumber: string) {
   const result = await db.select().from(declarations)
     .where(eq(declarations.declarationNumber, declarationNumber)).limit(1);
   return result[0] ?? undefined;
+}
+
+export async function getPublicDeclarationTracking(reference: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [declaration] = await db.select({
+    declarationNumber: declarations.declarationNumber,
+    ucr: declarations.ucr,
+    declarationType: declarations.declarationType,
+    status: declarations.status,
+    createdAt: declarations.createdAt,
+    updatedAt: declarations.updatedAt,
+    submittedAt: declarations.submittedAt,
+    clearedAt: declarations.clearedAt,
+  }).from(declarations)
+    .where(or(
+      eq(declarations.declarationNumber, reference),
+      eq(declarations.ucr, reference),
+    ))
+    .limit(1);
+  return declaration;
 }
 
 export async function getDeclarationsByTrader(traderId: number, limit = 20, offset = 0) {
@@ -516,6 +570,23 @@ export async function getPermitsByDeclaration(declarationId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(ogaPermits).where(eq(ogaPermits.declarationId, declarationId));
+}
+
+export async function getPublicPermitTracking(permitNumber: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const [permit] = await db.select({
+    permitNumber: ogaPermits.permitNumber,
+    permitType: ogaPermits.permitType,
+    status: ogaPermits.status,
+    createdAt: ogaPermits.createdAt,
+    updatedAt: ogaPermits.updatedAt,
+    respondedAt: ogaPermits.respondedAt,
+    expiresAt: ogaPermits.expiresAt,
+  }).from(ogaPermits)
+    .where(eq(ogaPermits.permitNumber, permitNumber))
+    .limit(1);
+  return permit;
 }
 
 export async function updateOgaPermit(id: number, data: Partial<typeof ogaPermits.$inferInsert>) {

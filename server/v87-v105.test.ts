@@ -350,11 +350,11 @@ describe("v100 — Cargo tracking heatmap", () => {
     expect((cargoTrackingRouter as any)._def.procedures.getCargoHeatmapData).toBeDefined();
   });
 
-  it("getCargoHeatmapData returns array for admin caller", async () => {
+  it("getCargoHeatmapData fails explicitly when tracking data is unavailable", async () => {
     const { cargoTrackingRouter } = await import("./routers/cargoTracking");
     const caller = cargoTrackingRouter.createCaller(adminCtx);
-    const result = await caller.getCargoHeatmapData({ hours: 24, limit: 100 });
-    expect(Array.isArray(result)).toBe(true);
+    await expect(caller.getCargoHeatmapData({ hours: 24, limit: 100 }))
+      .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("heatmap data points have lat, lng, and weight fields", () => {

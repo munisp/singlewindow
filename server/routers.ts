@@ -57,6 +57,7 @@ import { traderScorecardRouter } from "./routers/traderScorecard";
 import { cargoTrackingRouter } from "./routers/cargoTracking";
 import { onboardingRouter } from "./routers/onboarding";
 import { stakeholderRegistrationsRouter } from "./routers/stakeholderRegistrations";
+import { applicationTrackingRouter } from "./routers/applicationTracking";
 import { geofencesRouter } from "./routers/geofences";
 import { webhooksRouter } from "./routers/webhooks";
 import { apiChangelogRouter } from "./routers/apiChangelog";
@@ -309,6 +310,7 @@ export const appRouter = router({
   cargoTracking: cargoTrackingRouter,
   onboarding: onboardingRouter,
   stakeholderRegistrations: stakeholderRegistrationsRouter,
+  applicationTracking: applicationTrackingRouter,
   geofences: geofencesRouter,
   webhooks: webhooksRouter,
   apiChangelog: apiChangelogRouter,

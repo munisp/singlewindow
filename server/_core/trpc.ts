@@ -3,6 +3,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { redisRateLimit } from './redis';
+import { incrementRateLimit } from './redisRateLimiter';
 import crypto from 'crypto';
 
 // ─── CSRF Token Utilities (B3 FIX) ────────────────────────────────────────────
@@ -263,6 +264,21 @@ export const rateLimitedProcedure = protectedProcedure.use(
     const identifier = ctx.user ? `user:${ctx.user.id}` : `ip:${ip}`;
     const allowed = await _checkRateLimit("std", identifier, 60_000, 300);
     if (!allowed) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded. Try again in 60 seconds." });
+    }
+    return next({ ctx });
+  })
+);
+
+export const publicRateLimitedProcedure = publicProcedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+    const forwardedFor = ctx.req.headers["x-forwarded-for"] as string | undefined;
+    const ip = forwardedFor?.split(",")[0]?.trim()
+      ?? (ctx.req.socket as any)?.remoteAddress
+      ?? "unknown";
+    const count = await incrementRateLimit(`rl:public:ip:${ip}`, 60_000);
+    if (count > 60) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded. Try again in 60 seconds." });
     }
     return next({ ctx });

@@ -1,12 +1,15 @@
 import { TRPCError } from "@trpc/server";
 import { getActiveStakeholderMandate } from "../db";
 
-const OPERATIONAL_ROLES = new Set([
+const DECLARATION_CREATION_OVERRIDE_ROLES = new Set([
   "admin",
   "customs_officer",
-  "oga_officer",
+]);
+
+const PAYMENT_OPERATIONAL_OVERRIDE_ROLES = new Set([
+  "admin",
   "finance",
-  "inspector",
+  "customs_officer",
 ]);
 
 export async function requireActiveAgentMandate(
@@ -41,7 +44,7 @@ export async function resolveActingPrincipal(
     return { principalUserId: actor.id, actingAgentId: null };
   }
 
-  if (OPERATIONAL_ROLES.has(actor.role)) {
+  if (DECLARATION_CREATION_OVERRIDE_ROLES.has(actor.role)) {
     return { principalUserId, actingAgentId: null };
   }
 
@@ -55,10 +58,10 @@ export async function requireDeclarationActor(
   options?: { allowOperationalOverride?: boolean },
 ) {
   const principalUserId = declaration.principalId ?? declaration.traderId;
-  if (options?.allowOperationalOverride && OPERATIONAL_ROLES.has(actor.role)) {
+  if (principalUserId === actor.id) {
     return { principalUserId, actingAgentId: null };
   }
-  if (principalUserId === actor.id && !declaration.actingAgentId) {
+  if (options?.allowOperationalOverride && PAYMENT_OPERATIONAL_OVERRIDE_ROLES.has(actor.role)) {
     return { principalUserId, actingAgentId: null };
   }
   if (declaration.actingAgentId !== actor.id) {

@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, publicRateLimitedProcedure, router } from "../_core/trpc";
 import {
   createStakeholderRegistration,
   getStakeholderRegistrationById,
-  getStakeholderRegistrationByReference,
+  getPendingStakeholderRegistrationForUser,
   getStakeholderRegistrationsByUser,
   getPendingStakeholderRegistrations,
   updateStakeholderRegistration,
@@ -12,11 +12,14 @@ import {
   getStakeholderMandateById,
   getStakeholderMandateByReference,
   revokeStakeholderMandate,
+  getStakeholderMandatesByPrincipal,
+  getStakeholderMandatesByAgent,
   getApprovedAgentRegistration,
   getApprovedTraderProfile,
   logAuditEvent,
 } from "../db";
 import { resolveActingPrincipal } from "../_core/mandateAuthorization";
+import { lookupPublicApplication } from "../_core/applicationTracking";
 import { nanoid } from "nanoid";
 
 const registrationType = z.enum([
@@ -65,6 +68,13 @@ export const stakeholderRegistrationsRouter = router({
     .input(registrationInput)
     .mutation(async ({ ctx, input }) => {
       try {
+        const existing = await getPendingStakeholderRegistrationForUser(ctx.user.id, input.stakeholderType);
+        if (existing) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `A pending application already exists: ${existing.referenceNumber}`,
+          });
+        }
         const registration = await createStakeholderRegistration({
           referenceNumber: reference("REG"),
           userId: ctx.user.id,
@@ -93,22 +103,11 @@ export const stakeholderRegistrationsRouter = router({
       }
     }),
 
-  track: publicProcedure
+  track: publicRateLimitedProcedure
     .input(z.object({ referenceNumber: z.string().min(8).max(32) }))
     .query(async ({ input }) => {
       try {
-        const registration = await getStakeholderRegistrationByReference(input.referenceNumber);
-        if (!registration) throw new TRPCError({ code: "NOT_FOUND", message: "Application not found." });
-        return {
-          referenceNumber: registration.referenceNumber,
-          stakeholderType: registration.stakeholderType,
-          organizationName: registration.organizationName,
-          status: registration.status,
-          createdAt: registration.createdAt,
-          updatedAt: registration.updatedAt,
-          approvedAt: registration.approvedAt,
-          rejectionReason: registration.rejectionReason,
-        };
+        return await lookupPublicApplication(input.referenceNumber);
       } catch (error) {
         return serviceUnavailable("Application tracking is unavailable.", error);
       }
@@ -251,6 +250,18 @@ export const stakeholderRegistrationsRouter = router({
         return mandate;
       } catch (error) {
         return serviceUnavailable("Mandate lookup is unavailable.", error);
+      }
+  }),
+
+  mineMandates: protectedProcedure
+    .input(z.object({ side: z.enum(["principal", "agent"]) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        return input.side === "principal"
+          ? await getStakeholderMandatesByPrincipal(ctx.user.id)
+          : await getStakeholderMandatesByAgent(ctx.user.id);
+      } catch (error) {
+        return serviceUnavailable("Mandate history is unavailable.", error);
       }
     }),
 
