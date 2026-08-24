@@ -2,9 +2,13 @@ import express, { type Request, type Response } from "express";
 import crypto from "crypto";
 import { getWebhookSecret } from "../_core/webhookSecretsValidator";
 import {
+  claimPaymentIdempotencyKey,
+  completePaymentIdempotencyKey,
   createLedgerEntry,
+  getLedgerEntryByMojaloopTransferId,
   getMojaloopTransactionByTransferId,
   logAuditEvent,
+  releasePaymentIdempotencyKey,
   updateMojaloopTransaction,
 } from "../db";
 import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
@@ -56,37 +60,55 @@ export function registerMojaloopWebhookRoute(app: express.Application): void {
       const tx = await getMojaloopTransactionByTransferId(input.transferId);
       if (!tx) return res.status(404).json({ error: "Transfer not found" });
 
-      const updateData: Record<string, unknown> = {
-        status: input.transferState,
-        webhookPayload: input,
-      };
       if (input.transferState === "COMMITTED") {
-        updateData.fulfilment = input.fulfilment ?? null;
-        updateData.committedAt = input.completedTimestamp ? new Date(input.completedTimestamp) : new Date();
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: tx.id,
-          action: "mojaloop_webhook_committed",
-          actorId: tx.initiatedBy,
-          actorType: "system",
-          newState: { transferId: input.transferId, status: "COMMITTED" },
-        });
-      }
-      if (input.transferState === "ABORTED") {
-        updateData.abortedAt = new Date();
-        updateData.failureReason = input.errorInformation?.errorDescription ?? "Transfer aborted";
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: tx.id,
-          action: "mojaloop_webhook_aborted",
-          actorId: tx.initiatedBy,
-          actorType: "system",
-          newState: { transferId: input.transferId, status: "ABORTED", error: input.errorInformation },
-        });
-      }
-      await updateMojaloopTransaction(input.transferId, updateData as never);
+        const existingLedgerEntry = await getLedgerEntryByMojaloopTransferId(input.transferId);
+        if (existingLedgerEntry) {
+          if (tx.status !== "COMMITTED") {
+            await updateMojaloopTransaction(input.transferId, {
+              status: "COMMITTED",
+              fulfilment: input.fulfilment ?? null,
+              committedAt: input.completedTimestamp ? new Date(input.completedTimestamp) : new Date(),
+              webhookPayload: input,
+            });
+            await logAuditEvent({
+              entityType: "payment",
+              entityId: tx.id,
+              action: "mojaloop_webhook_committed",
+              actorId: tx.initiatedBy,
+              actorType: "system",
+              newState: { transferId: input.transferId, status: "COMMITTED" },
+            });
+          }
+          return res.json({ success: true, transferId: input.transferId, newStatus: "COMMITTED" });
+        }
 
-      if (input.transferState === "COMMITTED") {
+        const keyHash = crypto
+          .createHash("sha256")
+          .update(`mojaloop-webhook-settlement:${input.transferId}`)
+          .digest("hex");
+        let claim;
+        try {
+          claim = await claimPaymentIdempotencyKey({
+            keyHash,
+            transferId: input.transferId,
+            responseSnapshot: { transferId: input.transferId, status: "settlement_in_progress" },
+            expiresAt: new Date(Date.now() + 86_400_000),
+          });
+        } catch (error) {
+          console.error("[Mojaloop] Settlement idempotency unavailable:", error);
+          return res.status(503).json({
+            error: "Settlement idempotency unavailable; webhook will be retried",
+            transferId: input.transferId,
+          });
+        }
+        if (!claim) {
+          return res.status(503).json({
+            error: "Settlement is already being processed; webhook will be retried",
+            transferId: input.transferId,
+          });
+        }
+
+        let bridgeAccepted = false;
         try {
           if (!(await tbBridgeAvailable())) {
             throw new Error("TigerBeetle bridge is unavailable");
@@ -105,6 +127,7 @@ export function registerMojaloopWebhookRoute(app: express.Application): void {
               metadata: { mojaloopTransferId: input.transferId },
             }),
           });
+          bridgeAccepted = true;
           await createLedgerEntry({
             tbTransferId: bridgeTransfer.id,
             debitAccountId,
@@ -120,15 +143,59 @@ export function registerMojaloopWebhookRoute(app: express.Application): void {
             description: `Duty payment settled via Mojaloop webhook (${input.transferId})`,
             postedAt: new Date(),
           });
+          await updateMojaloopTransaction(input.transferId, {
+            status: "COMMITTED",
+            fulfilment: input.fulfilment ?? null,
+            committedAt: input.completedTimestamp ? new Date(input.completedTimestamp) : new Date(),
+            webhookPayload: input,
+          });
+          await logAuditEvent({
+            entityType: "payment",
+            entityId: tx.id,
+            action: "mojaloop_webhook_committed",
+            actorId: tx.initiatedBy,
+            actorType: "system",
+            newState: { transferId: input.transferId, status: "COMMITTED" },
+          });
+          await completePaymentIdempotencyKey(keyHash, {
+            transferId: input.transferId,
+            status: "settled",
+            tbTransferId: bridgeTransfer.id,
+          });
         } catch (error) {
-          console.error("[Mojaloop] TigerBeetle settlement unavailable:", error);
+          console.error("[Mojaloop] Settlement failed:", error);
+          if (!bridgeAccepted) {
+            try {
+              await releasePaymentIdempotencyKey(keyHash);
+            } catch (releaseError) {
+              console.error("[Mojaloop] Failed to release settlement claim:", releaseError);
+            }
+          }
           return res.status(503).json({
             error: "Ledger settlement unavailable; webhook will be retried",
             transferId: input.transferId,
           });
         }
+        return res.json({ success: true, transferId: input.transferId, newStatus: "COMMITTED" });
       }
 
+      const updateData: Record<string, unknown> = {
+        status: input.transferState,
+        webhookPayload: input,
+      };
+      if (input.transferState === "ABORTED") {
+        updateData.abortedAt = new Date();
+        updateData.failureReason = input.errorInformation?.errorDescription ?? "Transfer aborted";
+        await logAuditEvent({
+          entityType: "payment",
+          entityId: tx.id,
+          action: "mojaloop_webhook_aborted",
+          actorId: tx.initiatedBy,
+          actorType: "system",
+          newState: { transferId: input.transferId, status: "ABORTED", error: input.errorInformation },
+        });
+      }
+      await updateMojaloopTransaction(input.transferId, updateData as never);
       return res.json({ success: true, transferId: input.transferId, newStatus: input.transferState });
     },
   );
