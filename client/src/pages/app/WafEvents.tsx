@@ -27,6 +27,15 @@ const ACTION_COLORS: Record<string, string> = {
   LOG: "bg-gray-500/10 text-gray-400",
 };
 
+function eventField(event: object, key: string): unknown {
+  return Reflect.get(event, key);
+}
+
+function stringField(event: object, key: string): string | undefined {
+  const value = eventField(event, key);
+  return typeof value === "string" ? value : undefined;
+}
+
 export default function WafEvents() {
   const { toast } = useToast();
   const [severityFilter, setSeverityFilter] = useState<string>("ALL");
@@ -43,12 +52,13 @@ export default function WafEvents() {
   );
 
   const statsQuery = trpc.openAppSec.getWafStats.useQuery();
+  const ingestionQuery = trpc.openAppSec.getWafIngestionHealth.useQuery(undefined, { refetchInterval: 30_000 });
   const trendQuery = trpc.openAppSec.getWafTrend.useQuery({ days: 30 });
   const attackTypesQuery = trpc.openAppSec.getAttackTypes.useQuery();
   const eventsQuery = trpc.openAppSec.getWafEvents.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
-    severity: severityFilter !== "ALL" ? (severityFilter as any) : undefined,
+    severity: severityFilter !== "ALL" ? severityFilter as "critical" | "high" | "medium" | "low" : undefined,
     attackType: attackTypeFilter !== "ALL" ? attackTypeFilter : undefined,
     isAcknowledged: ackedFilter === "ALL" ? undefined : ackedFilter === "unacked" ? false : true,
   });
@@ -78,6 +88,7 @@ export default function WafEvents() {
   const total = eventsQuery.data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const stats = statsQuery.data;
+  const ingestionUnavailable = ingestionQuery.data?.status !== "healthy";
 
   const toggleSelect = (id: number) => {
     setSelectedIds((prev) => {
@@ -95,13 +106,13 @@ export default function WafEvents() {
       evt.attackType,
       evt.severity,
       evt.sourceIp,
-      (evt as any).country ?? "",
-      (evt as any).city ?? "",
-      (evt as any).asn ?? "",
+      stringField(evt, "country") ?? "",
+      stringField(evt, "city") ?? "",
+      stringField(evt, "asn") ?? "",
       evt.targetPath ?? "",
-      (evt as any).httpMethod ?? "",
+      evt.httpMethod ?? "",
       evt.action,
-      (evt as any).ruleId ?? "",
+      stringField(evt, "ruleId") ?? "",
       evt.isAcknowledged ? "yes" : "no",
       new Date(evt.createdAt).toISOString(),
     ]);
@@ -151,6 +162,14 @@ export default function WafEvents() {
       </div>
 
       {/* Stats Cards */}
+      {ingestionUnavailable && (
+        <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          WAF ingestion {ingestionQuery.data?.status ?? "unavailable"} —{" "}
+          {ingestionQuery.data?.lastEventAt
+            ? `last event received at ${new Date(ingestionQuery.data.lastEventAt).toLocaleString()}`
+            : "no event received"}
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: "Critical", value: stats?.critical, cls: "text-red-400" },
@@ -163,7 +182,7 @@ export default function WafEvents() {
             <CardContent className="pt-3 pb-2">
               <p className="text-xs text-muted-foreground">{s.label}</p>
               <p className={`text-xl font-bold ${s.cls}`}>
-                {statsQuery.isLoading ? "…" : (s.value ?? 0)}
+                {statsQuery.isLoading ? "…" : ingestionUnavailable ? "—" : (s.value ?? 0)}
               </p>
             </CardContent>
           </Card>
@@ -278,7 +297,9 @@ export default function WafEvents() {
               ) : events.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                    No WAF events found
+                    {ingestionUnavailable
+                      ? "WAF ingestion is unavailable; no empty result can be inferred."
+                      : "No WAF events recorded"}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -305,22 +326,22 @@ export default function WafEvents() {
                     <TableCell className="text-xs">
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-base leading-none" title={(evt as any).country ?? undefined}>
-                            {(evt as any).countryFlag ?? "🌐"}
+                          <span className="text-base leading-none" title={stringField(evt, "country")}>
+                            {stringField(evt, "countryFlag") ?? "🌐"}
                           </span>
                           <span className="font-mono text-muted-foreground">{evt.sourceIp}</span>
                         </div>
-                        {(evt as any).asn && (
+                        {stringField(evt, "asn") && (
                           <span
                             className="inline-block font-mono text-[10px] bg-muted text-muted-foreground px-1 py-0.5 rounded"
-                            title={(evt as any).asnOrg ?? undefined}
+                            title={stringField(evt, "asnOrg")}
                           >
-                            {(evt as any).asn}
+                            {stringField(evt, "asn")}
                           </span>
                         )}
-                        {(evt as any).city && (
+                        {stringField(evt, "city") && (
                           <span className="text-[10px] text-muted-foreground">
-                            {(evt as any).city}{(evt as any).country ? `, ${(evt as any).country}` : ""}
+                            {stringField(evt, "city")}{stringField(evt, "country") ? `, ${stringField(evt, "country")}` : ""}
                           </span>
                         )}
                       </div>
@@ -333,7 +354,7 @@ export default function WafEvents() {
                         {evt.action}
                       </span>
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{(evt as any).ruleId ?? "—"}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{stringField(evt, "ruleId") ?? "—"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(evt.createdAt).toLocaleString()}
                     </TableCell>
@@ -402,7 +423,7 @@ export default function WafEvents() {
                         {detailEvent.action}
                       </span>
                     )},
-                    { label: "Rule ID", value: <span className="font-mono">{(detailEvent as any).ruleId ?? "—"}</span> },
+                    { label: "Rule ID", value: <span className="font-mono">{stringField(detailEvent, "ruleId") ?? "—"}</span> },
                     { label: "Target Path", value: <span className="font-mono break-all">{detailEvent.targetPath ?? "—"}</span> },
                     { label: "Timestamp", value: new Date(detailEvent.createdAt).toLocaleString() },
                     { label: "Acknowledged", value: detailEvent.isAcknowledged ? "Yes" : "No" },
@@ -433,7 +454,7 @@ export default function WafEvents() {
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     {[
                       { label: "Country", value: geoLookupQuery.data.country
-                        ? `${(geoLookupQuery.data as any).countryFlag ?? ""} ${geoLookupQuery.data.country}`
+                        ? `${stringField(geoLookupQuery.data, "countryFlag") ?? ""} ${geoLookupQuery.data.country}`
                         : "Unknown" },
                       { label: "Country Code", value: geoLookupQuery.data.countryCode ?? "—" },
                       { label: "City", value: geoLookupQuery.data.city ?? "—" },
@@ -441,8 +462,8 @@ export default function WafEvents() {
                         ? <span className="font-mono">{geoLookupQuery.data.asn}</span>
                         : "—" },
                       { label: "ASN Org", value: geoLookupQuery.data.asnOrg ?? "—" },
-                      { label: "Last Updated", value: (geoLookupQuery.data as any).updatedAt
-                        ? new Date((geoLookupQuery.data as any).updatedAt).toLocaleDateString()
+                      { label: "Last Updated", value: stringField(geoLookupQuery.data, "updatedAt")
+                        ? new Date(stringField(geoLookupQuery.data, "updatedAt") ?? "").toLocaleDateString()
                         : "—" },
                     ].map(({ label, value }) => (
                       <div key={label}>

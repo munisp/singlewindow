@@ -29,11 +29,14 @@ def client():
 
 
 def test_health_endpoint(client):
-    """Health endpoint must return 200."""
+    """Health reports source-backed availability."""
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code in [200, 503]
     data = response.json()
-    assert "status" in data
+    if response.status_code == 200:
+        assert data["status"] == "ok"
+    else:
+        assert data["detail"]["reason"] == "analytics_source_unavailable"
 
 
 def test_metrics_endpoint(client):
@@ -77,7 +80,7 @@ def test_post_query(client):
     else:
         response = client.post("/query", json={"test": "data"})
     # Accept 200 (success), 422 (validation), 401 (auth required), 404 (not found)
-    assert response.status_code in [200, 201, 422, 401, 404, 500]
+    assert response.status_code in [200, 201, 422, 401, 404, 500, 503]
 
 def test_get_tables(client):
     """Test GET /tables endpoint."""
@@ -86,7 +89,7 @@ def test_get_tables(client):
     else:
         response = client.post("/tables", json={"test": "data"})
     # Accept 200 (success), 422 (validation), 401 (auth required), 404 (not found)
-    assert response.status_code in [200, 201, 422, 401, 404, 500]
+    assert response.status_code in [200, 201, 422, 401, 404, 500, 503]
 
 def test_get_health(client):
     """Test GET /health endpoint."""
@@ -95,5 +98,4 @@ def test_get_health(client):
     else:
         response = client.post("/health", json={"test": "data"})
     # Accept 200 (success), 422 (validation), 401 (auth required), 404 (not found)
-    assert response.status_code in [200, 201, 422, 401, 404, 500]
-
+    assert response.status_code in [200, 201, 422, 401, 404, 500, 503]

@@ -11,10 +11,11 @@
 //   GET  /health                          — liveness probe
 //   GET  /api/stream/events               — recent events (JSON, query: ?limit=50&declarationId=N)
 //   GET  /api/stream/ws                   — WebSocket upgrade (query: ?declarationId=N)
-//   POST /api/stream/publish              — internal: inject a synthetic event (dev/test only)
+// No event publication endpoint is exposed; events are read from Fluvio only.
 //
 // Environment variables:
-//   FLUVIO_ENDPOINT   — Fluvio SC address (default: localhost:9003)
+//   FLUVIO_ENDPOINT   — configured Fluvio SC address
+//   FLUVIO_HTTP_PROXY — configured Fluvio HTTP proxy address
 //   FLUVIO_TOPIC      — topic name (default: cargo-events)
 //   PORT              — HTTP listen port (default: 8093)
 //   MAX_RING_SIZE     — ring buffer size per partition (default: 500)
@@ -25,7 +26,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -49,7 +49,8 @@ func getEnv(key, fallback string) string {
 }
 
 var (
-	fluvioEndpoint = getEnv("FLUVIO_ENDPOINT", "localhost:9003")
+	fluvioEndpoint = os.Getenv("FLUVIO_ENDPOINT")
+	fluvioProxy    = os.Getenv("FLUVIO_HTTP_PROXY")
 	fluvioTopic    = getEnv("FLUVIO_TOPIC", "cargo-events")
 	listenPort     = getEnv("PORT", "8093")
 	maxRingSize    = func() int {
@@ -59,6 +60,7 @@ var (
 		}
 		return n
 	}()
+	sourceConnected bool
 )
 
 // ─── Event model ──────────────────────────────────────────────────────────────
@@ -75,10 +77,16 @@ type CargoEvent struct {
 	Actor         string    `json:"actor"`
 	Message       string    `json:"message"`
 	Severity      string    `json:"severity"` // INFO, WARNING, CRITICAL
-	Metadata      any       `json:"metadata,omitempty"`
+	Metadata      json.RawMessage `json:"metadata,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
 	Partition     int       `json:"partition"`
 	Offset        int64     `json:"offset"`
+}
+
+type SourceStatus struct {
+	Status    string    `json:"status"`
+	Reason    string    `json:"reason,omitempty"`
+	LastEvent time.Time `json:"last_event,omitempty"`
 }
 
 // ─── Ring buffer ──────────────────────────────────────────────────────────────
@@ -185,6 +193,21 @@ func (h *Hub) Broadcast(e CargoEvent) {
 	}
 }
 
+func (h *Hub) BroadcastStatus(status SourceStatus) {
+	data, err := json.Marshal(status)
+	if err != nil {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for c := range h.clients {
+		select {
+		case c.send <- data:
+		default:
+		}
+	}
+}
+
 func (h *Hub) serveWS(c *gin.Context) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
@@ -242,61 +265,75 @@ func (h *Hub) serveWS(c *gin.Context) {
 	h.Unregister(client)
 }
 
-// ─── Fluvio consumer (simulated) ─────────────────────────────────────────────
-// In production this uses the official Fluvio Go client (github.com/infinyon/fluvio-client-go).
-// In the sandbox/CI environment we simulate the consumer with a ticker that
-// generates realistic synthetic events, so the service compiles and runs
-// without a live Fluvio cluster.
+// ─── Fluvio consumer ─────────────────────────────────────────────────────────
 
-var eventTypes = []string{
-	"VESSEL_ARRIVED", "VESSEL_DEPARTED",
-	"CONTAINER_GATE_IN", "CONTAINER_GATE_OUT",
-	"INSPECTION_STARTED", "INSPECTION_COMPLETED",
-	"CUSTOMS_HOLD_PLACED", "CUSTOMS_HOLD_RELEASED",
-	"PAYMENT_RECEIVED", "CLEARANCE_PERMIT_ISSUED",
-	"AIS_POSITION_UPDATE", "BERTH_ASSIGNED",
-}
-
-var portCodes = []string{"GHTEM", "GHKSI", "GHKDI"}
-var severities = []string{"INFO", "INFO", "INFO", "WARNING", "CRITICAL"}
-
-func startSimulatedConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, logger *zap.Logger) {
-	logger.Info("Starting simulated Fluvio consumer",
-		zap.String("endpoint", fluvioEndpoint),
-		zap.String("topic", fluvioTopic),
-	)
-	ticker := time.NewTicker(3 * time.Second)
-	var offset int64
+func startConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, logger *zap.Logger) {
+	if fluvioProxy == "" && fluvioEndpoint == "" {
+		sourceConnected = false
+		logger.Warn("Fluvio source is unconfigured")
+		hub.BroadcastStatus(SourceStatus{Status: "unconfigured", Reason: "fluvio_source_not_configured"})
+		return
+	}
+	if fluvioProxy == "" {
+		sourceConnected = false
+		logger.Warn("Fluvio HTTP proxy is not configured")
+		hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_http_proxy_not_configured"})
+		return
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
 	go func() {
-		defer ticker.Stop()
+		offset := int64(0)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case t := <-ticker.C:
-				e := CargoEvent{
-					EventID:      fmt.Sprintf("EVT-%d", t.UnixMilli()),
-					EventType:    eventTypes[int(t.UnixMilli()/3000)%len(eventTypes)],
-					ContainerRef: fmt.Sprintf("GHCU%07d", offset%9999999),
-					PortCode:     portCodes[int(offset)%len(portCodes)],
-					Location:     "Tema Container Terminal",
-					Actor:        "PORT_OPERATOR",
-					Message:      fmt.Sprintf("Automated event from partition 0 offset %d", offset),
-					Severity:     severities[int(offset)%len(severities)],
-					Timestamp:    t.UTC(),
-					Partition:    0,
-					Offset:       offset,
-				}
-				// Attach a declaration ID to every 3rd event for demo purposes
-				if offset%3 == 0 {
-					id := int64(1000 + offset%50)
-					e.DeclarationID = &id
-					e.UCR = fmt.Sprintf("GH%010d", id)
-				}
-				offset++
-				ring.Push(e)
-				hub.Broadcast(e)
+			default:
 			}
+			url := strings.TrimRight(fluvioProxy, "/") + "/api/topics/" + fluvioTopic + "/consume?offset=" + strconv.FormatInt(offset, 10)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				sourceConnected = false
+				hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_request_invalid"})
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			res, err := client.Do(req)
+			if err != nil || res.StatusCode >= http.StatusBadRequest {
+				sourceConnected = false
+				if res != nil {
+					res.Body.Close()
+				}
+				hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_source_unreachable"})
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			var events []CargoEvent
+			err = json.NewDecoder(res.Body).Decode(&events)
+			res.Body.Close()
+			if err != nil {
+				sourceConnected = false
+				hub.BroadcastStatus(SourceStatus{Status: "unavailable", Reason: "fluvio_payload_invalid"})
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			last := time.Time{}
+			for _, event := range events {
+				ring.Push(event)
+				hub.Broadcast(event)
+				if event.Offset >= offset {
+					offset = event.Offset + 1
+				}
+				if event.Timestamp.After(last) {
+					last = event.Timestamp
+				}
+			}
+			sourceConnected = true
+			status := SourceStatus{Status: "connected"}
+			if !last.IsZero() {
+				status.LastEvent = last
+			}
+			hub.BroadcastStatus(status)
+			time.Sleep(3 * time.Second)
 		}
 	}()
 }
@@ -304,8 +341,19 @@ func startSimulatedConsumer(ctx context.Context, ring *RingBuffer, hub *Hub, log
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
 
 func healthHandler(c *gin.Context) {
+	status := "unconfigured"
+	reason := "fluvio_source_not_configured"
+	if fluvioProxy != "" || fluvioEndpoint != "" {
+		status = "unavailable"
+		reason = "fluvio_source_not_connected"
+		if sourceConnected {
+			status = "connected"
+			reason = ""
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
+		"status":    status,
+		"reason":    reason,
 		"service":   "fluvio-consumer",
 		"topic":     fluvioTopic,
 		"endpoint":  fluvioEndpoint,
@@ -335,26 +383,6 @@ func recentEventsHandler(ring *RingBuffer) gin.HandlerFunc {
 	}
 }
 
-func publishHandler(ring *RingBuffer, hub *Hub) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if getEnv("APP_ENV", "production") == "production" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "publish endpoint disabled in production"})
-			return
-		}
-		var e CargoEvent
-		if err := c.ShouldBindJSON(&e); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if e.Timestamp.IsZero() {
-			e.Timestamp = time.Now().UTC()
-		}
-		ring.Push(e)
-		hub.Broadcast(e)
-		c.JSON(http.StatusCreated, gin.H{"published": true, "event": e})
-	}
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 func main() {
@@ -367,7 +395,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	startSimulatedConsumer(ctx, ring, hub, logger)
+	startConsumer(ctx, ring, hub, logger)
 
 	gin.SetMode(func() string {
 		if strings.ToLower(getEnv("APP_ENV", "production")) == "development" {
@@ -398,7 +426,6 @@ func main() {
 	r.GET("/health", healthHandler)
 	r.GET("/api/stream/events", recentEventsHandler(ring))
 	r.GET("/api/stream/ws", hub.serveWS)
-	r.POST("/api/stream/publish", publishHandler(ring, hub))
 
 	addr := ":" + listenPort
 	logger.Info("Fluvio consumer service starting",

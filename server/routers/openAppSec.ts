@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { getDb, getOpenAppSecEvents, acknowledgeOpenAppSecEvent, getOpenAppSecEventStats } from "../db";
 import { openAppSecEvents } from "../../drizzle/schema";
 import { gte, sql } from "drizzle-orm";
+import { getWafIngestionHealth } from "../kafkaConsumer";
 
 const SEVERITIES = ["critical", "high", "medium", "low"] as const;
 const ATTACK_TYPES = [
@@ -99,9 +100,19 @@ export const openAppSecRouter = router({
    */
   getWafStats: keycloakAdminProcedure
     .query(async () => {
+      const ingestion = getWafIngestionHealth();
+      if (ingestion.status !== "healthy") {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `WAF ingestion ${ingestion.status} — ${ingestion.lastEventAt ?? "no event received"}`,
+        });
+      }
       const stats = await getOpenAppSecEventStats();
-      return stats ?? { critical: 0, high: 0, medium: 0, low: 0, unacknowledged: 0 };
+      if (!stats) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "WAF ingestion database unavailable" });
+      return stats;
     }),
+
+  getWafIngestionHealth: keycloakAdminProcedure.query(() => getWafIngestionHealth()),
 
   /**
    * getAttackTypes — list of distinct attack types for filter dropdowns.

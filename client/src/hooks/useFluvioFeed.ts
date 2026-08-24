@@ -42,11 +42,12 @@ export interface FluvioEvent {
   payload: VesselPosition | Record<string, unknown>;
 }
 
-export type FeedStatus = "connecting" | "connected" | "paused" | "reconnecting" | "error";
+export type FeedStatus = "connecting" | "connected" | "paused" | "reconnecting" | "error" | "unconfigured" | "unavailable";
+export type SourceStatus = "connected" | "unconfigured" | "unavailable";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const FLUVIO_WS_URL = "ws://localhost:8085/ws";
+const FLUVIO_WS_URL = import.meta.env.VITE_FLUVIO_WS_URL ?? "ws://localhost:8093/api/stream/ws";
 const MAX_EVENTS = 500;           // ring buffer size
 const RECONNECT_DELAY_MS = 3000;  // 3 s between reconnect attempts
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -66,6 +67,8 @@ export function useFluvioFeed(options?: {
 
   const [events, setEvents] = useState<FluvioEvent[]>([]);
   const [status, setStatus] = useState<FeedStatus>("connecting");
+  const [sourceStatus, setSourceStatus] = useState<SourceStatus | null>(null);
+  const [sourceReason, setSourceReason] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [reconnectCount, setReconnectCount] = useState(0);
 
@@ -93,7 +96,31 @@ export function useFluvioFeed(options?: {
       ws.onmessage = (evt) => {
         if (!mountedRef.current || pausedRef.current) return;
         try {
-          const event: FluvioEvent = JSON.parse(evt.data as string);
+          const parsed: unknown = JSON.parse(evt.data as string);
+          if (typeof parsed !== "object" || parsed === null) return;
+          if ("status" in parsed && (
+            parsed.status === "connected" ||
+            parsed.status === "unconfigured" ||
+            parsed.status === "unavailable"
+          )) {
+            if (parsed.status === "connected") {
+              setSourceStatus(null);
+              setSourceReason(null);
+              setStatus("connected");
+              const lastEvent = "last_event" in parsed && typeof parsed.last_event === "string"
+                ? new Date(parsed.last_event)
+                : new Date();
+              setLastUpdated(lastEvent);
+              return;
+            }
+            setSourceStatus(parsed.status);
+            setSourceReason("reason" in parsed && typeof parsed.reason === "string" ? parsed.reason : null);
+            setStatus(parsed.status);
+            return;
+          }
+          setSourceStatus(null);
+          setSourceReason(null);
+          const event = parsed as FluvioEvent;
           if (filterType && event.type !== filterType) return;
 
           setEvents(prev => {
@@ -168,11 +195,13 @@ export function useFluvioFeed(options?: {
     events,
     vesselPositions,
     status,
+    sourceStatus,
+    sourceReason,
     lastUpdated,
     reconnectCount,
     pause,
     resume,
     clearEvents,
-    isLive: status === "connected",
+    isLive: status === "connected" && sourceStatus === null,
   };
 }

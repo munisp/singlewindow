@@ -4,22 +4,32 @@
  */
 
 import { z } from "zod";
-import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { protectedProcedure, router } from "../_core/trpc";
+import { ENV } from "../_core/env";
 
-const DELTALAKE_SVC_URL = process.env.DELTALAKE_SVC_URL ?? "http://localhost:8103";
+const DELTALAKE_SVC_URL = ENV.deltaLakeSvcUrl;
 
 const PERIOD_SCHEMA = z.enum(["daily", "weekly", "monthly", "quarterly"]).default("monthly");
 
-async function deltaFetch<T>(path: string, options?: RequestInit): Promise<T | null> {
+async function deltaFetch<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     const res = await fetch(`${DELTALAKE_SVC_URL}${path}`, {
       headers: { "Content-Type": "application/json" },
       ...options,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body: unknown = await res.json().catch(() => null);
+      const reason = typeof body === "object" && body !== null && "detail" in body
+        ? JSON.stringify(body.detail)
+        : `HTTP ${res.status}`;
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Analytics unavailable — ${reason}` });
+    }
     return res.json() as Promise<T>;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    const reason = error instanceof Error ? error.message : "connection failed";
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Analytics unavailable — ${reason}` });
   }
 }
 
@@ -32,17 +42,14 @@ export const analyticsRouter = router({
         period: string;
         summary: {
           total_declarations: number;
-          total_value_usd: number;
-          total_duty_usd: number;
-          avg_clearance_hours: number;
-          lane_distribution: Record<string, number>;
+          total_value_usd?: number;
+          total_duty_usd?: number;
         };
         time_series: Array<{
           date: string;
           declaration_count: number;
-          total_value_usd: number;
-          total_duty_usd: number;
-          avg_clearance_hours: number;
+          total_value_usd?: number;
+          total_duty_usd?: number;
         }>;
       }>(`/trade-stats?period=${input.period}`);
     }),
@@ -53,11 +60,10 @@ export const analyticsRouter = router({
     .query(async ({ input }) => {
       return deltaFetch<{
         hs_volumes: Array<{
-          hs_chapter: string;
-          description: string;
+          hs_code: string;
           declaration_count: number;
-          total_value_usd: number;
-          total_duty_usd: number;
+          total_value_usd?: number;
+          total_duty_usd?: number;
         }>;
         total_chapters: number;
         period: string;
@@ -72,13 +78,8 @@ export const analyticsRouter = router({
         traders: Array<{
           trader_id: string;
           declaration_count: number;
-          total_value_usd: number;
-          total_duty_usd: number;
-          avg_clearance_hours: number;
-          green_lane_rate: number;
-          green_count: number;
-          yellow_count: number;
-          red_count: number;
+          total_value_usd?: number;
+          total_duty_usd?: number;
         }>;
         total_traders: number;
         period: string;
@@ -108,37 +109,9 @@ export const analyticsRouter = router({
     .query(async ({ input }) => {
       return deltaFetch<{
         period: string;
-        total_duty_revenue_usd: number;
-        avg_daily_revenue_usd: number;
+        total_duty_revenue_usd?: number;
         time_series: Array<{ date: string; duty_revenue_usd: number }>;
       }>(`/duty-revenue?period=${input.period}`);
-    }),
-
-  /** Ingest declaration events into the Delta Lake pipeline */
-  ingestEvents: adminProcedure
-    .input(
-      z.object({
-        events: z.array(
-          z.object({
-            declaration_id: z.string(),
-            date: z.string(),
-            hs_chapter: z.string(),
-            origin_country: z.string(),
-            dest_country: z.string(),
-            declared_value_usd: z.number(),
-            duty_amount_usd: z.number(),
-            clearance_lane: z.string(),
-            clearance_hours: z.number(),
-            trader_id: z.string(),
-          })
-        ),
-      })
-    )
-    .mutation(async ({ input }) => {
-      return deltaFetch<{ ingested: number; total_events: number }>("/ingest", {
-        method: "POST",
-        body: JSON.stringify({ events: input.events }),
-      });
     }),
 
   /** Get overall pipeline statistics */
@@ -147,17 +120,19 @@ export const analyticsRouter = router({
       total_events: number;
       total_trade_value_usd: number;
       total_duty_revenue_usd: number;
-      hs_chapters_tracked: number;
-      origin_countries: number;
-      destination_countries: number;
-      date_range_days: number;
+      origin_countries?: number;
+      destination_countries?: number;
     }>("/stats");
   }),
 
   /** Health check for deltalake-svc */
   getServiceStatus: protectedProcedure.query(async () => {
-    const result = await deltaFetch<{ status: string; service: string; events_ingested: number }>("/health");
-    if (!result) return { online: false, status: "unreachable", service: "deltalake-svc", events_ingested: 0 };
+    const result = await deltaFetch<{
+      status: string;
+      service: string;
+      source: string;
+      declarations_available: number;
+    }>("/health");
     return { online: result.status === "ok", ...result };
   }),
 });

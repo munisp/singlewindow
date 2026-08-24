@@ -11,7 +11,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 
-function lagColor(lag: number) {
+function lagColor(lag: number | null) {
+  if (lag === null) return "#94a3b8";
   if (lag === 0) return "#22c55e";
   if (lag < 1000) return "#f59e0b";
   return "#ef4444";
@@ -49,7 +50,7 @@ export default function FluvioTopicOffsets() {
           {isLoading ? (
             <div className="h-64 flex items-center justify-center text-muted-foreground">Loading…</div>
           ) : offsets.length === 0 ? (
-            <div className="h-64 flex items-center justify-center text-muted-foreground">No data available</div>
+            <div className="h-64 flex items-center justify-center text-muted-foreground">No offset reports available</div>
           ) : (
             <div style={{ height: 280 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -61,9 +62,9 @@ export default function FluvioTopicOffsets() {
                     formatter={(v: number) => [v.toLocaleString(), "Lag"]}
                     contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
                   />
-                  <Bar dataKey="lag" radius={[4, 4, 0, 0]}>
-                    {offsets.map((entry: any, i: number) => (
-                      <Cell key={i} fill={lagColor(entry.lag)} />
+                  <Bar dataKey="lagCount" radius={[4, 4, 0, 0]}>
+                    {offsets.map((entry, i) => (
+                      <Cell key={i} fill={lagColor(entry.displayStatus === "unknown / stale" ? null : Number(entry.lagCount))} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -98,22 +99,22 @@ export default function FluvioTopicOffsets() {
                 ) : offsets.length === 0 ? (
                   <tr><td colSpan={7} className="text-center py-8 text-muted-foreground">No records found</td></tr>
                 ) : (
-                  offsets.map((row: any, i: number) => (
+                  offsets.map((row, i) => (
                     <tr key={i} className="border-b hover:bg-muted/30">
                       <td className="px-4 py-3 font-mono text-xs">{row.topic}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{row.consumerGroup ?? "—"}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs">{row.latestOffset?.toLocaleString() ?? "—"}</td>
                       <td className="px-4 py-3 text-right font-mono text-xs">{row.committedOffset?.toLocaleString() ?? "—"}</td>
-                      <td className="px-4 py-3 text-right font-mono text-xs font-semibold" style={{ color: lagColor(row.lag ?? 0) }}>
-                        {(row.lag ?? 0).toLocaleString()}
+                      <td className="px-4 py-3 text-right font-mono text-xs font-semibold" style={{ color: lagColor(row.displayStatus === "unknown / stale" ? null : Number(row.lagCount)) }}>
+                        {row.displayStatus === "unknown / stale" ? "—" : Number(row.lagCount).toLocaleString()}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={row.lag === 0 ? "default" : row.lag < 1000 ? "secondary" : "destructive"} className="text-xs">
-                          {row.lag === 0 ? "Current" : row.lag < 1000 ? "Lagging" : "Critical"}
+                        <Badge variant={row.displayStatus === "healthy" ? "default" : "secondary"} className="text-xs">
+                          {row.displayStatus}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {row.recordedAt ? new Date(row.recordedAt).toLocaleString() : "—"}
+                        {row.lastUpdatedAt ? new Date(row.lastUpdatedAt).toLocaleString() : "—"}
                       </td>
                     </tr>
                   ))

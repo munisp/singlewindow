@@ -834,7 +834,7 @@ services:
   # Open AppSec integrates with APISIX to provide real-time WAF protection.
   # Events are published to Kafka topic: waf-events and stored in PostgreSQL.
   openappsec-agent:
-    image: openappsec/agent:latest
+    image: openappsec/agent:1.1.0
     container_name: tg-openappsec-agent
     restart: unless-stopped
     environment:

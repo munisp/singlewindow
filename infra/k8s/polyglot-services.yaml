@@ -1092,7 +1092,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: openappsec-agent
-          image: openappsec/agent:latest
+          image: openappsec/agent:1.1.0
           ports:
             - containerPort: 8090
               name: http

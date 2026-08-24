@@ -93,7 +93,7 @@ export const ENV = {
   fluvioWsUrl: process.env.FLUVIO_WS_URL ?? "ws://localhost:8097",
 
   // ─── Delta Lake / Flink Analytics ────────────────────────────────────────
-  deltaLakeSvcUrl: process.env.DELTALAKE_SVC_URL ?? "http://localhost:8098",
+  deltaLakeSvcUrl: process.env.DELTALAKE_SVC_URL ?? "http://localhost:8103",
   flinkCepSvcUrl: process.env.FLINK_CEP_SVC_URL ?? "http://localhost:8099",
   flinkStreamGrpcAddr: process.env.FLINK_STREAM_GRPC_ADDR ?? "localhost:50099",
 

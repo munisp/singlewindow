@@ -59,6 +59,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+const WAF_SEVERITIES = ["critical", "high", "medium", "low"] as const;
 
 function SeverityBadge({ severity }: { severity: string }) {
   return (
@@ -108,7 +109,7 @@ export default function CorazaWafDashboard() {
   const { data: caddyStatus, refetch: refetchCaddy } = trpc.corazaWaf.getCaddyAdminStatus.useQuery();
   const { data: rulesData, refetch: refetchRules, isLoading } = trpc.corazaWaf.listRules.useQuery({
     category: filterCategory !== "ALL" ? filterCategory : undefined,
-    severity: filterSeverity !== "ALL" ? (filterSeverity as any) : undefined,
+    severity: filterSeverity !== "ALL" ? filterSeverity as typeof WAF_SEVERITIES[number] : undefined,
     enabled: filterEnabled !== "ALL" ? filterEnabled === "true" : undefined,
     page,
     pageSize: PAGE_SIZE,
@@ -118,6 +119,7 @@ export default function CorazaWafDashboard() {
   // Event correlation queries
   const { data: topFiringRules, refetch: refetchTopFiring } = trpc.corazaWaf.getTopFiringRules.useQuery({ limit: 10 });
   const { data: correlationSummary, refetch: refetchCorrelation } = trpc.corazaWaf.getEventCorrelationSummary.useQuery({ days: correlationDays });
+  const ingestionQuery = trpc.openAppSec.getWafIngestionHealth.useQuery(undefined, { refetchInterval: 30_000 });
   const { data: ruleEvents } = trpc.corazaWaf.getEventsForRule.useQuery(
     { ruleId: selectedRuleId!, limit: 20 },
     { enabled: !!selectedRuleId }
@@ -307,6 +309,14 @@ export default function CorazaWafDashboard() {
       </div>
 
       {/* Stats Row */}
+      {ingestionQuery.data?.status !== "healthy" && (
+        <div className="rounded border border-red-500/40 bg-red-950/30 p-3 text-sm text-red-200">
+          WAF ingestion {ingestionQuery.data?.status ?? "unavailable"} —{" "}
+          {ingestionQuery.data?.lastEventAt
+            ? `last event received at ${new Date(ingestionQuery.data.lastEventAt).toLocaleString()}`
+            : "no event received"}
+        </div>
+      )}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="Total Rules" value={stats.total} icon={<Shield className="w-5 h-5 text-[#D4A017]" />} />
@@ -668,12 +678,12 @@ export default function CorazaWafDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {ruleEvents.map((ev: any) => (
+                      {ruleEvents.map((ev) => (
                         <tr key={ev.id ?? ev.eventId} className="border-b border-gray-800 hover:bg-[#0A1628]/50">
                           <td className="px-3 py-2 text-orange-300">{ev.attackType}</td>
                           <td className="px-3 py-2"><SeverityBadge severity={ev.severity ?? "low"} /></td>
                           <td className="px-3 py-2 font-mono text-gray-300">{ev.sourceIp}</td>
-                          <td className="px-3 py-2 text-gray-400 max-w-[160px] truncate" title={ev.targetPath}>{ev.targetPath}</td>
+                          <td className="px-3 py-2 text-gray-400 max-w-[160px] truncate" title={ev.targetPath ?? undefined}>{ev.targetPath}</td>
                           <td className="px-3 py-2">
                             <span className={ev.action === "BLOCK" ? "text-red-400" : "text-yellow-400"}>{ev.action}</span>
                           </td>

@@ -8,9 +8,10 @@
  */
 import type { Request, Response } from "express";
 import { sdk } from "../_core/sdk";
+import { ENV } from "../_core/env";
 import { randomUUID } from "crypto";
 
-const DELTALAKE_SVC = process.env.DELTALAKE_SVC_URL ?? "http://deltalake-svc:8000";
+const DELTALAKE_SVC = ENV.deltaLakeSvcUrl;
 const JOB_TYPE = "TRADE_STATS_ROLLUP";
 const TARGET_TABLE = "trade_stats_mirror";
 
@@ -18,7 +19,7 @@ export async function lakehouseRollupHandler(req: Request, res: Response) {
   try {
     // Authenticate — must be a cron caller
     const user = await sdk.authenticateRequest(req);
-    if (!(user as any).isCron) {
+    if (!("isCron" in user) || user.isCron !== true) {
       return res.status(403).json({ error: "cron-only endpoint" });
     }
 
@@ -46,7 +47,6 @@ export async function lakehouseRollupHandler(req: Request, res: Response) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           table: TARGET_TABLE,
-          data: { triggeredAt: startedAt.toISOString(), source: "heartbeat-nightly" },
         }),
         signal: AbortSignal.timeout(90_000),
       });
@@ -68,12 +68,12 @@ export async function lakehouseRollupHandler(req: Request, res: Response) {
         status: "completed",
         completedAt,
         durationMs,
-        rowsWritten: result.rows_written ?? 0,
-        rowsProcessed: result.rows_processed ?? result.rows_written ?? 0,
+        rowsWritten: result.rows_affected ?? 0,
+        rowsProcessed: result.rows_affected ?? 0,
       });
 
-      console.log(`[LakehouseRollup] Completed job ${dbId ?? jobId} — rows: ${result.rows_written ?? "?"} in ${durationMs}ms`);
-      return res.json({ ok: true, jobId, dbId, rowsWritten: result.rows_written ?? null, durationMs });
+      console.log(`[LakehouseRollup] Completed job ${dbId ?? jobId} — rows: ${result.rows_affected ?? "?"} in ${durationMs}ms`);
+      return res.json({ ok: true, jobId, dbId, rowsWritten: result.rows_affected ?? null, durationMs });
     } catch (innerErr: unknown) {
       const msg = innerErr instanceof Error ? innerErr.message : String(innerErr);
       console.error("[LakehouseRollup] Job failed:", msg);

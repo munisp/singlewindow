@@ -16,14 +16,12 @@ import {
 } from "@/components/ui/select";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  Tooltip, ResponsiveContainer,
 } from "recharts";
 import {
   TrendingUp, DollarSign, FileText, Clock, BarChart2,
   RefreshCw, Database, Globe, Package,
 } from "lucide-react";
-
-const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4", "#EC4899"];
 
 const fmt = (n: number | undefined) =>
   n === undefined ? "—" : n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `$${(n / 1_000).toFixed(0)}K` : `$${n.toFixed(0)}`;
@@ -31,23 +29,27 @@ const fmt = (n: number | undefined) =>
 export default function TradeAnalytics() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly" | "quarterly">("monthly");
 
-  const { data: stats, isLoading: statsLoading, refetch: refetchStats, isError} = trpc.analytics.getTradeStats.useQuery({ period });
-  const { data: hsData } = trpc.analytics.getHsCodeVolume.useQuery({ period });
-  const { data: traderData } = trpc.analytics.getTraderMetrics.useQuery({ period, limit: 10 });
-  const { data: routeData } = trpc.analytics.getRouteFlow.useQuery({ period });
-  const { data: dutyData } = trpc.analytics.getDutyRevenue.useQuery({ period });
-  const { data: pipelineStats } = trpc.analytics.getPipelineStats.useQuery();
+  const { data: stats, isLoading: statsLoading, refetch: refetchStats, isError, error: statsError } = trpc.analytics.getTradeStats.useQuery({ period });
+  const hsQuery = trpc.analytics.getHsCodeVolume.useQuery({ period });
+  const traderQuery = trpc.analytics.getTraderMetrics.useQuery({ period, limit: 10 });
+  const routeQuery = trpc.analytics.getRouteFlow.useQuery({ period });
+  const dutyQuery = trpc.analytics.getDutyRevenue.useQuery({ period });
+  const pipelineQuery = trpc.analytics.getPipelineStats.useQuery();
+  const { data: hsData } = hsQuery;
+  const { data: traderData } = traderQuery;
+  const { data: routeData } = routeQuery;
+  const { data: dutyData } = dutyQuery;
+  const { data: pipelineStats } = pipelineQuery;
   const { data: svcStatus } = trpc.analytics.getServiceStatus.useQuery();
-
-  const laneData = stats?.summary?.lane_distribution
-    ? Object.entries(stats.summary.lane_distribution).map(([name, value]) => ({ name: name.toUpperCase(), value }))
-    : [];
+  const unavailableError = [statsError, hsQuery.error, traderQuery.error, routeQuery.error, dutyQuery.error, pipelineQuery.error]
+    .find((error) => error instanceof Error);
+  const unavailableReason = unavailableError?.message ?? "source unavailable";
 
   return (
     <DashboardLayout>
-      {isError && (
+      {(isError || unavailableError) && (
         <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-          Failed to load data. Please refresh the page.
+          analytics unavailable — {unavailableReason}
         </div>
       )}
       <div className="p-6 space-y-6">
@@ -150,17 +152,13 @@ export default function TradeAnalytics() {
             <Card>
               <CardContent className="p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Avg Clearance</p>
-                <p className="text-xl font-bold">{stats.summary.avg_clearance_hours?.toFixed(1)}h</p>
+                <p className="text-sm font-bold">Not available from declarations</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Green Lane %</p>
-                <p className="text-xl font-bold text-green-600">
-                  {stats.summary.lane_distribution?.green
-                    ? `${((stats.summary.lane_distribution.green / stats.summary.total_declarations) * 100).toFixed(0)}%`
-                    : "—"}
-                </p>
+                <p className="text-sm font-bold">Not available from declarations</p>
               </CardContent>
             </Card>
           </div>
@@ -234,20 +232,9 @@ export default function TradeAnalytics() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {laneData.length ? (
-                <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
-                    <Pie data={laneData} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {laneData.map((_, i) => (
-                        <Cell key={i} fill={["#10B981", "#F59E0B", "#EF4444", "#3B82F6"][i] ?? COLORS[i]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-44 flex items-center justify-center text-muted-foreground text-sm">No data</div>
-              )}
+              <div className="h-44 flex items-center justify-center text-muted-foreground text-sm">
+                Clearance lanes are not present in declarations
+              </div>
             </CardContent>
           </Card>
 
@@ -265,7 +252,7 @@ export default function TradeAnalytics() {
                   <BarChart data={hsData.hs_volumes.slice(0, 8)} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                     <XAxis type="number" tick={{ fontSize: 10 }} />
-                    <YAxis dataKey="hs_chapter" type="category" tick={{ fontSize: 10 }} width={40} />
+                    <YAxis dataKey="hs_code" type="category" tick={{ fontSize: 10 }} width={60} />
                     <Tooltip formatter={(v: number) => [v.toLocaleString(), "Declarations"]} />
                     <Bar dataKey="declaration_count" fill="#8B5CF6" radius={[0, 2, 2, 0]} />
                   </BarChart>
@@ -295,8 +282,6 @@ export default function TradeAnalytics() {
                       <th className="text-right py-2 pr-4">Declarations</th>
                       <th className="text-right py-2 pr-4">Trade Value</th>
                       <th className="text-right py-2 pr-4">Duty Paid</th>
-                      <th className="text-right py-2 pr-4">Avg Clearance</th>
-                      <th className="text-right py-2">Green Lane %</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -306,12 +291,6 @@ export default function TradeAnalytics() {
                         <td className="text-right py-2 pr-4">{t.declaration_count.toLocaleString()}</td>
                         <td className="text-right py-2 pr-4">{fmt(t.total_value_usd)}</td>
                         <td className="text-right py-2 pr-4">{fmt(t.total_duty_usd)}</td>
-                        <td className="text-right py-2 pr-4">{t.avg_clearance_hours.toFixed(1)}h</td>
-                        <td className="text-right py-2">
-                          <Badge variant={t.green_lane_rate >= 0.8 ? "default" : "secondary"} className="text-xs">
-                            {(t.green_lane_rate * 100).toFixed(0)}%
-                          </Badge>
-                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -42,9 +42,10 @@ describe("v88 — Fluvio topic offsets", () => {
     expect((fluvioRouter as any)._def.procedures.getTopicOffsets).toBeDefined();
   });
 
-  it("fluvioRouter exports upsertOffset procedure", async () => {
+  it("fluvioRouter exports service-only reportOffset procedure", async () => {
     const { fluvioRouter } = await import("./routers/fluvio");
-    expect((fluvioRouter as any)._def.procedures.upsertOffset).toBeDefined();
+    expect((fluvioRouter as any)._def.procedures.reportOffset).toBeDefined();
+    expect((fluvioRouter as any)._def.procedures.upsertOffset).toBeUndefined();
   });
 
   it("fluvioRouter exports getLagSummary procedure", async () => {

@@ -2828,6 +2828,7 @@ export const fluvioTopicOffsets = pgTable("fluvio_topic_offsets", {
   lastUpdatedAt: timestamp("last_updated_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
+  uniqueIndex("uq_fluvio_offsets_identity").on(t.topic, t.partition, t.consumerGroup),
   index("idx_fluvio_offsets_topic").on(t.topic),
   index("idx_fluvio_offsets_group").on(t.consumerGroup),
   index("idx_fluvio_offsets_lag").on(t.lagCount),
