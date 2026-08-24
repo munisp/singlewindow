@@ -7,6 +7,7 @@ import {
   eq,
   gte,
   isNull,
+  isNotNull,
   lte,
   or,
   sql,
@@ -579,6 +580,14 @@ export const regulatoryRouter = router({
           isNull(tariffQuotaAllocations.reversedAt),
         )).limit(1);
         if (existing) return existing;
+        const [reversed] = await db.select({
+          count: sql<number>`count(*)`,
+        }).from(tariffQuotaAllocations).where(and(
+          eq(tariffQuotaAllocations.quotaId, quota.id),
+          eq(tariffQuotaAllocations.declarationId, input.declarationId),
+          isNotNull(tariffQuotaAllocations.reversedAt),
+        ));
+        const attempt = Number(reversed?.count ?? 0);
         if (!(await tbBridgeAvailable())) {
           throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Ledger is unavailable; quota was not allocated." });
         }
@@ -597,7 +606,7 @@ export const regulatoryRouter = router({
             currency: "QTY",
             reference: quota.quotaCode,
             description: `Tariff quota allocation for declaration ${input.declarationId}`,
-            idempotencyKey: `regulatory:quota:${quota.id}:${input.declarationId}`,
+            idempotencyKey: `regulatory:quota:${quota.id}:${input.declarationId}:${attempt}`,
           }),
         });
         const [allocation] = await db.insert(tariffQuotaAllocations).values({

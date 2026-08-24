@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { appRouter } from "./routers";
 import { getDb } from "./db";
 import type { TrpcContext } from "./_core/context";
@@ -371,6 +371,59 @@ describe.sequential("regulatory obligation behaviour", () => {
     const [missing] = await db.select().from(tariffQuotas)
       .where(eq(tariffQuotas.quotaCode, unavailableCode));
     expect(missing).toBeUndefined();
+  });
+
+  it("uses a new ledger idempotency attempt after quota reversal", async () => {
+    const db = await database();
+    const now = new Date();
+    const [quota] = await db.insert(tariffQuotas).values({
+      quotaCode: `Q-RETRY-${randomUUID()}`, hsCodePrefix: "7766", origin: "GH", regime: "import",
+      periodStart: new Date(now.getTime() - 60_000), periodEnd: new Date(now.getTime() + 60_000),
+      totalQuantity: "10", quantityUnit: "kg", ledgerAccountId: "quota-retry-available",
+      allocatedLedgerAccountId: "quota-retry-allocated",
+      legalInstrument: "Instrument QUOTA-RETRY", validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.quotas.push(quota.id);
+    const declarationRow = await declaration("776600");
+
+    const first = await caller().regulatory.allocateQuota({
+      quotaId: quota.id, declarationId: declarationRow.id, quantity: "3",
+    });
+    await caller("admin", 4).regulatory.reverseQuotaAllocation({ allocationId: first.id });
+    const second = await caller().regulatory.allocateQuota({
+      quotaId: quota.id, declarationId: declarationRow.id, quantity: "3",
+    });
+
+    const transfers = ledgerMocks.fetch.mock.calls
+      .filter(([url]) => url === "/api/ledger/transfers")
+      .map(([, options]) => JSON.parse(String((options as RequestInit).body)) as {
+        debitAccountId: string;
+        creditAccountId: string;
+        amount: string;
+        idempotencyKey: string;
+      });
+    const allocationTransfers = transfers.filter((transfer) =>
+      transfer.debitAccountId === quota.ledgerAccountId &&
+      transfer.creditAccountId === quota.allocatedLedgerAccountId,
+    );
+    const reversalTransfers = transfers.filter((transfer) =>
+      transfer.debitAccountId === quota.allocatedLedgerAccountId &&
+      transfer.creditAccountId === quota.ledgerAccountId,
+    );
+    expect(first.transferId).not.toBe(second.transferId);
+    expect(allocationTransfers).toHaveLength(2);
+    expect(new Set(allocationTransfers.map((transfer) => transfer.idempotencyKey))).toEqual(new Set([
+      `regulatory:quota:${quota.id}:${declarationRow.id}:0`,
+      `regulatory:quota:${quota.id}:${declarationRow.id}:1`,
+    ]));
+    expect(reversalTransfers).toHaveLength(1);
+
+    const ledgerAllocatedTotal = allocationTransfers.reduce((total, transfer) => total + Number(transfer.amount), 0) -
+      reversalTransfers.reduce((total, transfer) => total + Number(transfer.amount), 0);
+    const [activeSqlTotal] = await db.select({
+      quantity: sql<string>`coalesce(sum(${tariffQuotaAllocations.quantity}) filter (where ${tariffQuotaAllocations.reversedAt} is null), 0)`,
+    }).from(tariffQuotaAllocations).where(eq(tariffQuotaAllocations.quotaId, quota.id));
+    expect(ledgerAllocatedTotal).toBe(Number(activeSqlTotal?.quantity ?? 0));
   });
 
   it("re-evaluates effective regulations at clearance instead of trusting stale rows", async () => {
