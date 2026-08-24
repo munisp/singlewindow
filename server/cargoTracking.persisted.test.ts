@@ -76,6 +76,15 @@ describe("persisted cargo tracking", () => {
     await expect(track()).resolves.toMatchObject({ trackingStatus: "unavailable", reason: "bill_of_lading_not_in_manifest" });
   });
 
+  it("reports an ambiguous bill of lading reference distinctly from a missing manifest", async () => {
+    state.shipment.declaration = { bill_of_lading_id: null, bill_of_lading_number: "BL-7" };
+    state.shipment.bills = [
+      { id: 7, manifest_id: 11, bl_number: "BL-7" },
+      { id: 8, manifest_id: 12, bl_number: "BL-7" },
+    ];
+    await expect(track()).resolves.toMatchObject({ trackingStatus: "unavailable", reason: "ambiguous_bill_of_lading" });
+  });
+
   it("reports a manifest without an identifier or unambiguous AIS name match", async () => {
     state.shipment.declaration = { bill_of_lading_id: 7, bill_of_lading_number: "BL-7" };
     state.shipment.bills = [{ id: 7, manifest_id: 11, bl_number: "BL-7" }];

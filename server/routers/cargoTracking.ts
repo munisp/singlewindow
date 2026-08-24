@@ -88,6 +88,7 @@ async function persistedQuery<T = Record<string, unknown>>(query: string, params
 type ShipmentTrackingUnavailableReason =
   | "bill_of_lading_not_linked"
   | "bill_of_lading_not_in_manifest"
+  | "ambiguous_bill_of_lading"
   | "vessel_identifier_missing"
   | "ambiguous_vessel_name"
   | "no_ais_position";
@@ -159,7 +160,7 @@ export async function getShipmentPosition(
   if (billRows.length > 1) {
     return shipmentUnavailable(
       "unavailable",
-      "bill_of_lading_not_in_manifest",
+      "ambiguous_bill_of_lading",
       "The bill of lading reference is ambiguous and cannot be linked safely.",
     );
   }
