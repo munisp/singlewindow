@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { randomUUID } from "node:crypto";
 import {
   and,
   asc,
@@ -430,7 +431,6 @@ export const regulatoryRouter = router({
       periodEnd: z.coerce.date(),
       totalQuantity: z.string().regex(/^\d+(\.\d{1,3})?$/),
       quantityUnit: z.string().min(1).max(32),
-      ledgerAccountId: z.string().min(1).max(128),
       legalInstrument: z.string().min(1),
       validFrom: z.coerce.date(),
       validUntil: z.coerce.date().optional(),
@@ -438,9 +438,93 @@ export const regulatoryRouter = router({
     .mutation(async ({ ctx, input }) => {
       requireAuthoringRole(ctx.user.role);
       const db = await requireRegulatoryDb();
-      const [entry] = await db.insert(tariffQuotas).values({ ...input, createdBy: ctx.user.id }).returning();
-      await logAuditEvent({ entityType: "declaration", entityId: entry.id, action: "tariff_quota_created", actorId: ctx.user.id, actorType: ctx.user.role, newState: entry });
-      return entry;
+      if (!(await tbBridgeAvailable())) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Ledger is unavailable; quota was not created.",
+        });
+      }
+      try {
+        const accountSuffix = randomUUID();
+        const issuanceAccount = await tbFetch<{ id?: string }>("/api/ledger/accounts", {
+          method: "POST",
+          body: JSON.stringify({
+            id: `quota-issuance-${accountSuffix}`,
+            ledger: 1,
+            accountType: "QUOTA_ISSUANCE",
+            description: `Issuance source for quota ${input.quotaCode}`,
+            currency: "QTY",
+            initialBalance: input.totalQuantity,
+          }),
+        });
+        if (!issuanceAccount.id) {
+          throw new Error("Ledger did not return the quota issuance account.");
+        }
+        const availableAccount = await tbFetch<{ id?: string }>("/api/ledger/accounts", {
+          method: "POST",
+          body: JSON.stringify({
+            id: `quota-available-${accountSuffix}`,
+            ledger: 1,
+            accountType: "QUOTA_AVAILABLE",
+            description: `Available quantity for quota ${input.quotaCode}`,
+            currency: "QTY",
+            debitsMustNotExceedCredits: true,
+          }),
+        });
+        if (!availableAccount.id) {
+          throw new Error("Ledger did not return the available quota account.");
+        }
+        const allocatedAccount = await tbFetch<{ id?: string }>("/api/ledger/accounts", {
+          method: "POST",
+          body: JSON.stringify({
+            id: `quota-allocated-${accountSuffix}`,
+            ledger: 1,
+            accountType: "QUOTA_ALLOCATED",
+            description: `Allocated quantity for quota ${input.quotaCode}`,
+            currency: "QTY",
+          }),
+        });
+        if (!allocatedAccount.id) {
+          throw new Error("Ledger did not return the allocated quota account.");
+        }
+        const openingTransfer = await tbFetch<{ id?: string }>("/api/ledger/transfers", {
+          method: "POST",
+          body: JSON.stringify({
+            debitAccountId: issuanceAccount.id,
+            creditAccountId: availableAccount.id,
+            amount: input.totalQuantity,
+            currency: "QTY",
+            reference: input.quotaCode,
+            description: `Initial quantity for quota ${input.quotaCode}`,
+            idempotencyKey: `regulatory:quota:${input.quotaCode}:opening`,
+          }),
+        });
+        if (!openingTransfer.id) {
+          throw new Error("Ledger did not return the quota opening transfer.");
+        }
+        const [entry] = await db.insert(tariffQuotas).values({
+          ...input,
+          ledgerAccountId: availableAccount.id,
+          allocatedLedgerAccountId: allocatedAccount.id,
+          createdBy: ctx.user.id,
+        }).returning();
+        await logAuditEvent({
+          entityType: "declaration",
+          entityId: entry.id,
+          action: "tariff_quota_created",
+          actorId: ctx.user.id,
+          actorType: ctx.user.role,
+          newState: entry,
+        });
+        return entry;
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Quota ledger accounts could not be provisioned.",
+          cause: error,
+        });
+      }
     }),
 
   clearanceGraph: protectedProcedure
@@ -508,7 +592,7 @@ export const regulatoryRouter = router({
           method: "POST",
           body: JSON.stringify({
             debitAccountId: quota.ledgerAccountId,
-            creditAccountId: `quota-allocation:${quota.id}:${input.declarationId}`,
+            creditAccountId: quota.allocatedLedgerAccountId,
             amount: input.quantity,
             currency: "QTY",
             reference: quota.quotaCode,
@@ -546,7 +630,7 @@ export const regulatoryRouter = router({
       const transfer = await tbFetch<{ id: string }>("/api/ledger/transfers", {
         method: "POST",
         body: JSON.stringify({
-          debitAccountId: `quota-allocation:${allocation.quotaId}:${allocation.declarationId}`,
+          debitAccountId: quota.allocatedLedgerAccountId,
           creditAccountId: quota.ledgerAccountId,
           amount: allocation.quantity,
           currency: "QTY",

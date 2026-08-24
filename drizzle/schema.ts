@@ -372,6 +372,7 @@ export const tariffQuotas = pgTable("tariff_quotas", {
   totalQuantity: decimal("total_quantity", { precision: 18, scale: 3 }).notNull(),
   quantityUnit: varchar("quantity_unit", { length: 32 }).notNull(),
   ledgerAccountId: varchar("ledger_account_id", { length: 128 }).notNull(),
+  allocatedLedgerAccountId: varchar("allocated_ledger_account_id", { length: 128 }).notNull(),
   legalInstrument: text("legal_instrument").notNull(),
   validFrom: timestamp("valid_from").notNull(),
   validUntil: timestamp("valid_until"),

@@ -22,7 +22,13 @@ import {
 
 const ledgerMocks = vi.hoisted(() => ({
   available: vi.fn(async () => true),
-  fetch: vi.fn(async () => ({ id: `regulatory-transfer-${randomUUID()}` })),
+  fetch: vi.fn(async (url: string, options?: RequestInit) => {
+    if (url === "/api/ledger/accounts") {
+      const body = JSON.parse(String(options?.body)) as { id: string };
+      return { id: body.id };
+    }
+    return { id: `regulatory-transfer-${randomUUID()}` };
+  }),
 }));
 
 vi.mock("./routers/ledger", async (importOriginal) => {
@@ -242,6 +248,7 @@ describe.sequential("regulatory obligation behaviour", () => {
       quotaCode: `Q-${randomUUID()}`, hsCodePrefix: "7777", origin: "GH", regime: "import",
       periodStart: new Date(now.getTime() - 60_000), periodEnd: new Date(now.getTime() + 60_000),
       totalQuantity: "10", quantityUnit: "kg", ledgerAccountId: "quota-ledger-test",
+      allocatedLedgerAccountId: "quota-allocated-test",
       legalInstrument: "Instrument QUOTA", validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
     }).returning();
     created.quotas.push(quota.id);
@@ -291,6 +298,79 @@ describe.sequential("regulatory obligation behaviour", () => {
     await expect(caller().regulatory.allocateQuota({
       quotaId: quota.id, declarationId: outage.id, quantity: "1",
     })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("provisions platform-owned QTY ledger accounts and fails closed if unavailable", async () => {
+    const db = await database();
+    const now = new Date();
+    const quotaCode = `Q-CREATE-${randomUUID()}`;
+    const createdQuota = await caller("admin", 4).regulatory.createQuota({
+      quotaCode,
+      hsCodePrefix: "7799",
+      origin: "GH",
+      regime: "import",
+      periodStart: new Date(now.getTime() - 60_000),
+      periodEnd: new Date(now.getTime() + 60_000),
+      totalQuantity: "12",
+      quantityUnit: "kg",
+      legalInstrument: "Instrument QUOTA-CREATE",
+      validFrom: new Date(now.getTime() - 60_000),
+    });
+    created.quotas.push(createdQuota.id);
+    expect(createdQuota.ledgerAccountId).toMatch(/^quota-available-/);
+    expect(createdQuota.allocatedLedgerAccountId).toMatch(/^quota-allocated-/);
+    const accountBodies = ledgerMocks.fetch.mock.calls
+      .filter(([url]) => url === "/api/ledger/accounts")
+      .map(([url, options]) => {
+        expect(url).toBe("/api/ledger/accounts");
+        return JSON.parse(String((options as RequestInit).body)) as Record<string, unknown>;
+      });
+    expect(accountBodies.find((body) => body.accountType === "QUOTA_ISSUANCE")).toMatchObject({
+      currency: "QTY",
+      initialBalance: "12",
+    });
+    expect(accountBodies.find((body) => body.accountType === "QUOTA_AVAILABLE")).toMatchObject({
+      currency: "QTY",
+      debitsMustNotExceedCredits: true,
+    });
+    expect(accountBodies.find((body) => body.accountType === "QUOTA_ALLOCATED")).toMatchObject({ currency: "QTY" });
+    expect(ledgerMocks.fetch.mock.calls.some(([url, options]) =>
+      url === "/api/ledger/transfers" &&
+      JSON.parse(String((options as RequestInit).body)).idempotencyKey === `regulatory:quota:${quotaCode}:opening`,
+    )).toBe(true);
+    const quotaDeclaration = await declaration("779900");
+    const allocation = await caller().regulatory.allocateQuota({
+      quotaId: createdQuota.id,
+      declarationId: quotaDeclaration.id,
+      quantity: "3",
+    });
+    const allocationBody = [...ledgerMocks.fetch.mock.calls]
+      .reverse()
+      .find(([url]) => url === "/api/ledger/transfers");
+    expect(allocationBody).toBeDefined();
+    expect(JSON.parse(String((allocationBody?.[1] as RequestInit).body))).toMatchObject({
+      debitAccountId: createdQuota.ledgerAccountId,
+      creditAccountId: createdQuota.allocatedLedgerAccountId,
+      amount: "3",
+      currency: "QTY",
+    });
+    expect(allocation.transferId).toBeTruthy();
+
+    ledgerMocks.available.mockResolvedValue(false);
+    const unavailableCode = `Q-UNAVAILABLE-${randomUUID()}`;
+    await expect(caller("admin", 4).regulatory.createQuota({
+      quotaCode: unavailableCode,
+      hsCodePrefix: "7798",
+      periodStart: new Date(now.getTime() - 60_000),
+      periodEnd: new Date(now.getTime() + 60_000),
+      totalQuantity: "1",
+      quantityUnit: "kg",
+      legalInstrument: "Instrument QUOTA-UNAVAILABLE",
+      validFrom: new Date(now.getTime() - 60_000),
+    })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    const [missing] = await db.select().from(tariffQuotas)
+      .where(eq(tariffQuotas.quotaCode, unavailableCode));
+    expect(missing).toBeUndefined();
   });
 
   it("re-evaluates effective regulations at clearance instead of trusting stale rows", async () => {
