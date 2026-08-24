@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid, date, check
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date, check
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -3560,6 +3560,7 @@ export const exciseStampOrders = pgTable("excise_stamp_orders", {
   liability: decimal("liability", { precision: 15, scale: 2 }),
   currency: varchar("currency", { length: 3 }).notNull(),
   status: exciseOrderStatusEnum("status").default("ordered").notNull(),
+  paymentIdempotencyKey: varchar("payment_idempotency_key", { length: 128 }).unique(),
   ledgerTransferId: varchar("ledger_transfer_id", { length: 128 }),
   assessedAt: timestamp("assessed_at"),
   paidAt: timestamp("paid_at"),
@@ -3629,6 +3630,7 @@ export const exciseAggregates = pgTable("excise_aggregates", {
   id: serial("id").primaryKey(),
   aggregateUid: varchar("aggregate_uid", { length: 192 }).notNull().unique(),
   aggregateType: exciseAggregateTypeEnum("aggregate_type").notNull(),
+  licenceId: integer("licence_id").notNull().references(() => exciseLicences.id),
   parentAggregateId: integer("parent_aggregate_id"),
   createdBy: integer("created_by").notNull().references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -3644,8 +3646,8 @@ export const exciseAggregateChildren = pgTable("excise_aggregate_children", {
   removedBy: integer("removed_by").references(() => users.id),
   removedAt: timestamp("removed_at"),
 }, (t) => [
-  unique("uq_excise_child_mark").on(t.childMarkId),
-  unique("uq_excise_child_aggregate").on(t.childAggregateId),
+  uniqueIndex("uq_excise_active_child_mark").on(t.childMarkId).where(sql`${t.removedAt} IS NULL`),
+  uniqueIndex("uq_excise_active_child_aggregate").on(t.childAggregateId).where(sql`${t.removedAt} IS NULL`),
   index("idx_excise_children_aggregate").on(t.aggregateId),
   check("ck_excise_aggregate_child_exactly_one", sql`(child_mark_id IS NOT NULL) <> (child_aggregate_id IS NOT NULL)`),
 ]);
@@ -3705,8 +3707,10 @@ export const exciseReconciliationReports = pgTable("excise_reconciliation_report
   issuedQuantity: integer("issued_quantity").notNull(),
   activatedQuantity: integer("activated_quantity").notNull(),
   retiredQuantity: integer("retired_quantity").notNull(),
+  stillIssuedQuantity: integer("still_issued_quantity").notNull(),
   reportedProductionQuantity: integer("reported_production_quantity").notNull(),
-  variance: integer("variance").notNull(),
+  stampVariance: integer("stamp_variance").notNull(),
+  productionVariance: integer("production_variance").notNull(),
   computedAt: timestamp("computed_at").defaultNow().notNull(),
   computedBy: integer("computed_by").notNull().references(() => users.id),
 });

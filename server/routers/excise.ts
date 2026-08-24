@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   exciseAggregateChildren,
@@ -34,11 +34,14 @@ import {
   EXCISE_UID_HMAC_ENV,
   EXCISE_UID_KEY_ID_ENV,
 } from "../_core/webhookSecretsValidator";
+import { acquireLock, releaseLock } from "../_core/distributedLock";
 
 const REVIEWER_ROLES = new Set(["admin", "customs_officer", "oga_officer"]);
 const ID_ISSUER_ROLES = new Set(["admin", "customs_officer"]);
 const ENFORCEMENT_ROLES = new Set(["admin", "customs_officer", "oga_officer", "inspector"]);
 const AGGREGATE_LEVEL: Record<"carton" | "case" | "pallet", number> = { carton: 1, case: 2, pallet: 3 };
+export const EXCISE_MINT_BATCH_CAP = 5_000;
+const EXCISE_MINT_CHUNK_SIZE = 500;
 
 // 120 km/h is above plausible road/rail movement for a tax mark, while avoiding
 // false positives from ordinary city-to-city commercial transport.
@@ -52,7 +55,7 @@ export type ExciseTraversalUnavailableReason =
   | "declaration_missing"
   | "bill_of_lading_not_linked"
   | "bill_of_lading_ambiguous"
-  | "bill_of_lading_not_in_manifest"
+  | "bill_of_lading_missing"
   | "manifest_missing"
   | "manifest_vessel_missing"
   | "importer_missing"
@@ -161,14 +164,15 @@ export function calculateExciseLiability(
 }
 
 export function verifyExciseUid(uid: string): {
-  status: "signature_valid_pending_reconciliation" | "invalid_signature";
+  status: "signature_valid_pending_reconciliation" | "invalid_signature" | "verification_unavailable";
   keyId: string | null;
 } {
   const parts = uid.split(".");
   if (parts.length !== 3) return { status: "invalid_signature", keyId: null };
   const [keyId, nonce, signature] = parts;
   const key = getExciseKey(keyId);
-  if (!isStrongExciseKey(key)) return { status: "invalid_signature", keyId };
+  if (!key) return { status: isKnownExciseKeyId(keyId) ? "verification_unavailable" : "invalid_signature", keyId };
+  if (!isStrongExciseKey(key)) return { status: "verification_unavailable", keyId };
   const expected = createHmac("sha256", key).update(`${keyId}.${nonce}`).digest("hex").slice(0, 32);
   const valid = expected.length === signature.length &&
     timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
@@ -192,6 +196,26 @@ function getExciseKey(keyId: string): string | undefined {
     return typeof candidate === "string" ? candidate : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function isKnownExciseKeyId(keyId: string): boolean {
+  const configuredKeyId = process.env[EXCISE_UID_KEY_ID_ENV] ?? "v1";
+  if (keyId === configuredKeyId) return true;
+  const issuedKeyIds = (process.env.EXCISE_UID_ISSUED_KEY_IDS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (issuedKeyIds.includes(keyId)) return true;
+  if (Object.prototype.hasOwnProperty.call(process.env, `${EXCISE_UID_HMAC_ENV}_${keyId}`)) return true;
+  const configuredKeys = process.env.EXCISE_UID_HMAC_KEYS;
+  if (!configuredKeys) return false;
+  try {
+    const keys: unknown = JSON.parse(configuredKeys);
+    return typeof keys === "object" && keys !== null && !Array.isArray(keys) &&
+      Object.prototype.hasOwnProperty.call(keys, keyId);
+  } catch {
+    return false;
   }
 }
 
@@ -223,6 +247,15 @@ function distanceKm(
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+export function calculateImpossibleTravelSpeedKmh(
+  previous: { latitude: number; longitude: number; scannedAt: Date },
+  current: { latitude: number; longitude: number; scannedAt: Date },
+): number | null {
+  const elapsedHours = (current.scannedAt.getTime() - previous.scannedAt.getTime()) / 3_600_000;
+  if (elapsedHours <= 0) return null;
+  return distanceKm(previous, current) / elapsedHours;
+}
+
 async function recordScan(
   db: Awaited<ReturnType<typeof requireDb>>,
   uid: string,
@@ -240,12 +273,11 @@ async function recordScan(
   let impliedSpeedKmh: string | undefined;
   if (previous && previous.latitude !== null && previous.longitude !== null &&
       latitude !== undefined && longitude !== undefined) {
-    const elapsedHours = (Date.now() - previous.scannedAt.getTime()) / 3_600_000;
-    if (elapsedHours > 0) {
-      const speed = distanceKm(
-        { latitude: previous.latitude, longitude: previous.longitude },
-        { latitude, longitude },
-      ) / elapsedHours;
+    const speed = calculateImpossibleTravelSpeedKmh(
+      { latitude: previous.latitude, longitude: previous.longitude, scannedAt: previous.scannedAt },
+      { latitude, longitude, scannedAt: new Date() },
+    );
+    if (speed !== null) {
       impliedSpeedKmh = speed.toFixed(2);
       impossibleTravel = speed > IMPOSSIBLE_TRAVEL_SPEED_KMH;
     }
@@ -285,6 +317,11 @@ function requireTransition(status: string, expected: string): void {
   if (!(status in transitionOrder) || transitionOrder[status as keyof typeof transitionOrder] !== expected) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `Order must transition from ${status} to ${expected}.` });
   }
+}
+
+function metadataHasIdempotencyKey(metadata: unknown, key: string): boolean {
+  return typeof metadata === "object" && metadata !== null &&
+    (metadata as Record<string, unknown>).idempotencyKey === key;
 }
 
 export const exciseRouter = router({
@@ -342,13 +379,21 @@ export const exciseRouter = router({
       if (!isOfficer(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       try {
         const db = await requireDb();
+        const [current] = await db.select().from(exciseLicences).where(eq(exciseLicences.id, input.licenceId)).limit(1);
+        if (!current) throw new TRPCError({ code: "NOT_FOUND" });
+        if (current.status !== "pending") {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Only pending licences can be approved." });
+        }
+        if (current.validUntil <= new Date()) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "An expired licence cannot be approved." });
+        }
         const [licence] = await db.update(exciseLicences).set({
           status: "active",
           approvedBy: ctx.user.id,
           approvedAt: new Date(),
           updatedAt: new Date(),
-        }).where(eq(exciseLicences.id, input.licenceId)).returning();
-        if (!licence) throw new TRPCError({ code: "NOT_FOUND" });
+        }).where(and(eq(exciseLicences.id, input.licenceId), eq(exciseLicences.status, "pending"))).returning();
+        if (!licence) throw new TRPCError({ code: "CONFLICT", message: "Licence changed before approval." });
         await logAuditEvent({ entityType: "user", entityId: licence.userId, action: "excise_licence_approved", actorId: ctx.user.id, actorType: ctx.user.role, newState: { licenceId: licence.id, status: licence.status } });
         return licence;
       } catch (error) {
@@ -535,7 +580,6 @@ export const exciseRouter = router({
       quantity: z.number().int().positive(),
       declaredValue: z.string().regex(/^\d+(\.\d+)?$/).optional(),
       currency: z.string().length(3),
-      liability: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
@@ -592,43 +636,84 @@ export const exciseRouter = router({
   payOrder: protectedProcedure
     .input(z.object({ orderId: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
+      const lock = await acquireLock(`excise:pay:${input.orderId}`, 30_000);
       try {
+       try {
         const db = await requireDb();
-        const [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, input.orderId)).limit(1);
+        let [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, input.orderId)).limit(1);
         if (!order) throw new TRPCError({ code: "NOT_FOUND" });
         const { licence } = await requireLicence(order.licenceId, ctx.user.id, ctx.user.role);
+        if (order.status === "payment" || order.status === "fulfilment" || order.status === "delivery") return order;
         requireTransition(order.status, "payment");
         if (!order.liability) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Order must be assessed before payment." });
+        const liability = order.liability;
         if (!(await tbBridgeAvailable())) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable." });
-        const transfer = await tbFetch<{ id: string }>("/api/ledger/transfers", {
-          method: "POST",
-          body: JSON.stringify({
-            debitAccountId: `trader-${licence.userId}`,
-            creditAccountId: SYSTEM_ACCOUNTS.NCS_REVENUE,
-            amount: order.liability,
-            currency: order.currency,
-            reference: order.orderNumber,
-            description: `Excise stamp liability for ${order.orderNumber}`,
-          }),
-        });
+        const idempotencyKey = order.paymentIdempotencyKey ?? `excise:pay:${order.id}`;
+        if (!order.paymentIdempotencyKey) {
+          const [claimed] = await db.update(exciseStampOrders).set({ paymentIdempotencyKey: idempotencyKey, updatedAt: new Date() })
+            .where(and(eq(exciseStampOrders.id, order.id), isNull(exciseStampOrders.paymentIdempotencyKey))).returning();
+          if (!claimed) {
+            [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, order.id)).limit(1);
+            if (!order) throw new TRPCError({ code: "NOT_FOUND" });
+          } else {
+            order = claimed;
+          }
+        }
+        const existingEntries = await db.select().from(tigerBeetleLedgerEntries).where(and(
+          eq(tigerBeetleLedgerEntries.entryType, "excise_stamp_liability"),
+          eq(tigerBeetleLedgerEntries.reference, order.orderNumber),
+          eq(tigerBeetleLedgerEntries.status, "posted"),
+        ));
+        const existingEntry = existingEntries.find((entry) => metadataHasIdempotencyKey(entry.metadata, idempotencyKey));
+        if (existingEntry) {
+          const [reconciled] = await db.update(exciseStampOrders).set({
+            status: "payment", ledgerTransferId: existingEntry.tbTransferId, paidAt: order.paidAt ?? new Date(), updatedAt: new Date(),
+          }).where(eq(exciseStampOrders.id, order.id)).returning();
+          return reconciled;
+        }
+        let transferId = order.ledgerTransferId;
+        if (transferId) {
+          await tbFetch<Record<string, unknown>>(`/api/ledger/transfers/${transferId}`);
+        } else {
+          const transfer = await tbFetch<{ id: string }>("/api/ledger/transfers", {
+            method: "POST",
+            body: JSON.stringify({
+              idempotencyKey,
+              debitAccountId: `trader-${licence.userId}`,
+              creditAccountId: SYSTEM_ACCOUNTS.NCS_REVENUE,
+              amount: liability,
+              currency: order.currency,
+              reference: order.orderNumber,
+              description: `Excise stamp liability for ${order.orderNumber}`,
+            }),
+          });
+          transferId = transfer.id;
+          await db.update(exciseStampOrders).set({ ledgerTransferId: transferId, updatedAt: new Date() })
+            .where(eq(exciseStampOrders.id, order.id));
+        }
+        if (!transferId) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle transfer identity is unavailable." });
         await createLedgerEntry({
-          tbTransferId: transfer.id,
+          tbTransferId: transferId,
           debitAccountId: `trader-${licence.userId}`,
           creditAccountId: SYSTEM_ACCOUNTS.NCS_REVENUE,
-          amountMinorUnits: Number(parseScaled(order.liability, 2)),
+          amountMinorUnits: Number(parseScaled(liability, 2)),
           currency: order.currency,
           ledger: 1,
           entryType: "excise_stamp_liability",
           status: "posted",
           reference: order.orderNumber,
           description: `Excise stamp liability for ${order.orderNumber}`,
+          metadata: { idempotencyKey },
           postedAt: new Date(),
         });
-        const [updated] = await db.update(exciseStampOrders).set({ status: "payment", ledgerTransferId: transfer.id, paidAt: new Date(), updatedAt: new Date() }).where(eq(exciseStampOrders.id, order.id)).returning();
-        await logAuditEvent({ entityType: "user", entityId: ctx.user.id, action: "excise_order_paid", actorId: ctx.user.id, actorType: "licensee", newState: { orderId: order.id, status: updated.status, transferId: transfer.id } });
+        const [updated] = await db.update(exciseStampOrders).set({ status: "payment", ledgerTransferId: transferId, paidAt: new Date(), updatedAt: new Date() }).where(eq(exciseStampOrders.id, order.id)).returning();
+        await logAuditEvent({ entityType: "user", entityId: ctx.user.id, action: "excise_order_paid", actorId: ctx.user.id, actorType: "licensee", newState: { orderId: order.id, status: updated.status, transferId } });
         return updated;
       } catch (error) {
         return unavailable("Excise stamp payment is unavailable.", error);
+      }
+      } finally {
+        await releaseLock(lock);
       }
     }),
 
@@ -641,20 +726,27 @@ export const exciseRouter = router({
         if (!order) throw new TRPCError({ code: "NOT_FOUND" });
         await requireLicence(order.licenceId, ctx.user.id, ctx.user.role);
         requireTransition(order.status, "fulfilment");
+        const ledgerAvailable = order.declarationId ? await tbBridgeAvailable() : true;
+        if (!ledgerAvailable) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Settlement ledger is unavailable." });
         if (order.declarationId) {
-          if (!(await tbBridgeAvailable())) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Settlement ledger is unavailable." });
           const [declaration] = await db.select().from(declarations).where(eq(declarations.id, order.declarationId)).limit(1);
-          if (!declaration || declaration.declarationType !== "import" || !declaration.totalDue) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Customs duty liability is unavailable." });
+          if (!declaration || declaration.declarationType !== "import" || !declaration.totalDue || !declaration.invoiceCurrency) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Customs duty liability is unavailable." });
           const entries = await db.select().from(tigerBeetleLedgerEntries).where(and(
             eq(tigerBeetleLedgerEntries.declarationId, order.declarationId),
             eq(tigerBeetleLedgerEntries.entryType, "duty_payment"),
             eq(tigerBeetleLedgerEntries.status, "posted"),
           ));
+          const mismatchedCurrency = entries.some((entry) => entry.currency !== declaration.invoiceCurrency);
+          if (mismatchedCurrency) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Customs duty settlement currency cannot be verified without an authoritative exchange rate.",
+            });
+          }
           const settled = entries.reduce((sum, entry) => sum + BigInt(entry.amountMinorUnits), 0n);
           const due = parseScaled(declaration.totalDue, 2);
           if (settled < due) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Customs duty is not fully settled." });
         }
-        if (!(await tbBridgeAvailable())) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Settlement ledger is unavailable." });
         const [updated] = await db.update(exciseStampOrders).set({ status: "fulfilment", fulfilledAt: new Date(), updatedAt: new Date() }).where(eq(exciseStampOrders.id, order.id)).returning();
         await logAuditEvent({ entityType: "user", entityId: ctx.user.id, action: "excise_order_fulfilled", actorId: ctx.user.id, actorType: "licensee", newState: { orderId: order.id, status: updated.status } });
         return updated;
@@ -681,16 +773,24 @@ export const exciseRouter = router({
     }),
 
   mintMarks: protectedProcedure
-    .input(z.object({ orderId: z.number().int().positive(), machineId: z.number().int().positive().optional() }))
+    .input(z.object({
+      orderId: z.number().int().positive(),
+      machineId: z.number().int().positive().optional(),
+      batchSize: z.number().int().positive().max(EXCISE_MINT_BATCH_CAP).default(EXCISE_MINT_BATCH_CAP),
+    }))
     .mutation(async ({ ctx, input }) => {
+      const lock = await acquireLock(`excise:mint:${input.orderId}`, 60_000);
       try {
+       try {
         const db = await requireDb();
         const [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, input.orderId)).limit(1);
         if (!order) throw new TRPCError({ code: "NOT_FOUND" });
         await requireLicence(order.licenceId, ctx.user.id, ctx.user.role);
         if (order.status !== "fulfilment") throw new TRPCError({ code: "BAD_REQUEST", message: "Only fulfilment orders can mint marks." });
-        const [existing] = await db.select({ id: exciseStampMarks.id }).from(exciseStampMarks).where(eq(exciseStampMarks.orderId, order.id)).limit(1);
-        if (existing) return db.select().from(exciseStampMarks).where(eq(exciseStampMarks.orderId, order.id)).orderBy(asc(exciseStampMarks.id));
+        const [{ minted }] = await db.select({ minted: count(exciseStampMarks.id) }).from(exciseStampMarks)
+          .where(eq(exciseStampMarks.orderId, order.id));
+        const remaining = Math.max(0, order.quantity - Number(minted));
+        if (remaining === 0) return { marks: [], mintedCount: Number(minted), remaining: 0 };
         const [product] = await db.select().from(exciseProducts).where(eq(exciseProducts.id, order.productId)).limit(1);
         if (!product) throw new TRPCError({ code: "NOT_FOUND" });
         const [machine] = input.machineId ? await db.select().from(exciseMarkingMachines).where(eq(exciseMarkingMachines.id, input.machineId)).limit(1) : [undefined];
@@ -700,21 +800,27 @@ export const exciseRouter = router({
         }
         const marks = await db.transaction(async (tx) => {
           const created: typeof exciseStampMarks.$inferSelect[] = [];
-          for (let index = 0; index < order.quantity; index += 1) {
+          const values: typeof exciseStampMarks.$inferInsert[] = [];
+          for (let index = 0; index < Math.min(input.batchSize, remaining); index += 1) {
             const signed = mintExciseUid();
-            const [mark] = await tx.insert(exciseStampMarks).values({
+            values.push({
               uid: signed.uid, payload: signed.payload, signature: signed.signature, keyId: signed.keyId,
               orderId: order.id, productId: product.id, facilityId: order.facilityId, machineId: machine?.id,
               status: "issued",
-            }).returning();
-            created.push(mark);
+            });
+          }
+          for (let index = 0; index < values.length; index += EXCISE_MINT_CHUNK_SIZE) {
+            created.push(...await tx.insert(exciseStampMarks).values(values.slice(index, index + EXCISE_MINT_CHUNK_SIZE)).returning());
           }
           return created;
         });
         await logAuditEvent({ entityType: "user", entityId: ctx.user.id, action: "excise_marks_minted", actorId: ctx.user.id, actorType: "licensee", newState: { orderId: order.id, quantity: marks.length } });
-        return marks;
+        return { marks, mintedCount: Number(minted) + marks.length, remaining: remaining - marks.length };
       } catch (error) {
         return unavailable("Excise UID minting is unavailable.", error);
+      }
+      } finally {
+        await releaseLock(lock);
       }
     }),
 
@@ -785,22 +891,24 @@ export const exciseRouter = router({
 
   reconcileOrder: protectedProcedure
     .input(z.object({ orderId: z.number().int().positive() }))
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
         const db = await requireDb();
         const [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, input.orderId)).limit(1);
         if (!order) throw new TRPCError({ code: "NOT_FOUND" });
         await requireLicence(order.licenceId, ctx.user.id, ctx.user.role, false);
-        const [issuedRow] = await db.select().from(exciseStampMarks).where(eq(exciseStampMarks.orderId, order.id)).limit(1);
         const marks = await db.select().from(exciseStampMarks).where(eq(exciseStampMarks.orderId, order.id));
         const reports = await db.select().from(exciseProductionReports).where(eq(exciseProductionReports.orderId, order.id));
-        const issuedQuantity = issuedRow ? marks.length : 0;
+        const issuedQuantity = marks.length;
         const activatedQuantity = marks.filter((mark) => mark.status === "active" || mark.activatedAt !== null).length;
         const retiredQuantity = marks.filter((mark) => mark.status === "retired").length;
+        const stillIssuedQuantity = marks.filter((mark) => mark.status === "issued").length;
         const reportedProductionQuantity = reports.reduce((sum, report) => sum + report.quantity, 0);
-        const variance = issuedQuantity - activatedQuantity - retiredQuantity - reportedProductionQuantity;
+        const stampVariance = issuedQuantity - activatedQuantity - retiredQuantity - stillIssuedQuantity;
+        const productionVariance = activatedQuantity - reportedProductionQuantity;
         const [report] = await db.insert(exciseReconciliationReports).values({
-          orderId: order.id, issuedQuantity, activatedQuantity, retiredQuantity, reportedProductionQuantity, variance, computedBy: ctx.user.id,
+          orderId: order.id, issuedQuantity, activatedQuantity, retiredQuantity, stillIssuedQuantity,
+          reportedProductionQuantity, stampVariance, productionVariance, computedBy: ctx.user.id,
         }).returning();
         return report;
       } catch (error) {
@@ -809,14 +917,15 @@ export const exciseRouter = router({
     }),
 
   createAggregate: protectedProcedure
-    .input(z.object({ aggregateType: z.enum(["carton", "case", "pallet"]) }))
+    .input(z.object({ licenceId: z.number().int().positive(), aggregateType: z.enum(["carton", "case", "pallet"]) }))
     .mutation(async ({ ctx, input }) => {
       try {
         const db = await requireDb();
-        if (!isEnforcement(ctx.user.role) && ctx.user.role !== "user") throw new TRPCError({ code: "FORBIDDEN" });
+        await requireLicence(input.licenceId, ctx.user.id, ctx.user.role);
         const [aggregate] = await db.insert(exciseAggregates).values({
           aggregateUid: `EXA-${randomBytes(18).toString("hex").toUpperCase()}`,
           aggregateType: input.aggregateType,
+          licenceId: input.licenceId,
           createdBy: ctx.user.id,
         }).returning();
         return aggregate;
@@ -836,19 +945,25 @@ export const exciseRouter = router({
         if (input.markId) {
           const [mark] = await db.select().from(exciseStampMarks).where(eq(exciseStampMarks.id, input.markId)).limit(1);
           if (!mark) throw new TRPCError({ code: "NOT_FOUND" });
+          const [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, mark.orderId)).limit(1);
+          if (!order || order.licenceId !== parent.licenceId) throw new TRPCError({ code: "FORBIDDEN" });
         } else if (input.childAggregateId === parent.id) {
           throw new TRPCError({ code: "BAD_REQUEST" });
         } else {
           const [childAggregate] = await db.select().from(exciseAggregates).where(eq(exciseAggregates.id, input.childAggregateId!)).limit(1);
           if (!childAggregate) throw new TRPCError({ code: "NOT_FOUND" });
+          if (childAggregate.licenceId !== parent.licenceId) throw new TRPCError({ code: "FORBIDDEN" });
           if (AGGREGATE_LEVEL[childAggregate.aggregateType] >= AGGREGATE_LEVEL[parent.aggregateType]) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Aggregate hierarchy cannot skip levels." });
           }
         }
         const [existing] = await db.select().from(exciseAggregateChildren).where(
-          input.markId ? eq(exciseAggregateChildren.childMarkId, input.markId) : eq(exciseAggregateChildren.childAggregateId, input.childAggregateId!),
+          and(
+            input.markId ? eq(exciseAggregateChildren.childMarkId, input.markId) : eq(exciseAggregateChildren.childAggregateId, input.childAggregateId!),
+            isNull(exciseAggregateChildren.removedAt),
+          ),
         ).limit(1);
-        if (existing && existing.removedAt === null) throw new TRPCError({ code: "CONFLICT", message: "The child already belongs to an aggregate." });
+        if (existing) throw new TRPCError({ code: "CONFLICT", message: "The child already belongs to an aggregate." });
         const [child] = await db.insert(exciseAggregateChildren).values({ aggregateId: parent.id, childMarkId: input.markId, childAggregateId: input.childAggregateId, addedBy: ctx.user.id }).returning();
         if (input.childAggregateId) {
           await db.update(exciseAggregates).set({ parentAggregateId: parent.id }).where(eq(exciseAggregates.id, input.childAggregateId));
@@ -926,9 +1041,10 @@ export const exciseRouter = router({
           const [order] = await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, mark.orderId)).limit(1);
           if (!order) throw new TRPCError({ code: "NOT_FOUND" });
           await requireLicence(order.licenceId, ctx.user.id, ctx.user.role);
-        } else if (!isEnforcement(ctx.user.role)) {
+        } else {
           const [aggregate] = await db.select().from(exciseAggregates).where(eq(exciseAggregates.id, input.aggregateId!)).limit(1);
-          if (!aggregate || aggregate.createdBy !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
+          if (!aggregate) throw new TRPCError({ code: "NOT_FOUND" });
+          if (!isEnforcement(ctx.user.role) && aggregate.createdBy !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
         }
         const [event] = await db.insert(exciseMovementEvents).values({ ...input, actorId: ctx.user.id }).returning();
         return event;
@@ -939,7 +1055,7 @@ export const exciseRouter = router({
 
   enforcementScan: protectedProcedure
     .input(z.object({ uid: z.string().min(8).max(192), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }))
-    .query(async ({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
       if (!isEnforcement(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       try {
         const db = await requireDb();
@@ -954,7 +1070,9 @@ export const exciseRouter = router({
         const scans = await db.select().from(exciseScans).where(eq(exciseScans.uid, input.uid)).orderBy(asc(exciseScans.scannedAt));
         const signature = verifyExciseUid(mark.uid);
         return {
-          status: signature.status === "invalid_signature" || mark.status === "retired" ? "suspect" as const : "authentic" as const,
+          status: signature.status === "verification_unavailable"
+            ? "unavailable" as const
+            : signature.status === "invalid_signature" || mark.status === "retired" ? "suspect" as const : "authentic" as const,
           mark, activation: activation ?? null, movements, scans, scan,
         };
       } catch (error) {
@@ -980,7 +1098,7 @@ export const exciseRouter = router({
 
   publicVerify: publicRateLimitedProcedure
     .input(z.object({ uid: z.string().min(8).max(192), latitude: z.number().min(-90).max(90).optional(), longitude: z.number().min(-180).max(180).optional() }))
-    .query(async ({ input }) => {
+    .mutation(async ({ input }) => {
       if (!isStrongExciseKey(process.env[EXCISE_UID_HMAC_ENV])) return { status: "unavailable" as const };
       const signature = verifyExciseUid(input.uid);
       try {
@@ -989,6 +1107,7 @@ export const exciseRouter = router({
         if (mark && !isStrongExciseKey(getExciseKey(mark.keyId))) return { status: "unavailable" as const };
         await recordScan(db, input.uid, mark?.id ?? null, "public", null, input.latitude, input.longitude);
         if (!mark) return { status: signature.status === "invalid_signature" ? "suspect" as const : "unknown" as const };
+        if (signature.status === "verification_unavailable") return { status: "unavailable" as const };
         if (signature.status === "invalid_signature" || mark.status === "retired") return { status: "suspect" as const };
         return { status: "authentic" as const };
       } catch {
@@ -1017,14 +1136,11 @@ export const exciseRouter = router({
           return { available: false as const, reason: "bill_of_lading_ambiguous" as const };
         }
         const [bl] = bills;
-        if (!bl) return { available: false as const, reason: "bill_of_lading_not_in_manifest" as const };
+        if (!bl) return { available: false as const, reason: "bill_of_lading_missing" as const };
         const [manifest] = await db.select().from(manifests).where(eq(manifests.id, bl.manifestId)).limit(1);
         if (!manifest) return { available: false as const, reason: "manifest_missing" as const };
         if (!declaration.principalId && !declaration.traderId) {
           return { available: false as const, reason: "importer_missing" as const };
-        }
-        if (!declaration.actingAgentId) {
-          return { available: false as const, reason: "acting_agent_missing" as const };
         }
         const siblingMarks = await db.select().from(exciseStampMarks).where(eq(exciseStampMarks.orderId, order.id));
         return {
@@ -1035,7 +1151,7 @@ export const exciseRouter = router({
           billOfLading: { id: bl.id, blNumber: bl.blNumber },
           manifest: { id: manifest.id, manifestNumber: manifest.manifestNumber, vesselName: manifest.vesselName, mmsi: manifest.mmsi, imo: manifest.imo },
           importerUserId: declaration.principalId ?? declaration.traderId,
-          actingAgentUserId: declaration.actingAgentId,
+          actingAgentUserId: declaration.actingAgentId ?? null,
           siblingMarks,
         };
       } catch (error) {
@@ -1049,39 +1165,40 @@ export const exciseRouter = router({
       if (!isOfficer(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       try {
         const db = await requireDb();
-        const orders = input?.orderId
-          ? await db.select().from(exciseStampOrders).where(eq(exciseStampOrders.id, input.orderId))
-          : await db.select().from(exciseStampOrders);
-        const orderIds = orders.map((order) => order.id);
-        const marks = orderIds.length ? await db.select().from(exciseStampMarks).where(inArray(exciseStampMarks.orderId, orderIds)) : [];
-        const reports = orderIds.length ? await db.select().from(exciseProductionReports).where(inArray(exciseProductionReports.orderId, orderIds)) : [];
-        const anomalies = marks.length ? await db.select().from(exciseAnomalies).where(inArray(exciseAnomalies.markId, marks.map((mark) => mark.id))) : [];
-        const reportedByOrder = new Map<number, number>();
-        for (const report of reports) {
-          reportedByOrder.set(report.orderId, (reportedByOrder.get(report.orderId) ?? 0) + report.quantity);
-        }
-        const issuedByOrder = new Map<number, number>();
-        const activatedByOrder = new Map<number, number>();
-        const retiredByOrder = new Map<number, number>();
-        for (const mark of marks) {
-          issuedByOrder.set(mark.orderId, (issuedByOrder.get(mark.orderId) ?? 0) + 1);
-          if (mark.status === "active") activatedByOrder.set(mark.orderId, (activatedByOrder.get(mark.orderId) ?? 0) + 1);
-          if (mark.status === "retired") retiredByOrder.set(mark.orderId, (retiredByOrder.get(mark.orderId) ?? 0) + 1);
-        }
-        const variance = orders.reduce((sum, order) => sum +
-          (issuedByOrder.get(order.id) ?? 0) -
-          (activatedByOrder.get(order.id) ?? 0) -
-          (retiredByOrder.get(order.id) ?? 0) -
-          (reportedByOrder.get(order.id) ?? 0), 0);
+        const orderFilter = input?.orderId ? eq(exciseStampOrders.id, input.orderId) : undefined;
+        const [orderStats] = await db.select({
+          orders: count(exciseStampOrders.id),
+          paid: sql<number>`count(*) filter (where ${exciseStampOrders.paidAt} is not null)`,
+        }).from(exciseStampOrders).where(orderFilter);
+        const [markStats] = await db.select({
+          issued: count(exciseStampMarks.id),
+          activated: sql<number>`count(*) filter (where ${exciseStampMarks.status} = 'active')`,
+          retired: sql<number>`count(*) filter (where ${exciseStampMarks.status} = 'retired')`,
+          stillIssued: sql<number>`count(*) filter (where ${exciseStampMarks.status} = 'issued')`,
+        }).from(exciseStampMarks).where(input?.orderId ? eq(exciseStampMarks.orderId, input.orderId) : undefined);
+        const [productionStats] = await db.select({
+          reported: sql<number>`coalesce(sum(${exciseProductionReports.quantity}), 0)`,
+        }).from(exciseProductionReports).where(input?.orderId ? eq(exciseProductionReports.orderId, input.orderId) : undefined);
+        const [anomalyStats] = input?.orderId
+          ? await db.select({ anomalies: count(exciseAnomalies.id) }).from(exciseAnomalies)
+            .innerJoin(exciseStampMarks, eq(exciseAnomalies.markId, exciseStampMarks.id))
+            .where(eq(exciseStampMarks.orderId, input.orderId))
+          : await db.select({ anomalies: count(exciseAnomalies.id) }).from(exciseAnomalies);
+        const issued = Number(markStats?.issued ?? 0);
+        const activated = Number(markStats?.activated ?? 0);
+        const retired = Number(markStats?.retired ?? 0);
+        const stillIssued = Number(markStats?.stillIssued ?? 0);
+        const reportedProduction = Number(productionStats?.reported ?? 0);
         return {
-          orders: orders.length,
-          issued: marks.length,
-          activated: marks.filter((mark) => mark.status === "active").length,
-          retired: marks.filter((mark) => mark.status === "retired").length,
-          paid: orders.filter((order) => order.paidAt !== null).length,
-          reportedProduction: reports.reduce((sum, report) => sum + report.quantity, 0),
-          variance,
-          anomalies: anomalies.length,
+          orders: Number(orderStats?.orders ?? 0),
+          issued,
+          activated,
+          retired,
+          paid: Number(orderStats?.paid ?? 0),
+          reportedProduction,
+          stampAccountabilityVariance: issued - activated - retired - stillIssued,
+          productionAccountabilityVariance: activated - reportedProduction,
+          anomalies: Number(anomalyStats?.anomalies ?? 0),
         };
       } catch (error) {
         return unavailable("Excise analytics are unavailable.", error);

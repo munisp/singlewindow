@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   IMPOSSIBLE_TRAVEL_SPEED_KMH,
+  calculateImpossibleTravelSpeedKmh,
   calculateExciseLiability,
   mintExciseUid,
   verifyExciseUid,
@@ -8,12 +9,18 @@ import {
 
 const originalKey = process.env.EXCISE_UID_HMAC_KEY;
 const originalKeyId = process.env.EXCISE_UID_KEY_ID;
+const originalKeys = process.env.EXCISE_UID_HMAC_KEYS;
+const originalIssuedKeyIds = process.env.EXCISE_UID_ISSUED_KEY_IDS;
 
 afterEach(() => {
   if (originalKey === undefined) delete process.env.EXCISE_UID_HMAC_KEY;
   else process.env.EXCISE_UID_HMAC_KEY = originalKey;
   if (originalKeyId === undefined) delete process.env.EXCISE_UID_KEY_ID;
   else process.env.EXCISE_UID_KEY_ID = originalKeyId;
+  if (originalKeys === undefined) delete process.env.EXCISE_UID_HMAC_KEYS;
+  else process.env.EXCISE_UID_HMAC_KEYS = originalKeys;
+  if (originalIssuedKeyIds === undefined) delete process.env.EXCISE_UID_ISSUED_KEY_IDS;
+  else process.env.EXCISE_UID_ISSUED_KEY_IDS = originalIssuedKeyIds;
 });
 
 describe("excise digital marks", () => {
@@ -38,6 +45,10 @@ describe("excise digital marks", () => {
     expect(() => mintExciseUid()).toThrow();
     process.env.EXCISE_UID_HMAC_KEY = "b".repeat(64);
     expect(verifyExciseUid("v1.random.invalid").status).toBe("invalid_signature");
+    process.env.EXCISE_UID_KEY_ID = "issued-but-unavailable";
+    process.env.EXCISE_UID_ISSUED_KEY_IDS = "issued-but-unavailable";
+    delete process.env.EXCISE_UID_HMAC_KEY;
+    expect(verifyExciseUid("issued-but-unavailable.random.invalid").status).toBe("verification_unavailable");
   });
 
   it("verifies marks signed by a retained rotated key", () => {
@@ -66,7 +77,16 @@ describe("excise digital marks", () => {
     }, { unitContent: "1", unitOfMeasure: "unit" }, 2, "100.00")).toBe("20.00");
   });
 
-  it("keeps one named physical threshold for impossible-travel detection", () => {
-    expect(IMPOSSIBLE_TRAVEL_SPEED_KMH).toBe(120);
+  it("flags impossible travel only when implied speed exceeds the threshold", () => {
+    const previous = { latitude: 0, longitude: 0, scannedAt: new Date("2024-01-01T00:00:00Z") };
+    const below = calculateImpossibleTravelSpeedKmh(previous, {
+      latitude: 0, longitude: 1, scannedAt: new Date("2024-01-01T02:00:00Z"),
+    });
+    const above = calculateImpossibleTravelSpeedKmh(previous, {
+      latitude: 0, longitude: 1, scannedAt: new Date("2024-01-01T00:30:00Z"),
+    });
+    expect(below).not.toBeNull();
+    expect(below!).toBeLessThan(IMPOSSIBLE_TRAVEL_SPEED_KMH);
+    expect(above!).toBeGreaterThan(IMPOSSIBLE_TRAVEL_SPEED_KMH);
   });
 });
