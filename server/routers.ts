@@ -80,6 +80,7 @@ import { redisRouter } from "./routers/redis";
 import { kafkaEventsRouter } from "./routers/kafkaEvents";
 import { ogaPermitAuditRouter } from "./routers/ogaPermitAudit";
 import { temporalRunsRouter } from "./routers/temporalRuns";
+import { exciseRouter } from "./routers/excise";
 import { openAppSecRouter } from "./routers/openAppSec";
 import { corazaWafRouter } from "./routers/corazaWaf";
 import { heartbeatAdminRouter } from "./routers/heartbeatAdmin";
@@ -333,6 +334,7 @@ export const appRouter = router({
   kafkaEvents: kafkaEventsRouter,
   ogaPermitAudit: ogaPermitAuditRouter,
   temporalRuns: temporalRunsRouter,
+  excise: exciseRouter,
   openAppSec: openAppSecRouter,
   corazaWaf: corazaWafRouter,
   heartbeatAdmin: heartbeatAdminRouter,

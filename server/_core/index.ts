@@ -26,7 +26,7 @@ import { sanitizeMiddleware } from "./sanitize";
 import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 import { sdk } from "./sdk";
-import { validateWebhookSecrets } from "./webhookSecretsValidator";
+import { validateWebhookSecrets, validateExciseUidKey } from "./webhookSecretsValidator";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // General tRPC API: 200 requests per minute per IP
@@ -1183,6 +1183,7 @@ async function runPermifySeedOnStartup() {
 
 async function startServer() {
   validateWebhookSecrets();
+  validateExciseUidKey();
   const app = express();
   // Trust the reverse proxy (Manus/nginx) so express-rate-limit reads the correct client IP
   app.set('trust proxy', 1);
