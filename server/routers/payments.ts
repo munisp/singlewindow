@@ -19,6 +19,7 @@ import { assertCan, setOwner } from "../_core/permify";
 import { getDb } from "../db";
 import { emitPaymentInitiated } from "../_core/kafkaEventPublisher";
 import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
+import { requireDeclarationActor } from "../_core/mandateAuthorization";
 
 export const paymentsRouter = router({
   // ── INITIATE PAYMENT ─────────────────────────────────────────────────────────
@@ -34,18 +35,19 @@ export const paymentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const decl = await getDeclarationById(input.declarationId);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
-      if (decl.traderId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
+      const { principalUserId, actingAgentId } = await requireDeclarationActor(decl, ctx.user);
       if (!["under_assessment", "payment_pending"].includes(decl.status)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Declaration is not ready for payment." });
       }
 
       // R4 FIX: Ensure per-trader payment account exists before enqueuing
-      const traderAccountId = await getOrProvisionTraderAccount(ctx.user.id, decl.invoiceCurrency ?? 'USD');
+      const traderAccountId = await getOrProvisionTraderAccount(principalUserId, decl.invoiceCurrency ?? 'USD');
 
       const reference = `PAY-${nanoid(12).toUpperCase()}`;
       const payment = await createPayment({
         declarationId: input.declarationId,
-        traderId: ctx.user.id,
+        traderId: principalUserId,
+        actingAgentId,
         amount: decl.totalDue ?? "0",
         currency: decl.invoiceCurrency ?? "USD",
         paymentMethod: input.paymentMethod,
@@ -54,7 +56,7 @@ export const paymentsRouter = router({
       });
 
       if (payment) {
-        await setOwner("payment", payment.id, ctx.user.id);
+        await setOwner("payment", payment.id, principalUserId);
       }
 
       await updateDeclaration(input.declarationId, { status: "payment_pending" });
@@ -121,7 +123,7 @@ export const paymentsRouter = router({
         entityId: payment?.id ?? 0,
         action: "payment_initiated",
         actorId: ctx.user.id,
-        actorType: "trader",
+        actorType: actingAgentId ? "freight_forwarder" : "trader",
         newState: { status: "pending", reference, paymentMethod: input.paymentMethod },
       });
       // R3: Kafka event
@@ -129,7 +131,7 @@ export const paymentsRouter = router({
         await emitPaymentInitiated({
           paymentId: payment.id,
           declarationId: input.declarationId,
-          traderId: ctx.user.id,
+          traderId: principalUserId,
           amount: parseFloat(decl.totalDue ?? '0'),
           currency: decl.invoiceCurrency ?? 'USD',
           idempotencyKey: reference,
@@ -168,9 +170,13 @@ export const paymentsRouter = router({
         const [existing] = await db.select().from(payments).where(eq(payments.id, input.paymentId)).limit(1);
         if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
 
-        if (existing.traderId !== ctx.user.id && ctx.user.role !== "admin") {
-          throw new TRPCError({ code: "FORBIDDEN" });
-        }
+        const declaration = await getDeclarationById(existing.declarationId);
+        if (!declaration) throw new TRPCError({ code: "NOT_FOUND" });
+        await requireDeclarationActor(
+          { ...declaration, actingAgentId: existing.actingAgentId },
+          ctx.user,
+          { allowOperationalOverride: true },
+        );
 
         if (existing.status === "confirmed") {
           return existing; // Already confirmed — idempotent
@@ -393,9 +399,10 @@ export const paymentsRouter = router({
         return [];
       }
       const decl = await getDeclarationById(input.declarationId);
-      if (!decl || decl.traderId !== ctx.user.id) {
+      if (!decl) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
       }
+      await requireDeclarationActor(decl, ctx.user);
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) =>
         db.select().from(payments).where(eq(payments.declarationId, input.declarationId))
       );
@@ -532,9 +539,13 @@ export const paymentsRouter = router({
       // Permify RBAC: only the owner or an admin can cancel a payment
       await assertCan(String(ctx.user.id), "payment", String(input.paymentId), "cancel");
 
-      if (existing.traderId !== ctx.user.id && ctx.user.role !== "admin") {
-        throw new TRPCError({ code: "FORBIDDEN" });
-      }
+      const declaration = await getDeclarationById(existing.declarationId);
+      if (!declaration) throw new TRPCError({ code: "NOT_FOUND" });
+      await requireDeclarationActor(
+        { ...declaration, actingAgentId: existing.actingAgentId },
+        ctx.user,
+        { allowOperationalOverride: true },
+      );
       if (existing.status !== "pending") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only pending payments can be cancelled." });
       }

@@ -10,6 +10,7 @@ export const userRoleEnum = pgEnum("user_role", ["user", "admin", "customs_offic
 
 export const stakeholderTypeEnum = pgEnum("stakeholder_type", [
   "trader", "customs_officer", "oga_officer", "freight_forwarder",
+  "shipping_line", "shipping_company", "airline_gha",
   "bank_officer", "port_authority", "system_admin", "auditor"
 ]);
 
@@ -137,6 +138,58 @@ export const stakeholderProfiles = pgTable("stakeholder_profiles", {
 
 export type StakeholderProfile = typeof stakeholderProfiles.$inferSelect;
 
+// ─── NSW PARTY REGISTRATIONS & AGENT MANDATES ────────────────────────────────
+
+export const stakeholderRegistrations = pgTable("stakeholder_registrations", {
+  id: serial("id").primaryKey(),
+  referenceNumber: varchar("reference_number", { length: 32 }).notNull().unique(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  stakeholderType: stakeholderTypeEnum("stakeholder_type").notNull(),
+  organizationName: varchar("organization_name", { length: 255 }).notNull(),
+  organizationCode: varchar("organization_code", { length: 64 }),
+  licenseNumber: varchar("license_number", { length: 128 }),
+  licenseExpiresAt: timestamp("license_expires_at"),
+  taxId: varchar("tax_id", { length: 64 }),
+  country: varchar("country", { length: 2 }).notNull(),
+  phone: varchar("phone", { length: 32 }),
+  kycDocumentIds: json("kyc_document_ids").$type<number[]>().default([]),
+  status: profileStatusEnum("status").default("pending").notNull(),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  rejectionReason: text("rejection_reason"),
+  metadata: json("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_stakeholder_reg_user_id").on(t.userId),
+  index("idx_stakeholder_reg_status").on(t.status),
+  index("idx_stakeholder_reg_type").on(t.stakeholderType),
+]);
+
+export type StakeholderRegistration = typeof stakeholderRegistrations.$inferSelect;
+export type InsertStakeholderRegistration = typeof stakeholderRegistrations.$inferInsert;
+
+export const stakeholderMandates = pgTable("stakeholder_mandates", {
+  id: serial("id").primaryKey(),
+  referenceNumber: varchar("reference_number", { length: 32 }).notNull().unique(),
+  principalUserId: integer("principal_user_id").notNull().references(() => users.id),
+  agentUserId: integer("agent_user_id").notNull().references(() => users.id),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: integer("revoked_by").references(() => users.id),
+  revocationReason: text("revocation_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_stakeholder_mandate_principal").on(t.principalUserId),
+  index("idx_stakeholder_mandate_agent").on(t.agentUserId),
+  index("idx_stakeholder_mandate_window").on(t.validFrom, t.validUntil),
+]);
+
+export type StakeholderMandate = typeof stakeholderMandates.$inferSelect;
+export type InsertStakeholderMandate = typeof stakeholderMandates.$inferInsert;
+
 // ─── DECLARATIONS ────────────────────────────────────────────────────────────
 
 export const declarations = pgTable("declarations", {
@@ -144,6 +197,8 @@ export const declarations = pgTable("declarations", {
   declarationNumber: varchar("declaration_number", { length: 32 }).notNull().unique(),
   ucr: varchar("ucr", { length: 64 }).unique(),
   traderId: integer("trader_id").notNull(),
+  principalId: integer("principal_id").references(() => users.id),
+  actingAgentId: integer("acting_agent_id").references(() => users.id),
   declarationType: declarationTypeEnum("declaration_type").notNull(),
   status: declarationStatusEnum("status").default("draft").notNull(),
   riskLane: riskLaneEnum("risk_lane").default("green"),
@@ -229,6 +284,7 @@ export const payments = pgTable("payments", {
   id: serial("id").primaryKey(),
   declarationId: integer("declaration_id").notNull().references(() => declarations.id),
   traderId: integer("trader_id").notNull(),
+  actingAgentId: integer("acting_agent_id").references(() => users.id),
   amount: decimal("amount", { precision: 15, scale: 2 }).notNull(),
   currency: varchar("currency", { length: 3 }).default("USD").notNull(),
   paymentMethod: paymentMethodEnum("payment_method").notNull(),
