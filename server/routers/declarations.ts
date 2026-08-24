@@ -19,7 +19,7 @@ import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValid
 import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
 import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
 import { resolveActingPrincipal, requireDeclarationActor } from "../_core/mandateAuthorization";
-import { assertDeclarationFormalitiesSatisfied, evaluateDeclarationRegulations } from "../regulatory";
+import { assertDeclarationFormalitiesSatisfied, evaluateDeclarationRegulations } from "./regulatory";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {

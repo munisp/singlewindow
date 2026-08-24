@@ -215,6 +215,9 @@ func (s *Store) PostTransfer(t *Transfer) error {
 	if !ok {
 		return fmt.Errorf("credit account %s not found", t.CreditAccountID)
 	}
+	if debit.Currency != t.Currency || credit.Currency != t.Currency {
+		return fmt.Errorf("transfer currency %s does not match both account currencies", t.Currency)
+	}
 
 	now := time.Now().UTC()
 	t.CreatedAt = now
@@ -222,6 +225,10 @@ func (s *Store) PostTransfer(t *Transfer) error {
 
 	switch t.Flag {
 	case FlagPending:
+		available := debit.CreditsPosted.Sub(debit.DebitsPosted).Sub(debit.DebitsPending)
+		if available.LessThan(t.Amount) {
+			return fmt.Errorf("insufficient available balance in debit account %s", debit.ID)
+		}
 		debit.DebitsPending = debit.DebitsPending.Add(t.Amount)
 		credit.CreditsPending = credit.CreditsPending.Add(t.Amount)
 		t.Status = "PENDING"
@@ -231,6 +238,9 @@ func (s *Store) PostTransfer(t *Transfer) error {
 		pending, ok := s.transfers[t.PendingID]
 		if !ok {
 			return fmt.Errorf("pending transfer %s not found", t.PendingID)
+		}
+		if t.Amount.GreaterThan(pending.Amount) {
+			return fmt.Errorf("posted amount exceeds pending transfer %s", t.PendingID)
 		}
 		// Move from pending to posted
 		pendingDebit := s.accounts[pending.DebitAccountID]
@@ -262,6 +272,10 @@ func (s *Store) PostTransfer(t *Transfer) error {
 
 	default:
 		// Immediate (non-pending) transfer
+		available := debit.CreditsPosted.Sub(debit.DebitsPosted).Sub(debit.DebitsPending)
+		if available.LessThan(t.Amount) {
+			return fmt.Errorf("insufficient available balance in debit account %s", debit.ID)
+		}
 		debit.DebitsPosted = debit.DebitsPosted.Add(t.Amount)
 		credit.CreditsPosted = credit.CreditsPosted.Add(t.Amount)
 		t.Status = "POSTED"

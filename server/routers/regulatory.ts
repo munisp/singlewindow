@@ -11,8 +11,8 @@ import {
   sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import { protectedProcedure, router } from "./_core/trpc";
-import { getDb, logAuditEvent } from "./db";
+import { protectedProcedure, router } from "../_core/trpc";
+import { getDb, logAuditEvent } from "../db";
 import {
   declarations,
   declarationFormalities,
@@ -21,9 +21,10 @@ import {
   regulatoryRestrictions,
   tariffQuotaAllocations,
   tariffQuotas,
-} from "../drizzle/schema";
-import { tbBridgeAvailable, tbFetch } from "./routers/ledger";
-import { acquireLock, releaseLock } from "./_core/distributedLock";
+} from "../../drizzle/schema";
+import { tbBridgeAvailable, tbFetch } from "./ledger";
+import { acquireLock, releaseLock } from "../_core/distributedLock";
+import { requireDeclarationActor } from "../_core/mandateAuthorization";
 
 type RegulatoryDb = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 type RegulatoryDateInput = Date | string;
@@ -118,7 +119,7 @@ type ObligationInput = {
 };
 
 async function permitSatisfies(
-  db: RegulatoryDb,
+  db: Pick<RegulatoryDb, "select" | "update">,
   input: ObligationInput,
   obligation: {
     agencyCode: string | null;
@@ -161,12 +162,21 @@ async function permitSatisfies(
   return null;
 }
 
-async function buildObligations(db: RegulatoryDb, input: ObligationInput, consumePermits: boolean) {
-  const { formalities, restrictions, quotas } = await matchingRegisters(db, input);
-  const prohibitions = restrictions.filter((entry) => entry.restrictionType === "prohibition");
-  const requiredRestrictions = restrictions.filter((entry) => entry.restrictionType === "restriction");
-  const obligations = [
-    ...formalities.map((entry) => ({
+type MatchingRegisters = Awaited<ReturnType<typeof matchingRegisters>>;
+type RegisterObligation = {
+  formalityId: number | null;
+  restrictionId: number | null;
+  agencyCode: string | null;
+  agencyName: string | null;
+  permitType: string | null;
+  legalInstrument: string;
+  requiredQuantity: string;
+};
+
+function registerObligations(registers: MatchingRegisters): RegisterObligation[] {
+  const requiredRestrictions = registers.restrictions.filter((entry) => entry.restrictionType === "restriction");
+  return [
+    ...registers.formalities.map((entry) => ({
       formalityId: entry.id,
       restrictionId: null,
       agencyCode: entry.agencyCode,
@@ -185,57 +195,105 @@ async function buildObligations(db: RegulatoryDb, input: ObligationInput, consum
       requiredQuantity: entry.requiredQuantity,
     })),
   ];
+}
+
+async function evaluateObligations(
+  db: Pick<RegulatoryDb, "select" | "update">,
+  input: ObligationInput,
+  registers: MatchingRegisters,
+  consumePermits: boolean,
+) {
+  const obligations = registerObligations(registers);
   const evaluated = [];
   for (const obligation of obligations) {
     const permit = await permitSatisfies(db, input, obligation, consumePermits);
     evaluated.push({ ...obligation, permit });
   }
-  return { prohibitions, obligations: evaluated, quotas };
+  return { obligations: evaluated };
+}
+
+async function buildObligations(db: RegulatoryDb, input: ObligationInput) {
+  const registers = await matchingRegisters(db, input);
+  const evaluated = await evaluateObligations(db, input, registers, false);
+  return { ...evaluated, ...registers };
 }
 
 export async function evaluateDeclarationRegulations(input: ObligationInput): Promise<void> {
   const db = await requireRegulatoryDb();
-  const preview = await buildObligations(db, input, false);
-  const prohibition = preview.prohibitions[0];
+  const registers = await matchingRegisters(db, input);
+  const prohibition = registers.restrictions.find((entry) => entry.restrictionType === "prohibition");
   if (prohibition) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `Declaration refused under ${prohibition.legalInstrument}: ${prohibition.description}`,
     });
   }
-  const result = await buildObligations(db, input, true);
-  if (!input.declarationId || result.obligations.length === 0) return;
-  await db.insert(declarationFormalities).values(result.obligations.map((obligation) => ({
-    declarationId: input.declarationId!,
-    formalityId: obligation.formalityId,
-    restrictionId: obligation.restrictionId,
-    agencyCode: obligation.agencyCode,
-    agencyName: obligation.agencyName,
-    permitType: obligation.permitType,
-    legalInstrument: obligation.legalInstrument,
-    requiredQuantity: obligation.requiredQuantity,
-    satisfiedQuantity: obligation.permit ? obligation.requiredQuantity : "0",
-    satisfiedByPermitId: obligation.permit?.id ?? null,
-    status: obligation.permit ? "satisfied" as const : "required" as const,
-    evaluatedAt: input.at,
-  })));
+  if (!input.declarationId || registerObligations(registers).length === 0) return;
+  await db.transaction(async (tx) => {
+    const result = await evaluateObligations(tx, input, registers, true);
+    await tx.insert(declarationFormalities).values(result.obligations.map((obligation) => ({
+      declarationId: input.declarationId!,
+      formalityId: obligation.formalityId,
+      restrictionId: obligation.restrictionId,
+      agencyCode: obligation.agencyCode,
+      agencyName: obligation.agencyName,
+      permitType: obligation.permitType,
+      legalInstrument: obligation.legalInstrument,
+      requiredQuantity: obligation.requiredQuantity,
+      satisfiedQuantity: obligation.permit ? obligation.requiredQuantity : "0",
+      satisfiedByPermitId: obligation.permit?.id ?? null,
+      status: obligation.permit ? "satisfied" as const : "required" as const,
+      evaluatedAt: input.at,
+    })));
+  });
 }
 
 export async function assertDeclarationFormalitiesSatisfied(declarationId: number): Promise<void> {
   const db = await requireRegulatoryDb();
+  const [declaration] = await db.select().from(declarations).where(eq(declarations.id, declarationId)).limit(1);
+  if (!declaration) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found." });
+  }
+  const input: ObligationInput = {
+    declarationId,
+    importerId: declaration.principalId ?? declaration.traderId,
+    hsCode: declaration.hsCode ?? "",
+    origin: declaration.countryOfOrigin ?? "",
+    destination: declaration.countryOfDestination ?? undefined,
+    regime: declaration.declarationType,
+    quantity: String(declaration.numberOfPackages ?? 1),
+    at: declaration.submittedAt ?? declaration.createdAt,
+  };
+  const registers = await matchingRegisters(db, input);
+  const prohibition = registers.restrictions.find((entry) => entry.restrictionType === "prohibition");
+  if (prohibition) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Declaration refused under ${prohibition.legalInstrument}: ${prohibition.description}`,
+    });
+  }
   const rows = await db.select().from(declarationFormalities)
     .where(eq(declarationFormalities.declarationId, declarationId));
-  if (rows.some((row) => row.status !== "satisfied")) {
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "Required regulatory formalities are not satisfied.",
-    });
+  const obligations = registerObligations(registers);
+  for (const obligation of obligations) {
+    const persisted = rows.find((row) =>
+      (obligation.formalityId !== null && row.formalityId === obligation.formalityId) ||
+      (obligation.restrictionId !== null && row.restrictionId === obligation.restrictionId),
+    );
+    const satisfied = persisted?.status === "satisfied" ||
+      (await permitSatisfies(db, input, obligation, false)) !== null;
+    if (!satisfied) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `Required regulatory formality is unsatisfied under ${obligation.legalInstrument}.`,
+      });
+    }
   }
 }
 
 async function clearanceGraph(input: ObligationInput) {
   const db = await requireRegulatoryDb();
-  const result = await buildObligations(db, input, false);
+  const result = await buildObligations(db, input);
   const graph = result.obligations.map((obligation) => ({
     required: true as const,
     satisfied: obligation.permit !== null,
@@ -272,13 +330,15 @@ async function clearanceGraph(input: ObligationInput) {
   }
   return {
     registersAvailable: true as const,
-    prohibited: result.prohibitions.map((entry) => ({
-      description: entry.description,
-      legalInstrument: entry.legalInstrument,
-    })),
+    prohibited: result.restrictions
+      .filter((entry) => entry.restrictionType === "prohibition")
+      .map((entry) => ({
+        description: entry.description,
+        legalInstrument: entry.legalInstrument,
+      })),
     obligations: [...graph, ...quotaGraph],
-    blocking: result.prohibitions.length > 0 || graph.some((entry) => entry.blocking) || quotaGraph.some((entry) => entry.blocking),
-    cleared: false as const,
+    blocking: result.restrictions.some((entry) => entry.restrictionType === "prohibition") ||
+      graph.some((entry) => entry.blocking) || quotaGraph.some((entry) => entry.blocking),
   };
 }
 
@@ -412,8 +472,8 @@ export const regulatoryRouter = router({
       if (!quota) throw new TRPCError({ code: "NOT_FOUND", message: "Tariff quota not found." });
       const [declaration] = await db.select().from(declarations).where(eq(declarations.id, input.declarationId)).limit(1);
       if (!declaration) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found." });
-      if (ctx.user.role === "user" && declaration.traderId !== ctx.user.id) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "You may only allocate quota for your own declaration." });
+      if (ctx.user.role !== "admin" && ctx.user.role !== "customs_officer") {
+        await requireDeclarationActor(declaration, ctx.user);
       }
       const at = declaration.submittedAt ?? declaration.createdAt;
       if (!activeAt(quota.validFrom, quota.validUntil, at) || at < quota.periodStart || at > quota.periodEnd) {

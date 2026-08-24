@@ -4,13 +4,18 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { appRouter } from "./routers";
 import { getDb } from "./db";
 import type { TrpcContext } from "./_core/context";
-import { evaluateDeclarationRegulations } from "./regulatory";
+import {
+  assertDeclarationFormalitiesSatisfied,
+  evaluateDeclarationRegulations,
+} from "./routers/regulatory";
 import {
   declarations,
   declarationFormalities,
   ogaPermits,
   regulatoryFormalities,
   regulatoryRestrictions,
+  stakeholderRegistrations,
+  stakeholderMandates,
   tariffQuotaAllocations,
   tariffQuotas,
 } from "../drizzle/schema";
@@ -25,7 +30,10 @@ vi.mock("./routers/ledger", async (importOriginal) => {
   return { ...actual, tbBridgeAvailable: ledgerMocks.available, tbFetch: ledgerMocks.fetch };
 });
 
-function caller(role: "user" | "admin" | "customs_officer" = "user", userId = 1) {
+function caller(
+  role: "user" | "admin" | "customs_officer" | "finance" = "user",
+  userId = 1,
+) {
   const context: TrpcContext = {
     user: {
       id: userId,
@@ -56,14 +64,22 @@ const created = {
   restrictions: [] as number[],
   quotas: [] as number[],
   permits: [] as number[],
+  registrations: [] as number[],
+  mandates: [] as number[],
 };
 
-async function declaration(hsCode: string, createdAt = new Date()) {
+async function declaration(
+  hsCode: string,
+  createdAt = new Date(),
+  options: { traderId?: number; principalId?: number; actingAgentId?: number } = {},
+) {
   const db = await database();
   const [row] = await db.insert(declarations).values({
     declarationNumber: `REG-${randomUUID().slice(0, 20)}`,
     ucr: `REG-UCR-${randomUUID()}`,
-    traderId: 1,
+    traderId: options.traderId ?? 1,
+    principalId: options.principalId,
+    actingAgentId: options.actingAgentId,
     declarationType: "import",
     hsCode,
     countryOfOrigin: "GH",
@@ -86,11 +102,15 @@ afterEach(async () => {
   if (created.formalities.length) await db.delete(regulatoryFormalities).where(inArray(regulatoryFormalities.id, created.formalities));
   if (created.restrictions.length) await db.delete(regulatoryRestrictions).where(inArray(regulatoryRestrictions.id, created.restrictions));
   if (created.quotas.length) await db.delete(tariffQuotas).where(inArray(tariffQuotas.id, created.quotas));
+  if (created.registrations.length) await db.delete(stakeholderRegistrations).where(inArray(stakeholderRegistrations.id, created.registrations));
+  if (created.mandates.length) await db.delete(stakeholderMandates).where(inArray(stakeholderMandates.id, created.mandates));
+  created.mandates.length = 0;
   created.declarations.length = 0;
   created.formalities.length = 0;
   created.restrictions.length = 0;
   created.quotas.length = 0;
   created.permits.length = 0;
+  created.registrations.length = 0;
 });
 
 describe.sequential("regulatory obligation behaviour", () => {
@@ -227,6 +247,33 @@ describe.sequential("regulatory obligation behaviour", () => {
     created.quotas.push(quota.id);
     const first = await declaration("777700");
     const second = await declaration("777701");
+    const agentDeclaration = await declaration("777702", new Date(), { actingAgentId: 2 });
+    const [mandate] = await db.insert(stakeholderMandates).values({
+      referenceNumber: `REG-MANDATE-${randomUUID().slice(0, 12)}`,
+      principalUserId: 1,
+      agentUserId: 2,
+      validFrom: new Date(now.getTime() - 60_000),
+      validUntil: new Date(now.getTime() + 60_000),
+    }).returning();
+    created.mandates.push(mandate.id);
+    const [registration] = await db.insert(stakeholderRegistrations).values({
+      referenceNumber: `REG-AGENT-${randomUUID().slice(0, 12)}`,
+      userId: 2,
+      stakeholderType: "freight_forwarder",
+      organizationName: "Regulatory Behaviour Agent",
+      country: "GH",
+      licenseExpiresAt: new Date(now.getTime() + 60_000),
+      status: "approved",
+      approvedBy: 4,
+      approvedAt: now,
+    }).returning();
+    created.registrations.push(registration.id);
+    await expect(caller("finance", 2).regulatory.allocateQuota({
+      quotaId: quota.id, declarationId: first.id, quantity: "1",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller("user", 2).regulatory.allocateQuota({
+      quotaId: quota.id, declarationId: agentDeclaration.id, quantity: "1",
+    })).resolves.toMatchObject({ declarationId: agentDeclaration.id });
     const results = await Promise.allSettled([
       caller().regulatory.allocateQuota({ quotaId: quota.id, declarationId: first.id, quantity: "6" }),
       caller().regulatory.allocateQuota({ quotaId: quota.id, declarationId: second.id, quantity: "6" }),
@@ -237,12 +284,29 @@ describe.sequential("regulatory obligation behaviour", () => {
       eq(tariffQuotaAllocations.quotaId, quota.id),
       isNull(tariffQuotaAllocations.reversedAt),
     ));
-    expect(allocations).toHaveLength(1);
-    expect(Number(allocations[0]?.quantity)).toBe(6);
+    expect(allocations).toHaveLength(2);
+    expect(allocations.reduce((sum, allocation) => sum + Number(allocation.quantity), 0)).toBe(7);
     ledgerMocks.available.mockResolvedValue(false);
-    const outage = await declaration("777702");
+    const outage = await declaration("777703");
     await expect(caller().regulatory.allocateQuota({
       quotaId: quota.id, declarationId: outage.id, quantity: "1",
     })).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("re-evaluates effective regulations at clearance instead of trusting stale rows", async () => {
+    const db = await database();
+    const declarationRow = await declaration("888800");
+    const [formality] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "8888",
+      agencyCode: "OGA-CLEAR",
+      agencyName: "Clearance Agency",
+      permitType: "CLEARANCE",
+      legalInstrument: "Instrument CLEARANCE",
+      validFrom: new Date(Date.now() - 60_000),
+      createdBy: 4,
+    }).returning();
+    created.formalities.push(formality.id);
+    await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id))
+      .rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 });

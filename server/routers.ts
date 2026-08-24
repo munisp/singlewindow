@@ -121,7 +121,7 @@ import { tradeAnalyticsRouter } from "./routers/tradeAnalytics";
 import { ncsNrsRouter } from "./routers/ncsNrs";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
-import { regulatoryRouter } from "./regulatory";
+import { regulatoryRouter } from "./routers/regulatory";
 
 export const appRouter = router({
   complianceReporting: complianceReportingRouter,
