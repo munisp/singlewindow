@@ -3,7 +3,7 @@ import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import { securityAlerts } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 const WAZUH_SVC_URL = process.env.WAZUH_SVC_URL ?? "http://wazuh-svc:8100";
 async function callWazuh<T>(path: string, method = "GET", body?: unknown): Promise<T> {
@@ -25,7 +25,43 @@ async function callWazuh<T>(path: string, method = "GET", body?: unknown): Promi
 export const wazuhRouter = router({
   // Get all security alerts from Wazuh
   getAlerts: adminProcedure.query(async () => {
-    return callWazuh<{ alerts: unknown[]; count: number }>("/alerts");
+    try {
+      const live = await callWazuh<{ alerts: unknown[]; count: number }>("/alerts");
+      return { ...live, source: "wazuh" as const };
+    } catch {
+      const db = await getDb();
+      if (!db) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Wazuh and security-alert database are unavailable" });
+      }
+      try {
+        const rows = await db.select().from(securityAlerts)
+          .orderBy(desc(securityAlerts.createdAt))
+          .limit(100);
+        return {
+          alerts: rows.map(r => ({
+            id: r.alertId,
+            severity: r.severity,
+            category: r.category,
+            title: r.title,
+            description: r.description,
+            source_ip: r.sourceIp,
+            target_service: r.targetService,
+            rule_id: r.ruleId,
+            rule_description: r.ruleDescription,
+            raw_event: r.rawEvent,
+            acknowledged: r.acknowledged,
+            acknowledged_by: r.acknowledgedBy,
+            acknowledged_at: r.acknowledgedAt,
+            resolved_at: r.resolvedAt,
+            timestamp: r.createdAt,
+          })),
+          count: rows.length,
+          source: "database" as const,
+        };
+      } catch {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Security-alert database is unavailable" });
+      }
+    }
   }),
 
   // Get all monitored agents from Wazuh
@@ -75,9 +111,33 @@ export const wazuhRouter = router({
 
   // Get overall platform security score from Wazuh
   getSecurityScore: protectedProcedure.query(async () => {
-    return callWazuh<{
-      score: number; grade: string; unresolved_alerts: number; total_agents: number; computed_at: string;
-    }>("/security-score");
+    try {
+      const live = await callWazuh<{
+        score: number; grade: string; unresolved_alerts: number; total_agents: number; computed_at: string;
+      }>("/security-score");
+      return { ...live, source: "wazuh" as const };
+    } catch {
+      const db = await getDb();
+      if (!db) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Wazuh and security-alert database are unavailable" });
+      }
+      try {
+        const rows = await db.select().from(securityAlerts).where(eq(securityAlerts.acknowledged, false));
+        const criticals = rows.filter(r => r.severity === "critical").length;
+        const highs = rows.filter(r => r.severity === "high").length;
+        const score = Math.max(0, 100 - criticals * 15 - highs * 8 - rows.length * 2);
+        const grade = score >= 90 ? "A" : score >= 80 ? "B+" : score >= 70 ? "B" : score >= 60 ? "C" : "D";
+        return {
+          score,
+          grade,
+          unresolved_alerts: rows.length,
+          computed_at: new Date().toISOString(),
+          source: "database" as const,
+        };
+      } catch {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Security-alert database is unavailable" });
+      }
+    }
   }),
 
   // Acknowledge an alert

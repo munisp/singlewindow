@@ -7,6 +7,8 @@ import {
   logAuditEvent,
   updateMojaloopTransaction,
 } from "../db";
+import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
+import { tbBridgeAvailable, tbFetch } from "../routers/ledger";
 
 function verifySignature(rawBody: Buffer, signature: string, secret: string): boolean {
   const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
@@ -61,22 +63,6 @@ export function registerMojaloopWebhookRoute(app: express.Application): void {
       if (input.transferState === "COMMITTED") {
         updateData.fulfilment = input.fulfilment ?? null;
         updateData.committedAt = input.completedTimestamp ? new Date(input.completedTimestamp) : new Date();
-        const tbTransferId = crypto.randomUUID().replace(/-/g, "").slice(0, 32).padStart(32, "0");
-        await createLedgerEntry({
-          tbTransferId,
-          debitAccountId: "0000000000000002",
-          creditAccountId: "0000000000000001",
-          amountMinorUnits: Math.round(Number(tx.amount) * 100),
-          currency: tx.currency,
-          ledger: 1,
-          entryType: "duty_payment",
-          status: "posted",
-          declarationId: tx.declarationId ?? undefined,
-          mojaloopTransferId: input.transferId,
-          reference: `DUTY-${tx.declarationId ?? "N/A"}`,
-          description: `Duty payment settled via Mojaloop webhook (${input.transferId})`,
-          postedAt: new Date(),
-        });
         await logAuditEvent({
           entityType: "payment",
           entityId: tx.id,
@@ -99,6 +85,50 @@ export function registerMojaloopWebhookRoute(app: express.Application): void {
         });
       }
       await updateMojaloopTransaction(input.transferId, updateData as never);
+
+      if (input.transferState === "COMMITTED") {
+        try {
+          if (!(await tbBridgeAvailable())) {
+            throw new Error("TigerBeetle bridge is unavailable");
+          }
+          const debitAccountId = await getOrProvisionTraderAccount(tx.initiatedBy, tx.currency);
+          const bridgeTransfer = await tbFetch<{ id: string }>("/api/ledger/transfers", {
+            method: "POST",
+            body: JSON.stringify({
+              debitAccountId,
+              creditAccountId: SYSTEM_ACCOUNTS.NCS_REVENUE,
+              amount: String(tx.amount),
+              currency: tx.currency,
+              ledger: 1,
+              reference: `DUTY-${tx.declarationId ?? "N/A"}`,
+              description: `Duty payment settled via Mojaloop webhook (${input.transferId})`,
+              metadata: { mojaloopTransferId: input.transferId },
+            }),
+          });
+          await createLedgerEntry({
+            tbTransferId: bridgeTransfer.id,
+            debitAccountId,
+            creditAccountId: SYSTEM_ACCOUNTS.NCS_REVENUE,
+            amountMinorUnits: Math.round(Number(tx.amount) * 100),
+            currency: tx.currency,
+            ledger: 1,
+            entryType: "duty_payment",
+            status: "posted",
+            declarationId: tx.declarationId ?? undefined,
+            mojaloopTransferId: input.transferId,
+            reference: `DUTY-${tx.declarationId ?? "N/A"}`,
+            description: `Duty payment settled via Mojaloop webhook (${input.transferId})`,
+            postedAt: new Date(),
+          });
+        } catch (error) {
+          console.error("[Mojaloop] TigerBeetle settlement unavailable:", error);
+          return res.status(503).json({
+            error: "Ledger settlement unavailable; webhook will be retried",
+            transferId: input.transferId,
+          });
+        }
+      }
+
       return res.json({ success: true, transferId: input.transferId, newStatus: input.transferState });
     },
   );

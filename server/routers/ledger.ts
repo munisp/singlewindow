@@ -30,7 +30,7 @@ import {
 const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8093";
 const PAYMENT_RISK_URL = process.env.PAYMENT_RISK_URL || "http://localhost:8092";
 
-async function tbBridgeAvailable(): Promise<boolean> {
+export async function tbBridgeAvailable(): Promise<boolean> {
   try {
     const res = await fetch(`${TB_BRIDGE_URL}/health`, { signal: AbortSignal.timeout(3_000) });
     return res.ok;
@@ -48,7 +48,7 @@ async function riskScorerAvailable(): Promise<boolean> {
   }
 }
 
-async function tbFetch<T>(path: string, options?: RequestInit): Promise<T> {
+export async function tbFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${TB_BRIDGE_URL}${path}`, {
     ...options,
     headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
