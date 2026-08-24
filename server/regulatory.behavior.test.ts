@@ -442,4 +442,108 @@ describe.sequential("regulatory obligation behaviour", () => {
     await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id))
       .rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
+
+  it("gates clearance on quota allocation and re-blocks after reversal", async () => {
+    const db = await database();
+    const now = new Date();
+    const [quota] = await db.insert(tariffQuotas).values({
+      quotaCode: `Q-CLEAR-${randomUUID()}`, hsCodePrefix: "8899", origin: "GH", regime: "import",
+      periodStart: new Date(now.getTime() - 60_000), periodEnd: new Date(now.getTime() + 60_000),
+      totalQuantity: "5", quantityUnit: "kg", ledgerAccountId: "quota-clear-available",
+      allocatedLedgerAccountId: "quota-clear-allocated",
+      legalInstrument: "Instrument QUOTA-CLEAR", validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.quotas.push(quota.id);
+    const declarationRow = await declaration("889900");
+
+    await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id))
+      .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: expect.stringContaining("Instrument QUOTA-CLEAR") });
+    const allocation = await caller().regulatory.allocateQuota({
+      quotaId: quota.id, declarationId: declarationRow.id, quantity: "5",
+    });
+    await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id)).resolves.toBeUndefined();
+    await caller("admin", 4).regulatory.reverseQuotaAllocation({ allocationId: allocation.id });
+    await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id))
+      .rejects.toMatchObject({ code: "PRECONDITION_FAILED", message: expect.stringContaining("Instrument QUOTA-CLEAR") });
+  });
+
+  it("does not re-consume permits on resubmission and records new obligations", async () => {
+    const db = await database();
+    const now = new Date();
+    const declarationRow = await declaration("990000");
+    const [firstFormality] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "9900", agencyCode: "OGA-RESUBMIT-1", agencyName: "Resubmit Agency 1",
+      permitType: "RESUBMIT-1", requiredQuantity: "5", legalInstrument: "Instrument RESUBMIT-1",
+      validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    const [permit] = await db.insert(ogaPermits).values({
+      declarationId: declarationRow.id, agencyCode: "OGA-RESUBMIT-1", agencyName: "Resubmit Agency 1",
+      permitType: "RESUBMIT-1", status: "approved", hsCode: "9900", consigneeId: 1,
+      permittedQuantity: "5", validFrom: new Date(now.getTime() - 60_000),
+    }).returning();
+    created.formalities.push(firstFormality.id);
+    created.permits.push(permit.id);
+    await evaluateDeclarationRegulations({
+      declarationId: declarationRow.id, importerId: 1, hsCode: declarationRow.hsCode!, origin: "GH",
+      destination: "NG", regime: "import", quantity: "5", at: now,
+    });
+    const [secondFormality] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "9900", agencyCode: "OGA-RESUBMIT-2", agencyName: "Resubmit Agency 2",
+      permitType: "RESUBMIT-2", requiredQuantity: "5", legalInstrument: "Instrument RESUBMIT-2",
+      validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.formalities.push(secondFormality.id);
+    await evaluateDeclarationRegulations({
+      declarationId: declarationRow.id, importerId: 1, hsCode: declarationRow.hsCode!, origin: "GH",
+      destination: "NG", regime: "import", quantity: "5", at: now,
+    });
+    const [permitAfter] = await db.select({ usedQuantity: ogaPermits.usedQuantity })
+      .from(ogaPermits).where(eq(ogaPermits.id, permit.id));
+    const rows = await db.select().from(declarationFormalities)
+      .where(eq(declarationFormalities.declarationId, declarationRow.id));
+    expect(permitAfter?.usedQuantity).toBe("5.000");
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.formalityId)).toEqual([firstFormality.id, secondFormality.id]);
+  });
+
+  it("persists and consumes a permit satisfied by the live clearance recheck", async () => {
+    const db = await database();
+    const now = new Date();
+    const declarationRow = await declaration("991100");
+    const [formality] = await db.insert(regulatoryFormalities).values({
+      hsCodePrefix: "9911", agencyCode: "OGA-LIVE", agencyName: "Live Agency",
+      permitType: "LIVE-PERMIT", requiredQuantity: "5", legalInstrument: "Instrument LIVE",
+      validFrom: new Date(now.getTime() - 60_000), createdBy: 4,
+    }).returning();
+    created.formalities.push(formality.id);
+    await evaluateDeclarationRegulations({
+      declarationId: declarationRow.id, importerId: 1, hsCode: declarationRow.hsCode!, origin: "GH",
+      destination: "NG", regime: "import", quantity: "5", at: now,
+    });
+    const [before] = await db.select().from(declarationFormalities)
+      .where(eq(declarationFormalities.declarationId, declarationRow.id));
+    expect(before?.status).toBe("required");
+    const [permit] = await db.insert(ogaPermits).values({
+      declarationId: declarationRow.id, agencyCode: "OGA-LIVE", agencyName: "Live Agency",
+      permitType: "LIVE-PERMIT", status: "approved", hsCode: "9911", consigneeId: 1,
+      permittedQuantity: "5", validFrom: new Date(now.getTime() - 60_000),
+    }).returning();
+    created.permits.push(permit.id);
+
+    await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id)).resolves.toBeUndefined();
+    const [satisfied] = await db.select().from(declarationFormalities)
+      .where(eq(declarationFormalities.declarationId, declarationRow.id));
+    const [consumed] = await db.select({ usedQuantity: ogaPermits.usedQuantity })
+      .from(ogaPermits).where(eq(ogaPermits.id, permit.id));
+    expect(satisfied).toMatchObject({
+      status: "satisfied",
+      satisfiedByPermitId: permit.id,
+      satisfiedQuantity: "5.000",
+    });
+    expect(consumed?.usedQuantity).toBe("5.000");
+    await expect(assertDeclarationFormalitiesSatisfied(declarationRow.id)).resolves.toBeUndefined();
+    const [stillConsumed] = await db.select({ usedQuantity: ogaPermits.usedQuantity })
+      .from(ogaPermits).where(eq(ogaPermits.id, permit.id));
+    expect(stillConsumed?.usedQuantity).toBe("5.000");
+  });
 });

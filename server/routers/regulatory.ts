@@ -67,7 +67,7 @@ async function requireRegulatoryDb(): Promise<RegulatoryDb> {
 }
 
 async function matchingRegisters(
-  db: RegulatoryDb,
+  db: Pick<RegulatoryDb, "select">,
   input: {
     hsCode: string;
     origin: string;
@@ -204,8 +204,8 @@ async function evaluateObligations(
   input: ObligationInput,
   registers: MatchingRegisters,
   consumePermits: boolean,
+  obligations = registerObligations(registers),
 ) {
-  const obligations = registerObligations(registers);
   const evaluated = [];
   for (const obligation of obligations) {
     const permit = await permitSatisfies(db, input, obligation, consumePermits);
@@ -220,6 +220,47 @@ async function buildObligations(db: RegulatoryDb, input: ObligationInput) {
   return { ...evaluated, ...registers };
 }
 
+type QuotaSatisfaction = {
+  quota: MatchingRegisters["quotas"][number];
+  allocatedQuantity: number;
+  requiredQuantity: number;
+  satisfied: boolean;
+};
+
+async function quotaSatisfaction(
+  db: Pick<RegulatoryDb, "select">,
+  input: ObligationInput,
+  quotas: MatchingRegisters["quotas"],
+): Promise<QuotaSatisfaction[]> {
+  const requiredQuantity = Number(input.quantity);
+  return Promise.all(quotas.map(async (quota) => {
+    const allocations = input.declarationId
+      ? await db.select({ quantity: tariffQuotaAllocations.quantity })
+        .from(tariffQuotaAllocations)
+        .where(and(
+          eq(tariffQuotaAllocations.quotaId, quota.id),
+          eq(tariffQuotaAllocations.declarationId, input.declarationId),
+          isNull(tariffQuotaAllocations.reversedAt),
+        ))
+      : [];
+    const allocatedQuantity = allocations.reduce((sum, row) => sum + Number(row.quantity), 0);
+    return {
+      quota,
+      allocatedQuantity,
+      requiredQuantity,
+      satisfied: allocatedQuantity >= requiredQuantity,
+    };
+  }));
+}
+
+function matchesPersistedObligation(
+  obligation: RegisterObligation,
+  row: { formalityId: number | null; restrictionId: number | null },
+): boolean {
+  return (obligation.formalityId !== null && row.formalityId === obligation.formalityId) ||
+    (obligation.restrictionId !== null && row.restrictionId === obligation.restrictionId);
+}
+
 export async function evaluateDeclarationRegulations(input: ObligationInput): Promise<void> {
   const db = await requireRegulatoryDb();
   const registers = await matchingRegisters(db, input);
@@ -232,7 +273,16 @@ export async function evaluateDeclarationRegulations(input: ObligationInput): Pr
   }
   if (!input.declarationId || registerObligations(registers).length === 0) return;
   await db.transaction(async (tx) => {
-    const result = await evaluateObligations(tx, input, registers, true);
+    const existingRows = await tx.select({
+      formalityId: declarationFormalities.formalityId,
+      restrictionId: declarationFormalities.restrictionId,
+    }).from(declarationFormalities)
+      .where(eq(declarationFormalities.declarationId, input.declarationId!));
+    const newObligations = registerObligations(registers).filter((obligation) =>
+      !existingRows.some((row) => matchesPersistedObligation(obligation, row)),
+    );
+    if (newObligations.length === 0) return;
+    const result = await evaluateObligations(tx, input, registers, true, newObligations);
     await tx.insert(declarationFormalities).values(result.obligations.map((obligation) => ({
       declarationId: input.declarationId!,
       formalityId: obligation.formalityId,
@@ -266,31 +316,61 @@ export async function assertDeclarationFormalitiesSatisfied(declarationId: numbe
     quantity: String(declaration.numberOfPackages ?? 1),
     at: declaration.submittedAt ?? declaration.createdAt,
   };
-  const registers = await matchingRegisters(db, input);
-  const prohibition = registers.restrictions.find((entry) => entry.restrictionType === "prohibition");
-  if (prohibition) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: `Declaration refused under ${prohibition.legalInstrument}: ${prohibition.description}`,
-    });
-  }
-  const rows = await db.select().from(declarationFormalities)
-    .where(eq(declarationFormalities.declarationId, declarationId));
-  const obligations = registerObligations(registers);
-  for (const obligation of obligations) {
-    const persisted = rows.find((row) =>
-      (obligation.formalityId !== null && row.formalityId === obligation.formalityId) ||
-      (obligation.restrictionId !== null && row.restrictionId === obligation.restrictionId),
-    );
-    const satisfied = persisted?.status === "satisfied" ||
-      (await permitSatisfies(db, input, obligation, false)) !== null;
-    if (!satisfied) {
+  await db.transaction(async (tx) => {
+    const registers = await matchingRegisters(tx, input);
+    const prohibition = registers.restrictions.find((entry) => entry.restrictionType === "prohibition");
+    if (prohibition) {
       throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: `Required regulatory formality is unsatisfied under ${obligation.legalInstrument}.`,
+        code: "FORBIDDEN",
+        message: `Declaration refused under ${prohibition.legalInstrument}: ${prohibition.description}`,
       });
     }
-  }
+    const rows = await tx.select().from(declarationFormalities)
+      .where(eq(declarationFormalities.declarationId, declarationId));
+    for (const obligation of registerObligations(registers)) {
+      const persisted = rows.find((row) => matchesPersistedObligation(obligation, row));
+      if (persisted?.status === "satisfied") continue;
+      const permit = await permitSatisfies(tx, input, obligation, true);
+      if (!permit) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Required regulatory formality is unsatisfied under ${obligation.legalInstrument}.`,
+        });
+      }
+      const satisfaction = {
+        status: "satisfied" as const,
+        satisfiedByPermitId: permit.id,
+        satisfiedQuantity: obligation.requiredQuantity,
+        evaluatedAt: input.at,
+      };
+      if (persisted) {
+        await tx.update(declarationFormalities)
+          .set(satisfaction)
+          .where(eq(declarationFormalities.id, persisted.id));
+      } else {
+        await tx.insert(declarationFormalities).values({
+          declarationId,
+          formalityId: obligation.formalityId,
+          restrictionId: obligation.restrictionId,
+          agencyCode: obligation.agencyCode,
+          agencyName: obligation.agencyName,
+          permitType: obligation.permitType,
+          legalInstrument: obligation.legalInstrument,
+          requiredQuantity: obligation.requiredQuantity,
+          ...satisfaction,
+        });
+      }
+    }
+    const quotas = await quotaSatisfaction(tx, input, registers.quotas);
+    for (const { quota, satisfied } of quotas) {
+      if (!satisfied) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: `Required tariff quota is unsatisfied under ${quota.legalInstrument}.`,
+        });
+      }
+    }
+  });
 }
 
 async function clearanceGraph(input: ObligationInput) {
@@ -307,29 +387,15 @@ async function clearanceGraph(input: ObligationInput) {
     requiredQuantity: obligation.requiredQuantity,
     satisfiedByPermitId: obligation.permit?.id ?? null,
   }));
-  const quotaGraph = [];
-  for (const quota of result.quotas) {
-    const allocations = input.declarationId
-      ? await db.select({ quantity: tariffQuotaAllocations.quantity })
-        .from(tariffQuotaAllocations)
-        .where(and(
-          eq(tariffQuotaAllocations.quotaId, quota.id),
-          eq(tariffQuotaAllocations.declarationId, input.declarationId),
-          isNull(tariffQuotaAllocations.reversedAt),
-        ))
-      : [];
-    const allocated = allocations.reduce((sum, row) => sum + Number(row.quantity), 0);
-    const required = Number(input.quantity);
-    quotaGraph.push({
+  const quotaGraph = (await quotaSatisfaction(db, input, result.quotas)).map((check) => ({
       required: true as const,
-      satisfied: allocated >= required,
-      blocking: allocated < required,
-      quotaCode: quota.quotaCode,
-      legalInstrument: quota.legalInstrument,
+      satisfied: check.satisfied,
+      blocking: !check.satisfied,
+      quotaCode: check.quota.quotaCode,
+      legalInstrument: check.quota.legalInstrument,
       requiredQuantity: input.quantity,
-      allocatedQuantity: String(allocated),
-    });
-  }
+      allocatedQuantity: String(check.allocatedQuantity),
+    }));
   return {
     registersAvailable: true as const,
     prohibited: result.restrictions

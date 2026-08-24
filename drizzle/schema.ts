@@ -359,6 +359,10 @@ export const declarationFormalities = pgTable("declaration_formalities", {
 }, (t) => [
   index("idx_decl_formality_declaration").on(t.declarationId),
   index("idx_decl_formality_status").on(t.status),
+  uniqueIndex("uq_decl_formality_formality").on(t.declarationId, t.formalityId)
+    .where(sql`${t.formalityId} IS NOT NULL`),
+  uniqueIndex("uq_decl_formality_restriction").on(t.declarationId, t.restrictionId)
+    .where(sql`${t.restrictionId} IS NOT NULL`),
 ]);
 
 export const tariffQuotas = pgTable("tariff_quotas", {
