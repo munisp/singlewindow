@@ -425,6 +425,36 @@ describe.sequential("excise money and lifecycle behaviour", () => {
     expect(report.productionVariance).toBe(0);
   });
 
+  it("keeps reconciliation and analytics aligned after activation then retirement", async () => {
+    process.env.EXCISE_UID_HMAC_KEY = "e".repeat(64);
+    const { db, fixture, order } = await makeFixture({ quantity: 1 });
+    const signed = mintExciseUid();
+    const [mark] = await db.insert(exciseStampMarks).values({
+      uid: signed.uid,
+      payload: signed.payload,
+      signature: signed.signature,
+      keyId: signed.keyId,
+      orderId: order.id,
+      productId: fixture.productId,
+      facilityId: fixture.facilityId,
+      status: "issued",
+    }).returning();
+    fixture.markIds.push(mark.id);
+
+    await caller().excise.activateMark({ uid: signed.uid });
+    await caller().excise.reportProduction({ orderId: order.id, quantity: 1 });
+    await caller().excise.retireMark({ uid: signed.uid, reason: "wastage", details: "Behaviour test retirement" });
+
+    const report = await caller().excise.reconcileOrder({ orderId: order.id });
+    const analytics = await caller("customs_officer", 2).excise.analytics({ orderId: order.id });
+    expect(report.stampVariance).toBe(0);
+    expect(report.productionVariance).toBe(0);
+    expect(report.activatedQuantity).toBe(0);
+    expect(report.everActivatedQuantity).toBe(1);
+    expect(analytics.stampAccountabilityVariance).toBe(report.stampVariance);
+    expect(analytics.productionAccountabilityVariance).toBe(report.productionVariance);
+  });
+
   it("keeps public verification status-only and fails closed when signing is unavailable", async () => {
     process.env.EXCISE_UID_HMAC_KEY = "c".repeat(64);
     const signed = mintExciseUid();
