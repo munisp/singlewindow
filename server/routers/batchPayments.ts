@@ -104,7 +104,7 @@ export const batchPaymentsRouter = router({
       return { retried: deadItems.length, transferIds: deadItems.map((i) => i.transferId) };
     }),
 
-  getAccountBalance: protectedProcedure
+  getAccountBalance: adminProcedure
     .input(z.object({ accountId: z.string().min(1) }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -125,7 +125,7 @@ export const batchPaymentsRouter = router({
       };
     }),
 
-  listQueue: protectedProcedure
+  listQueue: adminProcedure
     .input(z.object({
       status: z.enum(["queued", "processing", "committed", "failed", "dead_letter", "all"]).default("all"),
       page: z.number().int().min(1).default(1),
@@ -149,7 +149,7 @@ export const batchPaymentsRouter = router({
       };
     }),
 
-  listArchivalJobs: protectedProcedure
+  listArchivalJobs: adminProcedure
     .input(z.object({
       tier: z.enum(["hot", "warm", "cold", "all"]).default("all"),
       page: z.number().int().min(1).default(1),
@@ -177,7 +177,7 @@ export const batchPaymentsRouter = router({
    * List all payment accounts with live net balance.
    * Used by the Balance Accounts dashboard page.
    */
-  listAllAccounts: protectedProcedure
+  listAllAccounts: adminProcedure
     .input(z.object({
       page: z.number().int().min(1).default(1),
       pageSize: z.number().int().min(1).max(100).default(50),

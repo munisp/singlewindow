@@ -2,7 +2,6 @@
  * ledger.ts — tRPC router for TigerBeetle double-entry ledger (Sprint 31)
  *
  * Proxies to the Rust tigerbeetle-bridge service (port 8093).
- * Falls back to DB-persisted ledger entries when the bridge is unavailable.
  *
  * Procedures:
  *   ledger.getAccount        — get account details and balance
@@ -25,7 +24,6 @@ import { publishEvent, TOPICS } from "../_core/kafka";
 import {
   getLedgerEntriesByDeclaration,
   getLedgerEntriesByPayment,
-  getRecentLedgerEntries,
   createLedgerEntry,
 } from "../db";
 
@@ -155,23 +153,7 @@ export const ledgerRouter = router({
         return result;
       }
 
-      // Fallback: persist to DB only
-      const entry = await createLedgerEntry({
-        tbTransferId: crypto.randomUUID(),
-        debitAccountId: input.debitAccountId,
-        creditAccountId: input.creditAccountId,
-        amountMinorUnits: Math.round(parseFloat(input.amount) * 100),
-        currency: input.currency,
-        ledger: 1,
-        entryType: "duty_payment",
-        status: "posted",
-        declarationId: input.declarationId,
-        paymentId: input.paymentId,
-        reference: input.reference,
-        description: input.description,
-        postedAt: new Date(),
-      });
-      return { ...entry, _source: "db_fallback" };
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
     }),
 
   /**
@@ -260,22 +242,14 @@ export const ledgerRouter = router({
 
   /**
    * Get ledger summary: all account balances + recent transfers.
-   * Calls the Go bridge; falls back to DB recent entries.
+   * Calls the Go bridge, which is the ledger of record.
    */
   getSummary: protectedProcedure.query(async () => {
     const available = await tbBridgeAvailable();
     if (available) {
       return tbFetch<Record<string, unknown>>("/api/ledger/summary");
     }
-    // DB fallback
-    const recent = await getRecentLedgerEntries(20);
-    return {
-      recentTransfers: recent,
-      summary: {
-        mode: "db_fallback",
-        note: "TigerBeetle bridge unavailable — showing DB ledger entries only",
-      },
-    };
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
   }),
 
   /**
@@ -298,45 +272,40 @@ export const ledgerRouter = router({
     .mutation(async ({ input }) => {
       const available = await riskScorerAvailable();
       if (!available) {
-        // Return a default LOW risk score when scorer is unavailable
-        return {
-          traderId: input.traderId,
-          riskScore: 0.10,
-          riskTier: "LOW",
-          recommendedAction: "APPROVE",
-          flags: ["SCORER_UNAVAILABLE: risk scorer offline — defaulting to LOW"],
-          modelVersion: "fallback",
-          scoredAt: new Date().toISOString(),
-          _source: "fallback",
-        };
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Payment risk scorer is unavailable" });
       }
 
-      const res = await fetch(`${PAYMENT_RISK_URL}/api/payment-risk/score`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          trader_id: input.traderId,
-          declaration_id: input.declarationId,
-          amount: input.amount,
-          currency: input.currency,
-          fsp_id: input.fspId,
-          fsp_type: input.fspType,
-          payer_account: input.payerAccount,
-          declaration_value: input.declarationValue,
-          trader_compliance_score: input.traderComplianceScore,
-          is_first_payment: input.isFirstPayment,
-        }),
-        signal: AbortSignal.timeout(5_000),
-      });
-
-      if (!res.ok) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Payment risk scorer error: ${res.status}`,
+      try {
+        const res = await fetch(`${PAYMENT_RISK_URL}/api/payment-risk/score`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            trader_id: input.traderId,
+            declaration_id: input.declarationId,
+            amount: input.amount,
+            currency: input.currency,
+            fsp_id: input.fspId,
+            fsp_type: input.fspType,
+            payer_account: input.payerAccount,
+            declaration_value: input.declarationValue,
+            trader_compliance_score: input.traderComplianceScore,
+            is_first_payment: input.isFirstPayment,
+          }),
+          signal: AbortSignal.timeout(5_000),
         });
-      }
 
-      return res.json();
+        if (!res.ok) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `Payment risk scorer error: ${res.status}`,
+          });
+        }
+
+        return res.json();
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Payment risk scorer is unavailable" });
+      }
     }),
 
   /**
@@ -355,19 +324,7 @@ export const ledgerRouter = router({
     .mutation(async ({ input, ctx }) => {
       const available = await tbBridgeAvailable();
       if (!available) {
-        return await createLedgerEntry({
-          declarationId: input.declarationId,
-          paymentId: null,
-          entryType: "bond_deposit",
-          debitAccountId: `trader-${input.traderId}-liability`,
-          creditAccountId: `bond-${input.traderId}-${input.bondType}`,
-          amountMinorUnits: Math.round(input.bondAmount * 100),
-          tbTransferId: `TB-BOND-DEP-${input.declarationId}-${Date.now()}`,
-          currency: input.currency,
-          reference: `BOND-DEP-${input.declarationId}-${input.bondType}`,
-          status: "posted",
-          metadata: { bondType: input.bondType, expiryDate: input.expiryDate, _source: "db-ledger-fallback", _tag: "offline-stub" },
-        });
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
       }
       return tbFetch<Record<string, unknown>>("/bond/deposit", {
         method: "POST",
@@ -398,19 +355,7 @@ export const ledgerRouter = router({
     .mutation(async ({ input }) => {
       const available = await tbBridgeAvailable();
       if (!available) {
-        return await createLedgerEntry({
-          declarationId: input.declarationId,
-          paymentId: null,
-          entryType: "bond_release",
-          debitAccountId: `bond-${input.traderId}-${input.bondType}`,
-          creditAccountId: `trader-${input.traderId}-liability`,
-          amountMinorUnits: Math.round(input.bondAmount * 100),
-          tbTransferId: `TB-BOND-REL-${input.declarationId}-${Date.now()}`,
-          currency: input.currency,
-          reference: `BOND-REL-${input.declarationId}-${input.releaseReason}`,
-          status: "posted",
-          metadata: { bondType: input.bondType, releaseReason: input.releaseReason, _source: "db-ledger-fallback", _tag: "offline-stub" },
-        });
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
       }
       return tbFetch<Record<string, unknown>>("/bond/release", {
         method: "POST",
@@ -441,19 +386,7 @@ export const ledgerRouter = router({
     .mutation(async ({ input }) => {
       const available = await tbBridgeAvailable();
       if (!available) {
-        return await createLedgerEntry({
-          declarationId: input.declarationId,
-          paymentId: null,
-          entryType: "penalty",
-          debitAccountId: `trader-${input.traderId}-liability`,
-          creditAccountId: `penalty-revenue-${input.penaltyCode}`,
-          amountMinorUnits: Math.round(input.penaltyAmount * 100),
-          tbTransferId: `TB-PENALTY-${input.declarationId}-${Date.now()}`,
-          currency: input.currency,
-          reference: `PENALTY-${input.declarationId}-${input.penaltyCode}`,
-          status: "posted",
-          metadata: { penaltyCode: input.penaltyCode, officerId: input.officerId, _source: "db-ledger-fallback", _tag: "offline-stub" },
-        });
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
       }
       return tbFetch<Record<string, unknown>>("/penalty", {
         method: "POST",
@@ -484,19 +417,7 @@ export const ledgerRouter = router({
     .mutation(async ({ input }) => {
       const available = await tbBridgeAvailable();
       if (!available) {
-        return await createLedgerEntry({
-          declarationId: input.declarationId,
-          paymentId: null,
-          entryType: "adjustment", // closest existing type; schema will add transit_guarantee in v77
-          debitAccountId: `trader-${input.traderId}-liability`,
-          creditAccountId: `transit-guarantee-${input.traderId}-${input.destinationCountry}`,
-          amountMinorUnits: Math.round(input.guaranteeAmount * 100),
-          tbTransferId: `TB-TRANSIT-${input.declarationId}-${Date.now()}`,
-          currency: input.currency,
-          reference: `TRANSIT-${input.declarationId}-${input.destinationCountry}`,
-          status: "posted",
-          metadata: { destinationCountry: input.destinationCountry, transitDays: input.transitDays, _source: "db-ledger-fallback", _tag: "offline-stub" },
-        });
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
       }
       return tbFetch<Record<string, unknown>>("/transit-guarantee", {
         method: "POST",

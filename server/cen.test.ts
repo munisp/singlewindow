@@ -41,34 +41,32 @@ function makeCtx(overrides: Partial<AuthenticatedUser> = {}): TrpcContext {
 
 // ─── getPartners ──────────────────────────────────────────────────────────────
 describe("cen.getPartners", () => {
-  it("returns fallback {partners, total} when cen-service is unavailable", async () => {
+  it("fails closed when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.getPartners({});
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("partners");
-    expect(result).toHaveProperty("total");
-    expect(Array.isArray(result.partners)).toBe(true);
+    await expect(caller.cen.getPartners({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("accepts optional region filter", async () => {
+  it("rejects optional region queries when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.getPartners({ region: "AFRICA" });
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("partners");
+    await expect(
+      caller.cen.getPartners({ region: "AFRICA" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
-  it("accepts optional activeOnly filter", async () => {
+  it("rejects optional activeOnly queries when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.getPartners({ activeOnly: true });
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("partners");
+    await expect(
+      caller.cen.getPartners({ activeOnly: true })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
-  it("accepts both region and activeOnly filters simultaneously", async () => {
+  it("rejects filtered queries when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.getPartners({ region: "ASIA", activeOnly: true });
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("partners");
+    await expect(
+      caller.cen.getPartners({ region: "ASIA", activeOnly: true })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("throws UNAUTHORIZED for unauthenticated caller", async () => {
@@ -209,47 +207,50 @@ describe("cen.receiveAlert", () => {
 
 // ─── listAlerts ───────────────────────────────────────────────────────────────
 describe("cen.listAlerts", () => {
-  it("returns fallback {alerts, total} when cen-service is unavailable", async () => {
+  it("fails closed when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.listAlerts({});
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("alerts");
-    expect(result).toHaveProperty("total");
-    expect(Array.isArray(result.alerts)).toBe(true);
-  });
-
-  it("accepts direction filter OUTBOUND", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.listAlerts({ direction: "OUTBOUND" });
-    expect(result).toHaveProperty("alerts");
-  });
-
-  it("accepts direction filter INBOUND", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.listAlerts({ direction: "INBOUND" });
-    expect(result).toHaveProperty("alerts");
-  });
-
-  it("accepts priority filter HIGH", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.listAlerts({ priority: "HIGH" });
-    expect(result).toHaveProperty("alerts");
-  });
-
-  it("accepts alertType filter SEIZURE", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.listAlerts({ alertType: "SEIZURE" });
-    expect(result).toHaveProperty("alerts");
-  });
-
-  it("accepts combined filters (direction + priority + alertType)", async () => {
-    const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.listAlerts({
-      direction: "INBOUND",
-      priority: "HIGH",
-      alertType: "RISK_PROFILE",
+    await expect(caller.cen.listAlerts({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
     });
-    expect(result).toHaveProperty("alerts");
+  });
+
+  it("rejects direction queries when cen-service is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.cen.listAlerts({ direction: "OUTBOUND" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("rejects inbound direction queries when cen-service is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.cen.listAlerts({ direction: "INBOUND" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("rejects priority queries when cen-service is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.cen.listAlerts({ priority: "HIGH" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("rejects alert-type queries when cen-service is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.cen.listAlerts({ alertType: "SEIZURE" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("rejects combined filtered queries when cen-service is unavailable", async () => {
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.cen.listAlerts({
+        direction: "INBOUND",
+        priority: "HIGH",
+        alertType: "RISK_PROFILE",
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("rejects invalid direction enum value", async () => {
@@ -267,22 +268,18 @@ describe("cen.listAlerts", () => {
 
 // ─── correlateAlert ───────────────────────────────────────────────────────────
 describe("cen.correlateAlert", () => {
-  it("returns fallback correlation object when cen-service is unavailable", async () => {
+  it("fails closed when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.correlateAlert({ alertId: "ALERT-001" });
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("alertId");
-    expect(result).toHaveProperty("matchedAlerts");
-    expect(result).toHaveProperty("correlationScore");
-    expect(result).toHaveProperty("reason");
-    expect(result.alertId).toBe("ALERT-001");
-    expect(Array.isArray(result.matchedAlerts)).toBe(true);
+    await expect(
+      caller.cen.correlateAlert({ alertId: "ALERT-001" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
-  it("preserves alertId in fallback response", async () => {
+  it("does not fabricate an alert correlation when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.correlateAlert({ alertId: "CEN-2026-XYZ" });
-    expect(result.alertId).toBe("CEN-2026-XYZ");
+    await expect(
+      caller.cen.correlateAlert({ alertId: "CEN-2026-XYZ" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("throws UNAUTHORIZED for unauthenticated caller", async () => {
@@ -306,29 +303,18 @@ describe("cen.acknowledgeAlert", () => {
 
 // ─── getStats ─────────────────────────────────────────────────────────────────
 describe("cen.getStats", () => {
-  it("returns fallback stats object with all required fields when cen-service is unavailable", async () => {
+  it("fails closed when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.getStats();
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty("total");
-    expect(result).toHaveProperty("outbound");
-    expect(result).toHaveProperty("inbound");
-    expect(result).toHaveProperty("high");
-    expect(result).toHaveProperty("medium");
-    expect(result).toHaveProperty("low");
-    expect(result).toHaveProperty("active");
-    expect(result).toHaveProperty("acknowledged");
-    expect(result).toHaveProperty("activePartners");
-    expect(result).toHaveProperty("totalPartners");
+    await expect(caller.cen.getStats()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("fallback stats have numeric values", async () => {
+  it("does not fabricate numeric stats when cen-service is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
-    const result = await caller.cen.getStats();
-    expect(typeof result.total).toBe("number");
-    expect(typeof result.outbound).toBe("number");
-    expect(typeof result.inbound).toBe("number");
-    expect(typeof result.high).toBe("number");
+    await expect(caller.cen.getStats()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
   it("throws UNAUTHORIZED for unauthenticated caller", async () => {

@@ -28,7 +28,7 @@ import { getDb } from "../db";
 import { paymentIdempotencyKeys } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import {
   getPaymentsByDeclaration,
   createMojaloopTransaction,
@@ -37,14 +37,12 @@ import {
   getMojaloopTransactionsByDeclaration,
   getMojaloopTransactionsByUser,
   logAuditEvent,
-  createLedgerEntry,
-  updatePayment,
+  getDeclarationById,
 } from "../db";
 
 const MOJALOOP_URL = process.env.MOJALOOP_URL || "http://localhost:3003";
 const MOJALOOP_API_KEY = process.env.MOJALOOP_API_KEY || "";
 // Shared secret for verifying webhook callbacks from the Mojaloop switch
-const MOJALOOP_WEBHOOK_SECRET = process.env.MOJALOOP_WEBHOOK_SECRET || "dev-webhook-secret";
 
 // ─── Mojaloop service client ───────────────────────────────────────────────
 
@@ -155,8 +153,6 @@ function generateCondition(): string {
 // In production these would be fetched from the TB bridge service.
 // For simulation, we use fixed account IDs for the customs authority ledger.
 
-const TB_CUSTOMS_REVENUE_ACCOUNT = "0000000000000001";  // Customs revenue credit account
-const TB_TRADER_DEBIT_ACCOUNT    = "0000000000000002";  // Trader debit account (per-trader in prod)
 
 // ─── Router ───────────────────────────────────────────────────────────────
 
@@ -196,7 +192,6 @@ export const mojaloopRouter = router({
           message: `Exchange rate not available for ${input.fromCurrency}/${input.toCurrency}`,
         });
       }
-
       return {
         fromCurrency: input.fromCurrency,
         toCurrency: input.toCurrency,
@@ -222,14 +217,34 @@ export const mojaloopRouter = router({
       paymentNote: z.string().max(128).optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+      const privileged = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role);
+      if (!privileged && decl.traderId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You do not own this declaration" });
+      }
+      const payableAmount = Number(decl.totalDue);
+      if (!Number.isFinite(payableAmount) || payableAmount <= 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Declaration has no payable amount" });
+      }
+      if (Math.abs(input.amount - payableAmount) > 0.005) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Payment amount does not match declaration total due" });
+      }
       const fsp = SUPPORTED_FSPS.find(f => f.fspId === input.fspId);
       if (!fsp) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `Unknown FSP: ${input.fspId}` });
       }
+      const declarationCurrency = decl.invoiceCurrency ?? input.currency;
+      if (input.currency !== declarationCurrency || declarationCurrency !== fsp.currency) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Declaration is denominated in ${declarationCurrency}, but ${fsp.name} settles in ${fsp.currency}; FX conversion is required and not implemented.`,
+        });
+      }
       if (!fsp.active) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `FSP ${fsp.name} is currently unavailable` });
       }
-      if (input.amount < fsp.minAmount || input.amount > fsp.maxAmount) {
+      if (payableAmount < fsp.minAmount || payableAmount > fsp.maxAmount) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: `Amount must be between ${fsp.minAmount} and ${fsp.maxAmount} ${fsp.currency} for ${fsp.name}`,
@@ -238,7 +253,7 @@ export const mojaloopRouter = router({
 
       // ── Idempotency check (1B payments/day pattern) ─────────────────────────
       // Hash: userId + declarationId + amount + currency + fspId + payerAccount
-      const idempotencyInput = `${ctx.user.id}:${input.declarationId}:${input.amount}:${input.currency}:${input.fspId}:${input.payerAccount}`;
+      const idempotencyInput = `${ctx.user.id}:${input.declarationId}:${payableAmount}:${input.currency}:${input.fspId}:${input.payerAccount}`;
       const encoder = new TextEncoder();
       const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(idempotencyInput));
       const keyHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
@@ -269,7 +284,7 @@ export const mojaloopRouter = router({
         fspType: fsp.type as FspType,
         payerAccount: input.payerAccount,
         payerName: input.payerName,
-        amount: input.amount.toString(),
+        amount: payableAmount.toString(),
         currency: input.currency,
         status: "PENDING",
         ilpPacket,
@@ -295,41 +310,47 @@ export const mojaloopRouter = router({
         action: "mojaloop_payment_initiated",
         actorId: ctx.user.id,
         actorType: "trader",
-        newState: { transferId, fspId: input.fspId, amount: input.amount, currency: input.currency },
+        newState: { transferId, fspId: input.fspId, amount: payableAmount, currency: input.currency },
       });
 
       // Forward to live Mojaloop switch if available
       const available = await mojaloopAvailable();
-      if (available) {
-        try {
-          await fetch(`${MOJALOOP_URL}/transfers`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-              "FSPIOP-Source": "CUSTOMS_AUTHORITY",
-              "FSPIOP-Destination": input.fspId,
-            },
-            body: JSON.stringify({
-              transferId,
-              payerFsp: input.fspId,
-              payeeFsp: "CUSTOMS_AUTHORITY",
-              amount: { amount: input.amount.toString(), currency: input.currency },
-              ilpPacket,
-              condition,
-              expiration: expiresAt.toISOString(),
-            }),
-            signal: AbortSignal.timeout(10_000),
-          });
-        } catch (e) {
-          console.warn(`[Mojaloop] Transfer request failed: ${e}. Using simulation.`);
+      if (!available) {
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Mojaloop switch is unavailable" });
+      }
+      try {
+        const response = await fetch(`${MOJALOOP_URL}/transfers`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+            "FSPIOP-Source": "CUSTOMS_AUTHORITY",
+            "FSPIOP-Destination": input.fspId,
+          },
+          body: JSON.stringify({
+            transferId,
+            payerFsp: input.fspId,
+            payeeFsp: "CUSTOMS_AUTHORITY",
+            amount: { amount: payableAmount.toString(), currency: input.currency },
+            ilpPacket,
+            condition,
+            expiration: expiresAt.toISOString(),
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => response.statusText);
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Mojaloop transfer rejected (${response.status}): ${detail}` });
         }
+      } catch (e) {
+        if (e instanceof TRPCError) throw e;
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Mojaloop transfer request failed" });
       }
 
       return {
         transferId,
         status: "PENDING",
-        amount: input.amount,
+        amount: payableAmount,
         currency: input.currency,
         fspName: fsp.name,
         fspType: fsp.type,
@@ -338,22 +359,27 @@ export const mojaloopRouter = router({
         expiresAt: expiresAt.toISOString(),
         paymentInstructions: fsp.type === "MOBILE_MONEY"
           ? `Approve the payment request on your ${fsp.name} app or dial *170# to complete payment.`
-          : `Transfer ${input.amount} ${input.currency} to account: CUSTOMS-DUTY-${input.declarationId} at ${fsp.name}.`,
-        simulationNote: !available ? "Running in simulation mode — no real payment processed." : undefined,
+          : `Transfer ${payableAmount} ${input.currency} to account: CUSTOMS-DUTY-${input.declarationId} at ${fsp.name}.`,
       };
     }),
 
   /**
    * Get the current status of a Mojaloop payment transfer.
-   * Reads from DB first; simulates state progression in dev mode.
+   * Reads the persisted transfer state without mutating it.
    */
   getPaymentStatus: protectedProcedure
     .input(z.object({ transferId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const privileged = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role);
       // Try DB first
       const dbRecord = await getMojaloopTransactionByTransferId(input.transferId);
 
       if (!dbRecord) {
+        // An ordinary caller cannot establish ownership of a transfer that is
+        // not present in this application's transaction store.
+        if (!privileged) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
+        }
         // Try live Mojaloop API
         const available = await mojaloopAvailable();
         if (available) {
@@ -368,58 +394,13 @@ export const mojaloopRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
       }
 
-      // Simulate state progression in dev/simulation mode
-      const elapsedMs = Date.now() - dbRecord.createdAt.getTime();
-      let status = dbRecord.status;
-
-      if (status === "PENDING" && elapsedMs > 5_000) {
-        status = "PROCESSING";
-        await updateMojaloopTransaction(input.transferId, { status });
+      if (!privileged && dbRecord.initiatedBy !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN" });
       }
-
-      if (status === "PROCESSING" && elapsedMs > 15_000) {
-        const fulfilment = generateCondition();
-        status = "COMMITTED";
-        await updateMojaloopTransaction(input.transferId, {
-          status,
-          fulfilment,
-          committedAt: new Date(),
-        });
-
-        // Create TigerBeetle ledger entry for this settlement
-        const tbTransferId = crypto.randomUUID().replace(/-/g, "").slice(0, 32).padStart(32, "0");
-        await createLedgerEntry({
-          tbTransferId,
-          debitAccountId: TB_TRADER_DEBIT_ACCOUNT,
-          creditAccountId: TB_CUSTOMS_REVENUE_ACCOUNT,
-          amountMinorUnits: Math.round(dbRecord.amount as unknown as number * 100),
-          currency: dbRecord.currency,
-          ledger: 1,
-          entryType: "duty_payment",
-          status: "posted",
-          declarationId: dbRecord.declarationId ?? undefined,
-          mojaloopTransferId: input.transferId,
-          reference: `DUTY-${dbRecord.declarationId ?? "N/A"}`,
-          description: `Duty payment via ${dbRecord.fspName} (${input.transferId})`,
-          postedAt: new Date(),
-        }).catch(e => console.warn("[TigerBeetle] Failed to create ledger entry:", e));
-
-        // Log audit event for settlement
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: dbRecord.id,
-          action: "mojaloop_payment_committed",
-          actorId: dbRecord.initiatedBy,
-          actorType: "system",
-          newState: { transferId: input.transferId, status: "COMMITTED", fulfilment },
-        });
-      }
-
-      const updated = await getMojaloopTransactionByTransferId(input.transferId);
 
       return {
         transferId: input.transferId,
-        status: updated?.status ?? status,
+        status: dbRecord.status,
         amount: Number(dbRecord.amount),
         currency: dbRecord.currency,
         fspId: dbRecord.fspId,
@@ -427,12 +408,12 @@ export const mojaloopRouter = router({
         fspType: dbRecord.fspType,
         payerAccount: dbRecord.payerAccount,
         createdAt: dbRecord.createdAt.toISOString(),
-        committedAt: updated?.committedAt?.toISOString() ?? null,
+        committedAt: dbRecord.committedAt?.toISOString() ?? null,
         ilpPacket: dbRecord.ilpPacket,
         condition: dbRecord.condition,
-        fulfilment: updated?.fulfilment ?? null,
-        isSettled: (updated?.status ?? status) === "COMMITTED",
-        isFailed: (updated?.status ?? status) === "ABORTED",
+        fulfilment: dbRecord.fulfilment ?? null,
+        isSettled: dbRecord.status === "COMMITTED",
+        isFailed: dbRecord.status === "ABORTED",
         paymentInstructions: dbRecord.fspType === "MOBILE_MONEY"
           ? `Approve the payment request on your ${dbRecord.fspName} app or dial *170# to complete payment.`
           : `Transfer to account: CUSTOMS-DUTY-${dbRecord.declarationId} at ${dbRecord.fspName}.`,
@@ -467,93 +448,6 @@ export const mojaloopRouter = router({
     }),
 
   /**
-   * Webhook callback from Mojaloop switch.
-   * Verifies the shared secret header and updates the transaction status.
-   * In production, this would be called by the Mojaloop switch directly.
-   */
-  webhookCallback: publicProcedure
-    .input(z.object({
-      transferId: z.string(),
-      transferState: z.enum(["RECEIVED", "RESERVED", "COMMITTED", "ABORTED"]),
-      fulfilment: z.string().optional(),
-      completedTimestamp: z.string().optional(),
-      errorInformation: z.object({
-        errorCode: z.string(),
-        errorDescription: z.string(),
-      }).optional(),
-      webhookSecret: z.string(),
-    }))
-    .mutation(async ({ input }) => {
-      // Verify webhook secret
-      if (input.webhookSecret !== MOJALOOP_WEBHOOK_SECRET) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid webhook secret" });
-      }
-
-      const tx = await getMojaloopTransactionByTransferId(input.transferId);
-      if (!tx) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
-      }
-
-      const updateData: Record<string, unknown> = {
-        status: input.transferState,
-        webhookPayload: input,
-      };
-
-      if (input.transferState === "COMMITTED") {
-        updateData.fulfilment = input.fulfilment ?? null;
-        updateData.committedAt = input.completedTimestamp
-          ? new Date(input.completedTimestamp)
-          : new Date();
-
-        // Create TigerBeetle ledger entry
-        const tbTransferId = crypto.randomUUID().replace(/-/g, "").slice(0, 32).padStart(32, "0");
-        await createLedgerEntry({
-          tbTransferId,
-          debitAccountId: TB_TRADER_DEBIT_ACCOUNT,
-          creditAccountId: TB_CUSTOMS_REVENUE_ACCOUNT,
-          amountMinorUnits: Math.round(Number(tx.amount) * 100),
-          currency: tx.currency,
-          ledger: 1,
-          entryType: "duty_payment",
-          status: "posted",
-          declarationId: tx.declarationId ?? undefined,
-          mojaloopTransferId: input.transferId,
-          reference: `DUTY-${tx.declarationId ?? "N/A"}`,
-          description: `Duty payment settled via Mojaloop webhook (${input.transferId})`,
-          postedAt: new Date(),
-        }).catch(e => console.warn("[TigerBeetle] Webhook ledger entry failed:", e));
-
-        // Log audit event
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: tx.id,
-          action: "mojaloop_webhook_committed",
-          actorId: tx.initiatedBy,
-          actorType: "system",
-          newState: { transferId: input.transferId, status: "COMMITTED" },
-        });
-      }
-
-      if (input.transferState === "ABORTED") {
-        updateData.abortedAt = new Date();
-        updateData.failureReason = input.errorInformation?.errorDescription ?? "Transfer aborted";
-
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: tx.id,
-          action: "mojaloop_webhook_aborted",
-          actorId: tx.initiatedBy,
-          actorType: "system",
-          newState: { transferId: input.transferId, status: "ABORTED", error: input.errorInformation },
-        });
-      }
-
-      await updateMojaloopTransaction(input.transferId, updateData as any);
-
-      return { success: true, transferId: input.transferId, newStatus: input.transferState };
-    }),
-
-  /**
    * Get a summary of the Mojaloop integration status and recent transactions.
    */
   getIntegrationStatus: protectedProcedure.query(async () => {
@@ -561,7 +455,7 @@ export const mojaloopRouter = router({
 
     return {
       connected: available,
-      mode: available ? "LIVE" : "SIMULATION",
+      mode: available ? "LIVE" : "UNAVAILABLE",
       switchUrl: MOJALOOP_URL,
       supportedFSPs: SUPPORTED_FSPS.filter(f => f.active).length,
       ilpVersion: "v4",

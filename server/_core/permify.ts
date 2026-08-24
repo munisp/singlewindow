@@ -51,7 +51,7 @@ export async function can(
 
   // In demo mode, bypass Permify and allow all checks
   const isDemoMode = process.env.DEMO_MODE === "true";
-  if (isDemoMode) {
+  if (isDemoMode && process.env.NODE_ENV !== "production") {
     return true;
   }
 
@@ -220,4 +220,3 @@ export async function writeRelationship(
 ): Promise<void> {
   await writeTuple(entityType, entityId, relation, subjectType, subjectId);
 }
-

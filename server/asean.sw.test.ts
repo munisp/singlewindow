@@ -33,25 +33,25 @@ describe("aseanSw.getConnections", () => {
     expect(typeof caller.aseanSw.getConnections).toBe("function");
   });
 
-  it("returns { connections, total, active } object for admin (offline fallback)", async () => {
+  it("fails closed when ASEAN SW is unavailable for admin", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getConnections() as any;
-    expect(result).toBeDefined();
-    expect(typeof result).toBe("object");
-    expect(Array.isArray(result.connections)).toBe(true);
+    await expect(caller.aseanSw.getConnections()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("returns { connections, total, active } for user role (protectedProcedure allows all)", async () => {
+  it("fails closed when ASEAN SW is unavailable for a user", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "user" }));
-    const result = await caller.aseanSw.getConnections() as any;
-    expect(result).toBeDefined();
-    expect(typeof result).toBe("object");
+    await expect(caller.aseanSw.getConnections()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("offline fallback has _offline: true when ASEAN SW API is unavailable", async () => {
+  it("does not fabricate an offline connection result", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getConnections() as any;
-    expect(result._offline).toBe(true);
+    await expect(caller.aseanSw.getConnections()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
   it("throws UNAUTHORIZED for unauthenticated requests", async () => {
@@ -168,31 +168,32 @@ describe("aseanSw.listMessages", () => {
     expect(typeof caller.aseanSw.listMessages).toBe("function");
   });
 
-  it("returns { messages, total } object for admin (offline fallback)", async () => {
+  it("fails closed when ASEAN SW is unavailable for admin", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.listMessages({}) as any;
-    expect(result).toBeDefined();
-    expect(typeof result).toBe("object");
-    expect(Array.isArray(result.messages)).toBe(true);
+    await expect(caller.aseanSw.listMessages({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("returns { messages, total } for user role (protectedProcedure allows all)", async () => {
+  it("fails closed when ASEAN SW is unavailable for a user", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "user" }));
-    const result = await caller.aseanSw.listMessages({}) as any;
-    expect(result).toBeDefined();
-    expect(Array.isArray(result.messages)).toBe(true);
+    await expect(caller.aseanSw.listMessages({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("accepts optional destinationCode filter (2-char)", async () => {
+  it("rejects destinationCode queries when ASEAN SW is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.listMessages({ destinationCode: "SG" }) as any;
-    expect(result).toBeDefined();
+    await expect(
+      caller.aseanSw.listMessages({ destinationCode: "SG" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
-  it("offline fallback has _offline: true in test env", async () => {
+  it("does not fabricate an offline message result", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.listMessages({}) as any;
-    expect(result._offline).toBe(true);
+    await expect(caller.aseanSw.listMessages({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
   it("throws UNAUTHORIZED for unauthenticated requests", async () => {
@@ -208,25 +209,25 @@ describe("aseanSw.listInboundMessages", () => {
     expect(typeof caller.aseanSw.listInboundMessages).toBe("function");
   });
 
-  it("returns { messages, total, unread } object for admin (offline fallback)", async () => {
+  it("fails closed when ASEAN SW is unavailable for admin", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.listInboundMessages({}) as any;
-    expect(result).toBeDefined();
-    expect(typeof result).toBe("object");
-    expect(Array.isArray(result.messages)).toBe(true);
+    await expect(caller.aseanSw.listInboundMessages({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("returns { messages, total, unread } for user role (protectedProcedure allows all)", async () => {
+  it("fails closed when ASEAN SW is unavailable for a user", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "user" }));
-    const result = await caller.aseanSw.listInboundMessages({}) as any;
-    expect(result).toBeDefined();
-    expect(Array.isArray(result.messages)).toBe(true);
+    await expect(caller.aseanSw.listInboundMessages({})).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("accepts optional sourceCode filter (2-char)", async () => {
+  it("rejects sourceCode queries when ASEAN SW is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.listInboundMessages({ sourceCode: "SG" }) as any;
-    expect(result).toBeDefined();
+    await expect(
+      caller.aseanSw.listInboundMessages({ sourceCode: "SG" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("throws UNAUTHORIZED for unauthenticated requests", async () => {
@@ -286,34 +287,32 @@ describe("aseanSw.getConnectivityStatus", () => {
     expect(typeof caller.aseanSw.getConnectivityStatus).toBe("function");
   });
 
-  it("returns { members, checkedAt } object with offline fallback for admin", async () => {
+  it("fails closed when ASEAN SW is unavailable for admin", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getConnectivityStatus() as any;
-    expect(result).toBeDefined();
-    expect(Array.isArray(result.members)).toBe(true);
-    expect(typeof result.checkedAt).toBe("string");
+    await expect(caller.aseanSw.getConnectivityStatus()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("returns { members, checkedAt } for user role (protectedProcedure allows all)", async () => {
+  it("fails closed when ASEAN SW is unavailable for a user", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "user" }));
-    const result = await caller.aseanSw.getConnectivityStatus() as any;
-    expect(result).toBeDefined();
-    expect(Array.isArray(result.members)).toBe(true);
+    await expect(caller.aseanSw.getConnectivityStatus()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("offline fallback has _offline: true in test env", async () => {
+  it("does not fabricate offline connectivity data", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getConnectivityStatus() as any;
-    expect(result._offline).toBe(true);
+    await expect(caller.aseanSw.getConnectivityStatus()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("each member has score and tier fields", async () => {
+  it("does not fabricate member scores or tiers", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getConnectivityStatus() as any;
-    for (const member of result.members) {
-      expect(typeof member.score).toBe("number");
-      expect(typeof member.tier).toBe("string");
-    }
+    await expect(caller.aseanSw.getConnectivityStatus()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
   it("throws UNAUTHORIZED for unauthenticated requests", async () => {
@@ -372,25 +371,25 @@ describe("aseanSw.getStats", () => {
     expect(typeof caller.aseanSw.getStats).toBe("function");
   });
 
-  it("returns { total, by_status } object with offline fallback for admin", async () => {
+  it("fails closed when ASEAN SW is unavailable for admin", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getStats() as any;
-    expect(result).toBeDefined();
-    expect(typeof result.total).toBe("number");
-    expect(typeof result.by_status).toBe("object");
+    await expect(caller.aseanSw.getStats()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("returns { total, by_status } for user role (protectedProcedure allows all)", async () => {
+  it("fails closed when ASEAN SW is unavailable for a user", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "user" }));
-    const result = await caller.aseanSw.getStats() as any;
-    expect(result).toBeDefined();
-    expect(typeof result.total).toBe("number");
+    await expect(caller.aseanSw.getStats()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
-  it("offline fallback has _offline: true in test env", async () => {
+  it("does not fabricate offline statistics", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.aseanSw.getStats() as any;
-    expect(result._offline).toBe(true);
+    await expect(caller.aseanSw.getStats()).rejects.toMatchObject({
+      code: "SERVICE_UNAVAILABLE",
+    });
   });
 
   it("throws UNAUTHORIZED for unauthenticated requests", async () => {

@@ -47,10 +47,10 @@ export default function SecurityAlerts() {
   const [activeTab, setActiveTab] = useState<"alerts" | "agents" | "playbooks" | "score">("alerts");
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-  const { data: alerts, isLoading: alertsLoading, refetch: refetchAlerts } = trpc.wazuh.getAlerts.useQuery(undefined, { enabled: isAdmin });
-  const { data: agents, isLoading: agentsLoading } = trpc.wazuh.getAgents.useQuery(undefined, { enabled: isAdmin && activeTab === "agents" });
-  const { data: playbooks, isLoading: playbooksLoading } = trpc.wazuh.listPlaybooks.useQuery(undefined, { enabled: isAdmin && activeTab === "playbooks" });
-  const { data: securityScore } = trpc.wazuh.getSecurityScore.useQuery();
+  const { data: alerts, isLoading: alertsLoading, isError: alertsError, refetch: refetchAlerts } = trpc.wazuh.getAlerts.useQuery(undefined, { enabled: isAdmin });
+  const { data: agents, isLoading: agentsLoading, isError: agentsError } = trpc.wazuh.getAgents.useQuery(undefined, { enabled: isAdmin && activeTab === "agents" });
+  const { data: playbooks, isLoading: playbooksLoading, isError: playbooksError } = trpc.wazuh.listPlaybooks.useQuery(undefined, { enabled: isAdmin && activeTab === "playbooks" });
+  const { data: securityScore, isError: securityScoreError } = trpc.wazuh.getSecurityScore.useQuery();
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
   const triggerPlaybookMutation = trpc.wazuh.triggerPlaybook.useMutation({
@@ -87,7 +87,7 @@ export default function SecurityAlerts() {
             <p className="text-muted-foreground text-sm">Your platform security score</p>
           </div>
         </div>
-        {securityScore && (
+        {securityScore ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-card border rounded-lg p-4 text-center">
               <div className="text-4xl font-bold text-green-600">{(securityScore as any).score ?? "—"}</div>
@@ -106,7 +106,9 @@ export default function SecurityAlerts() {
               <div className="text-sm text-muted-foreground mt-1">Failed Checks</div>
             </div>
           </div>
-        )}
+        ) : securityScoreError ? (
+          <p className="text-sm text-amber-700">Wazuh security score unavailable — no score is being reported.</p>
+        ) : null}
       </div>
     );
   }
@@ -176,6 +178,10 @@ export default function SecurityAlerts() {
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading alerts...
           </div>
+        ) : alertsError ? (
+          <div className="text-center py-12 text-amber-700">
+            Wazuh alerts unavailable — no clean result can be reported.
+          </div>
         ) : alertList.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <CheckCircle className="w-12 h-12 mx-auto mb-3 text-green-500 opacity-60" />
@@ -234,6 +240,8 @@ export default function SecurityAlerts() {
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading agents...
           </div>
+        ) : agentsError ? (
+          <div className="text-center py-8 text-amber-700">Wazuh agents unavailable — no agent state can be reported.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {agentList.map((agent: any) => (
@@ -255,7 +263,7 @@ export default function SecurityAlerts() {
                 </div>
               </div>
             ))}
-            {agentList.length === 0 && (
+            {agentList.length === 0 && !agentsError && (
               <div className="col-span-3 text-center py-8 text-muted-foreground">
                 <Server className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p>No agents registered</p>
@@ -271,6 +279,8 @@ export default function SecurityAlerts() {
           <div className="flex items-center justify-center py-12 text-muted-foreground">
             <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading playbooks...
           </div>
+        ) : playbooksError ? (
+          <div className="text-center py-8 text-amber-700">Wazuh playbooks unavailable.</div>
         ) : (
           <div className="space-y-3">
             {playbookList.map((pb: any) => (
@@ -294,7 +304,7 @@ export default function SecurityAlerts() {
                 </Button>
               </div>
             ))}
-            {playbookList.length === 0 && (
+            {playbookList.length === 0 && !playbooksError && (
               <div className="text-center py-8 text-muted-foreground">No playbooks configured</div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import { TRPCError } from "@trpc/server";
 import type { User } from "../../drizzle/schema";
 import { sdk } from "./sdk";
 
@@ -59,6 +60,14 @@ export async function createContext(
       }
     }
   } catch (error) {
+    const authHeader = opts.req.headers.authorization as string | undefined;
+    if (authHeader?.startsWith("Bearer ")) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Bearer token verification failed",
+        cause: error,
+      });
+    }
     // Authentication is optional for public procedures.
     user = null;
   }

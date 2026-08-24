@@ -255,18 +255,16 @@ describe("bondedWarehouse.ts: Kafka publish for deposit and release", () => {
 describe("wazuh.ts: Kafka publish for security alerts", () => {
   const wazuhTs = readText("server/routers/wazuh.ts");
 
-  it("imports publishEvent from kafka.ts", () => {
-    expect(wazuhTs).toContain("publishEvent");
+  it("does not publish fabricated anomaly events when Wazuh is unavailable", () => {
+    expect(wazuhTs).not.toContain("publishEvent");
   });
 
-  it("publishes SECURITY_ALERT in detectAnomaly", () => {
-    expect(wazuhTs).toContain("SECURITY_ALERT");
+  it("does not synthesize SECURITY_ALERT events in the Wazuh fallback", () => {
+    expect(wazuhTs).not.toContain("SECURITY_ALERT");
   });
 
-  it("SECURITY_ALERT uses DomainEvent aggregateId", () => {
-    const idx = wazuhTs.indexOf("SECURITY_ALERT");
-    const window = wazuhTs.slice(idx, idx + 500);
-    expect(window).toContain("aggregateId");
+  it("does not retain the removed synthetic SECURITY_ALERT payload", () => {
+    expect(wazuhTs).not.toContain("aggregateId");
   });
 });
 

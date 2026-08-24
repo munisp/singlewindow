@@ -8,7 +8,7 @@
  * Security:
  *   - HMAC-SHA256 signature verification via X-CEP-Signature header.
  *   - Shared secret configured via CEP_WEBHOOK_SECRET environment variable.
- *   - Falls back to a dev-only default when the env var is absent.
+ *   - Requests without a configured secret are rejected.
  *
  * Payload schema follows the WCO Risk Management Compendium Vol 1 alert format.
  * The Flink job should POST to this endpoint immediately after a CEP pattern fires.
@@ -23,14 +23,12 @@ import express, { Request, Response } from "express";
 import crypto from "crypto";
 import { getPool } from "../db";
 import { notifyOwner } from "../_core/notification";
-
-const CEP_WEBHOOK_SECRET =
-  process.env.CEP_WEBHOOK_SECRET ?? "tradegateway-cep-webhook-secret-dev";
+import { getWebhookSecret } from "../_core/webhookSecretsValidator";
 
 // ─── Signature verification ───────────────────────────────────────────────────
-function verifySignature(rawBody: string, signature: string): boolean {
+function verifySignature(rawBody: string, signature: string, secret: string): boolean {
   const expected = crypto
-    .createHmac("sha256", CEP_WEBHOOK_SECRET)
+    .createHmac("sha256", secret)
     .update(rawBody)
     .digest("hex");
   const provided = signature.replace(/^sha256=/, "");
@@ -91,17 +89,15 @@ export function registerCepWebhookRoute(app: express.Application) {
       // ── 1. Signature verification ──────────────────────────────────────────
       const rawBody = req.body instanceof Buffer ? req.body.toString("utf8") : "";
       const signature = String(req.headers["x-cep-signature"] ?? "");
-
-      // In development (no secret configured) we skip signature check to ease testing.
-      const isDev = process.env.NODE_ENV !== "production";
-      if (!isDev && signature) {
-        if (!verifySignature(rawBody, signature)) {
-          res.status(401).json({ error: "Invalid X-CEP-Signature" });
-          return;
-        }
-      } else if (!isDev && !signature) {
-        // Production requires the header
-        res.status(401).json({ error: "Missing X-CEP-Signature header" });
+      let secret: string;
+      try {
+        secret = getWebhookSecret("CEP_WEBHOOK_SECRET");
+      } catch {
+        res.status(503).json({ error: "Webhook authentication unavailable" });
+        return;
+      }
+      if (!signature || !verifySignature(rawBody, signature, secret)) {
+        res.status(401).json({ error: "Invalid X-CEP-Signature" });
         return;
       }
 

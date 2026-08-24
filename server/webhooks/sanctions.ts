@@ -21,8 +21,8 @@ import {
 } from "../db";
 import type { users } from "../../drizzle/schema";
 import { notifyOwner } from "../_core/notification";
-
-const WEBHOOK_SECRET = process.env.SANCTIONS_WEBHOOK_SECRET || "";
+import crypto from "crypto";
+import { getWebhookSecret } from "../_core/webhookSecretsValidator";
 
 interface SanctionsHitPayload {
   declarationId?: number;
@@ -42,7 +42,20 @@ export function registerSanctionsWebhookRoute(app: Express): void {
     async (req: Request, res: Response) => {
       // ── 1. Validate shared secret ──────────────────────────────────────────
       const providedSecret = req.headers["x-sanctions-secret"] as string;
-      if (WEBHOOK_SECRET && providedSecret !== WEBHOOK_SECRET) {
+      let webhookSecret: string;
+      try {
+        webhookSecret = getWebhookSecret("SANCTIONS_WEBHOOK_SECRET");
+      } catch {
+        res.status(503).json({ error: "Webhook authentication unavailable" });
+        return;
+      }
+      let validSecret = false;
+      try {
+        validSecret = crypto.timingSafeEqual(Buffer.from(providedSecret ?? ""), Buffer.from(webhookSecret));
+      } catch {
+        validSecret = false;
+      }
+      if (!providedSecret || !validSecret) {
         console.warn(
           "[SanctionsWebhook] Rejected: invalid secret from",
           req.ip

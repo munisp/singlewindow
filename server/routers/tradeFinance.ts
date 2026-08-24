@@ -30,7 +30,10 @@ export const tradeFinanceRouter = router({
       hsCode:             z.string(),
       incoterms:          z.string().default("CIF"),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const applicantId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role)
+        ? input.applicantId
+        : String(ctx.user.id);
       const res = await fetchWithResilience(
         `${TRADE_FINANCE_URL}/v1/letters-of-credit`,
         {
@@ -38,7 +41,7 @@ export const tradeFinanceRouter = router({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             declaration_id:      input.declarationId,
-            applicant_id:        input.applicantId,
+            applicant_id:        applicantId,
             applicant_name:      input.applicantName,
             beneficiary_name:    input.beneficiaryName,
             beneficiary_country: input.beneficiaryCountry,
@@ -71,7 +74,10 @@ export const tradeFinanceRouter = router({
       validDays:     z.number().int().min(30).max(730).default(365),
       dutyAmount:    z.number().min(0).default(0),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const traderId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role)
+        ? input.traderId
+        : String(ctx.user.id);
       const res = await fetchWithResilience(
         `${TRADE_FINANCE_URL}/v1/bank-guarantees`,
         {
@@ -79,7 +85,7 @@ export const tradeFinanceRouter = router({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             declaration_id: input.declarationId,
-            trader_id:      input.traderId,
+            trader_id:      traderId,
             issuing_bank:   input.issuingBank,
             guarantee_type: input.guaranteeType,
             amount:         input.amount,
@@ -168,9 +174,12 @@ export const tradeFinanceRouter = router({
 
   listBGByTrader: protectedProcedure
     .input(z.object({ traderId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      const traderId = ["admin", "customs_officer", "finance", "oga_officer"].includes(ctx.user.role)
+        ? input.traderId
+        : String(ctx.user.id);
       const res = await fetchWithResilience(
-        `${TRADE_FINANCE_URL}/v1/bank-guarantees?trader_id=${input.traderId}`,
+        `${TRADE_FINANCE_URL}/v1/bank-guarantees?trader_id=${traderId}`,
         {},
         "trade-finance"
       );

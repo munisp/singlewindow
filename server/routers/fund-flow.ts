@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
+import { assertCan } from "../_core/permify";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import {
@@ -48,16 +49,16 @@ async function getRedis() {
 /**
  * Atomic Redis idempotency guard.
  * Returns true if this key was already processed (duplicate).
- * Fails open (returns false) if Redis is unavailable.
+ * Fails closed if Redis is unavailable.
  */
 async function checkAndSetIdempotency(key: string, ttlSeconds = 86400): Promise<boolean> {
   try {
     const r = await getRedis();
-    if (!r) return false;
+    if (!r) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Idempotency service unavailable" });
     const result = await r.set(`ff:idem:${key}`, "1", { NX: true, EX: ttlSeconds });
     return result === null; // null → key existed → duplicate
   } catch {
-    return false; // fail open
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Idempotency service unavailable" });
   }
 }
 
@@ -69,48 +70,38 @@ async function triggerTemporalWorkflow(
   workflowType: string,
   input: Record<string, unknown>
 ): Promise<{ workflowId: string; runId: string }> {
-  const resp = await fetch(`${WORKFLOW_SERVICE_URL}/workflows/trigger`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workflow_type: workflowType, input }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new TRPCError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Temporal workflow trigger failed: ${body}`,
-    });
-  }
-  return resp.json() as Promise<{ workflowId: string; runId: string }>;
-}
-
-// ─── PERMIFY AUTHORIZATION ────────────────────────────────────────────────────
-
-const PERMIFY_URL = process.env.PERMIFY_URL ?? "http://localhost:3476";
-
-async function checkPermify(
-  subjectType: string,
-  subjectId: string,
-  resource: string,
-  action: string
-): Promise<boolean> {
   try {
-    const resp = await fetch(`${PERMIFY_URL}/v1/permissions/check`, {
+    const resp = await fetch(`${WORKFLOW_SERVICE_URL}/workflows/trigger`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        metadata: { schema_version: "", snap_token: "", depth: 20 },
-        entity: { type: "resource", id: resource },
-        permission: action,
-        subject: { type: subjectType, id: subjectId },
-      }),
-      signal: AbortSignal.timeout(5_000),
+      body: JSON.stringify({ workflow_type: workflowType, input }),
+      signal: AbortSignal.timeout(30_000),
     });
-    const data = (await resp.json()) as { can: string };
-    return data.can === "CHECK_RESULT_ALLOWED";
-  } catch {
-    return true; // fail open — Permify unavailable
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: `Temporal workflow trigger failed: ${body}`,
+      });
+    }
+    return resp.json() as Promise<{ workflowId: string; runId: string }>;
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: "Temporal workflow service unavailable",
+    });
+  }
+}
+
+const fundFlowProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  await assertCan(String(ctx.user.id), "fund_flow", "execute", "execute");
+  return next();
+});
+
+function requireOfficer(role: string): void {
+  if (!["admin", "customs_officer", "oga_officer", "inspector", "finance"].includes(role)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Officer access required" });
   }
 }
 
@@ -119,14 +110,14 @@ async function checkPermify(
 export const fundFlowRouter = router({
 
   // ─── SCENARIO 1: Import Duty Collection ────────────────────────────────────
-  collectImportDuty: protectedProcedure
+  collectImportDuty: fundFlowProcedure
     .input(z.object({
       declarationId: z.number().int().positive(),
       idempotencyKey: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
       const decl = await db.select().from(declarations).where(eq(declarations.id, input.declarationId)).limit(1).then(r => r[0]);
       if (!decl) throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
       if ((decl.status as string) !== "approved")
@@ -147,10 +138,10 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 2: Export Levy Collection ────────────────────────────────────
-  collectExportLevy: protectedProcedure
+  collectExportLevy: fundFlowProcedure
     .input(z.object({
       declarationId: z.number().int().positive(),
-      levyAmountMinor: z.number().int().nonnegative(),
+      levyAmountMinor: z.number().int().positive(),
     }))
     .mutation(async ({ ctx, input }) => {
       const idemKey = `export_levy:${input.declarationId}`;
@@ -165,7 +156,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 3: Duty Drawback Claim ───────────────────────────────────────
-  submitDrawbackClaim: protectedProcedure
+  submitDrawbackClaim: fundFlowProcedure
     .input(z.object({
       declarationId: z.number().int().positive(),
       claimedAmountMinor: z.number().int().positive(),
@@ -174,7 +165,7 @@ export const fundFlowRouter = router({
     .mutation(async ({ ctx, input }) => {
       const claimNumber = `DBC-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
       const [claim] = await db.insert(dutyDrawbackClaims).values({
         claimNumber,
         traderId: ctx.user.id,
@@ -192,14 +183,13 @@ export const fundFlowRouter = router({
       return { claimId: claim.id, status: "submitted" };
     }),
 
-  approveDrawbackClaim: protectedProcedure
+  approveDrawbackClaim: fundFlowProcedure
     .input(z.object({
       claimId: z.number().int().positive(),
       approvedAmountMinor: z.number().int().positive(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only customs officers can approve drawback claims" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `drawback_approve:${input.claimId}:${ctx.user.id}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -214,15 +204,14 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 4: Penalty Levy ───────────────────────────────────────────────
-  issuePenalty: protectedProcedure
+  issuePenalty: fundFlowProcedure
     .input(z.object({
       declarationId: z.number().int().positive(),
       penaltyAmountMinor: z.number().int().positive(),
       reason: z.string().min(10),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `penalty:${input.declarationId}:${ctx.user.id}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -238,7 +227,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 5: Bond Guarantee Lodgement ──────────────────────────────────
-  lodgeBondGuarantee: protectedProcedure
+  lodgeBondGuarantee: fundFlowProcedure
     .input(z.object({
       bondType: z.enum(["general_bond", "specific_bond", "transit_bond"]),
       amountMinor: z.number().int().positive(),
@@ -265,14 +254,13 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 6 & 7: Bond Release / Forfeiture ─────────────────────────────
-  releaseBond: protectedProcedure
+  releaseBond: fundFlowProcedure
     .input(z.object({
       bondId: z.number().int().positive(),
       clearancePermitRef: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `bond_release:${input.bondId}:${input.clearancePermitRef}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -287,14 +275,13 @@ export const fundFlowRouter = router({
       return { workflowId: wf.workflowId, idempotent: false };
     }),
 
-  forfeitBond: protectedProcedure
+  forfeitBond: fundFlowProcedure
     .input(z.object({
       bondId: z.number().int().positive(),
       reason: z.string().min(10),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `bond_forfeiture:${input.bondId}:${ctx.user.id}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -310,7 +297,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 8 & 9: Transit Guarantee ─────────────────────────────────────
-  lodgeTransitGuarantee: protectedProcedure
+  lodgeTransitGuarantee: fundFlowProcedure
     .input(z.object({
       transitId: z.number().int().positive(),
       amountMinor: z.number().int().positive(),
@@ -334,15 +321,14 @@ export const fundFlowRouter = router({
       return { workflowId: wf.workflowId, idempotent: false };
     }),
 
-  releaseTransitGuarantee: protectedProcedure
+  releaseTransitGuarantee: fundFlowProcedure
     .input(z.object({
       transitId: z.number().int().positive(),
       exitConfirmRef: z.string(),
       ucr: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `transit_release:${input.transitId}:${input.exitConfirmRef}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -358,7 +344,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 10: AEO Application Fee ──────────────────────────────────────
-  payAeoFee: protectedProcedure
+  payAeoFee: fundFlowProcedure
     .input(z.object({
       applicationId: z.number().int().positive(),
       feeAmountMinor: z.number().int().positive(),
@@ -377,7 +363,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 11: Free Zone Entry Fee ──────────────────────────────────────
-  payFreeZoneEntryFee: protectedProcedure
+  payFreeZoneEntryFee: fundFlowProcedure
     .input(z.object({
       admissionId: z.number().int().positive(),
       feeAmountMinor: z.number().int().positive(),
@@ -396,7 +382,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 12: Warehouse Storage Fee ────────────────────────────────────
-  payWarehouseStorageFee: protectedProcedure
+  payWarehouseStorageFee: fundFlowProcedure
     .input(z.object({
       inventoryId: z.number().int().positive(),
       feeAmountMinor: z.number().int().positive(),
@@ -417,7 +403,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 13: Ex-Bond Duty Payment ─────────────────────────────────────
-  payExBondDuty: protectedProcedure
+  payExBondDuty: fundFlowProcedure
     .input(z.object({
       permitId: z.number().int().positive(),
       dutyAmountMinor: z.number().int().positive(),
@@ -436,7 +422,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 14: Post-Clearance Audit Recovery ────────────────────────────
-  initiateAuditRecovery: protectedProcedure
+  initiateAuditRecovery: fundFlowProcedure
     .input(z.object({
       auditId: z.number().int().positive(),
       declarationId: z.number().int().positive(),
@@ -445,8 +431,7 @@ export const fundFlowRouter = router({
       paymentDeadline: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `audit_recovery:${input.auditId}:${input.demandNoticeRef}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -464,15 +449,14 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 15: Overpayment Refund ───────────────────────────────────────
-  initiateOverpaymentRefund: protectedProcedure
+  initiateOverpaymentRefund: fundFlowProcedure
     .input(z.object({
       auditId: z.number().int().positive(),
       declarationId: z.number().int().positive(),
       overpaidMinor: z.number().int().positive(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `overpayment_refund:${input.auditId}:${ctx.user.id}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -488,7 +472,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 16: OGA Permit Fee ───────────────────────────────────────────
-  payOgaPermitFee: protectedProcedure
+  payOgaPermitFee: fundFlowProcedure
     .input(z.object({
       permitApplicationId: z.number().int().positive(),
       feeAmountMinor: z.number().int().positive(),
@@ -507,15 +491,14 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 17: Sanctions-Blocked Payment Reversal ───────────────────────
-  reverseSanctionedPayment: protectedProcedure
+  reverseSanctionedPayment: fundFlowProcedure
     .input(z.object({
       declarationId: z.number().int().positive(),
       reservedTigerBeetleTxId: z.string(),
       sanctionsRef: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `sanctions_reversal:${input.declarationId}:${input.sanctionsRef}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -531,14 +514,13 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 18: Batch Payment Settlement ─────────────────────────────────
-  triggerBatchSettlement: protectedProcedure
+  triggerBatchSettlement: fundFlowProcedure
     .input(z.object({
       batchId: z.string(),
       settlementDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `batch_settlement:${input.batchId}`;
       if (await checkAndSetIdempotency(idemKey))
@@ -568,14 +550,13 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 19: Revenue Reconciliation ───────────────────────────────────
-  triggerRevenueReconciliation: protectedProcedure
+  triggerRevenueReconciliation: fundFlowProcedure
     .input(z.object({
       reconciliationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       alertThresholdMinor: z.number().int().nonnegative().default(100_000),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "admin")
-        throw new TRPCError({ code: "FORBIDDEN" });
+      requireOfficer(ctx.user.role);
 
       const idemKey = `revenue_reconciliation:${input.reconciliationDate}`;
       if (await checkAndSetIdempotency(idemKey, 3600)) // 1 hour TTL — allow re-run same day
@@ -590,11 +571,13 @@ export const fundFlowRouter = router({
     }),
 
   // ─── SCENARIO 20: Trader Account Provisioning ──────────────────────────────
-  provisionTraderAccount: protectedProcedure
+  provisionTraderAccount: fundFlowProcedure
     .input(z.object({
       currency: z.string().length(3).default("NGN"),
     }))
     .mutation(async ({ ctx, input }) => {
+      requireOfficer(ctx.user.role);
+
       const idemKey = `account_provisioning:${ctx.user.id}:${input.currency}`;
       if (await checkAndSetIdempotency(idemKey))
         return { idempotent: true, message: "Account already provisioned" };
@@ -608,7 +591,7 @@ export const fundFlowRouter = router({
     }),
 
   // ─── QUERY: Fund Flow Status ────────────────────────────────────────────────
-  getWorkflowStatus: protectedProcedure
+  getWorkflowStatus: fundFlowProcedure
     .input(z.object({ workflowId: z.string() }))
     .query(async ({ input }) => {
       const resp = await fetch(

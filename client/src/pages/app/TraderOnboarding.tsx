@@ -621,46 +621,6 @@ const ROLE_OPTIONS = [
     border: "border-blue-400/30",
     portal: "/app/trader",
   },
-  {
-    value: "customs_officer" as const,
-    label: "Customs Officer",
-    description: "Review declarations, assign risk lanes, issue clearances",
-    icon: Shield,
-    color: "text-amber-400",
-    bg: "bg-amber-400/10",
-    border: "border-amber-400/30",
-    portal: "/app/customs",
-  },
-  {
-    value: "oga_officer" as const,
-    label: "Other Government Agency (OGA) Officer",
-    description: "Review and approve permits, licences, and certificates",
-    icon: ClipboardList,
-    color: "text-purple-400",
-    bg: "bg-purple-400/10",
-    border: "border-purple-400/30",
-    portal: "/app/oga",
-  },
-  {
-    value: "inspector" as const,
-    label: "Port Inspector",
-    description: "Conduct physical inspections, manage cargo tracking",
-    icon: FileCheck,
-    color: "text-green-400",
-    bg: "bg-green-400/10",
-    border: "border-green-400/30",
-    portal: "/app/geo/heatmap",
-  },
-  {
-    value: "finance" as const,
-    label: "Finance / Revenue Officer",
-    description: "Monitor duty revenue, manage payments and drawbacks",
-    icon: Landmark,
-    color: "text-emerald-400",
-    bg: "bg-emerald-400/10",
-    border: "border-emerald-400/30",
-    portal: "/app/finance",
-  },
 ] as const;
 
 type SelfAssignableRole = typeof ROLE_OPTIONS[number]["value"];
@@ -815,12 +775,6 @@ export default function TraderOnboarding() {
               <RoleSelectionStep
                 onSelect={(role) => {
                   setRoleSelected(role);
-                  // Non-trader roles skip the 5-step wizard and go straight to their portal
-                  if (role !== "user") {
-                    const portal = ROLE_OPTIONS.find(r => r.value === role)?.portal ?? "/app/trader";
-                    toast.success("Role confirmed!", { description: `Redirecting you to the ${role.replace("_", " ")} portal.` });
-                    setTimeout(() => navigate(portal), 1200);
-                  }
                 }}
               />
             </CardContent>

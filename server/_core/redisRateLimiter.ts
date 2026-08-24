@@ -191,15 +191,16 @@ export async function revokeSession(sessionId: string): Promise<void> {
 /**
  * Checks if a session token has been revoked.
  * Returns true if the session is blacklisted (should be rejected).
+ * Throws if Redis cannot be queried so callers cannot accept an unchecked session.
  */
 export async function isSessionRevoked(sessionId: string): Promise<boolean> {
   const redis = getRedis();
-  if (!redis) return false; // fail-open when Redis is unavailable
+  if (!redis) throw new Error("Redis unavailable");
   try {
     const val = await redis.get(`revoked:${sessionId}`);
     return val === "1";
-  } catch {
-    return false;
+  } catch (error) {
+    throw new Error("Redis session revocation check failed", { cause: error });
   }
 }
 

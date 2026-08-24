@@ -12,15 +12,20 @@ import { protectedProcedure, router } from "../_core/trpc";
 const ASEAN_SVC = process.env.ASEAN_SW_SERVICE_URL ?? "http://localhost:8096";
 
 async function aseanFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${ASEAN_SVC}${path}`, {
-    ...opts,
-    headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `asean-sw-service error: ${body}` });
+  try {
+    const res = await fetch(`${ASEAN_SVC}${path}`, {
+      ...opts,
+      headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `asean-sw-service error: ${body}` });
+    }
+    return res.json();
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "ASEAN SW service unavailable" });
   }
-  return res.json();
 }
 
 // ASEAN member states
@@ -55,11 +60,7 @@ export function classifyConnectivity(score: number): "excellent" | "good" | "deg
 export const aseanSwRouter = router({
   /** Get all ASEAN member state bilateral connections and their status */
   getConnections: protectedProcedure.query(async () => {
-    try {
-      return await aseanFetch("/api/asean/connections");
-    } catch {
-      return { connections: [], total: 0, active: 0, _offline: true };
-    }
+    return aseanFetch("/api/asean/connections");
   }),
 
   /** Ping a specific ASEAN member state gateway to test connectivity */
@@ -118,11 +119,7 @@ export const aseanSwRouter = router({
     .input(z.object({ destinationCode: z.string().length(2).optional() }).optional())
     .query(async ({ input }) => {
       const qs = input?.destinationCode ? `?destination=${input.destinationCode.toUpperCase()}` : "";
-      try {
-        return await aseanFetch(`/api/asean/messages${qs}`);
-      } catch {
-        return { messages: [], total: 0, _offline: true };
-      }
+      return aseanFetch(`/api/asean/messages${qs}`);
     }),
 
   /** List inbound G2G messages received from member states */
@@ -130,27 +127,7 @@ export const aseanSwRouter = router({
     .input(z.object({ sourceCode: z.string().length(2).optional() }).optional())
     .query(async ({ input }) => {
       const qs = input?.sourceCode ? `?source=${input.sourceCode.toUpperCase()}` : "";
-      try {
-        return await aseanFetch(`/api/asean/messages/inbound${qs}`);
-      } catch {
-        const messageTypes = ["ACDD", "SSTC", "ATIGA"] as const;
-        const sources = ["SG", "MY", "TH", "ID", "VN"];
-        const statuses = ["pending_ack", "accepted", "rejected"];
-        return {
-          messages: Array.from({ length: 8 }, (_, i) => ({
-            id: `inbound-${i + 1}`,
-            message_ref: `INBOUND-${1000 + i}`,
-            source_code: sources[i % sources.length],
-            message_type: messageTypes[i % messageTypes.length],
-            ucr: `UCR-${2000 + i}`,
-            status: statuses[i % statuses.length],
-            received_at: new Date(Date.now() - i * 3600_000).toISOString(),
-            ack_reference: statuses[i % statuses.length] !== "pending_ack" ? `ACK-${3000 + i}` : undefined,
-          })),
-          total: 8,
-          _offline: true,
-        };
-      }
+      return aseanFetch(`/api/asean/messages/inbound${qs}`);
     }),
 
   /** Acknowledge an inbound G2G message from a member state */
@@ -161,50 +138,22 @@ export const aseanSwRouter = router({
       reason: z.string().max(500).optional(),
     }))
     .mutation(async ({ input }) => {
-      try {
-        return await aseanFetch(`/api/asean/messages/${input.messageId}/ack`, {
-          method: "POST",
-          body: JSON.stringify({ status: input.status, reason: input.reason ?? "" }),
-        });
-      } catch {
-        return {
-          messageId: input.messageId,
-          status: input.status,
-          ackReference: `ACK-${Date.now()}`,
-          acknowledgedAt: new Date().toISOString(),
-          _offline: true,
-        };
-      }
+      return aseanFetch(`/api/asean/messages/${input.messageId}/ack`, {
+        method: "POST",
+        body: JSON.stringify({ status: input.status, reason: input.reason ?? "" }),
+      });
     }),
 
   /** Retry a failed outbound G2G message */
   retryMessage: protectedProcedure
     .input(z.object({ messageId: z.string().min(3) }))
     .mutation(async ({ input }) => {
-      try {
-        return await aseanFetch(`/api/asean/messages/${input.messageId}/retry`, {
-          method: "POST",
-        });
-      } catch {
-        return { messageId: input.messageId, status: "queued", retryAt: new Date().toISOString(), _offline: true };
-      }
+      return aseanFetch(`/api/asean/messages/${input.messageId}/retry`, { method: "POST" });
     }),
 
   /** Get detailed connectivity metrics for all 10 ASEAN member states */
   getConnectivityStatus: protectedProcedure.query(async () => {
-    try {
-      return await aseanFetch("/api/asean/connectivity");
-    } catch {
-      return {
-        members: ASEAN_MEMBERS.map((m) => ({
-          ...m,
-          score: computeConnectivityScore(m.uptime, m.latency_ms),
-          tier: classifyConnectivity(computeConnectivityScore(m.uptime, m.latency_ms)),
-        })),
-        checkedAt: new Date().toISOString(),
-        _offline: true,
-      };
-    }
+    return aseanFetch("/api/asean/connectivity");
   }),
 
   /** Handle inbound acknowledgement from a member state gateway */
@@ -229,11 +178,7 @@ export const aseanSwRouter = router({
 
   /** Get message statistics for the admin dashboard */
   getStats: protectedProcedure.query(async () => {
-    try {
-      return await aseanFetch("/api/asean/stats");
-    } catch {
-      return { total: 0, by_status: {}, _offline: true };
-    }
+    return aseanFetch("/api/asean/stats");
   }),
 
   /**
@@ -257,16 +202,14 @@ export const aseanSwRouter = router({
     const results = await Promise.allSettled(
       MEMBER_ENDPOINTS.map(async (m) => {
         if (!m.url) {
-          // No endpoint configured — use static data from ASEAN_MEMBERS
-          const staticMember = ASEAN_MEMBERS.find((s) => s.code === m.code);
           return {
             code: m.code,
             name: m.name,
-            status: (staticMember?.status === "active" ? "online" : "maintenance") as string,
-            latencyMs: staticMember?.latency_ms ?? null,
+            status: "unavailable",
+            latencyMs: null as number | null,
             httpStatus: null as number | null,
             checkedAt: new Date().toISOString(),
-            source: "static",
+            source: "unavailable",
           };
         }
         const start = Date.now();

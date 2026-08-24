@@ -65,10 +65,10 @@ interface Playbook {
 export default function WazuhSecurityEvents() {
   const [triggeringPlaybook, setTriggeringPlaybook] = useState<string | null>(null);
 
-  const { data: alertsData, isLoading: loadingAlerts, refetch: refetchAlerts } = trpc.wazuh.getAlerts.useQuery();
-  const { data: agentsData, isLoading: loadingAgents } = trpc.wazuh.getAgents.useQuery();
-  const { data: playbooksData, isLoading: loadingPlaybooks } = trpc.wazuh.listPlaybooks.useQuery();
-  const { data: secScore } = trpc.wazuh.getSecurityScore.useQuery();
+  const { data: alertsData, isLoading: loadingAlerts, isError: alertsError, refetch: refetchAlerts } = trpc.wazuh.getAlerts.useQuery();
+  const { data: agentsData, isLoading: loadingAgents, isError: agentsError } = trpc.wazuh.getAgents.useQuery();
+  const { data: playbooksData, isLoading: loadingPlaybooks, isError: playbooksError } = trpc.wazuh.listPlaybooks.useQuery();
+  const { data: secScore, isError: scoreError } = trpc.wazuh.getSecurityScore.useQuery();
 
   const triggerPlaybook = trpc.wazuh.triggerPlaybook.useMutation({
     onSuccess: (data) => {
@@ -86,10 +86,14 @@ export default function WazuhSecurityEvents() {
   const playbooks: Playbook[] = (playbooksData as { playbooks?: Playbook[] } | undefined)?.playbooks ?? [];
 
   const score = secScore as { score?: number; grade?: string; unresolved_alerts?: number } | undefined;
+  const wazuhUnavailable = alertsError || agentsError || playbooksError || scoreError;
 
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
+        {wazuhUnavailable && (
+          <p className="text-sm text-amber-700">Wazuh data unavailable — empty panels do not indicate a clean security state.</p>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -107,13 +111,13 @@ export default function WazuhSecurityEvents() {
         </div>
 
         {/* Security Score */}
-        {score && (
+        {score ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="bg-card border-border">
               <CardContent className="p-4 flex items-center gap-3">
                 <Activity className="h-5 w-5 text-blue-400" />
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{score.score ?? 0}</p>
+                  <p className="text-2xl font-bold text-foreground">{score.score ?? "—"}</p>
                   <p className="text-xs text-muted-foreground">Security Score</p>
                 </div>
               </CardContent>
@@ -131,7 +135,7 @@ export default function WazuhSecurityEvents() {
               <CardContent className="p-4 flex items-center gap-3">
                 <AlertTriangle className="h-5 w-5 text-red-400" />
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{score.unresolved_alerts ?? 0}</p>
+                  <p className="text-2xl font-bold text-foreground">{score.unresolved_alerts ?? "—"}</p>
                   <p className="text-xs text-muted-foreground">Unresolved Alerts</p>
                 </div>
               </CardContent>
@@ -146,7 +150,9 @@ export default function WazuhSecurityEvents() {
               </CardContent>
             </Card>
           </div>
-        )}
+        ) : scoreError ? (
+          <p className="text-sm text-amber-700">Security score unavailable.</p>
+        ) : null}
 
         <Tabs defaultValue="alerts">
           <TabsList>
@@ -159,6 +165,8 @@ export default function WazuhSecurityEvents() {
           <TabsContent value="alerts" className="mt-4 space-y-3">
             {loadingAlerts ? (
               <p className="text-muted-foreground text-sm">Loading alerts…</p>
+            ) : alertsError ? (
+              <p className="text-sm text-amber-700">Security alerts unavailable.</p>
             ) : alerts.length === 0 ? (
               <p className="text-muted-foreground text-sm">No security alerts.</p>
             ) : (
@@ -196,6 +204,8 @@ export default function WazuhSecurityEvents() {
           <TabsContent value="agents" className="mt-4 space-y-3">
             {loadingAgents ? (
               <p className="text-muted-foreground text-sm">Loading agents…</p>
+            ) : agentsError ? (
+              <p className="text-sm text-amber-700">Wazuh agents unavailable.</p>
             ) : agents.length === 0 ? (
               <p className="text-muted-foreground text-sm">No agents registered.</p>
             ) : (
@@ -223,6 +233,8 @@ export default function WazuhSecurityEvents() {
           <TabsContent value="playbooks" className="mt-4 space-y-3">
             {loadingPlaybooks ? (
               <p className="text-muted-foreground text-sm">Loading playbooks…</p>
+            ) : playbooksError ? (
+              <p className="text-sm text-amber-700">Wazuh playbooks unavailable.</p>
             ) : playbooks.length === 0 ? (
               <p className="text-muted-foreground text-sm">No playbooks available.</p>
             ) : (

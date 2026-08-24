@@ -98,6 +98,7 @@ export default function AseanSingleWindow() {
   const inboundQ = trpc.aseanSw.listInboundMessages.useQuery();
   const statsQ = trpc.aseanSw.getStats.useQuery();
   const connectivityQ = trpc.aseanSw.getConnectivityStatus.useQuery();
+  const aseanUnavailable = connectionsQ.isError || messagesQ.isError || inboundQ.isError || statsQ.isError || connectivityQ.isError;
 
   const testMut = trpc.aseanSw.testConnection.useMutation({
     onSuccess: (data) => {
@@ -159,6 +160,9 @@ export default function AseanSingleWindow() {
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
+        {aseanUnavailable && (
+          <p className="text-sm text-amber-700">ASEAN Single Window integration unavailable — empty results are not being treated as healthy.</p>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -183,10 +187,10 @@ export default function AseanSingleWindow() {
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Active Connections", value: `${connections.filter(c => c.status === "active").length}/10`, icon: <Wifi className="h-5 w-5 text-emerald-400" /> },
-            { label: "Total Messages", value: stats?.total ?? 0, icon: <FileText className="h-5 w-5 text-blue-400" /> },
-            { label: "Pending Inbound Acks", value: inbound.filter(m => m.status === "pending_ack").length, icon: <ArrowDownToLine className="h-5 w-5 text-yellow-400" /> },
-            { label: "Failed/Rejected", value: (stats?.by_status?.failed ?? 0) + (stats?.by_status?.rejected ?? 0), icon: <XCircle className="h-5 w-5 text-red-400" /> },
+            { label: "Active Connections", value: aseanUnavailable ? "—" : `${connections.filter(c => c.status === "active").length}/10`, icon: <Wifi className="h-5 w-5 text-emerald-400" /> },
+            { label: "Total Messages", value: aseanUnavailable ? "—" : stats?.total ?? "—", icon: <FileText className="h-5 w-5 text-blue-400" /> },
+            { label: "Pending Inbound Acks", value: aseanUnavailable ? "—" : inbound.filter(m => m.status === "pending_ack").length, icon: <ArrowDownToLine className="h-5 w-5 text-yellow-400" /> },
+            { label: "Failed/Rejected", value: aseanUnavailable ? "—" : (stats?.by_status?.failed ?? 0) + (stats?.by_status?.rejected ?? 0), icon: <XCircle className="h-5 w-5 text-red-400" /> },
           ].map((s) => (
             <Card key={s.label} className="bg-card border-border">
               <CardContent className="pt-4">
@@ -217,7 +221,9 @@ export default function AseanSingleWindow() {
                 <Table>
                   <TableHeader><TableRow><TableHead>Ref</TableHead><TableHead>Destination</TableHead><TableHead>Doc Type</TableHead><TableHead>UCR</TableHead><TableHead>Status</TableHead><TableHead>Sent At</TableHead><TableHead>Ack Ref</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {messages.length === 0 ? (
+                    {aseanUnavailable ? (
+                      <TableRow><TableCell colSpan={8} className="text-center text-amber-700 py-8">Outbound message data unavailable.</TableCell></TableRow>
+                    ) : messages.length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No outbound messages yet</TableCell></TableRow>
                     ) : messages.map((m) => (
                       <TableRow key={m.id}>
@@ -244,7 +250,9 @@ export default function AseanSingleWindow() {
                 <Table>
                   <TableHeader><TableRow><TableHead>Ref</TableHead><TableHead>Source</TableHead><TableHead>Doc Type</TableHead><TableHead>UCR</TableHead><TableHead>Status</TableHead><TableHead>Received At</TableHead><TableHead>Ack Ref</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {inbound.length === 0 ? (
+                    {aseanUnavailable ? (
+                      <TableRow><TableCell colSpan={8} className="text-center text-amber-700 py-8">Inbound message data unavailable.</TableCell></TableRow>
+                    ) : inbound.length === 0 ? (
                       <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No inbound messages</TableCell></TableRow>
                     ) : inbound.map((m) => (
                       <TableRow key={m.id}>
@@ -266,8 +274,10 @@ export default function AseanSingleWindow() {
 
           <TabsContent value="connectivity">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {connectivity.length === 0 ? (
-                <div className="col-span-2 text-center text-muted-foreground py-12">Loading connectivity data…</div>
+              {aseanUnavailable ? (
+                <div className="col-span-2 text-center text-amber-700 py-12">Connectivity data unavailable.</div>
+              ) : connectivity.length === 0 ? (
+                <div className="col-span-2 text-center text-muted-foreground py-12">No connectivity data.</div>
               ) : connectivity.map((m: any) => (
                 <Card key={m.code} className="bg-card border-border">
                   <CardContent className="p-4 flex items-center justify-between">

@@ -231,11 +231,9 @@ export const onboardingRouter = router({
         }
 
         return { success: true, nextStep: isLastStep ? null : nextStep, isComplete: isLastStep };
-      } catch {
-        // DB not available — return success for sandbox
-        const stepIdx = STEPS.indexOf(input.step as OnboardingStep);
-        const nextStep = stepIdx < STEPS.length - 1 ? STEPS[stepIdx + 1] : null;
-        return { success: true, nextStep, isComplete: stepIdx === STEPS.length - 1 };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Onboarding progress could not be saved" });
       }
     }),
 
@@ -245,13 +243,14 @@ export const onboardingRouter = router({
   resetOnboarding: protectedProcedure.mutation(async ({ ctx }) => {
     try {
       const db = await (await import("../db")).getDb();
-      if (!db) return { success: true };
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
       const { onboardingProgress } = await import("../../drizzle/schema");
       const { eq } = await import("drizzle-orm");
       await db.delete(onboardingProgress).where(eq(onboardingProgress.userId, ctx.user.id));
       return { success: true };
-    } catch {
-      return { success: true };
+    } catch (error) {
+      if (error instanceof TRPCError) throw error;
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Onboarding reset failed" });
     }
   }),
 
@@ -271,12 +270,12 @@ export const onboardingRouter = router({
    */
   selectRole: protectedProcedure
     .input(z.object({
-      role: z.enum(["user", "customs_officer", "oga_officer", "inspector", "finance"]),
+      role: z.enum(["user"]),
     }))
     .mutation(async ({ ctx, input }) => {
       try {
         const db = await (await import("../db")).getDb();
-        if (!db) return { success: true, role: input.role };
+        if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
         const { users } = await import("../../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         await db.update(users)
@@ -298,10 +297,12 @@ export const onboardingRouter = router({
           await writeRelationship("organisation", "main", relation, "user", userId);
         } catch (permifyErr) {
           console.warn("[Permify] Failed to seed role relation:", permifyErr);
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Authorization setup unavailable" });
         }
         return { success: true, role: input.role };
-      } catch {
-        return { success: true, role: input.role };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Role selection failed" });
       }
     }),
 
