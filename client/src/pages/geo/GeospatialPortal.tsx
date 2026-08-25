@@ -13,7 +13,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { trpc } from "../../utils/trpc";
+import { trpc } from "@/lib/trpc";
 
 // Dynamic imports to avoid SSR issues with map libraries
 let maplibregl: any = null;
@@ -35,6 +35,40 @@ interface Vessel {
   declaration_ref?: string;
   eta?: string;
   destination_port?: string;
+}
+
+type VesselTrackingRow = {
+  id: number;
+  mmsi: string;
+  vesselName: string | null;
+  imoNumber: string | null;
+  latitude: number;
+  longitude: number;
+  speed: number | null;
+  heading: number | null;
+  destinationPort: string | null;
+  eta: Date | null;
+  cargoType: string | null;
+  flagCountry: string | null;
+  recordedAt: Date;
+};
+
+function toMapVessel(row: VesselTrackingRow): Vessel {
+  return {
+    id: String(row.id),
+    name: row.vesselName ?? row.mmsi,
+    mmsi: row.mmsi,
+    imo: row.imoNumber ?? "",
+    lat: row.latitude,
+    lng: row.longitude,
+    heading: row.heading ?? 0,
+    speed: row.speed ?? 0,
+    status: "underway",
+    cargo_type: row.cargoType ?? "unknown",
+    declaration_ref: row.destinationPort ?? undefined,
+    destination_port: row.destinationPort ?? undefined,
+    eta: row.eta?.toISOString(),
+  };
 }
 
 interface Port {
@@ -90,12 +124,11 @@ export default function GeospatialPortal() {
   const [cesiumLoaded, setCesiumLoaded] = useState(false);
 
   // tRPC data
-  const vessels = trpc.geospatial.getVesselPositions.useQuery(
-    { port: "NGAPP", radius_km: 200 },
-    { refetchInterval: 30000 }
+  const vessels = trpc.geospatial.listVessels.useQuery(
+    { destinationPort: "NGAPP", limit: 200 },
+    { refetchInterval: 30_000 }
   );
-  const geofences = trpc.geofences.list.useQuery({ limit: 50 });
-  const riskZones = trpc.geospatial.getRiskZones.useQuery(undefined, { enabled: activeLayers.has("risk-zones") });
+  const geofences = trpc.geofences.list.useQuery({ status: "active" });
 
   // ─── Load MapLibre GL JS ───────────────────────────────────────────────────
 
@@ -239,7 +272,7 @@ export default function GeospatialPortal() {
 
   useEffect(() => {
     if (!mapLoaded || !map2DRef.current || !vessels.data) return;
-    updateVesselLayer(vessels.data as Vessel[]);
+    updateVesselLayer((vessels.data as VesselTrackingRow[]).map(toMapVessel));
   }, [vessels.data, mapLoaded]);
 
   useEffect(() => {
@@ -417,7 +450,7 @@ export default function GeospatialPortal() {
     const toRemove = viewer.entities.values.filter((e: any) => e.id?.startsWith("vessel-"));
     toRemove.forEach((e: any) => viewer.entities.remove(e));
 
-    (vessels.data as Vessel[]).forEach(vessel => {
+    (vessels.data as VesselTrackingRow[]).map(toMapVessel).forEach(vessel => {
       viewer.entities.add({
         id: `vessel-${vessel.id}`,
         name: vessel.name,

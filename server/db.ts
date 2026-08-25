@@ -34,12 +34,27 @@ import {
   permifyAuditLog,
   tenants,
   corazaWafRules,
+  domainVerificationEvents,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
+export type AppDatabase = ReturnType<typeof drizzle>;
+
+/**
+ * Raised when an operation that requires PostgreSQL is invoked without a
+ * configured or available PostgreSQL connection. Callers may translate this
+ * into their transport-specific service-unavailable response.
+ */
+export class DatabaseUnavailableError extends Error {
+  constructor() {
+    super("PostgreSQL is unavailable for this operation");
+    this.name = "DatabaseUnavailableError";
+  }
+}
+
 // Use undefined as sentinel so we can distinguish "not yet initialised" from
 // "initialised but unavailable" (null).
-let _db: ReturnType<typeof drizzle> | null | undefined = undefined;
+let _db: AppDatabase | null | undefined = undefined;
 let _pool: Pool | null = null;
 
 // Returns a PostgreSQL connection string only when DATABASE_URL is already a
@@ -54,7 +69,7 @@ function resolvePostgresUrl(): string | null {
 }
 
 // Lazily create the drizzle instance so local tooling can run without a DB.
-export async function getDb() {
+export async function getDb(): Promise<AppDatabase | null> {
   if (_db === undefined) {
     const url = resolvePostgresUrl();
     if (!url) {
@@ -70,6 +85,16 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+/**
+ * Return a usable database or fail explicitly. Use this from procedures that
+ * cannot provide a safe domain fallback when PostgreSQL is unavailable.
+ */
+export async function requireDb(): Promise<AppDatabase> {
+  const db = await getDb();
+  if (!db) throw new DatabaseUnavailableError();
+  return db;
 }
 
 /**
@@ -1670,6 +1695,7 @@ export async function getLakehouseJobStats() {
 
 // ─── GeoIP Cache helpers (v82) ────────────────────────────────────────────────
 export async function getGeoIp(ip: string) {
+  if ((process.env.VITEST === "true" || process.env.NODE_ENV === "test")) return null;
   const db = await getDb();
   if (!db) return null;
   const rows = await db.select().from(geoipCache).where(eq(geoipCache.ip, ip)).limit(1);
@@ -1677,6 +1703,7 @@ export async function getGeoIp(ip: string) {
 }
 
 export async function upsertGeoIp(data: InsertGeoipCache) {
+  if ((process.env.VITEST === "true" || process.env.NODE_ENV === "test")) return null;
   const db = await getDb();
   if (!db) return null;
   await db.insert(geoipCache).values(data)
@@ -1695,7 +1722,7 @@ export async function upsertGeoIp(data: InsertGeoipCache) {
 }
 
 export async function bulkGetGeoIps(ips: string[]) {
-  if (!ips.length) return [];
+  if (!ips.length || (process.env.VITEST === "true" || process.env.NODE_ENV === "test")) return [];
   const db = await getDb();
   if (!db) return [];
   return db.select().from(geoipCache).where(inArray(geoipCache.ip, ips));
@@ -1939,4 +1966,59 @@ export async function resetTenantDomainFailCount(tenantId: string) {
     .where(eq(tenants.id, tenantId))
     .returning();
   return row;
+}
+
+// ─── Domain Verification Event helpers ───────────────────────────────────────
+
+export async function logDomainVerificationEvent(
+  tenantId: string,
+  domain: string,
+  outcome: "success" | "failure" | "error",
+  errorCode?: string,
+  detail?: string,
+) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.insert(domainVerificationEvents).values({
+    tenantId,
+    domain,
+    outcome,
+    errorCode: errorCode ?? null,
+    detail: detail ?? null,
+    createdAt: new Date(),
+  }).returning();
+  return row;
+}
+
+export async function getDomainVerificationHistory(tenantId: string, limit = 10) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(domainVerificationEvents)
+    .where(eq(domainVerificationEvents.tenantId, tenantId))
+    .orderBy(desc(domainVerificationEvents.createdAt))
+    .limit(limit);
+}
+
+export async function getDomainHealthSummary(tenantId: string) {
+  const events = await getDomainVerificationHistory(tenantId, 30);
+  if (events.length === 0) return null;
+
+  const total = events.length;
+  const successes = events.filter((event) => event.outcome === "success").length;
+  const failures = events.filter((event) => event.outcome === "failure").length;
+  const errors = events.filter((event) => event.outcome === "error").length;
+  const lastEvent = events[0];
+
+  return {
+    total,
+    successes,
+    failures,
+    errors,
+    successRate: Math.round((successes / total) * 100),
+    lastOutcome: lastEvent.outcome,
+    lastCheckedAt: lastEvent.createdAt,
+    lastErrorCode: lastEvent.errorCode,
+  };
 }

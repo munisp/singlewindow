@@ -76,12 +76,17 @@ interface WorkflowRecord {
 }
 
 async function saveWorkflowToDb(wf: WorkflowRecord) {
+  if (!wf.runId) {
+    console.warn(`[temporal] Skipping database save for ${wf.workflowId}: missing runId`);
+    return;
+  }
+
   const db = await getDb();
   if (!db) return;
   try {
     const row = {
       workflowId: wf.workflowId,
-      runId: wf.runId ?? null,
+      runId: wf.runId,
       workflowType: wf.workflowType ?? "DeclarationClearanceWorkflow",
       declarationId: typeof wf.declarationId === "number" ? wf.declarationId : null,
       status: (wf.status ?? "RUNNING") as any,

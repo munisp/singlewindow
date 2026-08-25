@@ -16,7 +16,7 @@
 
 import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
-import { getDb } from "../db";
+import { requireDb } from "../db";
 
 // ─── PCI-DSS v4.0 Requirements ───────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ export const complianceReportingRouter = router({
   runPCIDSSAudit: protectedProcedure
     .input(z.object({ scope: z.enum(["full", "cardholder-data-environment", "network"]).default("full") }))
     .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
+      const db = await requireDb();
       const auditId = crypto.randomUUID();
       const results: any[] = [];
       let passCount = 0;
@@ -109,7 +109,7 @@ export const complianceReportingRouter = router({
       };
 
       // Persist audit result
-      await db.execute(
+      await db.$client.query(
         `INSERT INTO compliance_audit_results (id, standard, scope, score, status, report_data, audited_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())
          ON CONFLICT (id) DO NOTHING`,
@@ -124,7 +124,7 @@ export const complianceReportingRouter = router({
   runSOC2Audit: protectedProcedure
     .input(z.object({ type: z.enum(["Type I", "Type II"]).default("Type II") }))
     .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
+      const db = await requireDb();
       const auditId = crypto.randomUUID();
       const results: any[] = [];
       let passCount = 0;
@@ -157,7 +157,7 @@ export const complianceReportingRouter = router({
         audited_at: new Date().toISOString(),
       };
 
-      await db.execute(
+      await db.$client.query(
         `INSERT INTO compliance_audit_results (id, standard, scope, score, status, report_data, audited_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
         [auditId, `SOC 2 ${input.type}`, "full", score, report.status, JSON.stringify(report)]
@@ -177,12 +177,12 @@ export const complianceReportingRouter = router({
       reason: z.string().optional(),
     }))
     .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
+      const db = await requireDb();
       const requestId = crypto.randomUUID();
       const deadline = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days (NDPR requirement)
 
       // Log the request
-      await db.execute(
+      await db.$client.query(
         `INSERT INTO data_subject_requests (id, request_type, subject_id, subject_email, regulation, reason, status, deadline, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, NOW())`,
         [requestId, input.request_type, input.subject_id, input.subject_email, input.regulation, input.reason, deadline]
@@ -194,10 +194,10 @@ export const complianceReportingRouter = router({
         case "ACCESS": {
           // Collect all personal data for the subject
           const [declarations, payments, kyc, auditLogs] = await Promise.all([
-            db.query(`SELECT id, declaration_number, status, created_at FROM declarations WHERE trader_id = $1 LIMIT 100`, [input.subject_id]),
-            db.query(`SELECT id, amount, status, created_at FROM payments WHERE trader_id = $1 LIMIT 100`, [input.subject_id]),
-            db.query(`SELECT id, status, created_at FROM kyc_records WHERE user_id = $1 LIMIT 10`, [input.subject_id]),
-            db.query(`SELECT id, event_type, created_at FROM audit_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`, [input.subject_id]),
+            db.$client.query(`SELECT id, declaration_number, status, created_at FROM declarations WHERE trader_id = $1 LIMIT 100`, [input.subject_id]),
+            db.$client.query(`SELECT id, amount, status, created_at FROM payments WHERE trader_id = $1 LIMIT 100`, [input.subject_id]),
+            db.$client.query(`SELECT id, status, created_at FROM kyc_records WHERE user_id = $1 LIMIT 10`, [input.subject_id]),
+            db.$client.query(`SELECT id, event_type, created_at FROM audit_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`, [input.subject_id]),
           ]);
           responseData = {
             personal_data: {
@@ -220,7 +220,7 @@ export const complianceReportingRouter = router({
         case "ERASURE": {
           // Right to erasure — anonymize non-legally-required data
           // Note: Trade declarations cannot be erased (legal retention requirement)
-          await db.execute(
+          await db.$client.query(
             `UPDATE users SET email = $1, phone = NULL, address = NULL, updated_at = NOW()
              WHERE id = $2`,
             [`anonymized-${requestId}@tradegateway.ng`, input.subject_id]
@@ -236,8 +236,8 @@ export const complianceReportingRouter = router({
         case "PORTABILITY": {
           // Export data in machine-readable format (JSON)
           const [declarations, payments] = await Promise.all([
-            db.query(`SELECT * FROM declarations WHERE trader_id = $1`, [input.subject_id]),
-            db.query(`SELECT * FROM payments WHERE trader_id = $1`, [input.subject_id]),
+            db.$client.query(`SELECT * FROM declarations WHERE trader_id = $1`, [input.subject_id]),
+            db.$client.query(`SELECT * FROM payments WHERE trader_id = $1`, [input.subject_id]),
           ]);
           responseData = {
             format: "JSON",
@@ -264,7 +264,7 @@ export const complianceReportingRouter = router({
       }
 
       // Update request status
-      await db.execute(
+      await db.$client.query(
         `UPDATE data_subject_requests SET status = 'COMPLETED', response_data = $1, completed_at = NOW()
          WHERE id = $2`,
         [JSON.stringify(responseData), requestId]
@@ -286,11 +286,11 @@ export const complianceReportingRouter = router({
   generateNDPRReport: protectedProcedure
     .input(z.object({ period: z.string().regex(/^\d{4}-\d{2}$/).optional() }))
     .query(async ({ input, ctx }) => {
-      const db = await getDb();
+      const db = await requireDb();
       const period = input.period ?? new Date().toISOString().slice(0, 7);
 
       const [dsrStats, breachStats, consentStats] = await Promise.all([
-        db.query(`
+        db.$client.query(`
           SELECT
             COUNT(*) AS total_requests,
             COUNT(*) FILTER (WHERE request_type='ACCESS') AS access_requests,
@@ -301,14 +301,14 @@ export const complianceReportingRouter = router({
           FROM data_subject_requests
           WHERE TO_CHAR(created_at, 'YYYY-MM') = $1
         `, [period]),
-        db.query(`
+        db.$client.query(`
           SELECT COUNT(*) AS total_breaches,
                  COUNT(*) FILTER (WHERE severity='HIGH') AS high_severity,
                  COUNT(*) FILTER (WHERE notified_ndpc=TRUE) AS notified_ndpc
           FROM security_incidents
           WHERE TO_CHAR(created_at, 'YYYY-MM') = $1
         `, [period]).catch(() => ({ rows: [{ total_breaches: 0, high_severity: 0, notified_ndpc: 0 }] })),
-        db.query(`SELECT COUNT(*) AS total_consents FROM user_consents WHERE TO_CHAR(created_at, 'YYYY-MM') = $1`, [period])
+        db.$client.query(`SELECT COUNT(*) AS total_consents FROM user_consents WHERE TO_CHAR(created_at, 'YYYY-MM') = $1`, [period])
           .catch(() => ({ rows: [{ total_consents: 0 }] })),
       ]);
 
@@ -336,7 +336,7 @@ export const complianceReportingRouter = router({
       auto_submit: z.boolean().default(false),
     }))
     .mutation(async ({ input, ctx }) => {
-      const db = await getDb();
+      const db = await requireDb();
       const submissionId = crypto.randomUUID();
 
       // Regulator endpoints (production URLs)
@@ -351,7 +351,7 @@ export const complianceReportingRouter = router({
       };
 
       // Log submission attempt
-      await db.execute(
+      await db.$client.query(
         `INSERT INTO regulatory_submissions (id, regulator, report_type, period, status, created_at)
          VALUES ($1, $2, $3, $4, 'PENDING', NOW())`,
         [submissionId, input.regulator, input.report_type, input.period]
@@ -385,7 +385,7 @@ export const complianceReportingRouter = router({
         });
 
         const status = response.ok ? "SUBMITTED" : "FAILED";
-        await db.execute(
+        await db.$client.query(
           `UPDATE regulatory_submissions SET status=$1, submitted_at=NOW(), response_code=$2 WHERE id=$3`,
           [status, response.status, submissionId]
         );
@@ -398,7 +398,7 @@ export const complianceReportingRouter = router({
           submitted_at: new Date().toISOString(),
         };
       } catch (error: any) {
-        await db.execute(
+        await db.$client.query(
           `UPDATE regulatory_submissions SET status='FAILED', error_message=$1 WHERE id=$2`,
           [error.message, submissionId]
         );
@@ -410,22 +410,22 @@ export const complianceReportingRouter = router({
 
   getComplianceDashboard: protectedProcedure
     .query(async ({ ctx }) => {
-      const db = await getDb();
+      const db = await requireDb();
 
       const [auditResults, submissions, dsrStats] = await Promise.all([
-        db.query(`
+        db.$client.query(`
           SELECT standard, status, score, audited_at
           FROM compliance_audit_results
           ORDER BY audited_at DESC
           LIMIT 10
         `),
-        db.query(`
+        db.$client.query(`
           SELECT regulator, report_type, status, submitted_at
           FROM regulatory_submissions
           ORDER BY created_at DESC
           LIMIT 20
         `),
-        db.query(`
+        db.$client.query(`
           SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='PENDING') AS pending
           FROM data_subject_requests
           WHERE created_at > NOW() - INTERVAL '30 days'
@@ -450,8 +450,8 @@ export const complianceReportingRouter = router({
       limit: z.number().max(100).default(50),
     }))
     .query(async ({ input, ctx }) => {
-      const db = await getDb();
-      const rows = await db.query(`
+      const db = await requireDb();
+      const rows = await db.$client.query(`
         SELECT id, request_type, subject_email, regulation, status, deadline, created_at, completed_at
         FROM data_subject_requests
         WHERE ($1::text IS NULL OR status = $1)
@@ -480,7 +480,7 @@ async function checkControlImplementation(db: any, control: string): Promise<{
       evidence: "Kubernetes NetworkPolicy default-deny-all with explicit allow rules. Permify RBAC.",
     }),
     "encryption-at-rest": async () => {
-      const result = await db.query(`SELECT setting FROM pg_settings WHERE name = 'ssl'`);
+      const result = await db.$client.query(`SELECT setting FROM pg_settings WHERE name = 'ssl'`);
       return {
         implemented: result.rows[0]?.setting === "on",
         evidence: "PostgreSQL SSL enabled. TigerBeetle data encrypted at rest.",
@@ -507,7 +507,7 @@ async function checkControlImplementation(db: any, control: string): Promise<{
       evidence: "APISIX jwt-auth plugin configured with RS256. Strict 3-part structure enforced.",
     }),
     "audit-logs": async () => {
-      const result = await db.query(`SELECT COUNT(*) FROM audit_events WHERE created_at > NOW() - INTERVAL '24 hours'`);
+      const result = await db.$client.query(`SELECT COUNT(*) FROM audit_events WHERE created_at > NOW() - INTERVAL '24 hours'`);
       return {
         implemented: parseInt(result.rows[0]?.count ?? "0") > 0,
         evidence: `${result.rows[0]?.count ?? 0} audit events in last 24 hours. Immutable audit trail in PostgreSQL.`,
@@ -556,7 +556,7 @@ async function checkSOC2Criterion(db: any, criterionId: string): Promise<{
       observations: "System operations monitored 24/7. Incident response procedures documented.",
     }),
     "A1": async () => {
-      const result = await db.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) AS avg_response FROM payments WHERE created_at > NOW() - INTERVAL '7 days' AND status='completed'`);
+      const result = await db.$client.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) AS avg_response FROM payments WHERE created_at > NOW() - INTERVAL '7 days' AND status='completed'`);
       const avgMs = parseFloat(result.rows[0]?.avg_response ?? "0") * 1000;
       return {
         met: avgMs < 5000,

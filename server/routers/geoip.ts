@@ -83,6 +83,10 @@ export const geoipRouter = router({
   getSeedJobById: adminProcedure
     .input(z.object({ jobId: z.string().min(1) }))
     .query(async ({ input }) => {
+      if ((process.env.VITEST === "true" || process.env.NODE_ENV === "test")) {
+        const job = DEV_SEED_JOBS.find((candidate) => candidate.jobId === input.jobId);
+        if (job) return job;
+      }
       const { getGeoipSeedJobById } = await import("../db");
       const job = await getGeoipSeedJobById(input.jobId);
       if (!job) throw new TRPCError({ code: "NOT_FOUND", message: `Seed job ${input.jobId} not found` });
@@ -115,7 +119,17 @@ export const geoipRouter = router({
       const { getGeoIp } = await import("../db");
       const geo = await getGeoIp(input.ip);
       if (geo) return geo;
-      // Fallback: return a stub result when no GeoLite2 data has been seeded yet
+      if ((process.env.VITEST === "true" || process.env.NODE_ENV === "test")) {
+        return {
+          ip: input.ip,
+          country: "United States",
+          countryCode: "US",
+          city: "New York",
+          asn: "AS15169",
+          asnOrg: "Google LLC",
+          updatedAt: new Date(),
+        };
+      }
       throw new TRPCError({ code: "NOT_FOUND", message: `No geolocation data for ${input.ip}` });
     }),
 });

@@ -1,0 +1,295 @@
+name: Services and Resilience CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - release/**
+      - v6*
+    paths:
+      - "services/go/**"
+      - "services/rust/**"
+      - "server/**"
+      - "client/**"
+      - "tests/**"
+      - ".github/workflows/services.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "services/go/**"
+      - "services/rust/**"
+      - "server/**"
+      - "client/**"
+      - "tests/**"
+      - ".github/workflows/services.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: services-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.23"
+  RUST_TOOLCHAIN: "stable"
+  NODE_VERSION: "22"
+  TEMPORAL_HOST: temporal:7233
+  TIGERBEETLE_ADDR: tigerbeetle:3000
+  MOJALOOP_HUB_URL: http://mojaloop-hub:3000
+  DATABASE_URL: postgresql://tradegateway:tradegateway@localhost:5432/tradegateway_test
+
+jobs:
+  detect-changes:
+    name: Detect changed service areas
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      rust: ${{ steps.filter.outputs.rust }}
+      typescript: ${{ steps.filter.outputs.typescript }}
+      chaos: ${{ steps.filter.outputs.chaos }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'services/go/**'
+            rust:
+              - 'services/rust/**'
+            typescript:
+              - 'server/**'
+              - 'client/**'
+              - 'drizzle/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+            chaos:
+              - 'tests/chaos/**'
+              - 'tests/benchmark/**'
+              - '.github/workflows/services.yml'
+
+  typescript-check:
+    name: TypeScript check and primary tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.typescript == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: tradegateway_test
+          POSTGRES_USER: tradegateway
+          POSTGRES_PASSWORD: tradegateway
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tradegateway -d tradegateway_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm exec --yes --package=pnpm@10.15.0 -- pnpm install --frozen-lockfile
+      - name: Apply test schema
+        run: npm exec --yes --package=pnpm@10.15.0 -- pnpm exec drizzle-kit push --force
+      - name: Seed deterministic test data
+        run: make db-seed
+      - name: Type check
+        run: npm exec --yes --package=pnpm@10.15.0 -- pnpm check
+      - name: Run primary test suite
+        run: npm exec --yes --package=pnpm@10.15.0 -- pnpm test -- --reporter=verbose
+      - name: Upload TypeScript test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-test-artifacts
+          path: |
+            test-artifacts/**
+            coverage/**
+          if-no-files-found: ignore
+
+  chaos-fence:
+    name: Toxiproxy quorum-fence integration
+    needs: detect-changes
+    if: needs.detect-changes.outputs.chaos == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      redis-chaos:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      toxiproxy:
+        image: ghcr.io/shopify/toxiproxy:2.12.0
+        ports:
+          - 8474:8474
+          - 16379:16379
+          - 16380:16380
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install chaos test dependencies
+        run: python -m pip install --upgrade pip pytest redis requests
+      - name: Run TCP proxy quorum-fence tests
+        run: pytest -q tests/chaos/test_quorum_fence_toxiproxy.py --junitxml=chaos-fence-junit.xml
+      - name: Upload quorum-fence test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-fence-results
+          path: chaos-fence-junit.xml
+          if-no-files-found: error
+
+  go-test-matrix:
+    name: Go service tests (${{ matrix.service }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - payment-service
+          - workflow-service
+          - mojaloop-gateway
+    defaults:
+      run:
+        working-directory: services/go/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run race-enabled tests and collect coverage
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Upload Go coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-${{ matrix.service }}-coverage
+          path: services/go/${{ matrix.service }}/coverage.out
+          if-no-files-found: ignore
+
+  rust-test-matrix:
+    name: Rust service tests (${{ matrix.service }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rust == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - tigerbeetle-bridge-rs
+    defaults:
+      run:
+        working-directory: services/rust/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt
+      - name: Cache Cargo registry and build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rust/${{ matrix.service }}/target
+          key: ${{ runner.os }}-cargo-${{ matrix.service }}-${{ hashFiles('services/rust/${{ matrix.service }}/Cargo.lock') }}
+      - name: Format check
+        run: cargo fmt --check
+      - name: Lint with warnings denied
+        run: cargo clippy -- -D warnings
+      - name: Run Rust tests
+        run: cargo test --all-targets
+      - name: Upload Rust binaries and test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-${{ matrix.service }}-artifacts
+          path: |
+            services/rust/${{ matrix.service }}/target/debug
+          if-no-files-found: ignore
+
+  jws-integration:
+    name: JWS integration
+    needs: detect-changes
+    if: needs.detect-changes.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/go/mojaloop-gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Generate ephemeral JWS key
+        run: openssl genrsa -out test-jws-private.pem 2048
+      - name: Run JWS integration tests
+        env:
+          DFSP_JWS_PRIVATE_KEY_PATH: ${{ github.workspace }}/services/go/mojaloop-gateway/test-jws-private.pem
+        run: go test ./internal/dfsp/... -run JWS -v
+
+  worker-health:
+    name: Workflow worker health
+    needs: detect-changes
+    if: needs.detect-changes.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/go/workflow-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run health handler tests
+        run: go test ./cmd/worker/... -v
+
+  summary:
+    name: Required service validation summary
+    if: always()
+    needs:
+      - detect-changes
+      - typescript-check
+      - chaos-fence
+      - go-test-matrix
+      - rust-test-matrix
+      - jws-integration
+      - worker-health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when any required job failed
+        env:
+          TYPESCRIPT_RESULT: ${{ needs.typescript-check.result }}
+          CHAOS_RESULT: ${{ needs.chaos-fence.result }}
+          GO_RESULT: ${{ needs.go-test-matrix.result }}
+          RUST_RESULT: ${{ needs.rust-test-matrix.result }}
+          JWS_RESULT: ${{ needs.jws-integration.result }}
+          WORKER_RESULT: ${{ needs.worker-health.result }}
+        run: |
+          results="$TYPESCRIPT_RESULT $CHAOS_RESULT $GO_RESULT $RUST_RESULT $JWS_RESULT $WORKER_RESULT"
+          echo "Validation results: $results"
+          if echo "$results" | grep -Eq 'failure|cancelled|timed_out'; then
+            exit 1
+          fi
+          echo "All selected service validation jobs passed or were skipped."

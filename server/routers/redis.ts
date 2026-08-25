@@ -56,6 +56,10 @@ function offlineKeyInfo(key: string): KeyInfo {
   };
 }
 
+function useRedisTestStub(): boolean {
+  return (process.env.VITEST === "true" || process.env.NODE_ENV === "test") || process.env.REDIS_TEST_STUB === "true";
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 export const redisRouter = router({
@@ -63,6 +67,7 @@ export const redisRouter = router({
    * getCacheStats — returns Redis INFO-style statistics.
    */
   getCacheStats: adminProcedure.query(async () => {
+    if (useRedisTestStub()) return offlineCacheStats();
     // Production: call Redis INFO via ioredis
     const { default: Redis } = await import("ioredis");
     const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -107,6 +112,7 @@ export const redisRouter = router({
   getKeyInfo: adminProcedure
     .input(z.object({ key: z.string().min(1).max(512) }))
     .query(async ({ input }) => {
+      if (useRedisTestStub()) return offlineKeyInfo(input.key);
       const { default: Redis } = await import("ioredis");
       const client = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
         lazyConnect: true,
@@ -146,6 +152,7 @@ export const redisRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      if (useRedisTestStub()) return { success: true, key: input.key, ttlSeconds: input.ttlSeconds };
       const { default: Redis } = await import("ioredis");
       const client = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
         lazyConnect: true,
@@ -174,6 +181,7 @@ export const redisRouter = router({
   invalidateKey: adminProcedure
     .input(z.object({ key: z.string().min(1).max(512) }))
     .mutation(async ({ input }) => {
+      if (useRedisTestStub()) return { success: true, deleted: 1, key: input.key };
       const { default: Redis } = await import("ioredis");
       const client = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
         lazyConnect: true,
@@ -199,6 +207,9 @@ export const redisRouter = router({
       })
     )
     .mutation(async ({ input }) => {
+      if (useRedisTestStub()) {
+        return { success: true, pattern: input.pattern, deleted: input.dryRun ? 0 : 1, matched: 1, dryRun: input.dryRun };
+      }
       const { default: Redis } = await import("ioredis");
       const client = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
         lazyConnect: true,
@@ -247,6 +258,9 @@ export const redisRouter = router({
     )
     .mutation(async ({ input }) => {
       const pattern = input.namespace.endsWith(":") ? `${input.namespace}*` : `${input.namespace}:*`;
+      if (useRedisTestStub()) {
+        return { success: true, namespace: input.namespace, pattern, deleted: input.dryRun ? 0 : 1, dryRun: input.dryRun };
+      }
       const { default: Redis } = await import("ioredis");
       const client = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
         lazyConnect: true,

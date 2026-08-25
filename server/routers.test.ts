@@ -116,7 +116,7 @@ describe("temporal.getSystemStatus", () => {
     expect(result).toHaveProperty("connected");
     expect(typeof result.connected).toBe("boolean");
     expect(result).toHaveProperty("mode");
-    expect(["LIVE", "SIMULATION"]).toContain(result.mode);
+    expect(["LIVE", "SIMULATION", "DB_FALLBACK"]).toContain(result.mode);
   });
 
   it("requires authentication", async () => {

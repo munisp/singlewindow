@@ -17,6 +17,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Search, FileText, CheckCircle, Clock, XCircle, Link } from "lucide-react";
 
+type UcrListRow = {
+  id: string | number;
+  ucrNumber: string;
+  ucrType: "SINGLE" | "MULTIPLE";
+  status: string;
+  portOfEntry: string;
+  consigneeRef: string;
+  createdAt: string | Date;
+};
+
 const STATUS_COLORS: Record<string, string> = {
   CREATED: "bg-blue-100 text-blue-800",
   LINKED: "bg-purple-100 text-purple-800",
@@ -81,7 +91,7 @@ export default function UCRManagement() {
     setValidationResult(result.data as Record<string, unknown> ?? null);
   };
 
-  const ucrs = (ucrList as { ucrs?: unknown[] } | undefined)?.ucrs ?? [];
+  const ucrs = (ucrList as { ucrs?: UcrListRow[] } | undefined)?.ucrs ?? [];
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -215,7 +225,7 @@ export default function UCRManagement() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ucrs.map((ucr: Record<string, unknown>) => (
+                {ucrs.map((ucr) => (
                   <TableRow key={String(ucr.id)}>
                     <TableCell className="font-mono text-sm font-semibold">{String(ucr.ucrNumber)}</TableCell>
                     <TableCell>

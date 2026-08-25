@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { trpc } from "../utils/trpc";
+import { trpc } from "@/lib/trpc";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";

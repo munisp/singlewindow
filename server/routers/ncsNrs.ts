@@ -233,9 +233,9 @@ export const ncsNrsRouter = router({
       limit:      z.number().int().min(1).max(50).default(20),
     }))
     .query(async ({ input }) => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
 
       let rows;
       switch (input.searchType) {
@@ -269,7 +269,7 @@ export const ncsNrsRouter = router({
           `);
           break;
       }
-      return rows;
+      return rows.rows;
     }),
 
   /**
@@ -288,9 +288,9 @@ export const ncsNrsRouter = router({
       active:          z.boolean().default(true),
     }))
     .mutation(async ({ input }) => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
       await db.execute(sql`
         INSERT INTO firs_tin_registry (tin, registered_name, cac_rc, nin, entity_type, tax_office, state, active)
         VALUES (${input.tin}, ${input.registered_name}, ${input.cac_rc ?? null},
@@ -320,9 +320,9 @@ export const ncsNrsRouter = router({
       source:         z.string().default("CBN_OFFICIAL"),
     }))
     .mutation(async ({ input }) => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
       await db.execute(sql`
         INSERT INTO cbn_exchange_rates (currency_pair, rate, effective_date, source)
         VALUES ('USD/NGN', ${input.rate}, ${input.effectiveDate}::date, ${input.source})
@@ -339,9 +339,9 @@ export const ncsNrsRouter = router({
   getAuditTrail: protectedProcedure
     .input(z.object({ declarationId: z.string() }))
     .query(async ({ input }) => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
       const rows = await db.execute(sql`
         SELECT a.id, a.declaration_id, a.event_type, a.event_data, a.actor, a.created_at,
                d.declaration_number, d.importer_name, d.importer_tin
@@ -351,7 +351,7 @@ export const ncsNrsRouter = router({
            OR d.declaration_number = ${input.declarationId}
         ORDER BY a.created_at ASC
       `);
-      return rows;
+      return rows.rows;
     }),
 
   /**
@@ -359,9 +359,9 @@ export const ncsNrsRouter = router({
    */
   getCBNRate: protectedProcedure
     .query(async () => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
       const rows = await db.execute(sql`
         SELECT rate, effective_date, source
         FROM cbn_exchange_rates
@@ -369,7 +369,7 @@ export const ncsNrsRouter = router({
         ORDER BY effective_date DESC
         LIMIT 1
       `);
-      return rows[0] ?? { rate: 1580.0, effective_date: new Date().toISOString().split("T")[0], source: "FALLBACK" };
+      return rows.rows[0] ?? { rate: 1580.0, effective_date: new Date().toISOString().split("T")[0], source: "FALLBACK" };
     }),
 
   /**
@@ -380,12 +380,12 @@ export const ncsNrsRouter = router({
       period: z.string().regex(/^\d{4}-\d{2}$/).optional(),
     }))
     .query(async ({ input }) => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
       const period = input.period ?? new Date().toISOString().slice(0, 7);
 
-      const [stats] = await db.execute(sql`
+      const { rows: [stats] } = await db.execute(sql`
         SELECT
           COUNT(d.id)                                                       AS total_declarations,
           COUNT(lc.id)                                                      AS landing_costs_computed,

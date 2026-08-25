@@ -279,8 +279,9 @@ describe("system_heartbeat_jobs schema table", () => {
 
 describe("GitHub PR workflow", () => {
   it("singlewindow clone directory exists with project files", () => {
-    const clonePath = "/tmp/singlewindow-clone";
+    const clonePath = path.resolve(__dirname, "..");
     expect(existsSync(clonePath)).toBe(true);
+    expect(existsSync(path.join(clonePath, "package.json"))).toBe(true);
   });
 
   it("infra/caddy directory exists in project", () => {

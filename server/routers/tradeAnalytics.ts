@@ -18,7 +18,7 @@
  */
 import { z } from "zod";
 import { router, protectedProcedure, publicProcedure } from "../_core/trpc";
-import { getDb } from "../db";
+import { requireDb } from "../db";
 import { sql } from "drizzle-orm";
 
 const DateRangeSchema = z.object({
@@ -34,11 +34,11 @@ export const tradeAnalyticsRouter = router({
   getTradeStats: protectedProcedure
     .input(DateRangeSchema)
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
       const from = input.from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to   = input.to   ?? new Date().toISOString();
 
-      const [stats] = await db.execute(sql`
+      const { rows: [stats] } = await db.execute(sql`
         SELECT
           COUNT(*)                                    AS total_declarations,
           COUNT(*) FILTER (WHERE status = 'cleared') AS cleared,
@@ -88,10 +88,10 @@ export const tradeAnalyticsRouter = router({
   getRevenueForecast: protectedProcedure
     .input(z.object({ months: z.number().int().min(1).max(12).default(3) }))
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
 
       // Get last 12 months of duty revenue for trend analysis
-      const monthlyRevenue = await db.execute(sql`
+      const { rows: monthlyRevenue } = await db.execute(sql`
         SELECT
           DATE_TRUNC('month', created_at) AS month,
           COALESCE(SUM(CAST(total_duty AS NUMERIC)), 0) AS duty_ngn,
@@ -161,12 +161,12 @@ export const tradeAnalyticsRouter = router({
   getTRSBenchmark: protectedProcedure
     .input(DateRangeSchema)
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
       const from = input.from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to   = input.to   ?? new Date().toISOString();
 
       // WCO TRS measures time from arrival to release
-      const trsData = await db.execute(sql`
+      const { rows: trsData } = await db.execute(sql`
         SELECT
           risk_lane,
           port_of_entry,
@@ -215,11 +215,11 @@ export const tradeAnalyticsRouter = router({
   getTopCommodities: protectedProcedure
     .input(DateRangeSchema.extend({ limit: z.number().int().min(5).max(50).default(10) }))
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
       const from = input.from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to   = input.to   ?? new Date().toISOString();
 
-      const commodities = await db.execute(sql`
+      const { rows: commodities } = await db.execute(sql`
         SELECT
           SUBSTRING(hs_code, 1, 4) AS hs_heading,
           COUNT(*) AS declaration_count,
@@ -252,11 +252,11 @@ export const tradeAnalyticsRouter = router({
   getTradeCorridors: protectedProcedure
     .input(DateRangeSchema.extend({ limit: z.number().int().min(5).max(30).default(15) }))
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
       const from = input.from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to   = input.to   ?? new Date().toISOString();
 
-      const corridors = await db.execute(sql`
+      const { rows: corridors } = await db.execute(sql`
         SELECT
           country_of_origin,
           port_of_entry,
@@ -286,11 +286,11 @@ export const tradeAnalyticsRouter = router({
   getPortPerformance: protectedProcedure
     .input(DateRangeSchema)
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
       const from = input.from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to   = input.to   ?? new Date().toISOString();
 
-      const portData = await db.execute(sql`
+      const { rows: portData } = await db.execute(sql`
         SELECT
           port_of_entry,
           COUNT(*) AS total_declarations,
@@ -324,12 +324,12 @@ export const tradeAnalyticsRouter = router({
       month: z.number().int().min(1).max(12).optional(),
     }))
     .query(async ({ input }) => {
-      const db = getDb();
+      const db = await requireDb();
       const year  = input.year  ?? new Date().getFullYear();
       const month = input.month ?? new Date().getMonth() + 1;
 
       // Aggregated, anonymized public trade statistics
-      const [stats] = await db.execute(sql`
+      const { rows: [stats] } = await db.execute(sql`
         SELECT
           COUNT(*) AS total_declarations,
           COALESCE(SUM(CAST(declared_value AS NUMERIC)), 0) AS total_trade_value_usd,

@@ -18,6 +18,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Ship, Plane, FileText, Package } from "lucide-react";
 
+type ManifestListRow = {
+  id: string | number;
+  manifestNumber: string;
+  manifestType: "SEA" | "AIR";
+  vesselName: string;
+  voyageNumber: string;
+  portOfDischarge: string;
+  eta?: string | Date | null;
+  status: string;
+  totalBLs?: number | null;
+};
+
 export default function ManifestManagement() {
   const { toast } = useToast();
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
@@ -60,7 +72,7 @@ export default function ManifestManagement() {
     });
   };
 
-  const manifests = (manifestList as { manifests?: unknown[] } | undefined)?.manifests ?? [];
+  const manifests = (manifestList as { manifests?: ManifestListRow[] } | undefined)?.manifests ?? [];
 
   const STATUS_COLORS: Record<string, string> = {
     DRAFT: "bg-gray-100 text-gray-800",
@@ -188,7 +200,7 @@ export default function ManifestManagement() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {manifests.map((m: Record<string, unknown>) => (
+                    {manifests.map((m) => (
                       <TableRow key={String(m.id)}>
                         <TableCell className="font-mono text-sm font-semibold">{String(m.manifestNumber)}</TableCell>
                         <TableCell>

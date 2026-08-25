@@ -80,9 +80,9 @@ export const wtoValuationRouter = router({
       offset:   z.number().int().min(0).default(0),
     }))
     .query(async ({ input }) => {
-      const { getDb } = await import("../db");
+      const { requireDb } = await import("../db");
       const { sql } = await import("drizzle-orm");
-      const db = getDb();
+      const db = await requireDb();
       const rows = await db.execute(sql`
         SELECT cv.*, d.trader_id
         FROM customs_valuations cv

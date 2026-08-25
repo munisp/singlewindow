@@ -4,6 +4,9 @@
  * GeoipSeed page route existence, and TemporalWorkflowRuns Manage Schemas tab procedures.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import path from "path";
+
+const projectRoot = path.resolve(__dirname, "..");
 import { geoipRouter } from "./routers/geoip";
 import { workflowSchemasRouter } from "./routers/workflowSchemas";
 import { openAppSecRouter } from "./routers/openAppSec";
@@ -245,42 +248,42 @@ describe("openAppSecRouter — GeoIP integration", () => {
 describe("v84 route and page existence", () => {
   it("GeoipSeed page file exists", async () => {
     const { existsSync } = await import("fs");
-    expect(existsSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/GeoipSeed.tsx")).toBe(true);
+    expect(existsSync(path.join(projectRoot, "client/src/pages/app/GeoipSeed.tsx"))).toBe(true);
   });
 
   it("TemporalWorkflowRuns page file exists", async () => {
     const { existsSync } = await import("fs");
-    expect(existsSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/TemporalWorkflowRuns.tsx")).toBe(true);
+    expect(existsSync(path.join(projectRoot, "client/src/pages/app/TemporalWorkflowRuns.tsx"))).toBe(true);
   });
 
   it("WafEvents page file exists", async () => {
     const { existsSync } = await import("fs");
-    expect(existsSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/WafEvents.tsx")).toBe(true);
+    expect(existsSync(path.join(projectRoot, "client/src/pages/app/WafEvents.tsx"))).toBe(true);
   });
 
   it("GeoipSeed page contains file upload form", async () => {
     const { readFileSync } = await import("fs");
-    const content = readFileSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/GeoipSeed.tsx", "utf-8");
+    const content = readFileSync(path.join(projectRoot, "client/src/pages/app/GeoipSeed.tsx"), "utf-8");
     expect(content).toContain("uploadGeoipCsv");
   });
 
   it("TemporalWorkflowRuns page contains Manage Schemas tab", async () => {
     const { readFileSync } = await import("fs");
-    const content = readFileSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/TemporalWorkflowRuns.tsx", "utf-8");
+    const content = readFileSync(path.join(projectRoot, "client/src/pages/app/TemporalWorkflowRuns.tsx"), "utf-8");
     expect(content).toContain("Manage Schemas");
     expect(content).toContain("upsertSchema");
   });
 
   it("WafEvents page contains Sheet drawer for GeoIP detail", async () => {
     const { readFileSync } = await import("fs");
-    const content = readFileSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/WafEvents.tsx", "utf-8");
+    const content = readFileSync(path.join(projectRoot, "client/src/pages/app/WafEvents.tsx"), "utf-8");
     expect(content).toContain("SheetContent");
     expect(content).toContain("lookupIp");
   });
 
   it("WafEvents page contains geolocation fields in drawer", async () => {
     const { readFileSync } = await import("fs");
-    const content = readFileSync("/home/ubuntu/tradegateway-ngswtp/client/src/pages/app/WafEvents.tsx", "utf-8");
+    const content = readFileSync(path.join(projectRoot, "client/src/pages/app/WafEvents.tsx"), "utf-8");
     expect(content).toContain("Geolocation");
     expect(content).toContain("countryCode");
     expect(content).toContain("asnOrg");
@@ -288,25 +291,25 @@ describe("v84 route and page existence", () => {
 
   it("DashboardLayout contains GeoIP Seed nav entry", async () => {
     const { readFileSync } = await import("fs");
-    const content = readFileSync("/home/ubuntu/tradegateway-ngswtp/client/src/components/DashboardLayout.tsx", "utf-8");
+    const content = readFileSync(path.join(projectRoot, "client/src/components/DashboardLayout.tsx"), "utf-8");
     expect(content).toContain("GeoIP Seed");
     expect(content).toContain("/app/admin/geoip-seed");
   });
 
   it("App.tsx contains geoip-seed route", async () => {
     const { readFileSync } = await import("fs");
-    const content = readFileSync("/home/ubuntu/tradegateway-ngswtp/client/src/App.tsx", "utf-8");
+    const content = readFileSync(path.join(projectRoot, "client/src/App.tsx"), "utf-8");
     expect(content).toContain("geoip-seed");
   });
 
   it("geoip router file exists", async () => {
     const { existsSync } = await import("fs");
-    expect(existsSync("/home/ubuntu/tradegateway-ngswtp/server/routers/geoip.ts")).toBe(true);
+    expect(existsSync(path.join(projectRoot, "server/routers/geoip.ts"))).toBe(true);
   });
 
   it("workflowSchemas router file exists", async () => {
     const { existsSync } = await import("fs");
-    expect(existsSync("/home/ubuntu/tradegateway-ngswtp/server/routers/workflowSchemas.ts")).toBe(true);
+    expect(existsSync(path.join(projectRoot, "server/routers/workflowSchemas.ts"))).toBe(true);
   });
 });
 

@@ -228,8 +228,9 @@ export const visionRouter = router({
           analysis = await runVisionAnalysis(imageUrl, "seal_verification", {
             expected_seal_number: input.expectedSealNumber,
           });
-        } catch {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${e}` });
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${message}` });
         }
       } else {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Vision AI service is currently unavailable. Please try again later." });
@@ -311,8 +312,9 @@ export const visionRouter = router({
           analysis = await runVisionAnalysis(imageUrl, "cargo_manifest_match", {
             manifest_items: input.manifestItems,
           });
-        } catch {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${e}` });
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Vision service error: ${message}` });
         }
       } else {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Vision AI service is currently unavailable. Please try again later." });

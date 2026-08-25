@@ -17,6 +17,7 @@ import dns from "node:dns/promises";
 import { sdk } from "../_core/sdk";
 import { notifyOwner } from "../_core/notification";
 import * as db from "../db";
+import { logDomainVerificationEvent } from "../db";
 
 /** Number of consecutive DNS failures before an owner notification is sent. */
 const FAIL_THRESHOLD = 3;
@@ -70,6 +71,7 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
           // ── Verified ─────────────────────────────────────────────────────
           await db.markTenantDomainVerified(tenant.id);
           await db.resetTenantDomainFailCount(tenant.id);
+          await logDomainVerificationEvent(tenant.id, domain, "success");
           verified++;
           results.push({ tenantId: String(tenant.id), domain, status: "verified" });
           console.log(`[TenantDomainPoller] Verified domain ${domain} for tenant ${tenant.id}`);
@@ -103,6 +105,7 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
             }
           }
 
+          await logDomainVerificationEvent(tenant.id, domain, "failure", "TOKEN_MISMATCH", "TXT record found but token mismatch");
           failed++;
           results.push({
             tenantId: String(tenant.id),
@@ -143,6 +146,7 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
         }
 
         if (isExpected) {
+          await logDomainVerificationEvent(tenant.id, domain, "failure", dnsErr.code ?? "DNS_LOOKUP_FAILED", `DNS lookup failed: ${dnsErr.code}`);
           results.push({
             tenantId: String(tenant.id),
             domain,
@@ -152,6 +156,7 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
             reason: `DNS: ${dnsErr.code}`,
           });
         } else {
+          await logDomainVerificationEvent(tenant.id, domain, "error", dnsErr.code ?? "UNEXPECTED_ERROR", String(dnsErr).slice(0, 512));
           failed++;
           results.push({
             tenantId: String(tenant.id),

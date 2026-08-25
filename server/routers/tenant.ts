@@ -8,6 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, publicProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
+import { getDomainVerificationHistory, getDomainHealthSummary } from "../db";
 import { tenants, tenantKeycloakConfig, tenantUsers, tenantBranding } from "../../drizzle/schema";
 import { eq, desc, and, or } from "drizzle-orm";
 import crypto from "crypto";
@@ -614,4 +615,15 @@ export const tenantRouter = router({
       }
       return { allowed: true, tenantId: tenant.id, tenantName: tenant.name };
     }),
+
+  getDomainVerificationHistory: protectedProcedure
+    .input(z.object({
+      tenantId: z.string().uuid(),
+      limit: z.number().int().min(1).max(50).default(10),
+    }))
+    .query(async ({ input }) => getDomainVerificationHistory(input.tenantId, input.limit)),
+
+  getDomainHealthSummary: protectedProcedure
+    .input(z.object({ tenantId: z.string().uuid() }))
+    .query(async ({ input }) => getDomainHealthSummary(input.tenantId)),
 });

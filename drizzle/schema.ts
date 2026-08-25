@@ -2782,6 +2782,33 @@ export const workflowInputSchemas = pgTable("workflow_input_schemas", {
 export type WorkflowInputSchema = typeof workflowInputSchemas.$inferSelect;
 export type InsertWorkflowInputSchema = typeof workflowInputSchemas.$inferInsert;
 
+// ─── Domain Verification Events ───────────────────────────────────────────────
+// Audit trail for each DNS TXT verification attempt. The history is retained
+// independently of tenant status so operators can diagnose propagation failures.
+export const domainVerificationOutcomeEnum = pgEnum("domain_verification_outcome", [
+  "success",
+  "failure",
+  "error",
+]);
+
+export const domainVerificationEvents = pgTable("domain_verification_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  domain: varchar("domain", { length: 253 }).notNull(),
+  outcome: domainVerificationOutcomeEnum("outcome").notNull(),
+  errorCode: varchar("error_code", { length: 64 }),
+  detail: varchar("detail", { length: 512 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_dve_tenant_id").on(t.tenantId),
+  index("idx_dve_domain").on(t.domain),
+  index("idx_dve_created_at").on(t.createdAt),
+  index("idx_dve_outcome").on(t.outcome),
+]);
+
+export type DomainVerificationEvent = typeof domainVerificationEvents.$inferSelect;
+export type InsertDomainVerificationEvent = typeof domainVerificationEvents.$inferInsert;
+
 // ─── Cron Run Logs ────────────────────────────────────────────────────────────
 export const cronRunLogs = pgTable("cron_run_logs", {
   id: serial("id").primaryKey(),

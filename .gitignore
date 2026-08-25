@@ -133,4 +133,5 @@ e2e/.auth/
 playwright-report/
 test-results/
 .project-config.json
-.github/workflows/
+.github/workflows/*
+!.github/workflows/services.yml

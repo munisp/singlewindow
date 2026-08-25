@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { trpc } from "../utils/trpc";
+import { trpc } from "@/lib/trpc";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell,
