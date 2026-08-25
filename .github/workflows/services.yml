@@ -57,25 +57,40 @@ jobs:
       chaos: ${{ steps.filter.outputs.chaos }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
         with:
-          filters: |
-            go:
-              - 'services/go/**'
-            rust:
-              - 'services/rust/**'
-            typescript:
-              - 'server/**'
-              - 'client/**'
-              - 'drizzle/**'
-              - 'package.json'
-              - 'pnpm-lock.yaml'
-            chaos:
-              - 'server/**'
-              - 'tests/chaos/**'
-              - 'tests/benchmark/**'
-              - '.github/workflows/services.yml'
+          fetch-depth: 0
+      - id: filter
+        name: Classify changed paths
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            changed_paths="server/\ntests/chaos/\nservices/go/\nservices/rust/"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            changed_paths="$(git diff --name-only "$PR_BASE_SHA" "$GITHUB_SHA")"
+          elif [[ -n "$EVENT_BEFORE" && "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            changed_paths="$(git diff --name-only "$EVENT_BEFORE" "$GITHUB_SHA")"
+          else
+            changed_paths="$(git diff --name-only HEAD^ HEAD)"
+          fi
+
+          echo "Changed paths:"
+          printf '%s\n' "$changed_paths"
+          classify() {
+            local output_name="$1"
+            local pattern="$2"
+            if printf '%s\n' "$changed_paths" | grep -qE "$pattern"; then
+              echo "${output_name}=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${output_name}=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          classify go '^services/go/'
+          classify rust '^services/rust/'
+          classify typescript '^(server/|client/|drizzle/|package\.json$|pnpm-lock\.yaml$)'
+          classify chaos '^(server/|tests/chaos/|tests/benchmark/|\.github/workflows/services\.yml$)'
 
   typescript-check:
     name: TypeScript check and primary tests

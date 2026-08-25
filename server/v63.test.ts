@@ -408,7 +408,8 @@ describe("GitHub Actions CI pipeline — services.yml", () => {
   it("has detect-changes job with path filtering", () => {
     const content = readFile(ciPath);
     expect(content).toContain("detect-changes");
-    expect(content).toContain("dorny/paths-filter");
+    expect(content).toContain("Classify changed paths");
+    expect(content).toContain("git diff --name-only");
   });
 
   it("has go-test-matrix job covering all 3 Go services", () => {
