@@ -7,8 +7,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, adminProcedure, publicProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
-import { getDomainVerificationHistory, getDomainHealthSummary } from "../db";
+import { getDb, getDomainVerificationHistory, getDomainHealthSummary } from "../db";
 import { tenants, tenantKeycloakConfig, tenantUsers, tenantBranding } from "../../drizzle/schema";
 import { eq, desc, and, or } from "drizzle-orm";
 import crypto from "crypto";
@@ -60,6 +59,23 @@ function generateTenantSlug(name: string): string {
 
 function generateApiPrefix(slug: string): string {
   return `ngswtp_${slug.replace(/-/g, "_")}_`;
+}
+
+/** Require platform-administrator status or membership in the requested tenant. */
+async function requireTenantMembership(tenantId: string, userId: number, userRole: string): Promise<void> {
+  if (userRole === "admin") return;
+  const db = await getDb();
+  if (!db) {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  }
+  const [membership] = await db
+    .select({ id: tenantUsers.id })
+    .from(tenantUsers)
+    .where(and(eq(tenantUsers.tenantId, tenantId), eq(tenantUsers.userId, userId)))
+    .limit(1);
+  if (!membership) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Not a member of this tenant" });
+  }
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -621,9 +637,15 @@ export const tenantRouter = router({
       tenantId: z.string().uuid(),
       limit: z.number().int().min(1).max(50).default(10),
     }))
-    .query(async ({ input }) => getDomainVerificationHistory(input.tenantId, input.limit)),
+    .query(async ({ ctx, input }) => {
+      await requireTenantMembership(input.tenantId, ctx.user.id, ctx.user.role);
+      return getDomainVerificationHistory(input.tenantId, input.limit);
+    }),
 
   getDomainHealthSummary: protectedProcedure
     .input(z.object({ tenantId: z.string().uuid() }))
-    .query(async ({ input }) => getDomainHealthSummary(input.tenantId)),
+    .query(async ({ ctx, input }) => {
+      await requireTenantMembership(input.tenantId, ctx.user.id, ctx.user.role);
+      return getDomainHealthSummary(input.tenantId);
+    }),
 });

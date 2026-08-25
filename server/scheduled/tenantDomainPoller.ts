@@ -118,7 +118,10 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
         }
       } catch (dnsErr: any) {
         // ENOTFOUND / ENODATA are expected for unverified domains — increment fail count
-        const isExpected = ["ENOTFOUND", "ENODATA", "ESERVFAIL"].includes(dnsErr.code);
+        const errorCode = typeof dnsErr.code === "string" && dnsErr.code.length > 0
+          ? dnsErr.code
+          : "DNS_LOOKUP_FAILED";
+        const isExpected = ["ENOTFOUND", "ENODATA", "ESERVFAIL"].includes(errorCode);
 
         const updated = await db.incrementTenantDomainFailCount(tenant.id);
         const newFailCount = updated?.domainVerificationFailCount ?? 0;
@@ -131,7 +134,7 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
               `Tenant **${tenant.name}** (ID: ${tenant.id}) has had ${newFailCount} consecutive`,
               `DNS lookup failures for custom domain **${domain}**.`,
               ``,
-              `**DNS error code:** \`${dnsErr.code ?? "UNKNOWN"}\``,
+              `**DNS error code:** \`${errorCode}\``,
               `**Verification host:** \`${verifyHost}\``,
               ``,
               `This may indicate the domain no longer resolves or has been removed from DNS.`,
@@ -141,22 +144,22 @@ export async function tenantDomainPollerHandler(req: Request, res: Response) {
           notificationSent = sent;
           if (sent) notified++;
           console.warn(
-            `[TenantDomainPoller] Sent DNS error notification for ${domain} (${dnsErr.code}, failCount=${newFailCount})`
+            `[TenantDomainPoller] Sent DNS error notification for ${domain} (${errorCode}, failCount=${newFailCount})`
           );
         }
 
         if (isExpected) {
-          await logDomainVerificationEvent(tenant.id, domain, "failure", dnsErr.code ?? "DNS_LOOKUP_FAILED", `DNS lookup failed: ${dnsErr.code}`);
+          await logDomainVerificationEvent(tenant.id, domain, "failure", errorCode, `DNS lookup failed: ${errorCode}`);
           results.push({
             tenantId: String(tenant.id),
             domain,
             status: "pending",
             failCount: newFailCount,
             notificationSent,
-            reason: `DNS: ${dnsErr.code}`,
+            reason: `DNS: ${errorCode}`,
           });
         } else {
-          await logDomainVerificationEvent(tenant.id, domain, "error", dnsErr.code ?? "UNEXPECTED_ERROR", String(dnsErr).slice(0, 512));
+          await logDomainVerificationEvent(tenant.id, domain, "error", errorCode, String(dnsErr).slice(0, 512));
           failed++;
           results.push({
             tenantId: String(tenant.id),

@@ -198,7 +198,8 @@ describe("tenant domain poller logs verification events", () => {
 
   it("poller logs error event on unexpected DNS errors", () => {
     const content = readFile("server/scheduled/tenantDomainPoller.ts");
-    expect(content).toContain("UNEXPECTED_ERROR");
+    expect(content).toContain("errorCode");
+    expect(content).toContain("DNS_LOOKUP_FAILED");
     expect(content).toContain("logDomainVerificationEvent(tenant.id, domain, \"error\"");
   });
 });
@@ -216,7 +217,7 @@ describe("tenant tRPC procedures for domain health", () => {
 
   it("tenant router imports getDomainVerificationHistory and getDomainHealthSummary from db", () => {
     const content = readFile("server/routers/tenant.ts");
-    expect(content).toContain("import { getDomainVerificationHistory, getDomainHealthSummary } from \"../db\"");
+    expect(content).toMatch(/import\s+\{[^}]*getDomainVerificationHistory[^}]*getDomainHealthSummary[^}]*\}\s+from\s+"\.\.\/db"/);
   });
 });
 
