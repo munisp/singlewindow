@@ -10,13 +10,17 @@ import { ENV } from "./env";
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME ?? "session";
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 export type SessionPayload = {
   openId: string;
   name: string;
 };
 
-export type AuthenticatedUser = User;
+export type AuthenticatedUser = User & {
+  isCron?: boolean;
+  taskUid?: string;
+};
 
 class LocalSessionService {
   private parseCookies(cookieHeader: string | undefined) {
