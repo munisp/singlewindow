@@ -35,4 +35,10 @@ describe("validateProductionConfig", () => {
     config.permifyUrl = "http://localhost:3476";
     expect(() => validateProductionConfig(config)).toThrow(/unsafe local endpoint: PERMIFY_URL/);
   });
+
+  it("rejects credential-bearing loopback URLs", () => {
+    const config = validProductionConfig();
+    config.redisUrl = "redis://:secret@localhost:6379";
+    expect(() => validateProductionConfig(config)).toThrow(/unsafe local endpoint: REDIS_URL/);
+  });
 });

@@ -169,8 +169,19 @@ export const ENV = {
 // ─── Production validation — fail closed on unsafe configuration ─────────────
 
 function isUnsafeProductionEndpoint(value: string): boolean {
-  return /(?:^|\/\/)(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::|\/|$)/i.test(value)
-    || /(?:^|,)\s*(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::|$)/i.test(value);
+  return value.split(",").some((rawEndpoint) => {
+    const endpoint = rawEndpoint.trim();
+    if (!endpoint) return false;
+    try {
+      const hostname = endpoint.includes("://")
+        ? new URL(endpoint).hostname
+        : endpoint.replace(/^\[/, "").split("]")[0].split(":")[0];
+      return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(hostname.toLowerCase());
+    } catch {
+      // Fail closed when an endpoint cannot be parsed as either a URL or host:port.
+      return true;
+    }
+  });
 }
 
 /**
