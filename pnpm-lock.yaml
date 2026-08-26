@@ -237,8 +237,8 @@ importers:
         specifier: ^8.1.0
         version: 8.1.0
       i18next:
-        specifier: ^25.8.16
-        version: 25.8.16(typescript@5.9.3)
+        specifier: ^26.4.0
+        version: 26.4.0(typescript@5.9.3)
       i18next-browser-languagedetector:
         specifier: ^8.2.1
         version: 8.2.1
@@ -301,7 +301,7 @@ importers:
         version: 7.64.0(react@19.2.1)
       react-i18next:
         specifier: ^16.5.6
-        version: 16.5.6(i18next@25.8.16(typescript@5.9.3))(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(typescript@5.9.3)
+        version: 16.5.6(i18next@26.4.0(typescript@5.9.3))(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(typescript@5.9.3)
       react-resizable-panels:
         specifier: ^3.0.6
         version: 3.0.6(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -410,7 +410,7 @@ importers:
         version: 1.58.2
       pnpm:
         specifier: ^11.20.0
-        version: 11.24.0
+        version: 11.22.0
       postcss:
         specifier: '>=8.5.10'
         version: 8.5.20
@@ -3232,10 +3232,10 @@ packages:
   i18next-browser-languagedetector@8.2.1:
     resolution: {integrity: sha512-bZg8+4bdmaOiApD7N7BPT9W8MLZG+nPTOFlLiJiT8uzKXFjhxw4v2ierCXOwB5sFDMtuA5G4kgYZ0AznZxQ/cw==}
 
-  i18next@25.8.16:
-    resolution: {integrity: sha512-/4Xvgm8RiJNcB+sZwplylrFNJ27DVvubGX7y6uXn7hh7aSvbmXVSRIyIGx08fEn05SYwaSYWt753mIpJuPKo+Q==}
+  i18next@26.4.0:
+    resolution: {integrity: sha512-rsmK5bFqsD1AetSFSIa43wtNR4WpvvH4p0tLEsTxkC7QTrfdFm06nbQ95bh8Og4wwaCnUEcm9DVYL2cgxitiQg==}
     peerDependencies:
-      typescript: ^5
+      typescript: ^5 || ^6 || ^7
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -3967,8 +3967,8 @@ packages:
     resolution: {integrity: sha512-40QW5YalBNfQo5yRYmiw7Yz6TKKVr3h6970B2YE+3fQpsWcrbj1PzJgxeJ19DRQjhMbKPIuMY8rFaXc8moolVw==}
     engines: {node: '>=10.13.0'}
 
-  pnpm@11.24.0:
-    resolution: {integrity: sha512-vSfjRel23LC+C3oSKCF7BJqBfiGx81XJDb59xGZxiVqLwebQbCRVRQXqk+oLRfSJon7Bv7yN5qlln8oPFvoAAA==}
+  pnpm@11.22.0:
+    resolution: {integrity: sha512-H/hwxMYTPf2I+yr8Rt0T1H8JyXlLQ4xv20fKmMrzvBY4HuC+k6CRuOOCTPAfiJ9G19niCRD7C+GrD7W6qA3WIQ==}
     engines: {node: '>=22.13'}
     hasBin: true
 
@@ -7697,9 +7697,7 @@ snapshots:
     dependencies:
       '@babel/runtime': 7.28.4
 
-  i18next@25.8.16(typescript@5.9.3):
-    dependencies:
-      '@babel/runtime': 7.28.4
+  i18next@26.4.0(typescript@5.9.3):
     optionalDependencies:
       typescript: 5.9.3
 
@@ -8599,7 +8597,7 @@ snapshots:
 
   pngjs@5.0.0: {}
 
-  pnpm@11.24.0: {}
+  pnpm@11.22.0: {}
 
   points-on-curve@0.2.0: {}
 
@@ -8713,11 +8711,11 @@ snapshots:
     dependencies:
       react: 19.2.1
 
-  react-i18next@16.5.6(i18next@25.8.16(typescript@5.9.3))(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(typescript@5.9.3):
+  react-i18next@16.5.6(i18next@26.4.0(typescript@5.9.3))(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(typescript@5.9.3):
     dependencies:
       '@babel/runtime': 7.28.4
       html-parse-stringify: 3.0.1
-      i18next: 25.8.16(typescript@5.9.3)
+      i18next: 26.4.0(typescript@5.9.3)
       react: 19.2.1
       use-sync-external-store: 1.6.0(react@19.2.1)
     optionalDependencies:
