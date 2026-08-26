@@ -7,7 +7,7 @@
  * Flow:
  *   1. Frontend calls nigeriaId.initiateAuth → receives a Keycloak IDP redirect URL
  *   2. User authenticates with NIMC portal (OIDC/OAuth2)
- *   3. NIMC redirects back to /api/oauth/callback with IDP token
+ *   3. NIMC redirects to the explicitly registered Keycloak/NIMC callback URL
  *   4. Frontend calls nigeriaId.verifyToken with the IDP token
  *   5. Server validates token, extracts NIN, links to trader KYC record
  *
@@ -100,9 +100,13 @@ export const nigeriaIdRouter = router({
       origin: z.string().url("Must be a valid URL"),
     }))
     .mutation(async ({ input }) => {
-      const redirectUri = NIN_REDIRECT_URI_BASE
-        ? `${NIN_REDIRECT_URI_BASE}/api/oauth/callback`
-        : `${input.origin}/api/oauth/callback`;
+      if (!NIN_REDIRECT_URI_BASE) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "NIGERIA_ID_REDIRECT_URI must be configured with the registered Keycloak/NIMC callback URL.",
+        });
+      }
+      const redirectUri = NIN_REDIRECT_URI_BASE;
 
       const params = new URLSearchParams({
         client_id: NIN_CLIENT_ID || "tradegateway-app",

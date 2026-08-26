@@ -6,12 +6,12 @@ import { ENV } from './_core/env';
 type StorageConfig = { baseUrl: string; apiKey: string };
 
 function getStorageConfig(): StorageConfig {
-  const baseUrl = ENV.forgeApiUrl;
-  const apiKey = ENV.forgeApiKey;
+  const baseUrl = ENV.externalProviderUrl;
+  const apiKey = ENV.externalProviderApiKey;
 
   if (!baseUrl || !apiKey) {
     throw new Error(
-      "Storage proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+      "Storage proxy credentials missing: set EXTERNAL_PROVIDER_API_URL and EXTERNAL_PROVIDER_API_KEY"
     );
   }
 

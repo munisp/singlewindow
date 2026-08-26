@@ -105,14 +105,14 @@ const SECTIONS: CheckSection[] = [
   },
   {
     id: "auth",
-    title: "Authentication & OAuth",
+    title: "Authentication & Identity",
     icon: <Key className="h-4 w-4" />,
     color: "text-purple-600",
     items: [
       {
-        id: "oauth-configured",
-        label: "Manus OAuth configured",
-        description: "VITE_APP_ID, OAUTH_SERVER_URL, VITE_OAUTH_PORTAL_URL all injected by platform.",
+        id: "keycloak-configured",
+        label: "Keycloak login configured",
+        description: "VITE_KEYCLOAK_LOGIN_URL, Keycloak client settings, and approved callback URLs are supplied through deployment-managed configuration.",
         required: true,
       },
       {
@@ -178,19 +178,19 @@ const SECTIONS: CheckSection[] = [
       {
         id: "custom-domain",
         label: "Custom domain bound",
-        description: "Bind your production domain (e.g. tradegateway.gov.ng) via Settings → Domains in the Management UI.",
+        description: "Bind the production domain (for example, tradegateway.gov.ng) through the approved DNS and ingress deployment process.",
         required: false,
       },
       {
         id: "ssl-cert",
         label: "SSL certificate active",
-        description: "Manus automatically provisions and renews SSL certificates for bound domains.",
+        description: "Provision and monitor a trusted TLS certificate through the approved ingress or certificate-management process.",
         required: false,
       },
       {
         id: "dns-records",
         label: "DNS records configured",
-        description: "Add CNAME record pointing your domain to the Manus-provided hostname.",
+        description: "Publish the DNS records required by the approved ingress endpoint and validate them before cutover.",
         required: false,
       },
     ],
@@ -381,7 +381,7 @@ export default function GoLiveChecklist() {
                 <div>
                   <p className="font-semibold text-emerald-800">All required items complete — ready to publish!</p>
                   <p className="text-xs text-emerald-700 mt-0.5">
-                    Click the <strong>Publish</strong> button in the Management UI header to deploy to production.
+                    Deploy only through the approved release pipeline after all required release gates pass.
                   </p>
                 </div>
               </div>

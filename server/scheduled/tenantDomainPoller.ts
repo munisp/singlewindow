@@ -8,7 +8,7 @@
 //      At 3 consecutive failures → sends an owner notification via notifyOwner().
 //
 // Cron creation (run after deploying the site):
-//   manus-heartbeat create --name tenant-domain-poller
+//   external scheduler registration for tenant-domain-poller
 //     --cron "0 */15 * * * *" --path /api/scheduled/tenant-domain-poll
 //     --description "Auto-verify pending tenant custom domains every 15 minutes"
 

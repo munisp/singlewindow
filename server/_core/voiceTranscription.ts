@@ -75,18 +75,18 @@ export async function transcribeAudio(
 ): Promise<TranscriptionResponse | TranscriptionError> {
   try {
     // Step 1: Validate environment configuration
-    if (!ENV.forgeApiUrl) {
+    if (!ENV.externalProviderUrl) {
       return {
         error: "Voice transcription service is not configured",
         code: "SERVICE_ERROR",
-        details: "BUILT_IN_FORGE_API_URL is not set"
+        details: "EXTERNAL_PROVIDER_API_URL is not set"
       };
     }
-    if (!ENV.forgeApiKey) {
+    if (!ENV.externalProviderApiKey) {
       return {
         error: "Voice transcription service authentication is missing",
         code: "SERVICE_ERROR",
-        details: "BUILT_IN_FORGE_API_KEY is not set"
+        details: "EXTERNAL_PROVIDER_API_KEY is not set"
       };
     }
 
@@ -143,9 +143,9 @@ export async function transcribeAudio(
     formData.append("prompt", prompt);
 
     // Step 4: Call the transcription service
-    const baseUrl = ENV.forgeApiUrl.endsWith("/")
-      ? ENV.forgeApiUrl
-      : `${ENV.forgeApiUrl}/`;
+    const baseUrl = ENV.externalProviderUrl.endsWith("/")
+      ? ENV.externalProviderUrl
+      : `${ENV.externalProviderUrl}/`;
     
     const fullUrl = new URL(
       "v1/audio/transcriptions",
@@ -155,7 +155,7 @@ export async function transcribeAudio(
     const response = await fetch(fullUrl, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${ENV.forgeApiKey}`,
+        authorization: `Bearer ${ENV.externalProviderApiKey}`,
         "Accept-Encoding": "identity",
       },
       body: formData,

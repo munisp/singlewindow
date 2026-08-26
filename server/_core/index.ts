@@ -10,7 +10,6 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
 import { registerOpenApiRoute } from "../openapi";
 import { metricsRegistry } from "./metrics";
 import { registerHealthRoutes } from "../routes/health";
@@ -39,15 +38,6 @@ const trpcRateLimit = rateLimit({
     // Skip rate limiting for health checks and static assets
     return req.path === "/health" || req.path === "/ping";
   },
-});
-
-// Auth endpoints: stricter — 20 requests per minute per IP
-const authRateLimit = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many authentication attempts. Please wait a minute before trying again." },
 });
 
 // ── Nightly risk scan cron job ────────────────────────────────────────────────
@@ -453,8 +443,8 @@ async function runBondedWarehouseExpiryCheck() {
       const { createNotification, getUserByOpenId } = await import("../db");
       const { ENV } = await import("./env");
       const env = ENV;
-      if (env.ownerOpenId) {
-        const owner = await getUserByOpenId(env.ownerOpenId);
+      if (env.bootstrapOwnerOpenId) {
+        const owner = await getUserByOpenId(env.bootstrapOwnerOpenId);
         if (owner) {
           const allFlagged = [
             ...alreadyExpired.map((item: any) => ({ ...item, flag: "expired" })),
@@ -1299,8 +1289,6 @@ async function startServer() {
   // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
-  // OAuth callback under /api/oauth/callback — apply strict rate limiting
-  app.use("/api/oauth", authRateLimit);
 
   // ─── KEYCLOAK EVENT WEBHOOK ──────────────────────────────────────────────────
   app.post("/api/webhooks/keycloak-event", express.json(), async (req, res) => {
@@ -1381,7 +1369,6 @@ async function startServer() {
     }
   });
 
-  registerOAuthRoutes(app);
   // Sprint 68: OpenAPI spec endpoint
   registerOpenApiRoute(app);
   // Deep health check endpoints (/api/health, /api/health/live, /api/health/ready)
@@ -1463,7 +1450,7 @@ async function startServer() {
     console.log("[Cron] 4-Eyes approval expiry scheduled every 15 minutes");
   }
   // Lakehouse Nightly Trade-Stats Rollup — Heartbeat handler
-  // Cron is created via: manus-heartbeat create --name lakehouse-nightly-rollup
+  // Cron is created via: external scheduler registration for lakehouse-nightly-rollup
   //   --cron "0 0 2 * * *" --path /api/scheduled/lakehouse-rollup
   //   --description "Nightly trade-stats Delta Lake write-back at 02:00 UTC"
   // Must be run after deploying the site.
@@ -1489,7 +1476,7 @@ async function startServer() {
     console.log("[Heartbeat] /api/scheduled/document-vault-expiry registered");
   }
   // Tenant Domain DNS Propagation Poller — Heartbeat handler (every 15 min)
-  // Cron creation: manus-heartbeat create --name tenant-domain-poller
+  // Cron creation: external scheduler registration for tenant-domain-poller
   //   --cron "0 */15 * * * *" --path /api/scheduled/tenant-domain-poll
   //   --description "Auto-verify pending tenant custom domains every 15 minutes"
   {

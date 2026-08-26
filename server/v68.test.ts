@@ -15,13 +15,11 @@ import { EventEmitter } from "events";
 vi.mock("./_core/env", () => ({
   ENV: {
     cookieSecret: "test-secret-32-chars-long-enough!",
-    appId: "test-app",
     databaseUrl: "mysql://localhost/test",
-    oAuthServerUrl: "http://oauth",
-    ownerOpenId: "owner-1",
+    bootstrapOwnerOpenId: "owner-1",
     isProduction: false,
-    forgeApiUrl: "http://forge",
-    forgeApiKey: "key",
+    externalProviderUrl: "http://provider",
+    externalProviderApiKey: "key",
   },
 }));
 

@@ -193,7 +193,7 @@ function buildOpenApiSpec(baseUrl: string): Record<string, unknown> {
         "All endpoints use the **tRPC HTTP Batch Link** protocol — queries use GET, mutations use POST.",
         "",
         "### Authentication",
-        "Session-based authentication via HTTP-only cookie. Obtain a session by completing the OAuth flow at `/api/oauth/callback`.",
+        "Authentication uses Keycloak-issued bearer tokens. Deployment-managed local sessions are supported only for explicitly provisioned users and test/demo flows.",
         "",
         "### Tech Stack",
         "- **Runtime**: Node.js + Express + tRPC 11",
@@ -223,7 +223,7 @@ function buildOpenApiSpec(baseUrl: string): Record<string, unknown> {
           type: "apiKey",
           in: "cookie",
           name: "session",
-          description: "Session cookie obtained via OAuth flow at /api/oauth/callback",
+          description: "Deployment-managed local session cookie for explicitly provisioned users; production clients should use Keycloak bearer authentication.",
         },
       },
       schemas: {

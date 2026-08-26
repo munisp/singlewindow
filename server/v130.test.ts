@@ -132,7 +132,7 @@ describe("/api/health/ready — readiness probe", () => {
 
 describe("Heartbeat cron job registration — schedule correctness", () => {
   /**
-   * The three platform-level cron jobs registered via manus-heartbeat CLI.
+   * The three platform-level cron jobs registered via external scheduler CLI.
    * These values are the canonical source of truth — any change to the schedule
    * must be reflected here and re-registered on the platform.
    */
@@ -225,7 +225,7 @@ describe("Heartbeat cron job registration — schedule correctness", () => {
   });
 
   it("all three cron jobs are enabled (is_enable: true)", () => {
-    // Simulated from manus-heartbeat list output
+    // Simulated from external scheduler list output
     const platformState = [
       { name: "sla-breach-escalation", is_enable: true },
       { name: "bond-expiry-digest", is_enable: true },
