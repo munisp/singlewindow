@@ -1,0 +1,51 @@
+# Merge this fragment into the production Prometheus configuration.
+# The file_sd target file should be mounted at the same path in Prometheus.
+# Runner lifecycle metrics are emitted by the external collector described in
+# infra/monitoring/ephemeral-runner-observability.md.
+
+scrape_configs:
+  - job_name: singlewindow-runner-host
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/singlewindow-runners.yml
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [__meta_filepath]
+        target_label: discovery_file
+        action: replace
+
+  - job_name: singlewindow-runner-lifecycle
+    static_configs:
+      - targets:
+          - runner-lifecycle-collector.monitoring.svc.cluster.local:9090
+        labels:
+          service: github-actions-runner
+          component: lifecycle-collector
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  - job_name: singlewindow-runner-cadvisor
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/singlewindow-cadvisor.yml
+        refresh_interval: 60s
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metric_relabel_configs:
+      # Keep only the container metrics needed for runner capacity and leaks.
+      - source_labels: [__name__]
+        action: keep
+        regex: 'container_(cpu_usage_seconds_total|memory_working_set_bytes|network_receive_bytes_total|network_transmit_bytes_total|oom_events_total|restarts_total)|container_fs_(usage_bytes|limit_bytes|inodes_total|inodes_free)'
+
+  - job_name: singlewindow-postgres-exporter
+    static_configs:
+      - targets:
+          - postgres-exporter.monitoring.svc.cluster.local:9187
+        labels:
+          service: postgres
+          component: test-harness
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s

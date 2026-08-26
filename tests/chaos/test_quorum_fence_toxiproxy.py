@@ -17,10 +17,10 @@ import redis
 import requests
 from redis.exceptions import RedisError
 
-TOXIPROXY_API: Final = "http://127.0.0.1:8474"
-REDIS_ADMIN_PORT: Final = 6379
-NODE_A_PORT: Final = 16379
-NODE_B_PORT: Final = 16380
+TOXIPROXY_API: Final = os.environ.get("TOXIPROXY_API", "http://127.0.0.1:8474")
+REDIS_ADMIN_PORT: Final = int(os.environ.get("REDIS_ADMIN_PORT", "6379"))
+NODE_A_PORT: Final = int(os.environ.get("REDIS_PROXY_A_PORT", "16379"))
+NODE_B_PORT: Final = int(os.environ.get("REDIS_PROXY_B_PORT", "16380"))
 RESOURCE: Final = "declaration:quorum-test"
 LEASE_KEY: Final = f"quorum-fence:lease:{RESOURCE}"
 EPOCH_KEY: Final = f"quorum-fence:epoch:{RESOURCE}"

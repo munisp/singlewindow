@@ -14,6 +14,8 @@ on:
       - "client/**"
       - "drizzle/**"
       - "tests/**"
+      - "infra/test-environment/**"
+      - "scripts/test-with-postgres.sh"
       - ".github/workflows/services.yml"
       - "package.json"
       - "pnpm-lock.yaml"
@@ -21,16 +23,6 @@ on:
     branches:
       - main
       - develop
-    paths:
-      - "services/go/**"
-      - "services/rust/**"
-      - "server/**"
-      - "client/**"
-      - "drizzle/**"
-      - "tests/**"
-      - ".github/workflows/services.yml"
-      - "package.json"
-      - "pnpm-lock.yaml"
   workflow_dispatch:
 
 concurrency:
@@ -49,7 +41,7 @@ env:
 jobs:
   detect-changes:
     name: Detect changed service areas
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     outputs:
       go: ${{ steps.filter.outputs.go }}
       rust: ${{ steps.filter.outputs.rust }}
@@ -89,28 +81,18 @@ jobs:
           }
           classify go '^services/go/'
           classify rust '^services/rust/'
-          classify typescript '^(server/|client/|drizzle/|package\.json$|pnpm-lock\.yaml$)'
+          classify typescript '^(server/|client/|drizzle/|infra/test-environment/|scripts/test-with-postgres\.sh$|package\.json$|pnpm-lock\.yaml$)'
           classify chaos '^(server/|tests/chaos/|tests/benchmark/|\.github/workflows/services\.yml$)'
 
   typescript-check:
-    name: TypeScript check and primary tests
+    name: TypeScript check and PostgreSQL-backed tests
     needs: detect-changes
-    if: needs.detect-changes.outputs.typescript == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: tradegateway_test
-          POSTGRES_USER: tradegateway
-          POSTGRES_PASSWORD: tradegateway
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U tradegateway -d tradegateway_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    if: github.event_name == 'pull_request' || needs.detect-changes.outputs.typescript == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
+    env:
+      # The disposable harness creates and removes a project-scoped PostgreSQL
+      # container. A unique name avoids collisions when runner capacity grows.
+      TEST_COMPOSE_PROJECT: singlewindow-test-db-${{ github.run_id }}-${{ github.job }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -119,14 +101,10 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm exec --yes --package=pnpm@10.15.0 -- pnpm install --frozen-lockfile
-      - name: Apply test schema
-        run: npm exec --yes --package=pnpm@10.15.0 -- pnpm exec drizzle-kit push --force
-      - name: Seed deterministic test data
-        run: make db-seed
       - name: Type check
         run: npm exec --yes --package=pnpm@10.15.0 -- pnpm check
-      - name: Run primary test suite
-        run: npm exec --yes --package=pnpm@10.15.0 -- pnpm test -- --reporter=verbose
+      - name: Run disposable PostgreSQL-backed test suite
+        run: scripts/test-with-postgres.sh --reporter=verbose
       - name: Upload TypeScript test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -141,7 +119,7 @@ jobs:
     name: Toxiproxy quorum-fence integration
     needs: detect-changes
     if: needs.detect-changes.outputs.chaos == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     services:
       redis-chaos:
         image: redis:7.4-alpine
@@ -191,7 +169,7 @@ jobs:
     name: Go service tests (${{ matrix.service }})
     needs: detect-changes
     if: needs.detect-changes.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     strategy:
       fail-fast: false
       matrix:
@@ -221,7 +199,7 @@ jobs:
     name: Rust service tests (${{ matrix.service }})
     needs: detect-changes
     if: needs.detect-changes.outputs.rust == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     strategy:
       fail-fast: false
       matrix:
@@ -263,7 +241,7 @@ jobs:
     name: JWS integration
     needs: detect-changes
     if: needs.detect-changes.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     defaults:
       run:
         working-directory: services/go/mojaloop-gateway
@@ -283,7 +261,7 @@ jobs:
     name: Workflow worker health
     needs: detect-changes
     if: needs.detect-changes.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     defaults:
       run:
         working-directory: services/go/workflow-service
@@ -306,7 +284,7 @@ jobs:
       - rust-test-matrix
       - jws-integration
       - worker-health
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, docker, singlewindow-ci]
     steps:
       - name: Fail when any required job failed
         env:

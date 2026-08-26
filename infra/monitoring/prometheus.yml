@@ -5,6 +5,10 @@ global:
     cluster: tradegateway-ngswtp
     environment: development
 
+# Production deployments should mount the runner alert file at this path.
+rule_files:
+  - /etc/prometheus/rules/ephemeral-runner-alerts.yaml
+
 scrape_configs:
   - job_name: apisix
     static_configs:

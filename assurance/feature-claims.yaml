@@ -1,0 +1,222 @@
+version: 1
+assessment_policy: mission-critical
+claims:
+  - id: SW-DECL-001
+    claim: Declaration creation, submission, assessment, hold, release, and payment-confirmation transitions enforce authorization and durable state rules.
+    authoritative_source: missing-approved-state-transition-and-acceptance-criteria
+    owner: unassigned
+    component: TypeScript declaration router and database schema
+    entry_points:
+      - server/routers/declarations.ts
+    implementation:
+      - server/routers/declarations.ts
+      - server/businessRules.ts
+      - drizzle/schema.ts
+    schema_and_migrations:
+      - drizzle/schema.ts
+      - drizzle/migrations
+    deployment:
+      - .github/workflows/services.yml
+      - infra/test-environment/compose.yml
+    evidence:
+      unit:
+        - server/declarations.lifecycle.test.ts
+      integration:
+        - infra/release-drills/scenarios/postgres-declaration-transaction.sh
+      end_to_end: []
+      fault_injection:
+        - infra/release-drills/scenarios/postgres-declaration-transaction.sh
+    security_and_audit_requirements:
+      - Tenant/role deny-by-default authorization
+      - Durable audit and outbox/event consistency
+    data_classification: trade-and-possibly-personal-data
+    status: blocked
+    last_verified_revision: null
+    limitations:
+      - Authoritative state-transition rules and real staging integration evidence are absent.
+
+  - id: SW-PAY-001
+    claim: Payment initiation, confirmation, cancellation, export, and reconciliation are idempotent, durable, authorized, and reconcilable under provider uncertainty.
+    authoritative_source: missing-approved-payment-ledger-idempotency-and-reconciliation-policy
+    owner: unassigned
+    component: TypeScript payments router and external payment integrations
+    entry_points:
+      - server/routers/payments.ts
+    implementation:
+      - server/routers/payments.ts
+      - server/payments.test.ts
+    schema_and_migrations:
+      - drizzle/schema.ts
+      - drizzle/migrations
+    deployment:
+      - .github/workflows/services.yml
+    evidence:
+      unit:
+        - server/payments.test.ts
+      integration:
+        - infra/release-drills/scenarios/postgres-payment-confirmation.sh
+        - infra/release-drills/scenarios/payment-timeout-and-retry.sh
+      end_to_end: []
+      fault_injection:
+        - infra/release-drills/scenarios/postgres-payment-confirmation.sh
+        - infra/release-drills/scenarios/payment-timeout-and-retry.sh
+    security_and_audit_requirements:
+      - Idempotency-key uniqueness and payload binding
+      - Ledger/audit integrity and reconciliation
+      - Provider status lookup after unknown outcome
+    data_classification: financial-and-trade-data
+    status: blocked
+    last_verified_revision: null
+    limitations:
+      - No official provider sandbox run, ledger contract, or reconciliation evidence exists.
+
+  - id: SW-AUTH-001
+    claim: Protected tenant-domain, declaration, and payment actions fail closed for unauthorized or cross-tenant callers.
+    authoritative_source: server-authz-contract-and-tenant-membership-rules
+    owner: unassigned
+    component: tRPC routers and authorization middleware
+    entry_points:
+      - server/routers/tenant.ts
+      - server/routers/declarations.ts
+      - server/routers/payments.ts
+    implementation:
+      - server/routers/tenant.ts
+      - server/middleware/keycloakJwt.ts
+    schema_and_migrations:
+      - drizzle/schema.ts
+    deployment:
+      - docker-compose.yml
+    evidence:
+      unit:
+        - server/tenantDomainAuthorization.test.ts
+      integration:
+        - infra/release-drills/scenarios/authorization-unavailable.sh
+      end_to_end: []
+      fault_injection:
+        - infra/release-drills/scenarios/authorization-unavailable.sh
+    security_and_audit_requirements:
+      - Cross-tenant negative tests
+      - Identity/policy outage behavior
+    data_classification: identity-and-tenant-data
+    status: blocked
+    last_verified_revision: null
+    limitations:
+      - No real identity/policy service staging evidence has been executed.
+
+  - id: SW-REDIS-001
+    claim: A Redis quorum fence prevents stale ownership from committing after a network partition or flapping recovery.
+    authoritative_source: tests/chaos/test_quorum_fence_toxiproxy.py
+    owner: unassigned
+    component: Redis quorum-fence resilience path
+    entry_points:
+      - tests/chaos/test_quorum_fence_toxiproxy.py
+    implementation:
+      - tests/chaos/test_quorum_fence_toxiproxy.py
+    schema_and_migrations: []
+    deployment:
+      - .github/workflows/services.yml
+      - infra/release-drills/compose.yml
+    evidence:
+      unit: []
+      integration:
+        - tests/chaos/test_quorum_fence_toxiproxy.py
+      end_to_end: []
+      fault_injection:
+        - infra/release-drills/scenarios/redis-quorum-fence.sh
+    security_and_audit_requirements:
+      - Fencing epoch monotonicity
+      - Partition/recovery artifacts
+    data_classification: operational-metadata
+    status: incomplete
+    last_verified_revision: null
+    limitations:
+      - The test is not yet demonstrated to guard the production declaration/payment write path.
+
+  - id: SW-GRPC-001
+    claim: Declared gRPC business interfaces for declaration, payment, OGA, and profile services are registered and reachable in deployed service binaries.
+    authoritative_source: protobuf-and-go-service-contracts
+    owner: unassigned
+    component: Go gRPC service registration
+    entry_points:
+      - services/go/declaration-service/grpc_server.go
+    implementation:
+      - services/go/declaration-service/grpc_server.go
+      - services/go/payment-service
+      - services/go/oga-service
+      - services/go/profile-service
+    schema_and_migrations: []
+    deployment:
+      - services/go/*/Dockerfile
+    evidence:
+      unit: []
+      integration: []
+      end_to_end: []
+      fault_injection: []
+    security_and_audit_requirements:
+      - Authenticated and authorized service exposure
+    data_classification: trade-and-financial-data
+    status: blocked
+    last_verified_revision: null
+    limitations:
+      - Core service registration is commented out or otherwise unverified; no live contract evidence exists.
+
+  - id: SW-CI-001
+    claim: Required pull-request and release checks run on a trusted, isolated, Docker-capable self-hosted runner with clean disposable dependencies.
+    authoritative_source: .github/workflows/services.yml
+    owner: platform
+    component: GitHub Actions runner and test harness
+    entry_points:
+      - .github/workflows/services.yml
+      - .github/workflows/release-drills.yml
+    implementation:
+      - infra/github-actions-runner
+      - infra/test-environment
+      - scripts/test-with-postgres.sh
+    schema_and_migrations: []
+    deployment:
+      - infra/github-actions-runner/compose.yml
+    evidence:
+      unit: []
+      integration:
+        - infra/test-environment/validate_workflow.mjs
+      end_to_end: []
+      fault_injection:
+        - infra/release-drills/scenarios/runner-cleanup.sh
+    security_and_audit_requirements:
+      - Trusted-code boundary and fork exclusion
+      - Docker socket risk controls
+    data_classification: CI-secrets-and-source-code
+    status: blocked
+    last_verified_revision: null
+    limitations:
+      - Runner package and workflow changes are uncommitted and not deployed; hosted-runner provisioning is blocked.
+
+  - id: SW-OBS-001
+    claim: Ephemeral runner and release-drill diagnostics remain observable after container destruction and alert on failures.
+    authoritative_source: infra/monitoring/ephemeral-runner-observability.md
+    owner: platform
+    component: lifecycle collector, Prometheus, Grafana, Loki forwarding
+    entry_points:
+      - infra/monitoring/runner-lifecycle-collector/collector.py
+    implementation:
+      - infra/monitoring/runner-lifecycle-collector/collector.py
+      - infra/monitoring/prometheus/ephemeral-runner-alerts.yaml
+      - infra/monitoring/dashboards/ephemeral-runner.json
+    schema_and_migrations: []
+    deployment:
+      - infra/monitoring/prometheus.yml
+    evidence:
+      unit:
+        - infra/monitoring/runner-lifecycle-collector/test_collector.py
+      integration: []
+      end_to_end: []
+      fault_injection:
+        - infra/release-drills/scenarios/observability-durability.sh
+    security_and_audit_requirements:
+      - Redaction and durable logs
+      - Alert delivery and acknowledgment
+    data_classification: CI-logs-and-operational-metadata
+    status: blocked
+    last_verified_revision: null
+    limitations:
+      - Collector/dashboard/rules are not deployed; Loki and Alertmanager evidence is absent.

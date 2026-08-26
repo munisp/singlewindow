@@ -72,10 +72,11 @@ export async function acquireLock(key: string, ttlMs = 30_000): Promise<Distribu
   const redis = await getRedis();
 
   if (!redis) {
-    // Redis unavailable — fail open with a warning
-    // In production, this should be a hard failure for financial operations
-    console.warn("[redis-lock] Redis unavailable — lock not acquired for:", key);
-    return { key, token: "no-redis", ttlMs, acquiredAt: new Date() };
+    // Financial critical sections must never proceed without their stated lock.
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Payment processing is temporarily unavailable because the idempotency lock service is unavailable.",
+    });
   }
 
   const lockKey = `lock:${key}`;
@@ -104,8 +105,6 @@ export async function acquireLock(key: string, ttlMs = 30_000): Promise<Distribu
  * preventing a process from releasing another process's lock.
  */
 export async function releaseLock(lock: DistributedLock): Promise<void> {
-  if (lock.token === "no-redis") return; // No-op for degraded mode
-
   const redis = await getRedis();
   if (!redis) return;
 

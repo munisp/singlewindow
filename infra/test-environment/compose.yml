@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${TEST_POSTGRES_DB:-tradegateway_test}
+      POSTGRES_USER: ${TEST_POSTGRES_USER:-tradegateway}
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:-tradegateway}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${TEST_POSTGRES_PORT:-55432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

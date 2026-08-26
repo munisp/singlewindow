@@ -30,7 +30,9 @@ async function sha256(input: string): Promise<string> {
 }
 
 export const batchPaymentsRouter = router({
-  enqueue: protectedProcedure
+  // Queue insertion is an operational/internal control-plane action. Trader payment
+  // initiation uses its dedicated ownership-checked flow and must not choose ledger accounts.
+  enqueue: adminProcedure
     .input(z.object({
       transferId: z.string().min(1).max(128),
       debitAccountId: z.string().min(1).max(128),

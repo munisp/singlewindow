@@ -1,6 +1,7 @@
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
   cookieSecret: process.env.JWT_SECRET ?? "",
+  apiKeyHashSecret: process.env.API_KEY_HASH_SECRET ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
@@ -165,17 +166,50 @@ export const ENV = {
   appVersion: process.env.APP_VERSION ?? "1.0.0",
 };
 
-// ─── Production validation — logs warnings for missing secrets ────────────────
-if (ENV.isProduction) {
+// ─── Production validation — fail closed on unsafe configuration ─────────────
+
+function isUnsafeProductionEndpoint(value: string): boolean {
+  return /(?:^|\/\/)(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::|\/|$)/i.test(value)
+    || /(?:^|,)\s*(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::|$)/i.test(value);
+}
+
+/**
+ * Rejects missing secrets and local/default endpoints before a production process
+ * can serve traffic. Tests and local development retain explicit local defaults.
+ */
+export function validateProductionConfig(config = ENV): void {
   const required: [string, string][] = [
-    ["KEYCLOAK_CLIENT_SECRET", ENV.keycloakClientSecret],
-    ["NIGERIA_ID_CLIENT_ID", ENV.nigeriaIdClientId],
-    ["NIGERIA_ID_CLIENT_SECRET", ENV.nigeriaIdClientSecret],
-    ["PERMIFY_API_KEY", ENV.permifyApiKey],
-    ["SENDGRID_API_KEY", ENV.sendgridApiKey],
-    ["REDIS_PASSWORD", ENV.redisPassword],
+    ["DATABASE_URL", config.databaseUrl],
+    ["JWT_SECRET", config.cookieSecret],
+    ["API_KEY_HASH_SECRET or JWT_SECRET", config.apiKeyHashSecret || config.cookieSecret],
+    ["KEYCLOAK_URL", config.keycloakUrl],
+    ["KEYCLOAK_CLIENT_SECRET", config.keycloakClientSecret],
+    ["PERMIFY_URL", config.permifyUrl],
+    ["PERMIFY_API_KEY", config.permifyApiKey],
+    ["REDIS_URL", config.redisUrl],
+    ["REDIS_PASSWORD", config.redisPassword],
+    ["MOJALOOP_URL", config.mojaloopUrl],
+    ["TEMPORAL_ADDRESS", config.temporalAddress],
+    ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ];
-  for (const [name, val] of required) {
-    if (!val) console.warn(`[ENV] WARNING: ${name} is not set in production`);
+  const missing = required.filter(([, value]) => !value.trim()).map(([name]) => name);
+  const unsafeEndpoints = [
+    ["DATABASE_URL", config.databaseUrl],
+    ["KEYCLOAK_URL", config.keycloakUrl],
+    ["PERMIFY_URL", config.permifyUrl],
+    ["REDIS_URL", config.redisUrl],
+    ["MOJALOOP_URL", config.mojaloopUrl],
+    ["TEMPORAL_ADDRESS", config.temporalAddress],
+    ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
+  ].filter(([, value]) => isUnsafeProductionEndpoint(value)).map(([name]) => name);
+
+  if (missing.length || unsafeEndpoints.length) {
+    const details = [
+      missing.length ? `missing: ${missing.join(", ")}` : "",
+      unsafeEndpoints.length ? `unsafe local endpoint: ${unsafeEndpoints.join(", ")}` : "",
+    ].filter(Boolean).join("; ");
+    throw new Error(`[ENV] Production configuration rejected (${details}).`);
   }
 }
+
+if (ENV.isProduction) validateProductionConfig();

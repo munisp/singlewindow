@@ -1,0 +1,94 @@
+# Host-level Promtail configuration fragment for dedicated runner hosts.
+# Mount /var/log/journal and the positions directory into the agent.
+# Docker must use the journald log driver (see the accompanying runbook).
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: https://loki.monitoring.example.com/loki/api/v1/push
+    tenant_id: tradegateway
+    batchwait: 1s
+    batchsize: 1048576
+    timeout: 10s
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 20
+    # Keep an on-disk retry queue so a short Loki outage does not lose logs.
+    queue_config:
+      capacity: 10000
+      max_shards: 4
+      min_shards: 1
+      max_backoff: 5m
+      min_backoff: 500ms
+      retry_on_ratelimit: true
+    tls_config:
+      insecure_skip_verify: false
+
+scrape_configs:
+  - job_name: singlewindow-runner-journal
+    journal:
+      # Read the recent journal after an agent restart; persistent journald is
+      # the source of truth while the container itself is ephemeral.
+      max_age: 24h
+      labels:
+        environment: production
+        platform: tradegateway-ngswtp
+        source: github-actions-runner
+    relabel_configs:
+      # Docker journald entries expose the configured tag as a journal field.
+      - source_labels: ["__journal__container_tag"]
+        regex: "singlewindow\\.runner\\.(.+)"
+        target_label: runner_container
+        replacement: "$1"
+      - source_labels: ["__journal__container_id_full"]
+        target_label: container_id
+      - source_labels: ["__journal__hostname"]
+        target_label: host
+      - source_labels: ["__journal__container_name"]
+        target_label: container_name
+    pipeline_stages:
+      - json:
+          expressions:
+            ts: ts
+            level: level
+            event: event
+            msg: msg
+            repository: repository
+            runner_mode: runner_mode
+            runner_name: runner_name
+            run_id: run_id
+            job_id: job_id
+            workflow: workflow
+            image_version: image_version
+            compose_project: compose_project
+            failure_class: failure_class
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+          fallback_formats:
+            - RFC3339
+            - UnixMs
+      - labels:
+          level:
+          event:
+          repository:
+          runner_mode:
+          workflow:
+          failure_class:
+      - static_labels:
+          service: github-actions-runner
+          log_class: ci_lifecycle
+      - match:
+          selector: '{level="debug"}'
+          action: drop
+          drop_counter_reason: debug_log_dropped
+      - limit:
+          rate: 10000
+          burst: 20000
+          drop: true

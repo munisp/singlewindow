@@ -135,3 +135,9 @@ test-results/
 .project-config.json
 .github/workflows/*
 !.github/workflows/services.yml
+
+# Local GitHub Actions runner credentials and host-specific overrides
+infra/github-actions-runner/.env
+infra/github-actions-runner/*.token
+infra/github-actions-runner/*.secret
+infra/github-actions-runner/.runtime/

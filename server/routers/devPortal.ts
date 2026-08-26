@@ -14,9 +14,16 @@ import { eq, desc, and, gte, sql } from "drizzle-orm";
 // ─── API Key Generation ───────────────────────────────────────────────────────
 
 function generateApiKey(prefix: string): { key: string; keyHash: string; keyPrefix: string } {
+  const hashSecret = process.env.API_KEY_HASH_SECRET ?? process.env.JWT_SECRET;
+  if (!hashSecret) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "API key creation is unavailable because the key-hash secret is not configured.",
+    });
+  }
   const raw = randomBytes(32).toString("hex");
   const key = `${prefix}_${raw}`;
-  const keyHash = createHmac("sha256", process.env.JWT_SECRET ?? "secret").update(key).digest("hex");
+  const keyHash = createHmac("sha256", hashSecret).update(key).digest("hex");
   const keyPrefix = key.slice(0, prefix.length + 9); // prefix + _ + first 8 chars
   return { key, keyHash, keyPrefix };
 }
@@ -38,7 +45,7 @@ async function checkRateLimit(apiKeyId: number, limitPerMinute: number): Promise
     const remaining = Math.max(0, limitPerMinute - used);
     return { allowed: remaining > 0, remaining };
   } catch {
-    return { allowed: true, remaining: limitPerMinute };
+    return { allowed: false, remaining: 0 };
   }
 }
 
@@ -82,22 +89,13 @@ export const devPortalRouter = router({
 
         // Return the raw key ONCE — never stored again
         return { ...created, rawKey: key };
-      } catch {
-        // Fallback for DB unavailability
-        return {
-          id: Math.floor(Math.random() * 100000),
-          userId: ctx.user.id,
-          name: input.name,
-          keyPrefix,
-          scopes: input.scopes.join(","),
-          rateLimit: input.rateLimit,
-          sandboxMode: input.sandboxMode,
-          status: "active",
-          expiresAt,
-          createdAt: new Date(),
-          lastUsedAt: null,
-          rawKey: key,
-        };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "API key creation failed; no key was issued because it could not be persisted.",
+          cause: error,
+        });
       }
     }),
 

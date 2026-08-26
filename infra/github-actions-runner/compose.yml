@@ -1,0 +1,35 @@
+services:
+  runner:
+    build:
+      context: .
+      args:
+        RUNNER_VERSION: ${RUNNER_VERSION:-2.336.0}
+        RUNNER_ARCH: ${RUNNER_ARCH:-x64}
+    image: singlewindow/github-actions-runner:${RUNNER_VERSION:-2.336.0}
+    # GitHub Actions service containers publish PostgreSQL/Redis ports on the
+    # Docker host. Host networking lets the containerized runner access the
+    # workflow's existing localhost service URLs without changing application code.
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RUNNER_URL: ${RUNNER_URL:?Set RUNNER_URL to the repository or organization URL.}
+      RUNNER_NAME: ${RUNNER_NAME:-singlewindow-ci-01}
+      RUNNER_LABELS: ${RUNNER_LABELS:-docker,singlewindow-ci}
+      RUNNER_EPHEMERAL: ${RUNNER_EPHEMERAL:-false}
+      RUNNER_TOKEN_FILE: /run/runner-secrets/registration-token
+      REQUIRE_DOCKER: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-work:/runner/_work
+      - ${RUNNER_REGISTRATION_TOKEN_FILE:?Set RUNNER_REGISTRATION_TOKEN_FILE to an owner-only runtime file.}:/run/runner-secrets/registration-token:ro
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  runner-work:

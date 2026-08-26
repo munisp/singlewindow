@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    LISTEN_HOST=0.0.0.0 \
+    LISTEN_PORT=8089 \
+    DELIVERY_DB=/var/lib/adapter/deliveries.sqlite3
+
+RUN groupadd --system adapter && useradd --system --gid adapter --home-dir /nonexistent --shell /usr/sbin/nologin adapter
+WORKDIR /app
+COPY github_workflow_job_adapter.py .
+RUN mkdir -p /var/lib/adapter && chown -R adapter:adapter /app /var/lib/adapter
+USER adapter
+VOLUME ["/var/lib/adapter"]
+EXPOSE 8089
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8089/healthz', timeout=3)"
+ENTRYPOINT ["python", "/app/github_workflow_job_adapter.py"]

@@ -23,30 +23,36 @@ import crypto from "crypto";
 export type DeclarationStatus =
   | "draft"
   | "submitted"
+  | "under_assessment"
   | "docs_required"
   | "payment_pending"
+  | "payment_confirmed"
   | "under_examination"
   | "examination_complete"
   | "cleared"
   | "rejected"
-  | "cancelled"
-  | "archived";
+  | "cancelled";
 
 /**
  * Valid transitions per WCO Revised Kyoto Convention (RKC) Standard 6.1.
  * Each key is the CURRENT status, values are allowed NEXT statuses.
  */
 export const VALID_TRANSITIONS: Record<DeclarationStatus, DeclarationStatus[]> = {
-  draft: ["submitted", "cancelled"],
-  submitted: ["docs_required", "payment_pending", "under_examination", "cleared", "rejected"],
-  docs_required: ["submitted", "rejected", "cancelled"],
-  payment_pending: ["under_examination", "cleared", "rejected"],
+  // Submission writes under_assessment after risk scoring. submitted remains supported
+  // for imports and workflows that preserve a distinct hand-off state.
+  draft: ["submitted", "under_assessment", "cancelled"],
+  submitted: ["under_assessment", "docs_required", "payment_pending", "under_examination", "cleared", "rejected"],
+  under_assessment: ["docs_required", "payment_pending", "under_examination", "cleared", "rejected"],
+  docs_required: ["submitted", "under_assessment", "rejected", "cancelled"],
+  // payment_confirmed is written by the payment confirmation workflow; retain the
+  // legacy direct paths from payment_pending while permitting the normal path.
+  payment_pending: ["payment_confirmed", "under_examination", "cleared", "rejected"],
+  payment_confirmed: ["under_examination", "cleared", "rejected"],
   under_examination: ["examination_complete", "docs_required", "rejected"],
   examination_complete: ["cleared", "rejected", "payment_pending"],
-  cleared: ["archived"],
-  rejected: ["submitted", "cancelled"],
+  cleared: [],
+  rejected: ["submitted", "under_assessment", "cancelled"],
   cancelled: [],
-  archived: [],
 };
 
 /**
@@ -56,26 +62,38 @@ export const VALID_TRANSITIONS: Record<DeclarationStatus, DeclarationStatus[]> =
  */
 export const TRANSITION_ROLES: Record<string, string[]> = {
   "draft→submitted": ["user", "customs_officer", "admin"],
+  "draft→under_assessment": ["user", "customs_officer", "admin"],
   "draft→cancelled": ["user", "admin"],
+  "submitted→under_assessment": ["customs_officer", "admin"],
   "submitted→docs_required": ["customs_officer", "admin"],
   "submitted→payment_pending": ["customs_officer", "admin"],
   "submitted→under_examination": ["customs_officer", "inspector", "admin"],
   "submitted→cleared": ["customs_officer", "admin"],
   "submitted→rejected": ["customs_officer", "admin"],
+  "under_assessment→docs_required": ["customs_officer", "admin"],
+  "under_assessment→payment_pending": ["customs_officer", "admin"],
+  "under_assessment→under_examination": ["customs_officer", "inspector", "admin"],
+  "under_assessment→cleared": ["customs_officer", "admin"],
+  "under_assessment→rejected": ["customs_officer", "admin"],
   "docs_required→submitted": ["user", "admin"],
+  "docs_required→under_assessment": ["user", "admin"],
   "docs_required→rejected": ["customs_officer", "admin"],
   "docs_required→cancelled": ["user", "admin"],
+  "payment_pending→payment_confirmed": ["finance", "customs_officer", "admin"],
   "payment_pending→under_examination": ["customs_officer", "admin"],
   "payment_pending→cleared": ["customs_officer", "admin"],
   "payment_pending→rejected": ["customs_officer", "admin"],
+  "payment_confirmed→under_examination": ["customs_officer", "admin"],
+  "payment_confirmed→cleared": ["customs_officer", "admin"],
+  "payment_confirmed→rejected": ["customs_officer", "admin"],
   "under_examination→examination_complete": ["customs_officer", "inspector", "admin"],
   "under_examination→docs_required": ["customs_officer", "admin"],
   "under_examination→rejected": ["customs_officer", "admin"],
   "examination_complete→cleared": ["customs_officer", "admin"],
   "examination_complete→rejected": ["customs_officer", "admin"],
   "examination_complete→payment_pending": ["customs_officer", "admin"],
-  "cleared→archived": ["admin"],
   "rejected→submitted": ["user", "admin"],
+  "rejected→under_assessment": ["user", "admin"],
   "rejected→cancelled": ["user", "admin"],
 };
 
@@ -345,7 +363,7 @@ export function isSlaBreached(
   lane: RiskLane,
   now: Date = new Date()
 ): { breached: boolean; hoursOverdue: number; deadline: Date } {
-  const terminalStatuses: DeclarationStatus[] = ["cleared", "rejected", "cancelled", "archived"];
+  const terminalStatuses: DeclarationStatus[] = ["cleared", "rejected", "cancelled"];
   if (terminalStatuses.includes(currentStatus)) {
     return { breached: false, hoursOverdue: 0, deadline: getSlaDeadline(submittedAt, declarationType, lane) };
   }

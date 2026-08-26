@@ -145,7 +145,7 @@ export const paymentsRouter = router({
   confirm: protectedProcedure
     .input(z.object({
       paymentId: z.number().int().positive(),
-      mojaloopTransferId: z.string().optional(),
+      mojaloopTransferId: z.string().min(1),
       tbPendingTransferId: z.string().optional(),
       signature: z.string().optional(),
     }))
@@ -180,13 +180,13 @@ export const paymentsRouter = router({
           });
         }
 
-        const mojaloopTxId = input.mojaloopTransferId ?? `MJL-${nanoid(16).toUpperCase()}`;
+        const mojaloopTxId = input.mojaloopTransferId;
         const TEMPORAL_URL = process.env.TEMPORAL_URL ?? "http://localhost:7233";
         const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? "default";
 
         // Trigger Temporal ConfirmPaymentWorkflow (atomic: PostTB + ConfirmDB)
         const workflowId = `confirm-payment-${input.paymentId}-${mojaloopTxId}`;
-        await fetch(`${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
+        const workflowResponse = await fetch(`${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -202,56 +202,26 @@ export const paymentsRouter = router({
           }),
           signal: AbortSignal.timeout(10_000),
         }).catch((err) => {
-          // Temporal unavailable — fall back to direct DB update
-          console.error("[payments] Temporal unavailable, falling back to direct confirm:", err.message);
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `Payment confirmation workflow is unavailable: ${err instanceof Error ? err.message : String(err)}`,
+          });
         });
+        if (!workflowResponse.ok) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Payment confirmation workflow rejected the request.",
+          });
+        }
 
-        // Direct DB update (also executed by Temporal workflow — idempotent via ON CONFLICT)
-        const updated = await updatePayment(input.paymentId, {
-          status: "confirmed",
-          confirmedAt: new Date(),
-          mojalooopTransferId: mojaloopTxId,
-        });
-        if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
-
-        await updateDeclaration(updated.declarationId, { status: "payment_confirmed" });
-
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: input.paymentId,
-          action: "payment_confirmed",
-          actorId: ctx.user.id,
-          actorType: "system",
-          newState: { status: "confirmed", mojaloopTxId, workflowId },
-        });
-
-        await createNotification({
-          userId: updated.traderId,
-          type: "payment_confirmed",
-          title: "Payment Confirmed",
-          message: `Payment of ${updated.amount} ${updated.currency} confirmed. Your declaration is now queued for examination.`,
-          entityType: "payment",
-          entityId: input.paymentId,
-        });
-
-        await createUserNotification({
-          userId: updated.traderId,
-          type: "payment_confirmed",
-          title: "Payment Confirmed ✓",
-          body: `Your payment of ${updated.amount} ${updated.currency} (Ref: ${updated.reference}) has been confirmed. Your declaration is now queued for examination.`,
-          declarationId: updated.declarationId,
-        }).catch(() => {});
-
-        await emitPaymentCompleted({
-          paymentId: input.paymentId,
-          declarationId: updated.declarationId,
-          traderId: updated.traderId,
-          amount: parseFloat(updated.amount ?? '0'),
-          currency: updated.currency ?? 'NGN',
-          mojalooopTransferId: updated.mojalooopTransferId ?? undefined,
-        }).catch(() => {});
-
-        const result = { ...updated, workflowId };
+        // Workflow acceptance is not settlement. Only the authoritative workflow callback,
+        // after provider and ledger confirmation, may write confirmed/payment_confirmed state.
+        const result = {
+          paymentId: existing.id,
+          status: "confirmation_submitted" as const,
+          mojaloopTransferId: mojaloopTxId,
+          workflowId,
+        };
         await setIdempotencyKey(idempotencyKey, result);
         return result;
       } finally {

@@ -1,0 +1,281 @@
+groups:
+  - name: singlewindow.ephemeral-runner.queue
+    interval: 30s
+    rules:
+      - alert: SingleWindowPRQueueLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, repository, workflow, runner_label_group) (rate(ci_job_queue_wait_seconds_bucket{event="pull_request"}[10m]))) > 120
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          component: github-actions
+        annotations:
+          summary: "SingleWindow PR queue latency is high"
+          description: "P95 pull-request queue wait for {{ $labels.workflow }} is {{ $value | humanizeDuration }}."
+          runbook: "https://wiki.tradegateway.gov/runbooks/ci-runner-queue"
+
+      - alert: SingleWindowPRQueueLatencyCritical
+        expr: histogram_quantile(0.95, sum by (le, repository, workflow, runner_label_group) (rate(ci_job_queue_wait_seconds_bucket{event="pull_request"}[10m]))) > 300
+        for: 15m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "SingleWindow PR queue latency exceeds five minutes"
+          description: "P95 pull-request queue wait for {{ $labels.workflow }} is {{ $value | humanizeDuration }}."
+          runbook: "https://wiki.tradegateway.gov/runbooks/ci-runner-queue"
+
+      - alert: SingleWindowOldQueuedJob
+        expr: max by (repository, runner_label_group) (ci_oldest_queued_job_age_seconds) > 600
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "A SingleWindow CI job has been queued for over ten minutes"
+          description: "The oldest queued job for {{ $labels.runner_label_group }} is {{ $value | humanizeDuration }} old."
+
+      - alert: SingleWindowNoIdleRunnerForQueuedJob
+        expr: (sum by (runner_label_group) (ci_queue_depth{runner_label_group="singlewindow-ci"}) > 0) and on (runner_label_group) (sum by (runner_label_group) (runner_online{runner_label_group="singlewindow-ci"} and runner_busy == 0) == 0)
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "Queued SingleWindow job has no idle matching runner"
+          description: "The singlewindow-ci queue has demand but no online idle runner."
+
+  - name: singlewindow.ephemeral-runner.lifecycle
+    interval: 30s
+    rules:
+      - alert: SingleWindowRunnerRegistrationFailure
+        expr: increase(runner_registration_failure_total{repository="munisp/singlewindow"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "SingleWindow runner registration failed"
+          description: "Runner registration failures increased for reason {{ $labels.failure_class }}."
+
+      - alert: SingleWindowRunnerProvisioningSlow
+        expr: histogram_quantile(0.95, sum by (le, runner_mode, image_version) (rate(runner_provision_seconds_bucket{repository="munisp/singlewindow"}[15m]))) > 90
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          component: github-actions
+        annotations:
+          summary: "SingleWindow runner provisioning is slow"
+          description: "P95 runner provisioning time is {{ $value | humanizeDuration }} for {{ $labels.runner_mode }} runners."
+
+      - alert: SingleWindowRunnerCleanupFailed
+        expr: increase(runner_cleanup_failure_total{repository="munisp/singlewindow"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "Ephemeral SingleWindow runner cleanup failed"
+          description: "An ephemeral runner cleanup failed with class {{ $labels.failure_class }}. Inspect containers, volumes, and runner registrations."
+
+      - alert: SingleWindowEphemeralWorkspaceLeaked
+        expr: max by (host, compose_project) (runner_ephemeral_workspace_age_seconds{repository="munisp/singlewindow"}) > 900
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "Ephemeral SingleWindow workspace was not removed"
+          description: "Workspace {{ $labels.compose_project }} has existed for {{ $value | humanizeDuration }} after its job lifecycle."
+
+      - alert: SingleWindowRunnerImageStale
+        expr: runner_image_stale{repository="munisp/singlewindow"} == 1
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+          component: github-actions
+        annotations:
+          summary: "SingleWindow runner image is outside its update window"
+          description: "Runner image {{ $labels.image_version }} requires rebuild and redeployment."
+
+      - alert: SingleWindowEphemeralLogsMissing
+        expr: (time() - runner_last_log_timestamp_seconds{repository="munisp/singlewindow"} > 600) or absent(runner_last_log_timestamp_seconds{repository="munisp/singlewindow"})
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "Ephemeral runner diagnostics are not reaching durable storage"
+          description: "No recent lifecycle log heartbeat is visible for the SingleWindow runner collector."
+
+  - name: singlewindow.ephemeral-runner.capacity
+    interval: 30s
+    rules:
+      - alert: SingleWindowRunnerHostCPUHigh
+        expr: 1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle", job="singlewindow-runner-host"}[5m])) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          component: github-actions
+        annotations:
+          summary: "SingleWindow runner host CPU is above 85%"
+          description: "Runner host {{ $labels.instance }} CPU utilization is {{ $value | humanizePercentage }}."
+
+      - alert: SingleWindowRunnerHostMemoryLow
+        expr: node_memory_MemAvailable_bytes{job="singlewindow-runner-host"} / node_memory_MemTotal_bytes{job="singlewindow-runner-host"} < 0.20
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          component: github-actions
+        annotations:
+          summary: "SingleWindow runner host available memory is below 20%"
+          description: "Runner host {{ $labels.instance }} has only {{ $value | humanizePercentage }} memory available."
+
+      - alert: SingleWindowRunnerDockerFilesystemHigh
+        expr: 1 - (node_filesystem_avail_bytes{job="singlewindow-runner-host",mountpoint="/var/lib/docker"} / node_filesystem_size_bytes{job="singlewindow-runner-host",mountpoint="/var/lib/docker"}) > 0.70
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          component: github-actions
+        annotations:
+          summary: "SingleWindow runner Docker filesystem is above 70%"
+          description: "Docker filesystem on {{ $labels.instance }} is {{ $value | humanizePercentage }} full."
+
+      - alert: SingleWindowRunnerDockerFilesystemCritical
+        expr: 1 - (node_filesystem_avail_bytes{job="singlewindow-runner-host",mountpoint="/var/lib/docker"} / node_filesystem_size_bytes{job="singlewindow-runner-host",mountpoint="/var/lib/docker"}) > 0.85
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "SingleWindow runner Docker filesystem is critically full"
+          description: "Docker filesystem on {{ $labels.instance }} is {{ $value | humanizePercentage }} full."
+
+      - alert: SingleWindowRunnerDockerOOM
+        expr: increase(container_oom_events_total{job="singlewindow-runner-cadvisor"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: github-actions
+          page: "true"
+        annotations:
+          summary: "A SingleWindow runner container was OOM-killed"
+          description: "Container {{ $labels.name }} reported an OOM event on {{ $labels.instance }}."
+
+  - name: singlewindow.ephemeral-runner.database
+    interval: 30s
+    rules:
+      - alert: SingleWindowPostgresHarnessFailure
+        expr: increase(ci_postgres_harness_setup_failures_total{repository="munisp/singlewindow"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: test-harness
+        annotations:
+          summary: "SingleWindow PostgreSQL test harness setup failed"
+          description: "The disposable PostgreSQL harness failed during {{ $labels.stage }}."
+
+      - alert: SingleWindowPostgresHarnessSlow
+        expr: histogram_quantile(0.95, sum by (le, stage) (rate(ci_postgres_harness_stage_seconds_bucket{repository="munisp/singlewindow"}[15m]))) > 120
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+          component: test-harness
+        annotations:
+          summary: "SingleWindow PostgreSQL harness stage is slow"
+          description: "P95 {{ $labels.stage }} duration is {{ $value | humanizeDuration }}."
+
+  - name: singlewindow.release-drills
+    interval: 30s
+    rules:
+      - alert: SingleWindowReleaseDrillFailed
+        expr: increase(release_drill_runs_total{repository="munisp/singlewindow",result=~"failed|blocked"}[30m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: release-drill
+          page: "true"
+        annotations:
+          summary: "A SingleWindow staging release drill failed"
+          description: "Scenario {{ $labels.scenario_id }} reported {{ $labels.result }}. Release promotion is blocked pending artifact and invariant review."
+          runbook: "https://wiki.tradegateway.gov/runbooks/release-drills"
+
+      - alert: SingleWindowReleaseDrillStalled
+        expr: release_drill_active{repository="munisp/singlewindow"} == 1
+        for: 45m
+        labels:
+          severity: critical
+          team: platform
+          component: release-drill
+          page: "true"
+        annotations:
+          summary: "A SingleWindow release drill has remained active for 45 minutes"
+          description: "Scenario {{ $labels.scenario_id }} may be stalled. Preserve artifacts, restore bounded faults, and clean only its validated project."
+          runbook: "https://wiki.tradegateway.gov/runbooks/release-drills"
+
+      - alert: SingleWindowReleaseDrillStale
+        expr: time() - max by (repository) (release_drill_last_completed_timestamp_seconds{repository="munisp/singlewindow"}) > 1209600
+        for: 1h
+        labels:
+          severity: warning
+          team: platform
+          component: release-drill
+        annotations:
+          summary: "No successful SingleWindow release-drill evidence has completed in 14 days"
+          description: "Verify the scheduled staging release-drill workflow, runner capacity, target approvals, and evidence retention."
+          runbook: "https://wiki.tradegateway.gov/runbooks/release-drills"
+
+      - alert: SingleWindowReleaseDrillEvidenceMissing
+        expr: |
+          (
+            increase(release_drill_runs_total{repository="munisp/singlewindow",scenario_id=~"RD-2|RD-3",result="passed"}[1h]) > 0
+          ) unless on (repository, scenario_id) (
+            release_drill_evidence_present{repository="munisp/singlewindow",evidence_class="database"} == 1
+          )
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+          component: release-drill
+          page: "true"
+        annotations:
+          summary: "A critical release drill completed without database evidence"
+          description: "{{ $labels.scenario_id }} reported a passing result but did not publish required database evidence. Treat the result as invalid."
+          runbook: "https://wiki.tradegateway.gov/runbooks/release-drills"
+
+      - alert: SingleWindowReleaseDrillTelemetryMissing
+        expr: absent(release_drill_runs_total{repository="munisp/singlewindow"})
+        for: 24h
+        labels:
+          severity: warning
+          team: platform
+          component: release-drill
+        annotations:
+          summary: "Release-drill metrics have not been observed"
+          description: "The lifecycle collector has no release-drill outcome series. Verify collector deployment and the drill event endpoint."
+          runbook: "https://wiki.tradegateway.gov/runbooks/release-drills"

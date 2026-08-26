@@ -36,14 +36,14 @@ describe("assertValidTransition", () => {
     expect(() => assertValidTransition("submitted", "cleared", "user")).toThrow("not authorised");
   });
 
-  it("allows cleared → archived for admin only", () => {
-    expect(() => assertValidTransition("cleared", "archived", "admin")).not.toThrow();
-    expect(() => assertValidTransition("cleared", "archived", "customs_officer")).toThrow("not authorised");
+  it("allows payment_pending → payment_confirmed for finance only", () => {
+    expect(() => assertValidTransition("payment_pending", "payment_confirmed", "finance")).not.toThrow();
+    expect(() => assertValidTransition("payment_pending", "payment_confirmed", "user")).toThrow("not authorised");
   });
 
   it("terminal statuses have no valid transitions", () => {
+    expect(VALID_TRANSITIONS.cleared).toEqual([]);
     expect(VALID_TRANSITIONS.cancelled).toEqual([]);
-    expect(VALID_TRANSITIONS.archived).toEqual([]);
   });
 
   it("allows rejected → submitted for trader (resubmission)", () => {

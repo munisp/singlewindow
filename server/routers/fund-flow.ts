@@ -48,16 +48,25 @@ async function getRedis() {
 /**
  * Atomic Redis idempotency guard.
  * Returns true if this key was already processed (duplicate).
- * Fails open (returns false) if Redis is unavailable.
+ * Fails closed with a typed error if Redis/idempotency storage is unavailable.
  */
 async function checkAndSetIdempotency(key: string, ttlSeconds = 86400): Promise<boolean> {
   try {
     const r = await getRedis();
-    if (!r) return false;
+    if (!r) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Fund-flow processing is temporarily unavailable because idempotency storage is unavailable.",
+      });
+    }
     const result = await r.set(`ff:idem:${key}`, "1", { NX: true, EX: ttlSeconds });
     return result === null; // null → key existed → duplicate
-  } catch {
-    return false; // fail open
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Fund-flow processing is temporarily unavailable because idempotency storage failed.",
+    });
   }
 }
 

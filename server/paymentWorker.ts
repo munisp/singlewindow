@@ -16,7 +16,7 @@
  * Dead-letter threshold: attempt_count >= max_attempts (default 5)
  */
 
-import { eq, and, lte, sql } from "drizzle-orm";
+import { eq, and, lte, inArray, sql } from "drizzle-orm";
 import {
   paymentQueue,
   paymentAccounts,
@@ -88,15 +88,9 @@ async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Pro
   const available = await mojaloopAvailable();
 
   if (!available) {
-    // Simulation mode: deterministic success after attempt 0
-    const simulatedSuccess = item.attemptCount === 0 || Math.random() > 0.1;
-    if (simulatedSuccess) {
-      return {
-        success: true,
-        fulfilment: deriveIlpFulfilment(item.transferId),
-      };
-    }
-    return { success: false, error: "Simulated transient failure" };
+    // A payment provider outage is an unknown external outcome, never a successful settlement.
+    // Keep the queue item retryable/dead-letterable until a real provider status lookup is available.
+    return { success: false, error: "Mojaloop unavailable; settlement outcome is not confirmed" };
   }
 
   const condition = deriveIlpCondition(item.transferId);
@@ -315,29 +309,35 @@ async function recoverStuckItems(
 
 // ─── Main worker loop ─────────────────────────────────────────────────────────
 
-export async function runPaymentWorkerCycle(): Promise<void> {
+export async function runPaymentWorkerCycle(): Promise<number> {
   const db = await getDb();
   if (!db) {
     console.warn("[Worker] DB unavailable — skipping payment worker cycle");
-    return;
+    return 0;
   }
 
   try {
     // 1. Recover any items stuck in 'processing' from a previous crashed cycle
     await recoverStuckItems(db);
 
-    // 2. Claim a batch of queued items atomically
-    //    Use a CTE-based UPDATE … RETURNING to avoid race conditions with multiple workers
+    // 2. Claim a bounded batch in the database. Rechecking status in the UPDATE
+    //    prevents a concurrent worker from claiming a row already claimed by another worker.
     const now = new Date();
-    const claimed = await db
-      .update(paymentQueue)
-      .set({ status: "processing", updatedAt: now })
+    const candidateIds = db
+      .select({ id: paymentQueue.id })
+      .from(paymentQueue)
       .where(
         and(
           eq(paymentQueue.status, "queued"),
           lte(paymentQueue.nextRetryAt, now),
         ),
       )
+      .orderBy(paymentQueue.nextRetryAt, paymentQueue.id)
+      .limit(WORKER_BATCH_SIZE);
+    const claimed = await db
+      .update(paymentQueue)
+      .set({ status: "processing", updatedAt: now })
+      .where(and(eq(paymentQueue.status, "queued"), inArray(paymentQueue.id, candidateIds)))
       .returning({
         id: paymentQueue.id,
         transferId: paymentQueue.transferId,
@@ -356,11 +356,9 @@ export async function runPaymentWorkerCycle(): Promise<void> {
         metadata: paymentQueue.metadata,
         createdAt: paymentQueue.createdAt,
         updatedAt: paymentQueue.updatedAt,
-      })
-      // Drizzle does not support LIMIT on UPDATE natively; slice after returning
-      .then((rows) => rows.slice(0, WORKER_BATCH_SIZE));
+      });
 
-    if (claimed.length === 0) return;
+    if (claimed.length === 0) return 0;
 
     console.log(`[Worker] Processing ${claimed.length} payment(s)…`);
 
@@ -382,8 +380,10 @@ export async function runPaymentWorkerCycle(): Promise<void> {
           .where(eq(paymentQueue.id, item.id));
       }
     }
+    return claimed.length;
   } catch (err) {
     console.error("[Worker] Payment worker cycle error:", err);
+    return 0;
   }
 }
 
