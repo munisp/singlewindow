@@ -366,7 +366,7 @@ func defaultIndexTemplates() []IndexTemplate {
 		{
 			Name: "tradegateway-audit-events",
 			Body: map[string]any{
-				"index_patterns": []string{"audit-events-*"},
+				"index_patterns": []string{"tradegateway-audit-events*"},
 				"priority":       100,
 				"template": map[string]any{
 					"settings": map[string]any{

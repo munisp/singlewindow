@@ -309,7 +309,10 @@ export async function ensureOpenSearchIndices(): Promise<void> {
 // ─── INDEX LIFECYCLE MANAGEMENT ──────────────────────────────────────────────
 /**
  * Creates an ISM (Index State Management) policy on OpenSearch for the
- * audit-trail-* index pattern:
+ * tradegateway-audit-* index pattern (matches the actual
+ * tradegateway-audit-events and tradegateway-audit-log indices; the
+ * previous audit-trail-* pattern matched no index, so retention never
+ * applied):
  *   hot (7 days) → warm (30 days) → delete (90 days)
  */
 export async function setupIndexLifecycle(): Promise<{ success: boolean; message: string }> {
@@ -335,7 +338,7 @@ export async function setupIndexLifecycle(): Promise<{ success: boolean; message
           transitions: [],
         },
       ],
-      ism_template: [{ index_patterns: ["audit-trail-*"], priority: 100 }],
+      ism_template: [{ index_patterns: ["tradegateway-audit-*"], priority: 100 }],
     },
   };
   try {

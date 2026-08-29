@@ -56,7 +56,7 @@
     {
       "name": "tradegateway-audit-events",
       "body": {
-        "index_patterns": ["audit-events-*"],
+        "index_patterns": ["tradegateway-audit-events*"],
         "priority": 100,
         "template": {
           "settings": {
