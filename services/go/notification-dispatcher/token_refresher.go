@@ -131,11 +131,26 @@ func (r *TokenRefresher) runCycle(ctx context.Context) {
 	cycleID := fmt.Sprintf("cycle-%d", time.Now().UnixMilli())
 	slog.Info("TokenRefresher cycle started", "cycle_id", cycleID)
 
+	// Fail-closed: a refresher without its dependencies cannot validate or
+	// purge anything. Log loudly and skip the cycle instead of panicking or
+	// fabricating a successful refresh.
+	if r.provider == nil || r.publisher == nil {
+		slog.Error("TokenRefresher: missing TokenProvider/PurgePublisher — cycle skipped", "cycle_id", cycleID)
+		return
+	}
+
 	tokens, err := r.provider.ListTokens(ctx, "fcm", r.batchSize)
 	if err != nil {
 		slog.Error("TokenRefresher: failed to list tokens", "error", err)
 		return
 	}
+
+	// A completed cycle counts even when there was nothing to validate —
+	// otherwise the stats lie about the refresher having run.
+	r.mu.Lock()
+	r.stats.TotalCycles++
+	r.stats.LastCycleAt = time.Now().UnixMilli()
+	r.mu.Unlock()
 
 	if len(tokens) == 0 {
 		slog.Info("TokenRefresher: no tokens to validate", "cycle_id", cycleID)
@@ -145,10 +160,8 @@ func (r *TokenRefresher) runCycle(ctx context.Context) {
 	stale := r.validateTokens(ctx, tokens)
 
 	r.mu.Lock()
-	r.stats.TotalCycles++
 	r.stats.TotalValidated += int64(len(tokens))
 	r.stats.TotalStale += int64(len(stale))
-	r.stats.LastCycleAt = time.Now().UnixMilli()
 	r.mu.Unlock()
 
 	if len(stale) == 0 {
@@ -189,7 +202,7 @@ func (r *TokenRefresher) validateTokens(ctx context.Context, tokens []string) []
 	stale := make([]string, 0, len(tokens)/10)
 
 	for _, token := range tokens {
-		if isStaleToken(ctx, r.fcm.projectID, r.fcm.bearerToken, token) {
+		if isStaleToken(ctx, r.fcm.ProjectID, r.fcm.BearerToken, token) {
 			stale = append(stale, token)
 		}
 	}
