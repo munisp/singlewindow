@@ -233,3 +233,145 @@ class TestAPIEndpoints:
         assert r.status_code == 200
         data = r.json()
         assert "total_scored" in data
+
+
+# ─── Honest ML augmentation (fail-closed) ─────────────────────────────────────
+
+import json as _json
+import threading as _threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+class _MLStubHandler(BaseHTTPRequestHandler):
+    """Minimal real HTTP server emulating the blueeconomy-ml-stack scoring endpoint."""
+
+    risk_score = 0.9
+    model_version = "mlstack-test-1"
+
+    def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("Content-Length", 0))
+        body = _json.loads(self.rfile.read(length) or b"{}")
+        assert "features" in body  # contract: rule features are sent
+        payload = _json.dumps({
+            "risk_score": self.risk_score,
+            "model_version": self.model_version,
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args):  # silence
+        pass
+
+
+@pytest.fixture
+def ml_stub_server():
+    server = HTTPServer(("127.0.0.1", 0), _MLStubHandler)
+    thread = _threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}/api/v1/score"
+    server.shutdown()
+    thread.join(timeout=2)
+
+
+@pytest.fixture
+def restore_ml_config():
+    original_url = svc.ML_SCORING_URL
+    yield
+    svc.ML_SCORING_URL = original_url
+
+
+class TestHonestMLAugmentation:
+    def test_no_ml_configured_reports_unavailable(self, restore_ml_config):
+        """Fail-closed: with ML_SCORING_URL unset the response says UNAVAILABLE,
+        never a fabricated score."""
+        svc.ML_SCORING_URL = None
+        r = client.post("/api/payment-risk/score", json=_base_req())
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ml_augmentation"] == "UNAVAILABLE"
+        assert data["ml_model_version"] is None
+        assert "ml_signal" not in data["features"]
+        assert "ml_external_score" not in data["features"]
+
+    def test_unreachable_ml_reports_unavailable(self, restore_ml_config):
+        """Fail-closed: an unreachable ML endpoint degrades to rules-only."""
+        svc.ML_SCORING_URL = "http://127.0.0.1:1/score"  # nothing listens there
+        r = client.post("/api/payment-risk/score", json=_base_req())
+        assert r.status_code == 200
+        assert r.json()["ml_augmentation"] == "UNAVAILABLE"
+
+    def test_ml_endpoint_applies_real_augmentation(self, restore_ml_config, ml_stub_server):
+        """When a real ML endpoint answers, its score is blended and reported."""
+        svc.ML_SCORING_URL = ml_stub_server
+        r = client.post("/api/payment-risk/score", json=_base_req())
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ml_augmentation"] == "APPLIED"
+        assert data["ml_model_version"] == "mlstack-test-1"
+        assert data["features"]["ml_external_score"] == 0.9
+        # Blended score must differ from the rules-only score (ML stub is hot: 0.9)
+        svc.ML_SCORING_URL = None
+        rules_only = client.post("/api/payment-risk/score", json=_base_req()).json()
+        expected = 0.65 * rules_only["risk_score"] + 0.35 * 0.9
+        assert data["risk_score"] == pytest.approx(expected, abs=1e-3)
+
+    def test_rules_critical_never_softened_by_ml(self):
+        """Fail-closed: blend_scores never lets ML lower a rule-layer CRITICAL."""
+        assert svc.blend_scores(0.95, 0.0) == 0.95
+        assert svc.blend_scores(0.85, 0.0) == 0.85
+        # Below the CRITICAL threshold ML genuinely augments the score.
+        assert svc.blend_scores(0.50, 0.0) == pytest.approx(0.65 * 0.50)
+        assert svc.blend_scores(0.50, 1.0) == pytest.approx(0.65 * 0.50 + 0.35)
+
+    def test_critical_action_survives_ml_augmentation(self, restore_ml_config, ml_stub_server):
+        """End-to-end: when ML is APPLIED the tier/action mapping still derives
+        from the blended score via the deterministic thresholds."""
+        _MLStubHandler.risk_score = 1.0  # ML as hot as possible
+        try:
+            svc.ML_SCORING_URL = ml_stub_server
+            hot = _base_req(amount=10_000_000.0, trader_compliance_score=0.0)
+            data = client.post("/api/payment-risk/score", json=hot).json()
+            assert data["ml_augmentation"] == "APPLIED"
+            tier_by_score = (
+                "LOW" if data["risk_score"] < 0.30
+                else "MEDIUM" if data["risk_score"] < 0.60
+                else "HIGH" if data["risk_score"] < 0.85
+                else "CRITICAL"
+            )
+            assert data["risk_tier"] == tier_by_score
+        finally:
+            _MLStubHandler.risk_score = 0.9
+
+    def test_no_hash_derived_features(self, restore_ml_config):
+        """Regression guard: no SHA/MD5-derived pseudo-ML feature may reappear."""
+        svc.ML_SCORING_URL = None
+        data = client.post("/api/payment-risk/score", json=_base_req()).json()
+        for key in data["features"]:
+            assert "hash" not in key.lower()
+            assert key != "ml_signal"
+
+    def test_invalid_ml_payload_falls_back(self, restore_ml_config):
+        """An out-of-range ML score is rejected and rules-only scoring proceeds."""
+        class _BadHandler(_MLStubHandler):
+            def do_POST(self):  # noqa: N802
+                payload = _json.dumps({"risk_score": 42.0}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        server = HTTPServer(("127.0.0.1", 0), _BadHandler)
+        thread = _threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            svc.ML_SCORING_URL = f"http://127.0.0.1:{server.server_port}/score"
+            r = client.post("/api/payment-risk/score", json=_base_req())
+            assert r.status_code == 200
+            assert r.json()["ml_augmentation"] == "UNAVAILABLE"
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
