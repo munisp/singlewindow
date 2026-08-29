@@ -31,6 +31,28 @@ Model registry:
   - MLflow tracking for all experiments
   - Versioned weights saved to /models/gnn/
   - Automatic promotion to production on F1 > 0.85
+
+⚠️  CIRCULAR-LABEL WARNING — READ BEFORE TRUSTING ANY METRIC FROM THIS TRAINER
+  Two label sources feed this model, and NEITHER is ground-truth fraud:
+    1. Synthetic data from NigerianSyntheticGenerator — labels are assigned
+       from the injected fraud *scenario*, a hand-written generator heuristic,
+       not observed outcomes.
+    2. "Labeled production data" (risk_label_int in PostgreSQL) — this column
+       is populated from `risk_lane`, which is ASSIGNED BY THE DETERMINISTIC
+       RULE ENGINE (microservices/risk-engine) that this model is meant to
+       augment/replace.
+
+  Consequence: trained on these labels the GNN can only ever learn to
+  IMITATE THE RULES (or the synthetic generator's assumptions). Reported
+  F1/accuracy measures agreement with those heuristics, not fraud detection
+  skill. "Automatic promotion on F1 > 0.85" against circular labels is
+  meaningless and MUST stay disabled until real labels exist.
+
+  Resolution path: analyst-reviewed outcomes from sec-ops case management
+  (confirmed fraud / confirmed clean dispositions of inspected
+  declarations) written to a dedicated label store. See
+  services/python-ai/MODEL_RISK.md for the full risk statement and the
+  production-data labeling plan. Until then: shadow-mode scoring only.
 """
 from __future__ import annotations
 

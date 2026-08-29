@@ -23,6 +23,28 @@ Usage:
     python3 continuous_training_pipeline.py --mode scheduled
     python3 continuous_training_pipeline.py --mode drift-check
     python3 continuous_training_pipeline.py --mode force-retrain
+
+⚠️  CIRCULAR-LABEL WARNING — READ BEFORE TRUSTING ANY PROMOTION DECISION
+  The "labeled production data" this pipeline extracts is NOT ground truth:
+    - `risk_lane` (used directly as the GNN label) is ASSIGNED BY THE
+      DETERMINISTIC RULE ENGINE (microservices/risk-engine) the models are
+      meant to augment/replace.
+    - Declaration `status` (map_status_to_label) is an operational routing
+      outcome that is itself driven by rule-engine lane assignment
+      (rule-RED declarations are the ones flagged/seized), so it is only
+      marginally less circular.
+    - The synthetic augmentation labels come from generator heuristics.
+
+  Consequence: models trained here can only ever learn to IMITATE THE
+  RULES. "Promote when F1 > threshold" measures agreement with heuristics,
+  not fraud detection skill — automatic promotion against these labels is
+  meaningless and MUST stay disabled until real labels exist.
+
+  Resolution path: analyst-reviewed outcomes from sec-ops case management
+  (confirmed fraud / confirmed clean dispositions of inspected
+  declarations) written to a dedicated label store. See
+  services/python-ai/MODEL_RISK.md for the full risk statement and the
+  production-data labeling plan.
 """
 from __future__ import annotations
 

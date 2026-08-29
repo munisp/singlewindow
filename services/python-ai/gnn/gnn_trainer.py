@@ -27,6 +27,24 @@ Architecture:
     3. Train GraphSAGE for 100 epochs with Adam + cross-entropy loss
     4. Export to ONNX for Rust inference
     5. Write risk scores back to FalkorDB
+
+⚠️  CIRCULAR-LABEL WARNING — READ BEFORE TRUSTING ANY METRIC FROM THIS TRAINER
+  The training label is each declaration's `lane` (green/yellow/red) read
+  from the graph store. That lane was ASSIGNED BY THE DETERMINISTIC RULE
+  ENGINE (microservices/risk-engine: compute score -> assign_lane ->
+  risk_lane column) — i.e. by the very system this model is meant to
+  augment/replace. The labels are NOT ground-truth fraud outcomes.
+
+  Consequence: this GNN can only ever learn to IMITATE THE RULES. Its
+  reported accuracy/F1 measures agreement with the rule engine, not fraud
+  detection skill. It can never exceed the rule engine on the rules' own
+  blind spots, and presenting its metrics as model quality is dishonest.
+
+  Resolution path: train on analyst-reviewed outcomes from sec-ops case
+  management (confirmed fraud / confirmed clean dispositions of inspected
+  declarations). See services/python-ai/MODEL_RISK.md for the full risk
+  statement and the production-data labeling plan. Until such labels exist,
+  this model must not gate traffic autonomously; shadow-mode scoring only.
 """
 
 from __future__ import annotations

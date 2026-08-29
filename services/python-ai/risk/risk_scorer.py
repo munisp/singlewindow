@@ -29,6 +29,24 @@ Model drift detection:
   - Population Stability Index (PSI) on feature distributions
   - Performance degradation alerts via Prometheus
   - Automatic retraining trigger when PSI > 0.25
+
+⚠️  CIRCULAR-LABEL WARNING — READ BEFORE TRUSTING ANY METRIC FROM THIS TRAINER
+  The training target `risk_label_int` is either (a) produced by the
+  NigerianSyntheticGenerator from injected fraud *scenarios* (generator
+  heuristics, not observed outcomes), or (b) read from PostgreSQL where it
+  derives from `risk_lane` — the output of the DETERMINISTIC RULE ENGINE
+  (microservices/risk-engine) that this ensemble is meant to augment/replace.
+
+  Consequence: this ensemble can only ever learn to IMITATE THE RULES (or
+  the synthetic generator's assumptions). Cross-validation scores measure
+  agreement with those heuristics, not fraud detection skill. Presenting
+  them as model quality is dishonest.
+
+  Resolution path: analyst-reviewed outcomes from sec-ops case management
+  (confirmed fraud / confirmed clean dispositions of inspected
+  declarations). See services/python-ai/MODEL_RISK.md for the full risk
+  statement and the production-data labeling plan. Until such labels exist,
+  this model must not gate traffic autonomously; shadow-mode scoring only.
 """
 from __future__ import annotations
 
