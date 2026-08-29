@@ -5,10 +5,43 @@
  * and Supply Chain Visibility (cargo tracking).
  */
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { fetchWithResilience } from "../_core/middlewareClients";
 
 const TRADE_FINANCE_URL = process.env.TRADE_FINANCE_SERVICE_URL ?? "http://localhost:8097";
+
+/** SW-22: officers may act on behalf of an applicant; traders only for themselves. */
+const OFFICER_ROLES = ["admin", "finance", "customs_officer"];
+
+function bindApplicant(ctx: { user: { id: number; role: string } }, requestedId: string | undefined): string {
+  const selfId = String(ctx.user.id);
+  if (!requestedId || requestedId === selfId) return selfId;
+  if (OFFICER_ROLES.includes(ctx.user.role)) return requestedId;
+  throw new TRPCError({
+    code: "FORBIDDEN",
+    message: "You can only create trade finance instruments for yourself",
+  });
+}
+
+/** SW-22: exact decimal → integer minor units (no float money at the API edge). */
+function toMinorUnits(amount: number): number {
+  const s = String(amount).trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Invalid monetary amount: ${s}` });
+  }
+  const [maj, frac = ""] = s.split(".");
+  return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
+}
+
+/** Propagate the verified caller identity to the downstream service. */
+function identityHeaders(ctx: { user: { id: number; role: string } }): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "X-User-Id": String(ctx.user.id),
+    "X-User-Role": ctx.user.role,
+  };
+}
 
 export const tradeFinanceRouter = router({
   // ── Letter of Credit ──────────────────────────────────────────────────────
@@ -30,21 +63,25 @@ export const tradeFinanceRouter = router({
       hsCode:             z.string(),
       incoterms:          z.string().default("CIF"),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // SW-22: applicant identity from the verified token, never the request body.
+      const applicantId = bindApplicant(ctx, input.applicantId);
+      const amountMinorUnits = toMinorUnits(input.amount);
       const res = await fetchWithResilience(
         `${TRADE_FINANCE_URL}/v1/letters-of-credit`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: identityHeaders(ctx),
           body: JSON.stringify({
             declaration_id:      input.declarationId,
-            applicant_id:        input.applicantId,
+            applicant_id:        applicantId,
             applicant_name:      input.applicantName,
             beneficiary_name:    input.beneficiaryName,
             beneficiary_country: input.beneficiaryCountry,
             issuing_bank:        input.issuingBank,
             advising_bank:       input.advisingBank,
             amount:              input.amount,
+            amount_minor_units:  amountMinorUnits,
             currency:            input.currency,
             expiry_date:         input.expiryDate,
             port_of_loading:     input.portOfLoading,
@@ -71,18 +108,22 @@ export const tradeFinanceRouter = router({
       validDays:     z.number().int().min(30).max(730).default(365),
       dutyAmount:    z.number().min(0).default(0),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      // SW-22: trader identity from the verified token, never the request body.
+      const traderId = bindApplicant(ctx, input.traderId);
+      const amountMinorUnits = toMinorUnits(input.amount);
       const res = await fetchWithResilience(
         `${TRADE_FINANCE_URL}/v1/bank-guarantees`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: identityHeaders(ctx),
           body: JSON.stringify({
             declaration_id: input.declarationId,
-            trader_id:      input.traderId,
+            trader_id:      traderId,
             issuing_bank:   input.issuingBank,
             guarantee_type: input.guaranteeType,
             amount:         input.amount,
+            amount_minor_units: amountMinorUnits,
             currency:       input.currency,
             valid_days:     input.validDays,
             duty_amount:    input.dutyAmount,
