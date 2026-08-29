@@ -33,6 +33,14 @@ func (h *paymentHealthServer) Check(
 	}, nil
 }
 
+// List implements grpc_health_v1.HealthServer (required by newer grpc).
+func (h *paymentHealthServer) List(
+	ctx context.Context,
+	req *grpc_health_v1.HealthListRequest,
+) (*grpc_health_v1.HealthListResponse, error) {
+	return &grpc_health_v1.HealthListResponse{}, nil
+}
+
 func (h *paymentHealthServer) Watch(
 	req *grpc_health_v1.HealthCheckRequest,
 	stream grpc_health_v1.Health_WatchServer,
