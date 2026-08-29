@@ -71,7 +71,7 @@ type PermifySubject struct {
 }
 
 type PermifyCheckResponse struct {
-	Can     string `json:"can"` // "RESULT_ALLOWED" or "RESULT_DENIED"
+	Can     string `json:"can"` // "CHECK_RESULT_ALLOWED" or "CHECK_RESULT_DENIED" (Permify v1 enum)
 	Metadata struct {
 		CheckCount int `json:"check_count"`
 	} `json:"metadata"`
@@ -95,15 +95,21 @@ func (p *PermifyClient) CheckAuditPermission(ctx context.Context, userID, auditC
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := p.httpClient.Do(httpReq)
 	if err != nil {
-		p.logger.Warn("permify check failed (fail-open)", "error", err)
-		return true, nil // fail-open for availability; adjust to fail-closed for high-security
+		// P0 remediation: FAIL-CLOSED. A permission check that cannot be
+		// executed is an error, never an implicit allow.
+		p.logger.Error("permify check unavailable (fail-closed)", "error", err)
+		return false, fmt.Errorf("permify check unavailable: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		p.logger.Error("permify check returned non-200 (fail-closed)", "status", resp.StatusCode)
+		return false, fmt.Errorf("permify check returned HTTP %d", resp.StatusCode)
+	}
 	var result PermifyCheckResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return false, fmt.Errorf("decode permify response: %w", err)
 	}
-	allowed := result.Can == "RESULT_ALLOWED"
+	allowed := result.Can == "CHECK_RESULT_ALLOWED"
 	p.logger.Info("permify check", "user", userID, "resource", auditCaseID, "action", action, "allowed", allowed)
 	return allowed, nil
 }
@@ -220,7 +226,9 @@ func NewAPISIXClient() *APISIXClient {
 	}
 	adminKey := os.Getenv("APISIX_ADMIN_KEY")
 	if adminKey == "" {
-		adminKey = "edd1c9f034335f136f87ad84b625c8f1"
+		// P0 remediation: no hardcoded credential defaults. Route registration
+		// is disabled loudly when the admin key is not provided via env.
+		slog.Default().Error("APISIX_ADMIN_KEY is not set — APISIX route registration is disabled")
 	}
 	return &APISIXClient{
 		adminURL:   adminURL,
@@ -232,6 +240,9 @@ func NewAPISIXClient() *APISIXClient {
 
 // RegisterRoutes registers audit-service routes in APISIX on startup.
 func (a *APISIXClient) RegisterRoutes(ctx context.Context, serviceHost string, servicePort int) error {
+	if a.adminKey == "" {
+		return fmt.Errorf("APISIX_ADMIN_KEY is not set: refusing to register routes without credentials (fail-closed)")
+	}
 	routes := []map[string]interface{}{
 		{
 			"id":   "audit-service-api",
