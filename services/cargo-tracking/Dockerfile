@@ -17,6 +17,9 @@ FROM scratch
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /app/cargo-tracking /cargo-tracking
 
+# SW-O12: run as non-root (numeric uid — scratch has no user db)
+USER 65532:65532
+
 EXPOSE 50051 8080
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \

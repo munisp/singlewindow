@@ -5,7 +5,8 @@ RUN go mod download
 COPY cmd/ ./cmd/
 RUN CGO_ENABLED=0 GOOS=linux go build -o security-scanner ./cmd/
 
-FROM gcr.io/distroless/static-debian12
+# SW-O12: non-root runtime
+FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /app/security-scanner /security-scanner
 EXPOSE 8110
 ENTRYPOINT ["/security-scanner"]
