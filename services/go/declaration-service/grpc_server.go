@@ -239,6 +239,19 @@ func (h *healthServer) Watch(
 	})
 }
 
+// List implements grpc_health_v1.HealthServer (required since gRPC-Go v1.62
+// made List a mandatory method — its absence was a pre-existing compile break).
+func (h *healthServer) List(
+	ctx context.Context,
+	req *grpc_health_v1.HealthListRequest,
+) (*grpc_health_v1.HealthListResponse, error) {
+	return &grpc_health_v1.HealthListResponse{
+		Statuses: map[string]*grpc_health_v1.HealthCheckResponse{
+			"": {Status: grpc_health_v1.HealthCheckResponse_SERVING},
+		},
+	}, nil
+}
+
 // ─── GRPC SERVER STARTUP ──────────────────────────────────────────────────────
 
 // StartGRPCServer starts the gRPC server on a separate port

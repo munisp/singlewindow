@@ -41,6 +41,19 @@ func (h *ogaHealthServer) Watch(
 	})
 }
 
+// List implements grpc_health_v1.HealthServer (required since gRPC-Go v1.62
+// made List a mandatory method — its absence was a pre-existing compile break).
+func (h *ogaHealthServer) List(
+	ctx context.Context,
+	req *grpc_health_v1.HealthListRequest,
+) (*grpc_health_v1.HealthListResponse, error) {
+	return &grpc_health_v1.HealthListResponse{
+		Statuses: map[string]*grpc_health_v1.HealthCheckResponse{
+			"": {Status: grpc_health_v1.HealthCheckResponse_SERVING},
+		},
+	}, nil
+}
+
 func StartGRPCServer() {
 	grpcPort := os.Getenv("GRPC_PORT")
 	if grpcPort == "" {

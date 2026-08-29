@@ -18,7 +18,7 @@ import (
 	_ "github.com/lib/pq"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
-	ogamw "github.com/munisp/singlewindow/services/go/oga-service/internal/middleware"
+	ogamw "tradegateway/oga-service/internal/middleware"
 )
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
