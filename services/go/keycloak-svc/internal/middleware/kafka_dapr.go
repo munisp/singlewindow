@@ -41,6 +41,9 @@ const (
 	TopicAuthRoleChanged   = "auth.role.changed"
 	TopicTraderSuspended   = "trader.suspended"
 	TopicTraderVerified    = "trader.verified"
+	// TopicSecurityAlert is the platform-wide real-time security alert topic
+	// (canonical definition: services/go/cen-service/internal/middleware).
+	TopicSecurityAlert = "security.alert"
 
 	DaprPubsubName = "pubsub"
 	ServiceName    = "keycloak-svc"
@@ -75,6 +78,23 @@ type AuthEvent struct {
 	Source     string    `json:"source"`
 	Timestamp  time.Time `json:"timestamp"`
 	TraceID    string    `json:"trace_id,omitempty"`
+}
+
+// SecurityAlertEvent is the canonical security.alert payload (matches
+// services/go/cen-service/internal/middleware/kafka_dapr.go).
+type SecurityAlertEvent struct {
+	AlertID        string    `json:"alert_id"`
+	AlertType      string    `json:"alert_type"` // CEN_ALERT, SANCTIONS_HIT, THREAT_INDICATOR
+	Severity       string    `json:"severity"`   // CRITICAL, HIGH, MEDIUM, LOW
+	DeclarationID  string    `json:"declaration_id,omitempty"`
+	UCR            string    `json:"ucr,omitempty"`
+	TraderID       string    `json:"trader_id,omitempty"`
+	HSCode         string    `json:"hs_code,omitempty"`
+	Description    string    `json:"description"`
+	CENAlertRef    string    `json:"cen_alert_ref,omitempty"`
+	SendingCountry string    `json:"sending_country,omitempty"`
+	Timestamp      time.Time `json:"timestamp"`
+	Source         string    `json:"source"`
 }
 
 type TraderSuspendedEvent struct {

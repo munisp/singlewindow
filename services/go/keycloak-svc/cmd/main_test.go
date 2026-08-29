@@ -21,6 +21,7 @@ func TestHealthEndpoint(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d", w.Code)
 		}
+		_ = req
 	})
 
 	t.Run("readiness probe returns 200", func(t *testing.T) {
