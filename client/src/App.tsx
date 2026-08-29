@@ -276,22 +276,22 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
       </Route>
       <Route path="/app/finance/drawback">
-        <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense></FinanceGuard>
       </Route>
       {/* Sprint 60 — Drawback Automation */}
       <Route path="/app/finance/drawback-automation">
-        <Suspense fallback={<LazyFallback />}><DrawbackAutomation /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><DrawbackAutomation /></Suspense></FinanceGuard>
       </Route>
       {/* 1B Payments/Day — Async Payment Queue */}
       <Route path="/app/trader/payment-queue">
         <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
       </Route>
       <Route path="/app/finance/payment-queue">
-        <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense></FinanceGuard>
       </Route>
       {/* Balance Accounts — Payment Mirror */}
       <Route path="/app/finance/balance-accounts">
-        <Suspense fallback={<LazyFallback />}><BalanceAccounts /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><BalanceAccounts /></Suspense></FinanceGuard>
       </Route>
       {/* Sprint 61 — Trader Performance Scorecard */}
       <Route path="/app/trader/scorecard">
@@ -348,8 +348,8 @@ function Router() {
 
       {/* Sprint 31 — Finance Ledger (TigerBeetle) */}
       <Route path="/app/finance/ledger">
-        <Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense>
-      </Route>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense></FinanceGuard>
+FinanceLedger
 
       {/* Sprint 32 — Identity Provider (Keycloak) */}
       <Route path="/app/admin/identity-provider">

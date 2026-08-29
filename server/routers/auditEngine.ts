@@ -4,7 +4,8 @@
  * No in-memory stores.
  */
 import { z } from "zod";
-import { publicProcedure, router } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import {
   auditTasks, auditFindings,
@@ -41,13 +42,26 @@ export function selectForAudit(params: {
   return null;
 }
 
-export function calculateDutyDiscrepancy(findings: { findingType: string; amountUsd: number | string }[]): number {
+export // ─── SW-FLAG1: role gate ─────────────────────────────────────────────────────
+// The entire post-clearance audit lifecycle was publicProcedure — any anonymous
+// caller could create/assign/close audits and fabricate findings. Restricted to
+// customs officers and admins; finding submission additionally requires being
+// the assigned officer (or admin).
+const AUDIT_ROLES = ["admin", "customs_officer"];
+const auditOfficerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (!AUDIT_ROLES.includes(ctx.user?.role ?? "")) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Customs officer or admin role required" });
+  }
+  return next({ ctx });
+});
+
+function calculateDutyDiscrepancy(findings: { findingType: string; amountUsd: number | string }[]): number {
   return findings.filter((f) => f.findingType !== "no_finding").reduce((sum, f) => sum + Number(f.amountUsd), 0);
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 export const auditEngineRouter = router({
-  getAuditTasks: publicProcedure
+  getAuditTasks: auditOfficerProcedure
     .input(z.object({
       status: z.enum(["pending","assigned","in_progress","findings_submitted","closed","appealed"]).optional(),
       assignedOfficerId: z.string().optional(),
@@ -86,7 +100,7 @@ export const auditEngineRouter = router({
       };
     }),
 
-  getAuditTask: publicProcedure
+  getAuditTask: auditOfficerProcedure
     .input(z.object({ auditId: z.string() }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -99,7 +113,7 @@ export const auditEngineRouter = router({
         dutyDiscrepancyUsd: Number(task.dutyDiscrepancyUsd ?? 0) };
     }),
 
-  createAuditTask: publicProcedure
+  createAuditTask: auditOfficerProcedure
     .input(z.object({
       declarationId: z.string(), declarantName: z.string(), hsCode: z.string().optional(),
       declaredValueUsd: z.number(), dutyPaidUsd: z.number(),
@@ -120,7 +134,7 @@ export const auditEngineRouter = router({
       return { ...task, findings: [] };
     }),
 
-  assignAuditTask: publicProcedure
+  assignAuditTask: auditOfficerProcedure
     .input(z.object({ auditId: z.string(), officerId: z.string(), officerName: z.string() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -132,7 +146,7 @@ export const auditEngineRouter = router({
       return updated;
     }),
 
-  submitFindings: publicProcedure
+  submitFindings: auditOfficerProcedure
     .input(z.object({
       auditId: z.string(),
       findings: z.array(z.object({
@@ -140,9 +154,18 @@ export const auditEngineRouter = router({
         description: z.string(), amountUsd: z.number().min(0).default(0), evidenceUrl: z.string().default(""),
       })),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
+      // SW-FLAG1: ownership/assignment scoping — only the assigned officer (or
+      // an admin) may submit findings for a task.
+      if (ctx.user.role !== "admin") {
+        const [task] = await db.select().from(auditTasks).where(eq(auditTasks.id, input.auditId)).limit(1);
+        if (!task) throw new TRPCError({ code: "NOT_FOUND", message: `Audit task ${input.auditId} not found` });
+        if (task.assignedOfficerId && task.assignedOfficerId !== String(ctx.user.id)) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Findings can only be submitted by the assigned officer" });
+        }
+      }
       await db.delete(auditFindings).where(eq(auditFindings.auditTaskId, input.auditId));
       const newFindings = input.findings.map((f) => ({
         id: `finding-${crypto.randomBytes(4).toString("hex")}`,
@@ -157,7 +180,7 @@ export const auditEngineRouter = router({
       return { ...updated, findings: newFindings };
     }),
 
-  closeAudit: publicProcedure
+  closeAudit: auditOfficerProcedure
     .input(z.object({ auditId: z.string() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -169,7 +192,7 @@ export const auditEngineRouter = router({
       return updated;
     }),
 
-  appealAudit: publicProcedure
+  appealAudit: auditOfficerProcedure
     .input(z.object({ auditId: z.string(), appealNotes: z.string() }))
     .mutation(async ({ input }) => {
       const db = await getDb();
@@ -181,7 +204,7 @@ export const auditEngineRouter = router({
       return updated;
     }),
 
-  getDutyDiscrepancyReport: publicProcedure
+  getDutyDiscrepancyReport: auditOfficerProcedure
     .input(z.object({ fromDate: z.string().optional(), toDate: z.string().optional() }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -209,7 +232,7 @@ export const auditEngineRouter = router({
       };
     }),
 
-  getAuditStats: publicProcedure.query(async () => {
+  getAuditStats: auditOfficerProcedure.query(async () => {
     const db = await getDb();
     if (!db) return { total: 0, byStatus: {}, byReason: {}, totalDiscrepancyUsd: 0, overdueTasks: 0 };
     const tasks = await db.select().from(auditTasks);
@@ -227,7 +250,7 @@ export const auditEngineRouter = router({
     return { total: tasks.length, byStatus, byReason, totalDiscrepancyUsd: totalDiscrepancy, overdueTasks };
   }),
 
-  runAuditSelection: publicProcedure
+  runAuditSelection: auditOfficerProcedure
     .input(z.object({
       declarations: z.array(z.object({
         declarationId: z.string(), declarantName: z.string(), hsCode: z.string(),

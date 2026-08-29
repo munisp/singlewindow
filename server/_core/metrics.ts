@@ -427,3 +427,11 @@ export const webhookDeliveryDurationSeconds = new Histogram({
   buckets: [0.1, 0.5, 1, 2, 5, 10, 30],
   registers: [metricsRegistry],
 });
+
+/** SW-O2: privileged-action audit append failures — must never be silent. */
+export const auditAppendFailuresTotal = new Counter({
+  name: "tradegateway_audit_append_failures_total",
+  help: "Privileged-action audit append failures (insiderThreat). Any increment is an incident.",
+  labelNames: ["event_type"] as const,
+  registers: [metricsRegistry],
+});

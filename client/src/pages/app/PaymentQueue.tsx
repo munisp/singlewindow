@@ -52,7 +52,7 @@ function formatAmount(minorUnits: number, currency: string) {
   }
 }
 
-export default function PaymentQueue() {
+function FinancePaymentQueue() {
   const [queueStatus, setQueueStatus] = useState<QueueStatus>("all");
   const [queuePage, setQueuePage] = useState(1);
   const [archivalTier, setArchivalTier] = useState<ArchivalTier>("all");
@@ -393,6 +393,90 @@ export default function PaymentQueue() {
             )}
           </div>
         )}
+      </div>
+    </DashboardLayout>
+  );
+}
+
+/**
+ * SW-G7: route-level split — the platform-wide queue is finance/admin data.
+ * Traders hitting /app/trader/payment-queue see ONLY their own payments
+ * (server-enforced via batchPayments.listMyQueue scoped by ctx.user.id).
+ */
+export default function PaymentQueue() {
+  const { user } = useAuth();
+  const isFinanceUser = user?.role === "admin" || user?.role === "finance";
+  if (!isFinanceUser) return <TraderPaymentQueue />;
+  return <FinancePaymentQueue />;
+}
+
+function TraderPaymentQueue() {
+  const [page, setPage] = useState(1);
+  const myQueue = trpc.batchPayments.listMyQueue.useQuery({ page, pageSize: 20 });
+
+  return (
+    <DashboardLayout>
+      <div className="p-6 space-y-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <Layers className="text-primary" size={20} />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold">My Payments</h1>
+            <p className="text-sm text-muted-foreground">
+              Your payment records and their processing status.
+            </p>
+          </div>
+        </div>
+
+        {myQueue.isLoading && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 size={16} className="animate-spin" /> Loading your payments…
+          </div>
+        )}
+        {myQueue.error && (
+          <div className="text-destructive text-sm">
+            Could not load your payments: {myQueue.error.message}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {(myQueue.data?.items ?? []).map((p: any) => (
+            <div key={p.id} className="flex items-center justify-between rounded-md border p-3">
+              <div>
+                <div className="font-mono text-sm">{p.reference ?? `PAY-${p.id}`}</div>
+                <div className="text-xs text-muted-foreground">
+                  Declaration #{p.declarationId} · {p.paymentMethod}
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="font-medium">{formatAmount(Number(p.amount) * 100, p.currency)}</span>
+                <Badge variant={p.status === "confirmed" ? "outline" : p.status === "failed" ? "destructive" : "secondary"}>
+                  {p.status}
+                </Badge>
+              </div>
+            </div>
+          ))}
+          {myQueue.data && myQueue.data.items.length === 0 && (
+            <div className="text-sm text-muted-foreground">No payments found for your account.</div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            <ChevronLeft size={14} /> Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {myQueue.data?.page ?? page} of {myQueue.data?.totalPages ?? 1}
+          </span>
+          <Button
+            variant="outline" size="sm"
+            disabled={(myQueue.data?.page ?? 1) >= (myQueue.data?.totalPages ?? 1)}
+            onClick={() => setPage(page + 1)}
+          >
+            Next <ChevronRight size={14} />
+          </Button>
+        </div>
       </div>
     </DashboardLayout>
   );

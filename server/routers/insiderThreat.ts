@@ -14,6 +14,13 @@ import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../_core/trpc";
 import { logAuditEvent } from "../db";
 import { publishEvent, TOPICS } from "../_core/kafka";
+import {
+  consumeFourEyesApproval,
+  createFourEyesRequest,
+  decideFourEyesRequest,
+  listPendingFourEyes,
+} from "../_core/fourEyes";
+import { auditAppendFailuresTotal } from "../_core/metrics";
 
 // ─── Admin procedure helper ───────────────────────────────────────────────────
 
@@ -55,48 +62,34 @@ async function queryOpenSearch(index: string, body: Record<string, unknown>) {
   }
 }
 
-// ─── TigerBeetle bridge helpers ───────────────────────────────────────────────
-
+// ─── Privileged-action audit (SW-O2) ─────────────────────────────────────────
+// The old helper POSTed to a dead endpoint (tigerbeetle-bridge:4600/audit/append)
+// and silently swallowed every failure — privileged actions left NO audit trail.
+// Converged to the platform's canonical local audit store (audit_logs via
+// logAuditEvent). Failures increment a Prometheus metric AND surface to the
+// caller — never silent.
 async function appendAuditEntry(params: {
   eventTypeCode: number;
   actorId: number;
   subjectId: number;
   payloadJson: string;
-}) {
-  const url = process.env.TIGERBEETLE_BRIDGE_URL ?? "http://tigerbeetle-bridge:4600";
+}): Promise<{ ok: boolean; error?: string }> {
   try {
-    await fetch(`${url}/audit/append`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event_type_code: params.eventTypeCode,
-        actor_id: params.actorId,
-        subject_id: params.subjectId,
-        payload_json: params.payloadJson,
-      }),
+    await logAuditEvent({
+      entityType: "privileged_action",
+      entityId: params.subjectId,
+      action: `privileged_event_${params.eventTypeCode}`,
+      actorId: params.actorId,
+      actorType: "system",
+      newState: JSON.parse(params.payloadJson),
     });
-  } catch {
-    // Non-fatal: audit log is best-effort in sandbox; in production TigerBeetle is always available
+    return { ok: true };
+  } catch (err) {
+    auditAppendFailuresTotal.inc({ event_type: String(params.eventTypeCode) });
+    console.error(`[insiderThreat] AUDIT APPEND FAILED (event ${params.eventTypeCode}):`, err);
+    return { ok: false, error: String(err) };
   }
 }
-
-// ─── In-memory 4-eyes approval store (fallback when DB unavailable) ───────────
-
-const fourEyesStore = new Map<string, {
-  id: string;
-  requesterId: number;
-  requesterName: string;
-  action: string;
-  entityType: string;
-  entityId: string;
-  description: string;
-  status: "pending" | "approved" | "denied";
-  approverId?: number;
-  approverName?: string;
-  reason?: string;
-  createdAt: Date;
-  resolvedAt?: Date;
-}>();
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -142,8 +135,18 @@ export const insiderThreatRouter = router({
       sessionId: z.string().min(1),
       reason: z.string().min(1).max(500),
       targetUserId: z.number().int().positive(),
+      // SW-G4: dual control is ENFORCED — a valid approved 4-eyes request for
+      // (force_logout, user, targetUserId) must exist; it is consumed on use.
+      approvalId: z.number().int().positive().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      await consumeFourEyesApproval({
+        action: "force_logout",
+        entityType: "user",
+        entityId: String(input.targetUserId),
+        approvalId: input.approvalId,
+      });
+
       const redis = await getRedisClient();
       if (redis) {
         try {
@@ -156,8 +159,9 @@ export const insiderThreatRouter = router({
         }
       }
 
-      // Audit log: ForceLogoutExecuted (code 107)
-      await appendAuditEntry({
+      // Audit log: ForceLogoutExecuted (code 107) — failure is surfaced,
+      // never silent (SW-O2).
+      const audit = await appendAuditEntry({
         eventTypeCode: 107,
         actorId: ctx.user.id,
         subjectId: input.targetUserId,
@@ -168,6 +172,12 @@ export const insiderThreatRouter = router({
           adminId: ctx.user.id,
         }),
       });
+      if (!audit.ok) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: `AUDIT_TRAIL_UNAVAILABLE: force-logout aborted would leave no audit trail (${audit.error})`,
+        });
+      }
 
       await logAuditEvent({
         entityType: "user",
@@ -193,40 +203,29 @@ export const insiderThreatRouter = router({
       description: z.string().min(1).max(1000),
     }))
     .mutation(async ({ ctx, input }) => {
-      const id = `4eyes-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-      const record = {
-        id,
-        requesterId: ctx.user.id,
-        requesterName: ctx.user.name ?? ctx.user.email ?? "unknown",
+      // SW-G4: Postgres-backed (four_eyes_requests) — survives restarts and is
+      // enforced by the privileged mutations it covers.
+      const record = await createFourEyesRequest({
         action: input.action,
         entityType: input.entityType,
         entityId: input.entityId,
-        description: input.description,
-        status: "pending" as const,
-        createdAt: new Date(),
-      };
-
-      fourEyesStore.set(id, record);
-
-      // Audit log: FourEyesApprovalRequested (code 103)
-      await appendAuditEntry({
-        eventTypeCode: 103,
-        actorId: ctx.user.id,
-        subjectId: ctx.user.id,
-        payloadJson: JSON.stringify({ ...record }),
+        requestedBy: ctx.user.id,
       });
 
       await logAuditEvent({
-        entityType: "declaration",
-        entityId: ctx.user.id,
+        entityType: "four_eyes_request",
+        entityId: record.id,
         action: "four_eyes_requested",
         actorId: ctx.user.id,
         actorType: "user",
-        newState: { approvalId: id, action: input.action, entityType: input.entityType, entityId: input.entityId },
+        newState: { approvalId: record.id, action: input.action, entityType: input.entityType, entityId: input.entityId, description: input.description },
       });
 
-      return record;
+      return {
+        ...record,
+        requesterName: ctx.user.name ?? ctx.user.email ?? "unknown",
+        description: input.description,
+      };
     }),
 
   /**
@@ -235,81 +234,51 @@ export const insiderThreatRouter = router({
    */
   approveFourEyes: adminProcedure
     .input(z.object({
-      approvalId: z.string().min(1),
+      approvalId: z.number().int().positive(),
       decision: z.enum(["approved", "denied"]),
       reason: z.string().min(1).max(500),
     }))
     .mutation(async ({ ctx, input }) => {
-      const record = fourEyesStore.get(input.approvalId);
-      if (!record) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Approval request not found" });
-      }
-      if (record.status !== "pending") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: `Request already ${record.status}` });
-      }
-      if (record.requesterId === ctx.user.id) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Cannot approve your own 4-eyes request",
-        });
-      }
-
-      const updated = {
-        ...record,
-        status: input.decision,
+      const updated = await decideFourEyesRequest({
+        id: input.approvalId,
         approverId: ctx.user.id,
-        approverName: ctx.user.name ?? ctx.user.email ?? "unknown",
-        reason: input.reason,
-        resolvedAt: new Date(),
-      };
-      fourEyesStore.set(input.approvalId, updated);
-
-      // Audit log: FourEyesApprovalGranted (104) or FourEyesApprovalDenied (105)
-      const eventTypeCode = input.decision === "approved" ? 104 : 105;
-      await appendAuditEntry({
-        eventTypeCode,
-        actorId: ctx.user.id,
-        subjectId: record.requesterId,
-        payloadJson: JSON.stringify({
-          approvalId: input.approvalId,
-          decision: input.decision,
-          reason: input.reason,
-          originalAction: record.action,
-        }),
+        decision: input.decision,
       });
 
       await logAuditEvent({
-        entityType: "declaration",
-        entityId: record.requesterId,
+        entityType: "four_eyes_request",
+        entityId: updated.id,
         action: `four_eyes_${input.decision}`,
         actorId: ctx.user.id,
         actorType: "admin",
-        newState: { approvalId: input.approvalId, decision: input.decision, reason: input.reason },
+        newState: { approvalId: updated.id, decision: input.decision, reason: input.reason },
       });
 
-      // Publish Kafka INSIDER_THREAT_ALERT when a 4-eyes decision is made (fire-and-forget)
+      // Publish Kafka event when a 4-eyes decision is made (fire-and-forget)
       publishEvent(TOPICS.INSIDER_THREAT_DETECTED, {
         eventType: `insider_threat.four_eyes_${input.decision}`,
-        aggregateId: input.approvalId,
+        aggregateId: String(input.approvalId),
         payload: {
           approvalId: input.approvalId,
           decision: input.decision,
           reason: input.reason,
-          originalAction: record.action,
-          requesterId: record.requesterId,
+          originalAction: updated.action,
+          requesterId: updated.requestedBy,
           approverId: ctx.user.id,
         },
       }).catch(() => {});
-      return updated;
+      return {
+        ...updated,
+        approverName: ctx.user.name ?? ctx.user.email ?? "unknown",
+        reason: input.reason,
+      };
     }),
 
   /**
    * getPendingFourEyes — list all pending 4-eyes approval requests.
    */
   getPendingFourEyes: adminProcedure.query(async () => {
-    const pending = Array.from(fourEyesStore.values())
-      .filter((r) => r.status === "pending")
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const pending = await listPendingFourEyes();
     return { requests: pending, total: pending.length };
   }),
 
@@ -409,33 +378,32 @@ export const insiderThreatRouter = router({
       limit: z.number().int().min(1).max(500).default(100),
     }).optional())
     .query(async ({ input }) => {
-      const url = process.env.TIGERBEETLE_BRIDGE_URL ?? "http://tigerbeetle-bridge:4600";
-      try {
-        const resp = await fetch(`${url}/audit/entries`);
-        if (!resp.ok) return { entries: [], total: 0, source: "unavailable" };
-        const all: any[] = await resp.json();
-        // Filter to insider-threat event codes (100–110)
-        const privileged = all
-          .filter((e) => e.event_type >= 100 && e.event_type <= 110)
-          .slice(0, input?.limit ?? 100);
-        return { entries: privileged, total: privileged.length, source: "tigerbeetle" };
-      } catch {
-        return { entries: [], total: 0, source: "unavailable" };
-      }
+      // SW-O2: read the canonical local audit store — the old dead bridge
+      // endpoint returned empty results that looked like "no privileged actions".
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AUDIT_STORE_UNAVAILABLE" });
+      const { auditEvents } = await import("../../drizzle/schema");
+      const { like, desc } = await import("drizzle-orm");
+      const entries = await db.select().from(auditEvents)
+        .where(like(auditEvents.action, "privileged_event_%"))
+        .orderBy(desc(auditEvents.createdAt))
+        .limit(input?.limit ?? 100);
+      return { entries, total: entries.length, source: "local_audit_table" };
     }),
 
   /**
    * verifyAuditChain — verify the TigerBeetle immutable audit chain integrity.
    */
   verifyAuditChain: adminProcedure.query(async () => {
-    const url = process.env.TIGERBEETLE_BRIDGE_URL ?? "http://tigerbeetle-bridge:4600";
-    try {
-      const resp = await fetch(`${url}/audit/verify`);
-      if (!resp.ok) return { is_valid: false, source: "unavailable" };
-      return { ...(await resp.json()), source: "tigerbeetle" };
-    } catch {
-      return { is_valid: false, source: "unavailable" };
-    }
+    // SW-O2: honest state — no tamper-evident chain verification exists against
+    // the local audit table yet; report that instead of querying a dead endpoint.
+    return {
+      is_valid: null,
+      verified: false,
+      source: "local_audit_table",
+      note: "CHAIN_VERIFICATION_UNAVAILABLE: tamper-evident chain verification requires the canonical bridge audit API, which is not implemented. Audit entries are persisted in the local audit table.",
+    };
   }),
 
   /**
@@ -533,8 +501,17 @@ export const insiderThreatRouter = router({
     .input(z.object({
       reason: z.string().min(1).max(500).default("manual_promotion"),
       operator: z.string().min(1).max(100).default("admin"),
+      modelVersion: z.string().min(1).max(100).default("champion"),
+      // SW-G4: dual control ENFORCED for insider-threat response actions.
+      approvalId: z.number().int().positive().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await consumeFourEyesApproval({
+        action: "model_promote",
+        entityType: "risk_model",
+        entityId: input.modelVersion,
+        approvalId: input.approvalId,
+      });
       const svcUrl = process.env.INSIDER_THREAT_SVC_URL ?? "http://insider-threat-svc:8000";
       try {
         const resp = await fetch(`${svcUrl}/ab/promote`, {
@@ -550,8 +527,11 @@ export const insiderThreatRouter = router({
         return await resp.json();
       } catch (err) {
         if (err instanceof TRPCError) throw err;
-        // Service unavailable in test/dev — return offline stub
-        return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, promotedAt: new Date().toISOString() };
+        // Never fabricate a promotion outcome — fail closed.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `PROMOTION_SERVICE_UNAVAILABLE: ${String(err)}`,
+        });
       }
     }),
 

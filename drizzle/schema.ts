@@ -60,7 +60,8 @@ export const paymentStatusEnum = pgEnum("payment_status", [
 
 export const auditEntityEnum = pgEnum("audit_entity", [
   "declaration", "user", "payment", "permit", "document",
-  "aeo_application", "kyc_verification"
+  "aeo_application", "kyc_verification",
+  "privileged_action", "four_eyes_request"
 ]);
 
 export const alertSeverityEnum = pgEnum("alert_severity", [

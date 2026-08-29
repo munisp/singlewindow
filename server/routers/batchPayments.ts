@@ -7,13 +7,14 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { adminProcedure, financeProcedure, protectedProcedure, router } from "../_core/trpc";
+import { getDb, withRlsContext } from "../db";
 import {
   paymentQueue,
   paymentAccounts,
   paymentIdempotencyKeys,
   paymentArchivalJobs,
+  payments,
 } from "../../drizzle/schema";
 import { eq, desc, and, count, gte, lt } from "drizzle-orm";
 
@@ -65,7 +66,7 @@ export const batchPaymentsRouter = router({
       return { duplicate: false, queueId: inserted.id, transferId: inserted.transferId, status: inserted.status };
     }),
 
-  getQueueStats: protectedProcedure.query(async () => {
+  getQueueStats: financeProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
     const statuses = ["queued", "processing", "committed", "failed", "dead_letter"] as const;
@@ -106,7 +107,7 @@ export const batchPaymentsRouter = router({
       return { retried: deadItems.length, transferIds: deadItems.map((i) => i.transferId) };
     }),
 
-  getAccountBalance: protectedProcedure
+  getAccountBalance: financeProcedure
     .input(z.object({ accountId: z.string().min(1) }))
     .query(async ({ input }) => {
       const db = await getDb();
@@ -127,7 +128,7 @@ export const batchPaymentsRouter = router({
       };
     }),
 
-  listQueue: protectedProcedure
+  listQueue: financeProcedure
     .input(z.object({
       status: z.enum(["queued", "processing", "committed", "failed", "dead_letter", "all"]).default("all"),
       page: z.number().int().min(1).default(1),
@@ -151,7 +152,7 @@ export const batchPaymentsRouter = router({
       };
     }),
 
-  listArchivalJobs: protectedProcedure
+  listArchivalJobs: financeProcedure
     .input(z.object({
       tier: z.enum(["hot", "warm", "cold", "all"]).default("all"),
       page: z.number().int().min(1).default(1),
@@ -179,7 +180,7 @@ export const batchPaymentsRouter = router({
    * List all payment accounts with live net balance.
    * Used by the Balance Accounts dashboard page.
    */
-  listAllAccounts: protectedProcedure
+  listAllAccounts: financeProcedure
     .input(z.object({
       page: z.number().int().min(1).default(1),
       pageSize: z.number().int().min(1).max(100).default(50),
@@ -242,4 +243,35 @@ export const batchPaymentsRouter = router({
       });
     }
   }),
+
+  /**
+   * SW-G7: trader-scoped payment queue — returns ONLY the caller's own payments.
+   * The platform-wide payment_queue ops data is finance/admin territory
+   * (financeProcedure); traders see their own payment records and statuses.
+   */
+  listMyQueue: protectedProcedure
+    .input(z.object({
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(20),
+    }))
+    .query(async ({ ctx, input }) => {
+      // SW-G3: run inside the RLS context so the payments_select policy is
+      // enforced at the database layer too (defence in depth).
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const offset = (input.page - 1) * input.pageSize;
+      const [items, [{ total }]] = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (txDb) => Promise.all([
+        txDb.select().from(payments).where(eq(payments.traderId, ctx.user.id))
+          .orderBy(desc(payments.createdAt)).limit(input.pageSize).offset(offset),
+        txDb.select({ total: count() }).from(payments).where(eq(payments.traderId, ctx.user.id)),
+      ]));
+      return {
+        items,
+        total: Number(total),
+        page: input.page,
+        pageSize: input.pageSize,
+        totalPages: Math.ceil(Number(total) / input.pageSize),
+        scope: "trader",
+      };
+    }),
 });

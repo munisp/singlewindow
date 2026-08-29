@@ -60,3 +60,7 @@ CREATE TABLE IF NOT EXISTS "freezone_reconciliation_runs" (
 );
 CREATE INDEX IF NOT EXISTS "idx_fz_recon_zone" ON "freezone_reconciliation_runs" ("zone_id");
 CREATE INDEX IF NOT EXISTS "idx_fz_recon_created" ON "freezone_reconciliation_runs" ("created_at");
+
+-- SW-G4/SW-O2: audit entity types for privileged-action + dual-control audit trail.
+ALTER TYPE "public"."audit_entity" ADD VALUE IF NOT EXISTS 'privileged_action';
+ALTER TYPE "public"."audit_entity" ADD VALUE IF NOT EXISTS 'four_eyes_request';

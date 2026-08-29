@@ -105,6 +105,28 @@ const requireUser = t.middleware(async opts => {
 
 export const protectedProcedure = t.procedure.use(requireUser);
 
+/**
+ * SW-G7: finance-console procedures — restricted to the finance and admin
+ * roles. Finance dashboards expose platform-wide money data (payment queues,
+ * balances, ledger mirrors) and must never be reachable by ordinary traders.
+ */
+export const financeProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+
+    if (!ctx.user || !['admin', 'finance'].includes(ctx.user.role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Finance or admin role required" });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  }),
+);
+
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;

@@ -1251,8 +1251,14 @@ export function getPool(): Pool | null {
 
 /**
  * withRlsContext — runs a callback inside a PostgreSQL transaction with
- * app.current_user_id and app.current_user_role set via SET LOCAL so that
- * all RLS policies on multi-tenant tables are enforced for the duration.
+ * app.current_user_id, app.current_role and app.current_trader_id set via
+ * SET LOCAL (the exact GUC names the RLS policies read) so that all RLS
+ * policies on multi-tenant tables are enforced for the duration.
+ *
+ * IMPORTANT (SW-G3): RLS only bites when the database role in DATABASE_URL is
+ * NOT a superuser and does NOT have BYPASSRLS. Production deployments must use
+ * a dedicated non-BYPASSRLS application role (see drizzle/migrations/0052
+ * header). Table owners are also subject to FORCE ROW LEVEL SECURITY.
  *
  * Usage:
  *   const result = await withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
@@ -1279,8 +1285,12 @@ export async function withRlsContext<T>(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // SW-G3: set EXACTLY the GUC names the RLS policies read
+    // (infra/postgres/01_rls_policies.sql, folded into drizzle/migrations/0052):
+    //   app.current_user_id, app.current_role, app.current_trader_id
     await client.query("SELECT set_config('app.current_user_id', $1, true)", [String(user.id)]);
-    await client.query("SELECT set_config('app.current_user_role', $1, true)", [user.role]);
+    await client.query("SELECT set_config('app.current_role', $1, true)", [user.role]);
+    await client.query("SELECT set_config('app.current_trader_id', $1, true)", [String(user.id)]);
     // Create a Drizzle instance bound to this specific client
     const txDb = drizzle(client as any);
     const result = await callback(txDb as any);
