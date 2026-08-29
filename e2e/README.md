@@ -57,7 +57,7 @@ Start the full stack first, then run the tests:
 
 ```bash
 # Start all services
-cp .env.compose .env
+cp .env.compose.example .env  # then fill every REQUIRED value
 docker compose up -d
 
 # Wait for health checks to pass (~2 minutes)
