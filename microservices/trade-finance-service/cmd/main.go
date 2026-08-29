@@ -654,7 +654,6 @@ func main() {
 		log.Fatal("FATAL: TRADE_FINANCE_SERVICE_TOKEN and BANK_CALLBACK_SECRET must be set in production. Refusing to boot.")
 	}
 	dbURL := getEnv("DATABASE_URL", devOnlyDB())
-	db, err := sql.Open("postgres", dbURL) "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
