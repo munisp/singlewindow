@@ -1064,7 +1064,9 @@ async function runSLABreachAlertBroadcast() {
   }
 }
 // SLA breach alert broadcast — every 15 minutes (offset by 7 minutes from port congestion scan)
-cron.schedule("0 7/15 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
+// NOTE: "7/15" is rejected by node-cron >= 4.6 (boot-fatal at module load).
+// The explicit list 7,22,37,52 is the semantically identical classic-cron form.
+cron.schedule("0 7,22,37,52 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
 console.log("[Cron] SLA breach alert broadcast scheduled every 15 minutes");
 
 // ─── Nightly Bulk Export Expiry Cleanup ──────────────────────────────────────
