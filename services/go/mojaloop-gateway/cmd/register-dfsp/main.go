@@ -68,7 +68,7 @@ func main() {
 	var signer *dfsp.Signer
 	keyPath := os.Getenv("MOJALOOP_JWS_KEY_PATH")
 	if keyPath != "" {
-		signer, err = dfsp.NewSignerFromFile(keyPath, cfg.DFSP_ID)
+		signer, err = dfsp.NewSignerFromFile(cfg.DFSP_ID, keyPath)
 		if err != nil {
 			logger.Warn("Failed to load JWS key from file — falling back to ephemeral key",
 				zap.String("path", keyPath), zap.Error(err))
