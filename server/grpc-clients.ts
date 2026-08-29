@@ -298,10 +298,17 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
     ["keycloak-proxy",       KEYCLOAK_PROXY_GRPC],
   ];
 
-  // Run gRPC checks and TB HTTP checks in parallel
-  const [grpcResults, tbGoResult, tbRustResult] = await Promise.all([
+  // Run gRPC checks and TB HTTP checks in parallel. P0-2 remediation: EVERY
+  // probe path is settled/caught — a rejected or timed-out probe maps to an
+  // honest `false` (unhealthy) entry. A health summary must NEVER throw
+  // because a probed service is down. (Previously `tbRustResult` was
+  // destructured from a Promise.all that never included it, so any caller
+  // crashed with TypeError whenever this ran — i.e. exactly when a bridge was
+  // down in the test environment.)
+  const [grpcResults, tbGoResult] = await Promise.all([
     Promise.allSettled(grpcChecks.map(([, addr]) => checkGRPCHealth(addr))),
-    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
+    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP)
+      .catch(() => ({ healthy: false, mode: "unreachable" })),
   ]);
 
   const summary: Record<string, boolean> = Object.fromEntries(
@@ -311,9 +318,9 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
     ])
   );
 
-  // Add TigerBeetle bridge health (HTTP)
-  summary["tigerbeetle-go-bridge"]   = tbGoResult.healthy;
-  summary["tigerbeetle-rust-bridge"] = tbRustResult.healthy;
+  // Add TigerBeetle bridge health (HTTP). The Rust bridge replica was removed
+  // from deploy surfaces (SW-O3) — no phantom entry is reported for it.
+  summary["tigerbeetle-go-bridge"] = tbGoResult.healthy;
 
   return summary;
 }
@@ -327,8 +334,12 @@ export async function getTigerBeetleBridgeModes(): Promise<{
   go: { healthy: boolean; mode: string };
   rust: { healthy: boolean; mode: string };
 }> {
-  const [go, rust] = await Promise.all([
-    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
-  ]);
+  // The Rust bridge replica was removed from deploy surfaces (SW-O3): report
+  // it honestly as not deployed instead of probing a phantom endpoint or
+  // returning undefined (which previously crashed consumers). Probe failures
+  // map to an honest unhealthy result — never an exception.
+  const go = await checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP)
+    .catch(() => ({ healthy: false, mode: "unreachable" }));
+  const rust = { healthy: false, mode: "not_deployed" };
   return { go, rust };
 }
