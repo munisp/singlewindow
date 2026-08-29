@@ -13,7 +13,7 @@ version: "3.9"
 services:
   # ── Application Server ──────────────────────────────────────────────────────
   app:
-    image: tradegateway/ngswtp:${APP_VERSION:-1.0.0}
+    image: tradegateway/web-api:${APP_VERSION:-1.0.0}
     build:
       context: .
       dockerfile: Dockerfile

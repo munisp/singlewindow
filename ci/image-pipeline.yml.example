@@ -1,0 +1,128 @@
+# ci/image-pipeline.yml.example — SW-O10
+# EXAMPLE container image pipeline. Copy to .github/workflows/image-pipeline.yml
+# and set REGISTRY + credentials to activate. It is intentionally an example:
+# the repository ships no live image-build workflow, and a workflow referencing
+# a registry that does not exist would be fiction.
+#
+# Guarantees enforced here:
+#   1. Every first-party image referenced by the deploy surfaces
+#      (infra/kubernetes/deployments/*.yaml, infra/k8s/polyglot-services.yaml,
+#      infra/helm + helm values, docker-compose*.yml) is built from the context
+#      declared in the matrix below — names MUST match the manifests.
+#   2. The canonical money-rail bridge image `tradegateway/tigerbeetle-bridge`
+#      is built from services/go/tigerbeetle-bridge with Dockerfile.production
+#      (CGO `-tags tigerbeetle`, live TigerBeetle backend). The Rust bridges
+#      (services/tigerbeetle-bridge, services/tigerbeetle-bridge-rs,
+#      services/rust/tigerbeetle-bridge) are DEV-ONLY (TB_ALLOW_SIM_BACKEND=1)
+#      and must never be published by this pipeline.
+#   3. A convergence job fails the build if any manifest references a
+#      tradegateway/* image with no matrix entry (drift detection).
+
+name: Image Pipeline (example)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: tradegateway
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Canonical money rail ──────────────────────────────────────────
+          - { name: tigerbeetle-bridge,   context: services/go/tigerbeetle-bridge, dockerfile: Dockerfile.production }
+          # ── Go services (deploy-surface images) ───────────────────────────
+          - { name: declaration-engine,   context: services/declaration-engine }
+          - { name: cargo-tracking,       context: services/cargo-tracking }
+          - { name: oga-hub,              context: services/oga-hub }
+          - { name: go-graph-bridge,      context: services/go-graph-bridge }
+          - { name: ai-risk-scorer,       context: services/ai-risk-scorer }
+          - { name: opensearch-indexer,   context: services/opensearch-indexer }
+          - { name: declaration-service,  context: microservices/declaration-service }
+          - { name: payment-service,      context: microservices/payment-service }
+          - { name: trade-finance-service, context: microservices/trade-finance-service }
+          - { name: sanctions-service,    context: microservices/sanctions-service }
+          - { name: profile-service,      context: microservices/profile-service }
+          - { name: analytics-service,    context: microservices/analytics-service }
+          - { name: cargo-tracking-service, context: microservices/cargo-tracking-service }
+          - { name: oga-service,          context: microservices/oga-service }
+          - { name: risk-engine,          context: microservices/risk-engine }
+          - { name: risk-ai,              context: microservices/risk-ai }
+          - { name: anomaly-detection,    context: microservices/anomaly-detection }
+          - { name: hs-classifier,        context: microservices/hs-classifier }
+          - { name: vision-service,       context: microservices/vision-service }
+          - { name: temporal-worker,      context: microservices/temporal-worker }
+          - { name: fluvio-consumer,      context: microservices/fluvio-consumer }
+          - { name: mojaloop-service,     context: microservices/mojaloop-service }
+          - { name: mojaloop-gateway,     context: services/go/mojaloop-gateway }
+          - { name: asean-sw-service,     context: services/go/asean-sw-service }
+          - { name: audit-service,        context: services/go/audit-service }
+          - { name: cen-service,          context: services/go/cen-service }
+          - { name: keycloak-svc,         context: services/go/keycloak-svc }
+          - { name: deltalake-svc,        context: services/python/deltalake-svc }
+          - { name: insider-threat-svc,   context: services/python/insider-threat-svc }
+          - { name: kyc-service,          context: services/python/kyc-service }
+          - { name: payment-risk-scorer,  context: services/python/payment-risk-scorer }
+          - { name: sedona-svc,           context: services/python/sedona-svc }
+          - { name: rule-engine,          context: services/rust/rule-engine }
+          - { name: vision-preprocessor,  context: services/rust/vision-preprocessor }
+          - { name: kafka-consumer,       context: services/kafka-consumer }
+          - { name: web-api,              context: . }  # root Dockerfile (main Node gateway)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (and push on main/tags)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/${{ matrix.dockerfile || 'Dockerfile' }}
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.name }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  manifest-convergence:
+    # Fails if a deploy surface references a tradegateway/* image that the
+    # matrix above does not build (helm/k8s/compose drift detection).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check image/manifest convergence
+        run: |
+          set -euo pipefail
+          built=$(grep -oE '\{ name: [a-z0-9-]+' ci/image-pipeline.yml.example \
+                  | awk '{print $3}' | sort -u)
+          # only image:/repository: lines count (NOTES/docs mention chart paths)
+          referenced=$(grep -rhE '^\s*(image|repository):' \
+                  infra/kubernetes/deployments/*.yaml infra/k8s/polyglot-services.yaml \
+                  infra/helm helm docker-compose*.yml infra/docker-compose*.yml 2>/dev/null \
+                  | grep -oE 'tradegateway/[a-z0-9-]+' \
+                  | sed 's|tradegateway/||' | sort -u)
+          missing=0
+          for img in $referenced; do
+            # third-party platform images pinned in values files are exempt
+            case "$img" in tigerbeetle|model-downloader) continue;; esac
+            if ! grep -qx "$img" <<<"$built"; then
+              echo "::error::manifest references tradegateway/$img but the image pipeline does not build it"
+              missing=1
+            fi
+          done
+          # The canonical bridge MUST be present
+          grep -qx tigerbeetle-bridge <<<"$built" || { echo "::error::canonical tigerbeetle-bridge missing from pipeline"; exit 1; }
+          # The dev-only Rust bridges MUST NOT be built for deploy surfaces
+          for bad in tigerbeetle-bridge-rs tigerbeetle-bridge-rust; do
+            if grep -qx "$bad" <<<"$built"; then
+              echo "::error::dev-only Rust bridge $bad must not be published"; exit 1
+            fi
+          done
+          exit $missing
