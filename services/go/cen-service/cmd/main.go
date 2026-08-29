@@ -487,7 +487,9 @@ func healthCheck(c *gin.Context) {
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8097"
+		// Default 8093 per the gateway PORTS registry (SW-MP8). Previously
+		// 8097, which collided with profile-service (P0-7).
+		port = "8093"
 	}
 
 	gin.SetMode(gin.ReleaseMode)

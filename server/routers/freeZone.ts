@@ -8,15 +8,18 @@ import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import { declarations, freezoneReconciliationRuns } from "../../drizzle/schema";
 import { eq, inArray, desc } from "drizzle-orm";
+import { fetchWithResilience } from "../_core/middlewareClients";
 
 const FZ_SERVICE_URL = process.env.FREEZONE_SERVICE_URL || "http://localhost:8098";
 
 async function fzFetch(path: string, options?: RequestInit) {
   try {
-    const res = await fetch(`${FZ_SERVICE_URL}${path}`, {
+    // P0-7: timeout + retry + circuit breaker via the resilience wrapper.
+    const res = await fetchWithResilience(`${FZ_SERVICE_URL}${path}`, {
       ...options,
+      timeoutMs: 5_000,
       headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
-    });
+    }, "freezone-service");
     const text = await res.text();
     if (!res.ok) {
       let msg = text;

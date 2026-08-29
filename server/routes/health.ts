@@ -123,12 +123,14 @@ export async function buildHealthReport(): Promise<HealthReport> {
         `http://${process.env.KAFKA_HOST ?? "localhost"}:${process.env.KAFKA_REST_PORT ?? "8082"}/topics`,
         "Kafka"
       ),
+      // asean-sw-service bind default is 8096 (was wrongly 8098 = freezone)
       checkOptionalService(
-        process.env.ASEAN_SW_URL ?? "http://localhost:8098/health",
+        process.env.ASEAN_SW_URL ?? "http://localhost:8096/health",
         "ASEAN Single Window"
       ),
+      // cen-service renumbered off 8097 (profile-service collision, P0-7)
       checkOptionalService(
-        process.env.CEN_SERVICE_URL ?? "http://localhost:8097/health",
+        process.env.CEN_SERVICE_URL ?? "http://localhost:8093/health",
         "WCO CEN Service"
       ),
       checkOptionalService(

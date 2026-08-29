@@ -22,13 +22,15 @@ export const PORTS = {
   wazuhApi: 55000,
   opencti: 4000,
   kubecost: 9090,
-  aseanSwService: 8091,
+  aseanSwService: 8096, // matches asean-sw-service bind default + aseanSw.ts
   aseanGatewayGrpc: 50091,
-  freeZoneService: 8092,
-  cenService: 8093,
+  freeZoneService: 8098, // matches freezone-service bind default + freeZone.ts
+  cenService: 8093, // cen-service renumbered off 8097 (profile-service collision, P0-7)
   tigerBeetleBridge: 8086, // CANONICAL — the only money-rail bridge
+  // DEPRECATED (P0-9): Fluvio is not deployed — these entries are stale and
+  // their ports are owned by asean-sw-service (8096) / profile-service (8097).
   fluvioSvc: 8096,
-  fluvioWs: 8097, // ws endpoint of the fluvio streaming stack (NOT profile-service)
+  fluvioWs: 8097,
   deltaLakeSvc: 8098,
   flinkCepSvc: 8099,
   flinkStreamGrpc: 50099,
@@ -128,11 +130,11 @@ export const ENV = {
   kubecostUrl: process.env.KUBECOST_URL ?? "http://localhost:9090",
 
   // ─── ASEAN Single Window ──────────────────────────────────────────────────
-  aseanSwServiceUrl: process.env.ASEAN_SW_SERVICE_URL ?? process.env.ASEAN_SW_URL ?? "http://localhost:8091",
+  aseanSwServiceUrl: process.env.ASEAN_SW_SERVICE_URL ?? process.env.ASEAN_SW_URL ?? "http://localhost:8096", // asean-sw-service bind default
   aseanGatewayGrpcAddr: process.env.ASEAN_GATEWAY_GRPC_ADDR ?? "localhost:50091",
 
   // ─── Free Zone Service ────────────────────────────────────────────────────
-  freeZoneServiceUrl: process.env.FREEZONE_SERVICE_URL ?? "http://localhost:8092",
+  freeZoneServiceUrl: process.env.FREEZONE_SERVICE_URL ?? "http://localhost:8098", // freezone-service bind default
 
   // ─── CEN (WCO) Service ────────────────────────────────────────────────────
   cenServiceUrl: process.env.CEN_SERVICE_URL ?? "http://localhost:8093",

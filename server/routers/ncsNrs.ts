@@ -33,17 +33,20 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { fetchWithResilience } from "../_core/middlewareClients";
 
 const NCS_NRS_GATEWAY_URL = process.env.NCS_NRS_GATEWAY_URL ?? "http://ncs-nrs-gateway:8101";
 
 async function fetchGateway(path: string, options: RequestInit = {}): Promise<Response> {
-  const res = await fetch(`${NCS_NRS_GATEWAY_URL}${path}`, {
+  // P0-7: timeout + retry + circuit breaker via the resilience wrapper.
+  const res = await fetchWithResilience(`${NCS_NRS_GATEWAY_URL}${path}`, {
     ...options,
+    timeoutMs: 5_000,
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {}),
     },
-  });
+  }, "ncs-nrs-gateway");
   return res;
 }
 

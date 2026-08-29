@@ -1,19 +1,24 @@
 /**
  * WCO CEN (Customs Enforcement Network) tRPC Router
- * Proxies to the Go cen-service (port 8097)
+ * Proxies to the Go cen-service (default port 8093 per the PORTS registry —
+ * renumbered off 8097 which collided with profile-service, P0-7).
  */
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { fetchWithResilience } from "../_core/middlewareClients";
+import { PORTS } from "../_core/env";
 
-const CEN_SERVICE_URL = process.env.CEN_SERVICE_URL || "http://localhost:8097";
+const CEN_SERVICE_URL = process.env.CEN_SERVICE_URL || `http://localhost:${PORTS.cenService}`;
 
 async function cenFetch(path: string, options?: RequestInit) {
   try {
-    const res = await fetch(`${CEN_SERVICE_URL}${path}`, {
+    // P0-7: timeout + retry + circuit breaker via the resilience wrapper.
+    const res = await fetchWithResilience(`${CEN_SERVICE_URL}${path}`, {
       ...options,
+      timeoutMs: 5_000,
       headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
-    });
+    }, "cen-service");
     const text = await res.text();
     if (!res.ok) {
       let msg = text;
@@ -22,8 +27,10 @@ async function cenFetch(path: string, options?: RequestInit) {
     }
     return JSON.parse(text);
   } catch (err) {
-    if (err instanceof TRPCError) throw err;
-    // Service unavailable — return graceful fallback
+    // Real HTTP error responses from the service propagate.
+    if (err instanceof TRPCError && err.code !== "SERVICE_UNAVAILABLE") throw err;
+    // Service unavailable (network/timeout/circuit-breaker open) — return
+    // graceful fallback; MUTATIONS convert null into SERVICE_UNAVAILABLE.
     return null;
   }
 }

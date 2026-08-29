@@ -33,6 +33,7 @@
 import { TRPCError } from "@trpc/server";
 import nodeCrypto from "crypto";
 import { getDb } from "../db";
+import { fetchWithResilience } from "../_core/middlewareClients";
 import { paymentIdempotencyKeys } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -458,8 +459,12 @@ export const mojaloopRouter = router({
       const available = await mojaloopAvailable();
       if (available) {
         try {
-          await fetch(`${MOJALOOP_URL}/transfers`, {
+          // P0-7: money-movement calls go through the resilience wrapper
+          // (timeout + retry + circuit breaker) — a raw fetch without a
+          // timeout can hang a payment request indefinitely.
+          await fetchWithResilience(`${MOJALOOP_URL}/transfers`, {
             method: "POST",
+            timeoutMs: 10_000,
             headers: {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
@@ -475,8 +480,7 @@ export const mojaloopRouter = router({
               condition,
               expiration: expiresAt.toISOString(),
             }),
-            signal: AbortSignal.timeout(10_000),
-          });
+          }, "mojaloop-switch");
         } catch (e) {
           console.warn(`[Mojaloop] Transfer request to switch failed: ${e}. Transfer remains PENDING.`);
         }
