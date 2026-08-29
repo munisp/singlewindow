@@ -49,12 +49,9 @@ images:
   fluvioConsumer:
     repository: tradegateway/fluvio-consumer
     tag: "1.0.0"
-  # TigerBeetle bridges
+  # Canonical TigerBeetle bridge (Go; the Rust -rs replica was removed — dev-only)
   tigerbeetleBridgeGo:
-    repository: tradegateway/tigerbeetle-bridge-go
-    tag: "1.0.0"
-  tigerbeetleBridgeRs:
-    repository: tradegateway/tigerbeetle-bridge-rs
+    repository: tradegateway/tigerbeetle-bridge
     tag: "1.0.0"
   # Python AI/ML services
   riskEngine:
@@ -89,7 +86,6 @@ replicaCount:
   analyticsService: 2
   fluvioConsumer: 2
   tigerbeetleBridgeGo: 2
-  tigerbeetleBridgeRs: 2
   riskEngine: 3
   sanctionsService: 2
   anomalyDetection: 2
@@ -176,8 +172,7 @@ ports:
   sanctionsService: 8088
   anomalyDetection: 8091
   kycService: 8095
-  tigerbeetleBridgeGo: 8200
-  tigerbeetleBridgeRs: 8201
+  tigerbeetleBridgeGo: 8086
 
 # ─── Infrastructure Addresses ────────────────────────────────────────────────
 infrastructure:
@@ -198,7 +193,7 @@ infrastructure:
   tigerbeetle:
     address: "tigerbeetle-0.tigerbeetle.svc.cluster.local:3000"
     clusterId: 0
-  goBridgeHttpAddr: "http://tigerbeetle-bridge-go.tradegateway.svc.cluster.local:8200"
+  goBridgeHttpAddr: "http://tigerbeetle-bridge.tradegateway.svc.cluster.local:8086"
   mojaloop:
     hubUrl: "https://hub.mojaloop.io"
   spark:
@@ -596,8 +591,8 @@ services:
 
   tigerbeetle-bridge-go:
     enabled: true
-    port: 8200
-    metricsPort: 9090
+    port: 8086
+    metricsPort: 9086
     replicas: 2
     daprEnabled: "false"
     resources:
@@ -611,19 +606,6 @@ services:
     pdb:
       minAvailable: 1
 
-  tigerbeetle-bridge-rs:
-    enabled: false  # Rust bridge disabled by default; enable for high-throughput ledger
-    port: 8201
-    metricsPort: 9090
-    replicas: 2
-    daprEnabled: "false"
-    resources:
-      requests: { cpu: "500m", memory: "256Mi" }
-      limits:   { cpu: "2000m", memory: "1Gi" }
-    hpa:
-      enabled: false
-    pdb:
-      minAvailable: 1
 
   fluvio-consumer:
     enabled: true

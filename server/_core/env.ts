@@ -147,7 +147,7 @@ export const ENV = {
   paymentServiceUrl: process.env.PAYMENT_SERVICE_URL ?? "http://localhost:8082",
   ogaServiceUrl: process.env.OGA_SERVICE_URL ?? "http://localhost:8084",
   analyticsServiceUrl: process.env.ANALYTICS_SERVICE_URL ?? "http://localhost:8085",
-  profileServiceUrl: process.env.PROFILE_SERVICE_URL ?? "http://localhost:8086",
+  profileServiceUrl: process.env.PROFILE_SERVICE_URL ?? "http://localhost:8097",
   riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8087",
   cargoTrackingServiceUrl: process.env.CARGO_TRACKING_SERVICE_URL ?? "http://localhost:8088",
   sanctionsServiceUrl: process.env.SANCTIONS_SERVICE_URL ?? "http://localhost:8089",

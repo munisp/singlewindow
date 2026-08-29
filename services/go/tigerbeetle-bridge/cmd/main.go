@@ -421,6 +421,17 @@ func getEnv(key, fallback string) string {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 func main() {
+	// Distroless-safe container healthcheck: the runtime image has no shell,
+	// wget, or curl, so compose/k8s exec probes invoke the binary itself.
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Get("http://127.0.0.1:" + httpPort + "/health")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 

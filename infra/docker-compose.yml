@@ -396,14 +396,14 @@ services:
       dockerfile: Dockerfile
     container_name: tg-analytics-service
     ports:
-      - "8086:8086"
+      - "8097:8097"
     environment:
-      PORT: "8086"
+      PORT: "8097"
       DELTALAKE_SVC_URL: "${DELTALAKE_SVC_URL:-}"
     networks:
       - tradegateway
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8086/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8097/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -812,6 +812,35 @@ services:
   # ── TIGERBEETLE (Financial Ledger) ─────────────────────────────────────────
   # TigerBeetle provides linearizable, high-throughput double-entry accounting.
   # Initialise the data file on first run with: docker compose run tigerbeetle-init
+  # ── TIGERBEETLE BRIDGE (canonical Go ledger service, HTTP /api/ledger/*) ─────
+  # SW-O3: canonical money-rail bridge. Rust bridges are dev-only and removed.
+  tigerbeetle-bridge:
+    build:
+      context: ../services/go/tigerbeetle-bridge
+      dockerfile: Dockerfile
+    container_name: tg-tigerbeetle-bridge
+    restart: unless-stopped
+    depends_on:
+      tigerbeetle:
+        condition: service_started
+    environment:
+      TB_BRIDGE_HTTP_PORT: "8086"
+      TB_BRIDGE_GRPC_PORT: "9086"
+      TIGERBEETLE_ADDR: "tigerbeetle:3000"
+      TB_ALLOW_SIM_BACKEND: "${TB_ALLOW_SIM_BACKEND:-}"
+      KAFKA_BROKERS: "kafka:9092"
+    ports:
+      - "8086:8086"
+      - "9086:9086"
+    networks:
+      - tradegateway
+    healthcheck:
+      test: ["CMD", "/tigerbeetle-bridge", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   tigerbeetle:
     image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
     container_name: tg-tigerbeetle

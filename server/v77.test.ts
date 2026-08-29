@@ -48,17 +48,20 @@ function read(rel: string) {
 
 // ─── TB-01: Port consistency ──────────────────────────────────────────────────
 describe("TB-01: TB bridge port consistency", () => {
-  it("ledger.ts uses port 8093 for TB_BRIDGE_URL", () => {
+  it("ledger.ts uses the canonical port 8086 for TB_BRIDGE_URL", () => {
+    // SW-O3: canonical money-rail bridge is the Go service
+    // tigerbeetle-bridge:8086 (HTTP /api/ledger/*). The old 8093/4600
+    // Rust-bridge ports were removed from all deploy surfaces.
     const src = read("server/routers/ledger.ts");
-    expect(src).toContain("8093");
-    expect(src).not.toMatch(/TB_BRIDGE_URL.*8086/);
+    expect(src).toContain("8086");
+    expect(src).not.toMatch(/TB_BRIDGE_URL.*8093/);
     expect(src).not.toMatch(/TB_BRIDGE_URL.*8087/);
   });
 
-  it("polyglot-services.yaml tigerbeetle-bridge uses port 4600 (internal) and 8093 (service)", () => {
+  it("polyglot-services.yaml references only the canonical Go bridge (no Rust replica)", () => {
     const src = read("infra/k8s/polyglot-services.yaml");
-    // The bridge-rs service should be present
-    expect(src).toMatch(/tigerbeetle-bridge/);
+    expect(src).toMatch(/tigerbeetle-bridge:8086/);
+    expect(src).not.toMatch(/tigerbeetle-bridge-rs/);
   });
 
   it("fund-flow.ts uses port 8093 for TB bridge", () => {

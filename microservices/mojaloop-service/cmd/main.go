@@ -183,7 +183,7 @@ func loadConfig() Config {
 		DatabaseURL:     getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway"),
 		MojaloopBaseURL: getEnv("MOJALOOP_URL", "http://mojaloop-ml-api-adapter:3000"),
 		MojaloopFSPID:   getEnv("MOJALOOP_FSP_ID", "tradegateway-ng"),
-		TigerBeetleURL:  getEnv("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:50055"),
+		TigerBeetleURL:  getEnv("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
 		KafkaBrokers:    getEnv("KAFKA_BROKERS", "localhost:9092"),
 		DaprPort:        getEnv("DAPR_HTTP_PORT", "3500"),
 	}

@@ -45,7 +45,7 @@ data:
   trader-registry-grpc-addr: "trader-registry-service:9090"
   asean-grpc-addr: "asean-sw-service:9090"
   cen-grpc-addr: "cen-service:9090"
-  tb-go-bridge-http-addr: "http://tigerbeetle-bridge:9100"
+  tb-go-bridge-http-addr: "http://tigerbeetle-bridge:8086"
   # insider-threat-svc (real IsolationForest ML service)
   insider-threat-block-threshold: {{ .Values.services.insiderThreat.blockThreshold | default "0.85" | quote }}
   insider-threat-retrain-contamination: {{ .Values.services.insiderThreat.retrainContamination | default "0.05" | quote }}

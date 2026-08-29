@@ -23,6 +23,7 @@ networks:
 
 # ─── Persistent volumes ──────────────────────────────────────────────────────
 volumes:
+  tigerbeetle_data:
   postgres_data:
   redis_data:
   temporal_data:
@@ -284,7 +285,8 @@ services:
   #   payment-service:      8082  (gRPC: 50053)
   #   oga-service:          8084  (gRPC: 50054)
   #   analytics-service:    8085  (gRPC: 50055)
-  #   profile-service:      8086  (gRPC: 50056)
+  #   tigerbeetle-bridge:   8086  (gRPC: 9086)  ← canonical money-rail bridge
+  #   profile-service:      8097  (gRPC: 50056)
   #   risk-engine:          8087  (gRPC: 50052)
   #   cargo-tracking:       8088  (gRPC: 50057)
   #   sanctions-service:    8089  (gRPC: 50058)
@@ -419,16 +421,16 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PORT: 8086
+      PORT: 8097
       GRPC_PORT: 50056
       DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
     ports:
-      - "8086:8086"
+      - "8097:8097"
       - "50056:50056"
     networks:
       - tradegateway-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8097/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -764,25 +766,55 @@ services:
     networks:
       - tradegateway-net
 
-  # ── TigerBeetle Bridge (Rust / gRPC ledger service) ──────────────────────────
+  # ── TigerBeetle Bridge (canonical Go ledger service, HTTP /api/ledger/*) ──────
+  # SW-O3: THE canonical money-rail bridge. The Rust gRPC bridges are dev-only
+  # (TB_ALLOW_SIM_BACKEND=1) and were removed from all deploy surfaces.
+  # Production images must be built from Dockerfile.production (-tags tigerbeetle,
+  # live TB backend). The default build is the DEV-only sim backend, which
+  # refuses to boot when ENVIRONMENT=production.
   tigerbeetle-bridge:
     build:
-      context: ./services/tigerbeetle-bridge
+      context: ./services/go/tigerbeetle-bridge
       dockerfile: Dockerfile
     container_name: tg-tigerbeetle-bridge
     restart: unless-stopped
+    depends_on:
+      tigerbeetle:
+        condition: service_started
     environment:
-      GRPC_PORT: "50055"
-      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-tigerbeetle:3000}
+      TB_BRIDGE_HTTP_PORT: "8086"
+      TB_BRIDGE_GRPC_PORT: "9086"
+      TIGERBEETLE_ADDR: ${TIGERBEETLE_ADDR:-tigerbeetle:3000}
+      TB_ALLOW_SIM_BACKEND: ${TB_ALLOW_SIM_BACKEND:-}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
-      GRPC_TLS_CERT_PATH: /certs/server.crt
-      GRPC_TLS_KEY_PATH: /certs/server.key
-      GRPC_TLS_CA_PATH: /certs/ca.crt
-    volumes:
-      - ./certs:/certs:ro
     ports:
-      - "50055:50055"
+      - "8086:8086"
+      - "9086:9086"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      # distroless image: no shell/wget — the binary serves its own probe
+      test: ["CMD", "/tigerbeetle-bridge", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── TigerBeetle (ledger datastore) ───────────────────────────────────────────
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+    container_name: tg-tigerbeetle
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -f /var/lib/tigerbeetle/0_0.tigerbeetle ]; then
+          /tigerbeetle format --cluster=0 --replica=0 --replica-count=1 /var/lib/tigerbeetle/0_0.tigerbeetle;
+        fi;
+        exec /tigerbeetle start --addresses=0.0.0.0:3000 /var/lib/tigerbeetle/0_0.tigerbeetle
+    volumes:
+      - tigerbeetle_data:/var/lib/tigerbeetle
     networks:
       - tradegateway-net
 

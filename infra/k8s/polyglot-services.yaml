@@ -454,104 +454,12 @@ spec:
       targetPort: 8080
 ---
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Rust — TigerBeetle Bridge
+# 5. TigerBeetle Bridge — REMOVED (SW-O3)
+# The Rust tigerbeetle-bridge-rs replica was removed from deploy surfaces: its
+# in-memory ledger is dev-only (TB_ALLOW_SIM_BACKEND=1). The canonical
+# money-rail bridge is the Go service `tigerbeetle-bridge` (HTTP /api/ledger/*,
+# port 8086) — see infra/kubernetes/deployments/ai-services.yaml.
 # ─────────────────────────────────────────────────────────────────────────────
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: tigerbeetle-bridge-rust
-  namespace: tradegateway
-  labels:
-    app: tigerbeetle-bridge-rust
-    language: rust
-    tier: ledger
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: tigerbeetle-bridge-rust
-  template:
-    metadata:
-      labels:
-        app: tigerbeetle-bridge-rust
-        language: rust
-        tier: ledger
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
-    spec:
-      serviceAccountName: tradegateway-sa
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1001
-      containers:
-        - name: tigerbeetle-bridge-rust
-          image: tradegateway/tigerbeetle-bridge-rs:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 4600
-              name: http
-            - containerPort: 9090
-              name: metrics
-          env:
-            - name: TIGERBEETLE_ADDRESS
-              valueFrom:
-                configMapKeyRef:
-                  name: tradegateway-config
-                  key: TIGERBEETLE_ADDRESS
-            - name: GRPC_TLS_CERT_FILE
-              value: /etc/tls/tls.crt
-            - name: GRPC_TLS_KEY_FILE
-              value: /etc/tls/tls.key
-            - name: GRPC_TLS_CA_FILE
-              value: /etc/tls/ca.crt
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "256Mi"
-            limits:
-              cpu: "2000m"
-              memory: "512Mi"
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-          livenessProbe:
-            exec:
-              command: ["/usr/local/bin/tigerbeetle-bridge", "--health-check"]
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          readinessProbe:
-            exec:
-              command: ["/usr/local/bin/tigerbeetle-bridge", "--health-check"]
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          volumeMounts:
-            - name: tls-certs
-              mountPath: /etc/tls
-              readOnly: true
-      volumes:
-        - name: tls-certs
-          secret:
-            secretName: tradegateway-tls
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: tigerbeetle-bridge-rust
-  namespace: tradegateway
-spec:
-  selector:
-    app: tigerbeetle-bridge-rust
-  ports:
-    - name: http
-      port: 4600
-      targetPort: 4600
-    - name: metrics
-      port: 9090
-      targetPort: 9090
----
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Rust — Kafka Consumer (Domain Event Processor)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -941,7 +849,7 @@ data:
   RISK_ENGINE_GO_URL: "http://risk-engine-go:8080"
   OGA_HUB_URL: "http://oga-hub:8080"
   CARGO_TRACKING_GO_URL: "http://cargo-tracking-go:8080"
-  TIGERBEETLE_BRIDGE_RUST_URL: "http://tigerbeetle-bridge-rs:4600"
+  TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:8086"
   KAFKA_CONSUMER_METRICS_URL: "http://kafka-consumer-rust:9090"
   OPENSEARCH_INDEXER_URL: "http://opensearch-indexer:8002"
 

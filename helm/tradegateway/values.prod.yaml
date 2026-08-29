@@ -261,7 +261,7 @@ workflowWorker:
     TEMPORAL_HOST: "temporal-frontend:7233"
     TEMPORAL_NAMESPACE: "tradegateway-prod"
     TEMPORAL_TASK_QUEUE: "fund-flow-tasks"
-    TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:4600"
+    TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:8086"
     KAFKA_BROKER: "kafka:9092"
     MOJALOOP_URL: "http://mojaloop-switch:3000"
     LOG_LEVEL: "info"

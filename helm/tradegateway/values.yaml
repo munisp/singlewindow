@@ -503,7 +503,7 @@ workflowWorker:
   healthPort: 8090
 
   # Middleware URLs injected as environment variables
-  tigerbeetleBridgeUrl: "http://tigerbeetle-bridge:4600"
+  tigerbeetleBridgeUrl: "http://tigerbeetle-bridge:8086"
   kafkaRestUrl: "http://kafka-rest-proxy:8082"
   fluvioHttpUrl: "http://fluvio-sc:9003"
 

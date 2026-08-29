@@ -183,7 +183,7 @@ upstreams:
     scheme: http
     nodes:
       - host: payment-risk-scorer.tradegateway.svc.cluster.local
-        port: 8000
+        port: 8092
         weight: 100
     health_check:
       active:

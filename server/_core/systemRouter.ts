@@ -344,7 +344,7 @@ export const systemRouter = router({
         { name: "ai-risk-scorer (Python)",       url: process.env.AI_RISK_SCORER_URL ?? "http://ai-risk-scorer:8001",        category: "Python/ML" },
         { name: "opensearch-indexer (Python)",   url: process.env.OPENSEARCH_INDEXER_URL ?? "http://opensearch-indexer:8002", category: "Python/Analytics" },
         { name: "kafka-consumer (Rust)",         url: process.env.KAFKA_CONSUMER_METRICS_URL ?? "http://kafka-consumer:9090", category: "Rust/Events" },
-        { name: "tigerbeetle-bridge (Rust)",     url: process.env.TIGERBEETLE_BRIDGE_RUST_URL ?? "http://tigerbeetle-bridge:50055", category: "Rust/Ledger" },
+        { name: "tigerbeetle-bridge (Go)",       url: process.env.TIGERBEETLE_BRIDGE_URL ?? "http://tigerbeetle-bridge:8086", category: "Ledger" },
         { name: "declaration-engine (Go)",       url: process.env.DECLARATION_ENGINE_URL ?? "http://declaration-engine:8080",  category: "Go/Core" },
         { name: "risk-engine-go (Go)",           url: process.env.RISK_ENGINE_GO_URL ?? "http://risk-engine-go:8080",          category: "Go/Core" },
         { name: "oga-hub (Go)",                  url: process.env.OGA_HUB_URL ?? "http://oga-hub:8080",                        category: "Go/Core" },

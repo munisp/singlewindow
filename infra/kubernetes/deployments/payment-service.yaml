@@ -24,7 +24,7 @@ data:
   METRICS_PORT: "9082"
   DAPR_HTTP_PORT: "3502"
   TEMPORAL_ADDRESS: "temporal-frontend.tradegateway.svc.cluster.local:7233"
-  TB_GO_BRIDGE_HTTP_ADDR: "http://tigerbeetle-bridge.tradegateway.svc.cluster.local:8085"
+  TB_GO_BRIDGE_HTTP_ADDR: "http://tigerbeetle-bridge.tradegateway.svc.cluster.local:8086"
   TIGERBEETLE_ADDRESS: "tigerbeetle.tradegateway.svc.cluster.local:3000"
   MOJALOOP_URL: "http://mojaloop-gateway.tradegateway.svc.cluster.local:3001"
   ENVIRONMENT: "production"
