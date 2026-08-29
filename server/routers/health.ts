@@ -1,29 +1,40 @@
 /**
  * Health Router — v104
- * Provides a platform health score (0–100) aggregated from all service checks.
+ * Provides a platform health score (0–100) aggregated from REAL service probes.
+ *
+ * P0 remediation (audit): this router previously returned hardcoded "healthy"
+ * statuses with synthesized latencies/uptimes. It now delegates to the real
+ * health stack:
+ *   - getServiceHealthSummary() (server/grpc-clients.ts) probes every Go
+ *     microservice via gRPC and the TigerBeetle bridges via HTTP.
+ *   - buildHealthReport() (server/routes/health.ts) performs deep dependency
+ *     checks (DB, Redis, TigerBeetle, Temporal, Kafka, ASEAN, CEN, Permify).
+ * No fabricated numbers: latencies are measured, and uptime is reported as
+ * null (NOT_ASSESSED) because uptime requires historical monitoring data this
+ * process does not have.
  */
 import { router, protectedProcedure } from "../_core/trpc";
-import { TRPCError } from "@trpc/server";
+import { getServiceHealthSummary } from "../grpc-clients";
+import { buildHealthReport } from "../routes/health";
 
 export const healthRouter = router({
   /**
    * v104: Get aggregate platform health score (0–100) with per-service breakdown.
+   * Score is derived from live probes: each reachable service scores 100, each
+   * unreachable service scores 0. No probe results are synthesized.
    */
   getPlatformHealthScore: protectedProcedure.query(async () => {
-    const services = [
-      { name: "Database", status: "healthy" as const, score: 100 },
-      { name: "API Gateway (APISIX)", status: "healthy" as const, score: 100 },
-      { name: "Kafka Event Bus", status: "healthy" as const, score: 95 },
-      { name: "Redis Cache", status: "healthy" as const, score: 100 },
-      { name: "Keycloak IAM", status: "healthy" as const, score: 98 },
-      { name: "Temporal Workflow", status: "healthy" as const, score: 97 },
-      { name: "OpenSearch", status: "healthy" as const, score: 96 },
-      { name: "Permify AuthZ", status: "healthy" as const, score: 99 },
-    ];
+    const healthMap = await getServiceHealthSummary();
+    const services = Object.entries(healthMap).map(([name, healthy]) => ({
+      name,
+      status: (healthy ? "healthy" : "down") as "healthy" | "down",
+      score: healthy ? 100 : 0,
+    }));
 
-    const score = Math.round(
-      services.reduce((sum, s) => sum + s.score, 0) / services.length
-    );
+    const score =
+      services.length === 0
+        ? 0
+        : Math.round(services.reduce((sum, s) => sum + s.score, 0) / services.length);
 
     return {
       score,
@@ -34,29 +45,29 @@ export const healthRouter = router({
   }),
 
   /**
-   * v125: getComponentHealth — return health status for each platform component.
+   * v125: getComponentHealth — return MEASURED health status for each platform
+   * component (deep dependency check). `uptime` is null (NOT_ASSESSED) because
+   * historical uptime data is not available to this process.
    */
   getComponentHealth: protectedProcedure.query(async () => {
-    const components = [
-      { name: "API Gateway", status: "healthy", latencyMs: 12, uptime: 99.98 },
-      { name: "Declaration Engine", status: "healthy", latencyMs: 45, uptime: 99.95 },
-      { name: "Risk AI Engine", status: "healthy", latencyMs: 120, uptime: 99.90 },
-      { name: "Payment Gateway", status: "healthy", latencyMs: 80, uptime: 99.97 },
-      { name: "Document Vault", status: "healthy", latencyMs: 30, uptime: 99.99 },
-      { name: "Cargo Tracking", status: "healthy", latencyMs: 25, uptime: 99.96 },
-      { name: "OGA Integration Hub", status: "degraded", latencyMs: 350, uptime: 98.50 },
-      { name: "ASEAN Single Window", status: "healthy", latencyMs: 200, uptime: 99.80 },
-      { name: "Ledger Service", status: "healthy", latencyMs: 15, uptime: 99.99 },
-      { name: "Notification Service", status: "healthy", latencyMs: 8, uptime: 99.99 },
-    ];
+    const report = await buildHealthReport();
+    const components = Object.entries(report.components).map(([name, c]) => ({
+      name,
+      status: c.status === "ok" ? ("healthy" as const) : c.status,
+      latencyMs: c.latencyMs ?? null,
+      // Honest empty state: uptime cannot be measured from a single probe.
+      uptime: null as number | null,
+      message: c.message ?? null,
+    }));
     const healthy = components.filter((c) => c.status === "healthy").length;
     const degraded = components.filter((c) => c.status === "degraded").length;
     const down = components.filter((c) => c.status === "down").length;
     return {
       components,
       summary: { total: components.length, healthy, degraded, down },
-      overallStatus: down > 0 ? "critical" : degraded > 0 ? "degraded" : "healthy",
-      checkedAt: new Date().toISOString(),
+      overallStatus:
+        report.status === "ok" ? "healthy" : report.status === "degraded" ? "degraded" : "critical",
+      checkedAt: report.timestamp,
     };
   }),
 });

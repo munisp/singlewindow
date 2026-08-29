@@ -96,7 +96,9 @@ async function checkOptionalService(
 }
 
 // ─── Full health report ───────────────────────────────────────────────────────
-async function buildHealthReport(): Promise<HealthReport> {
+// Exported so the tRPC health router (server/routers/health.ts) can serve the
+// same REAL probe results instead of fabricated scores (P0 remediation).
+export async function buildHealthReport(): Promise<HealthReport> {
   const isDemoMode = process.env.DEMO_MODE === "true";
 
   const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =
