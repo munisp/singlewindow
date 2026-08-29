@@ -368,7 +368,8 @@ func NewCallbackHandler(logger *zap.Logger) *CallbackHandler {
 	return &CallbackHandler{
 		logger:         logger,
 		jwksCache:      newHubJWKSCache(hubJWKSURL, logger),
-		tigerbeetleURL: getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:4600"),
+		// SW-MP2: canonical Go bridge (k8s Service tigerbeetle-bridge, /api/ledger/*, port 8086).
+		tigerbeetleURL: getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
 		kafkaRestURL:   getEnvOrDefault("KAFKA_REST_URL", "http://kafka-rest-proxy:8082"),
 		pendingILP:     make(map[string]string),
 	}
@@ -681,14 +682,14 @@ func (h *CallbackHandler) verifyILPFulfilment(transferID, fulfilment string) err
 // ─── TigerBeetle bridge calls ─────────────────────────────────────────────────
 
 // tigerbeetlePost finalizes a two-phase pending transfer in TigerBeetle.
+// SW-MP2: converged to the CANONICAL Go-bridge dialect
+// POST /api/ledger/transfers/post/{pendingId} (path param, no body).
 func (h *CallbackHandler) tigerbeetlePost(ctx context.Context, transferID string) error {
-	payload, _ := json.Marshal(map[string]string{"transfer_id": transferID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		h.tigerbeetleURL+"/transfers/post", bytes.NewReader(payload))
+		h.tigerbeetleURL+"/api/ledger/transfers/post/"+transferID, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("tigerbeetle post: %w", err)
@@ -702,14 +703,14 @@ func (h *CallbackHandler) tigerbeetlePost(ctx context.Context, transferID string
 }
 
 // tigerbeetleVoid voids a two-phase pending transfer in TigerBeetle.
+// SW-MP2: converged to the CANONICAL Go-bridge dialect
+// POST /api/ledger/transfers/void/{pendingId} (path param, no body).
 func (h *CallbackHandler) tigerbeetleVoid(ctx context.Context, transferID string) error {
-	payload, _ := json.Marshal(map[string]string{"transfer_id": transferID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		h.tigerbeetleURL+"/transfers/void", bytes.NewReader(payload))
+		h.tigerbeetleURL+"/api/ledger/transfers/void/"+transferID, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("tigerbeetle void: %w", err)
