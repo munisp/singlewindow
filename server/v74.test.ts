@@ -98,8 +98,13 @@ describe("tRPC insiderThreat.rollbackModel procedure", () => {
     expect(insiderTs).toContain("operator");
   });
 
-  it("returns offline stub when service is unavailable", () => {
-    expect(insiderTs).toContain("rolledBackAt");
+  it("fails closed (no fabricated rolledBackAt) when service is unavailable", () => {
+    // SW-E: the offline stub with a fabricated rolledBackAt timestamp was
+    // removed — an unavailable rollback must surface as SERVICE_UNAVAILABLE.
+    const idx = insiderTs.indexOf("rollbackModel: adminProcedure");
+    const window = insiderTs.slice(idx, idx + 2500);
+    expect(window).toContain("ROLLBACK_SERVICE_UNAVAILABLE");
+    expect(window).not.toMatch(/rolledBackAt:/);
   });
 
   it("throws INTERNAL_SERVER_ERROR on non-OK response", () => {
@@ -116,31 +121,26 @@ describe("tRPC insiderThreat.rollbackModel procedure", () => {
 
 // ─── 3. tRPC insiderThreat.rollbackModel caller (offline mode) ───────────────
 
-describe("tRPC insiderThreat.rollbackModel caller (offline mode)", () => {
+describe("tRPC insiderThreat.rollbackModel caller (fail-closed)", () => {
   const caller = appRouter.createCaller(makeCtx("admin"));
 
-  it("returns rolledBackAt when service is unavailable", async () => {
-    const result = await caller.insiderThreat.rollbackModel({
-      reason: "test_rollback",
-      operator: "test-admin",
-    });
-    expect(result).toHaveProperty("rolledBackAt");
+  it("rejects with SERVICE_UNAVAILABLE when the service is down (no fabricated outcome)", async () => {
+    await expect(
+      caller.insiderThreat.rollbackModel({
+        reason: "test_rollback",
+        operator: "test-admin",
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
-  it("returns success=false in offline stub", async () => {
-    const result = await caller.insiderThreat.rollbackModel({
-      reason: "test_rollback",
-      operator: "test-admin",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("echoes reason in offline stub response", async () => {
-    const result = await caller.insiderThreat.rollbackModel({
-      reason: "my_rollback_reason",
-      operator: "test-admin",
-    });
-    expect(result.reason).toBe("my_rollback_reason");
+  it("rollbackToVersion rejects with SERVICE_UNAVAILABLE when the service is down", async () => {
+    await expect(
+      caller.insiderThreat.rollbackToVersion({
+        target_version: 2,
+        reason: "test_rollback",
+        operator: "test-admin",
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("throws FORBIDDEN for non-admin users", async () => {

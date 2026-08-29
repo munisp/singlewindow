@@ -578,8 +578,13 @@ export const insiderThreatRouter = router({
         return await resp.json();
       } catch (err) {
         if (err instanceof TRPCError) throw err;
-        // Service unavailable in test/dev — return offline stub
-        return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, rolledBackAt: new Date().toISOString() };
+        // SW-E: FAIL-CLOSED — never return a fabricated rollback outcome
+        // (the old offline stub invented a rolledBackAt timestamp for a
+        // rollback that never happened — same violation class as SW-G4).
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "ROLLBACK_SERVICE_UNAVAILABLE: insider-threat-svc is unavailable — no rollback was performed",
+        });
       }
     }),
 
@@ -610,7 +615,11 @@ export const insiderThreatRouter = router({
         return await resp.json();
       } catch (err) {
         if (err instanceof TRPCError) throw err;
-        return { success: false, message: "insider-threat-svc unavailable (offline mode)", reason: input.reason, operator: input.operator, target_version: input.target_version, rolledBackAt: new Date().toISOString(), restored_version: input.target_version };
+        // SW-E: FAIL-CLOSED — never fabricate a version-rollback outcome.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "ROLLBACK_SERVICE_UNAVAILABLE: insider-threat-svc is unavailable — no rollback was performed",
+        });
       }
     }),
 
