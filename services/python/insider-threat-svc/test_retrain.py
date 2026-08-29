@@ -284,3 +284,34 @@ class TestScheduler:
         with patch.dict(os.environ, {"DATABASE_URL": "", "RETRAIN_MIN_EVENTS": "50"}):
             result = run_nightly_retrain()
         assert result is None
+
+
+    def test_env_gated_scheduler_disabled_by_default(self, tmp_models_dir):
+        """RETRAIN_SCHEDULER_ENABLED unset -> lifespan does NOT start APScheduler."""
+        import importlib
+        import main as app_module
+        importlib.reload(app_module)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RETRAIN_SCHEDULER_ENABLED", None)
+            with TestClient(app_module.app):
+                import retrain_scheduler
+                assert retrain_scheduler._scheduler is None or \
+                    not retrain_scheduler._scheduler.running
+
+    def test_env_gated_scheduler_enabled(self, tmp_models_dir):
+        """RETRAIN_SCHEDULER_ENABLED=true -> lifespan starts and stops the
+        nightly retrain scheduler cleanly."""
+        import importlib
+        import main as app_module
+        importlib.reload(app_module)
+        import retrain_scheduler
+        importlib.reload(retrain_scheduler)
+        with patch.dict(os.environ, {"RETRAIN_SCHEDULER_ENABLED": "true",
+                                     "DATABASE_URL": ""}):
+            with TestClient(app_module.app):
+                assert retrain_scheduler._scheduler is not None
+                assert retrain_scheduler._scheduler.running
+                job = retrain_scheduler._scheduler.get_job("nightly_retrain")
+                assert job is not None
+            # After lifespan shutdown the scheduler is stopped
+            assert not retrain_scheduler._scheduler.running

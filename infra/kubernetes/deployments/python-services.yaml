@@ -692,3 +692,157 @@ spec:
     - name: metrics
       port: 9097
       targetPort: 9097
+
+
+---
+
+# ─── insider-threat-svc ──────────────────────────────────────────────────────
+# The platform's real, integrated ML service (IsolationForest anomaly
+# detection for insider threat). Model artefacts are versioned on a PVC;
+# the retrain loop is the insider-threat-retrain CronJob (see
+# insider-threat-retrain-cronjob.yaml). All behaviour is env-gated.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insider-threat-svc
+  namespace: tradegateway
+  labels:
+    app: insider-threat-svc
+    tier: ai
+    language: python
+spec:
+  replicas: 1  # single writer for the versioned model store on the PVC
+  selector:
+    matchLabels:
+      app: insider-threat-svc
+  strategy:
+    type: Recreate  # avoid concurrent writers to the shared model store
+  template:
+    metadata:
+      labels:
+        app: insider-threat-svc
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9093"
+        prometheus.io/path: "/metrics"
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "insider-threat-svc"
+        dapr.io/app-port: "8093"
+    spec:
+      serviceAccountName: tradegateway-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: insider-threat-svc
+          image: tradegateway/insider-threat-svc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8093
+            - name: metrics
+              containerPort: 9093
+          env:
+            - name: PORT
+              value: "8093"
+            - name: METRICS_PORT
+              value: "9093"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: MODELS_DIR
+              value: "/app/models"
+            - name: ANOMALY_BLOCK_THRESHOLD
+              valueFrom:
+                configMapKeyRef:
+                  name: tradegateway-config
+                  key: insider-threat-block-threshold
+            # In-process retrain loop stays OFF in k8s: the CronJob is the
+            # canonical retrain loop.
+            - name: RETRAIN_SCHEDULER_ENABLED
+              value: "false"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: database-url
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: tradegateway-secrets
+                  key: redis-host
+            - name: REDIS_PORT
+              value: "6379"
+          volumeMounts:
+            - name: model-store
+              mountPath: /app/models
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8093
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8093
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+      volumes:
+        - name: model-store
+          persistentVolumeClaim:
+            claimName: insider-threat-models-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: insider-threat-models-pvc
+  namespace: tradegateway
+  labels:
+    app: insider-threat-svc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: insider-threat-svc
+  namespace: tradegateway
+  labels:
+    app: insider-threat-svc
+spec:
+  selector:
+    app: insider-threat-svc
+  ports:
+    - name: http
+      port: 8093
+      targetPort: 8093
+    - name: metrics
+      port: 9093
+      targetPort: 9093
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: insider-threat-svc-pdb
+  namespace: tradegateway
+  labels:
+    app: insider-threat-svc
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: insider-threat-svc
