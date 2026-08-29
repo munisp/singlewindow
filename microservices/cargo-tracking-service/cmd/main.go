@@ -21,6 +21,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"sync"
 	"os"
 	"strings"
 	"time"
@@ -67,6 +68,68 @@ func jsonErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+// ── Real gate-event store (SW-FLAG2) ─────────────────────────────────────────
+// Gate events posted to this service are the ONLY data source for the port
+// queue and cargo event history — no random/synthetic entries are ever served.
+type gateEventStore struct {
+	mu     sync.Mutex
+	events []GateEvent
+}
+
+var gateEvents = &gateEventStore{}
+
+func (st *gateEventStore) record(e GateEvent) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.events = append(st.events, e)
+}
+
+func (st *gateEventStore) byUCR(ucr string) []GateEvent {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := []GateEvent{}
+	for _, e := range st.events {
+		if e.UCR == ucr {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// queueForPort: containers with a gate_in at the port and no subsequent gate_out,
+// ordered by arrival. Position and wait time derive from REAL timestamps.
+func (st *gateEventStore) queueForPort(portCode string) []map[string]any {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	gatedOut := map[string]bool{}
+	for _, e := range st.events {
+		if e.EventType == "gate_out" && e.PortCode == portCode {
+			gatedOut[e.Container] = true
+		}
+	}
+	queue := []map[string]any{}
+	pos := 1
+	for _, e := range st.events {
+		if e.EventType == "gate_in" && e.PortCode == portCode && !gatedOut[e.Container] {
+			waitHours := int(time.Since(e.Timestamp).Hours())
+			if waitHours < 0 {
+				waitHours = 0
+			}
+			queue = append(queue, map[string]any{
+				"position":  pos,
+				"ucr":       e.UCR,
+				"container": e.Container,
+				"waitHours": waitHours,
+				"gateInAt":  e.Timestamp.Format(time.RFC3339),
+				// riskLane intentionally absent: gate events carry no risk data
+				// and fabricating lanes would mislead targeting officers.
+			})
+			pos++
+		}
+	}
+	return queue
+}
+
 // generateSyntheticVessels returns synthetic vessel positions for demo/testing.
 func generateSyntheticVessels(count int) []VesselPosition {
 	names := []string{"MV TEMA STAR", "MV ACCRA TRADER", "MV KIGALI EXPRESS", "MV MOMBASA QUEEN", "MV LAGOS PIONEER", "MV ABIDJAN GLORY", "MV DAKAR WIND", "MV NAIROBI SPIRIT"}
@@ -103,6 +166,9 @@ func vesselsHandler(w http.ResponseWriter, r *http.Request) {
 		"vessels":     vessels,
 		"totalCount":  count,
 		"lastRefresh": time.Now().UTC().Format(time.RFC3339),
+		// Explicit honesty label: these are NOT live AIS positions.
+		"synthetic":   true,
+		"dataSource":  "SYNTHETIC_DEMO_NOT_LIVE_AIS",
 	})
 }
 
@@ -126,7 +192,12 @@ func vesselDetailHandler(w http.ResponseWriter, r *http.Request) {
 		ETA:         time.Now().UTC().Add(6 * time.Hour).Format(time.RFC3339),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	jsonOK(w, vessel)
+	// Explicit honesty label: NOT a live AIS position for this MMSI.
+	jsonOK(w, map[string]any{
+		"vessel":     vessel,
+		"synthetic":  true,
+		"dataSource": "SYNTHETIC_DEMO_NOT_LIVE_AIS",
+	})
 }
 
 func cargoHandler(w http.ResponseWriter, r *http.Request) {
@@ -135,15 +206,29 @@ func cargoHandler(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "ucr required")
 		return
 	}
-	events := []map[string]any{
-		{"event": "declaration_submitted", "timestamp": time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339), "actor": "trader"},
-		{"event": "risk_assessed", "timestamp": time.Now().UTC().Add(-47 * time.Hour).Format(time.RFC3339), "lane": "green"},
-		{"event": "payment_confirmed", "timestamp": time.Now().UTC().Add(-46 * time.Hour).Format(time.RFC3339), "amount": 1250.00},
-		{"event": "gate_in", "timestamp": time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339), "portCode": "GHTMA"},
-		{"event": "inspection_cleared", "timestamp": time.Now().UTC().Add(-20 * time.Hour).Format(time.RFC3339)},
-		{"event": "gate_out", "timestamp": time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339), "portCode": "GHTMA"},
+	// SW-FLAG2: serve ONLY real recorded gate events for this UCR — the canned
+	// "cleared" timeline fabricated compliance evidence for any arbitrary UCR.
+	recorded := gateEvents.byUCR(ucr)
+	events := []map[string]any{}
+	for _, e := range recorded {
+		events = append(events, map[string]any{
+			"event":     e.EventType,
+			"timestamp": e.Timestamp.Format(time.RFC3339),
+			"portCode":  e.PortCode,
+			"container": e.Container,
+		})
 	}
-	jsonOK(w, map[string]any{"ucr": ucr, "events": events, "status": "cleared"})
+	status := "UNKNOWN"
+	if len(recorded) > 0 {
+		status = "GATE_EVENTS_RECORDED"
+	}
+	jsonOK(w, map[string]any{
+		"ucr":     ucr,
+		"events":  events,
+		"status":  status,
+		"noData":  len(recorded) == 0,
+		"source":  "recorded_gate_events",
+	})
 }
 
 func gateInHandler(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +243,7 @@ func gateInHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	event.EventType = "gate_in"
 	event.Timestamp = time.Now().UTC()
+	gateEvents.record(event)
 	log.Printf("[cargo-tracking] gate_in: UCR=%s port=%s container=%s", event.UCR, event.PortCode, event.Container)
 	jsonOK(w, map[string]any{"status": "recorded", "event": event})
 }
@@ -174,24 +260,24 @@ func gateOutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	event.EventType = "gate_out"
 	event.Timestamp = time.Now().UTC()
+	gateEvents.record(event)
 	log.Printf("[cargo-tracking] gate_out: UCR=%s port=%s container=%s", event.UCR, event.PortCode, event.Container)
 	jsonOK(w, map[string]any{"status": "recorded", "event": event})
 }
 
 func portQueueHandler(w http.ResponseWriter, r *http.Request) {
+	// SW-FLAG2: the queue is derived ONLY from real recorded gate events.
+	// An empty queue is an honest no-data state, never random filler.
 	portCode := strings.TrimPrefix(r.URL.Path, "/api/v1/ports/")
 	portCode = strings.TrimSuffix(portCode, "/queue")
-	queue := make([]map[string]any, rand.Intn(8)+2)
-	for i := range queue {
-		queue[i] = map[string]any{
-			"position":  i + 1,
-			"ucr":       fmt.Sprintf("UCR-%s-%04d", portCode, rand.Intn(9999)),
-			"container": fmt.Sprintf("TEMU%07d", rand.Intn(9999999)),
-			"waitHours": rand.Intn(12) + 1,
-			"riskLane":  []string{"green", "yellow", "red"}[rand.Intn(3)],
-		}
-	}
-	jsonOK(w, map[string]any{"portCode": portCode, "queue": queue, "total": len(queue)})
+	queue := gateEvents.queueForPort(portCode)
+	jsonOK(w, map[string]any{
+		"portCode": portCode,
+		"queue":    queue,
+		"total":    len(queue),
+		"noData":   len(queue) == 0,
+		"source":   "recorded_gate_events",
+	})
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

@@ -285,31 +285,9 @@ function driftVessel(vessel: LiveVessel, tickSeconds: number): LiveVessel {
   };
 }
 
-// ─── ROUTE GENERATION ────────────────────────────────────────────────────────
-
-function generateRoute(vessel: LiveVessel): RouteWaypoint[] {
-  const waypoints: RouteWaypoint[] = [];
-  const steps = 12;
-  const now = Date.now();
-
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const lat = vessel.originLat + (vessel.lat - vessel.originLat) * t;
-    const lon = vessel.originLon + (vessel.lon - vessel.originLon) * t;
-    const hoursAgo = (steps - i) * 2;
-    const speed = vessel.status === "underway" ? vessel.speed * (0.8 + Math.random() * 0.4) : 0;
-
-    waypoints.push({
-      lat,
-      lon,
-      timestamp: new Date(now - hoursAgo * 3600000).toISOString(),
-      speed: Math.round(speed * 10) / 10,
-      event: i === 0 ? `Departed ${vessel.originPort}` : i === steps ? "Current position" : undefined,
-    });
-  }
-
-  return waypoints;
-}
+// ─── ROUTE GENERATION — REMOVED (SW-25) ──────────────────────────────────────
+// The fabricated 12-waypoint route synthesizer with randomized speeds was
+// removed. Vessel history is served only from persisted vessel_tracking_events.
 
 // ─── PORT ARRIVALS ────────────────────────────────────────────────────────────
 
@@ -373,14 +351,36 @@ export const cargoTrackingRouter = router({
    */
   getVesselRoute: publicProcedure
     .input(z.object({ mmsi: z.string() }))
-    .query(({ input }) => {
-      const vessel = BASE_VESSELS.find(v => v.mmsi === input.mmsi);
-      if (!vessel) {
-        return { waypoints: [], vessel: null };
+    .query(async ({ input }) => {
+      // SW-25: serve ONLY real persisted AIS tracking events. An empty result is
+      // an explicit, labelled no-data state — never synthesized waypoints.
+      let rows: Array<Record<string, unknown>>;
+      try {
+        rows = await pgQuery(
+          `SELECT latitude AS lat, longitude AS lon, speed, heading,
+                  recorded_at AS "timestamp", vessel_name AS "vesselName"
+           FROM vessel_tracking_events WHERE mmsi = $1
+           ORDER BY recorded_at ASC LIMIT 500`,
+          [input.mmsi]
+        );
+      } catch {
+        return {
+          waypoints: [] as RouteWaypoint[],
+          vessel: null,
+          noData: true,
+          unavailable: true,
+          message: "TRACKING_STORE_UNAVAILABLE: persisted vessel tracking events could not be queried.",
+        };
       }
+      const waypoints = rows as unknown as RouteWaypoint[];
       return {
-        waypoints: generateRoute(vessel),
-        vessel,
+        waypoints,
+        vessel: null,
+        noData: waypoints.length === 0,
+        unavailable: false,
+        message: waypoints.length === 0
+          ? "NO_TRACKING_DATA: no persisted tracking events exist for this MMSI."
+          : undefined,
       };
     }),
 

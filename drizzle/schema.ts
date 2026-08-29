@@ -3407,3 +3407,24 @@ export const fourEyesRequests = pgTable("four_eyes_requests", {
 ]);
 export type FourEyesRequest = typeof fourEyesRequests.$inferSelect;
 export type InsertFourEyesRequest = typeof fourEyesRequests.$inferInsert;
+
+// ─── Phase-6 Remediation: Free-Zone Reconciliation Runs (SW-21) ──────────────
+// Real persisted reconciliation runs — never simulated history.
+export const freezoneReconciliationRuns = pgTable("freezone_reconciliation_runs", {
+  id: serial("id").primaryKey(),
+  zoneId: varchar("zone_id", { length: 64 }).notNull().default("all"),
+  tolerancePct: real("tolerance_pct").notNull(),
+  totalItems: integer("total_items").notNull().default(0),
+  matched: integer("matched").notNull().default(0),
+  unmatched: integer("unmatched").notNull().default(0),
+  surplus: integer("surplus").notNull().default(0),
+  reconciliationRate: real("reconciliation_rate"),
+  report: jsonb("report"),
+  triggeredBy: integer("triggered_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_fz_recon_zone").on(t.zoneId),
+  index("idx_fz_recon_created").on(t.createdAt),
+]);
+export type FreezoneReconciliationRun = typeof freezoneReconciliationRuns.$inferSelect;
+export type InsertFreezoneReconciliationRun = typeof freezoneReconciliationRuns.$inferInsert;

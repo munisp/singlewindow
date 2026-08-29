@@ -43,3 +43,20 @@ CREATE INDEX IF NOT EXISTS "idx_four_eyes_action_entity"
 -- SW-S2-8: documents uploaded while the AV scanner is unavailable are
 -- quarantined (never silently activated).
 ALTER TYPE "public"."document_vault_status" ADD VALUE IF NOT EXISTS 'quarantined';
+
+-- SW-21: real persisted free-zone reconciliation runs.
+CREATE TABLE IF NOT EXISTS "freezone_reconciliation_runs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "zone_id" varchar(64) DEFAULT 'all' NOT NULL,
+  "tolerance_pct" real NOT NULL,
+  "total_items" integer DEFAULT 0 NOT NULL,
+  "matched" integer DEFAULT 0 NOT NULL,
+  "unmatched" integer DEFAULT 0 NOT NULL,
+  "surplus" integer DEFAULT 0 NOT NULL,
+  "reconciliation_rate" real,
+  "report" jsonb,
+  "triggered_by" integer REFERENCES "users"("id"),
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "idx_fz_recon_zone" ON "freezone_reconciliation_runs" ("zone_id");
+CREATE INDEX IF NOT EXISTS "idx_fz_recon_created" ON "freezone_reconciliation_runs" ("created_at");

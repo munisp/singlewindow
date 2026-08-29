@@ -666,6 +666,35 @@ async def health():
     }
 
 
+def _is_pdf_bytes(content: bytes) -> bool:
+    """SW-FLAG3: parser selection by CONTENT sniffing — client filename and
+    Content-Type are attacker-controlled and must not choose the parser."""
+    return content[:5] == b"%PDF-"
+
+
+def _unverified_pdf_vlm_result() -> VLMVerificationResult:
+    """SW-FLAG3: honest UNVERIFIED state when visual verification did NOT run.
+    is_authentic is False because authenticity was NOT established (fail closed)
+    — never a hardcoded True/0.90 for a check that never happened."""
+    return VLMVerificationResult(
+        is_authentic=False,
+        authenticity_score=0.0,
+        tampering_detected=False,
+        tampering_indicators=[],
+        security_features_present=[],
+        security_features_missing=["not_assessed_visual_verification_not_performed"],
+        cross_field_consistency=False,
+        consistency_issues=["visual_verification_not_performed"],
+        expiry_status="UNKNOWN",
+        vlm_reasoning=(
+            "UNVERIFIED: visual authenticity verification was not performed on this "
+            "PDF (the VLM verifier processes images; DocLing performs structural "
+            "extraction only and cannot establish authenticity). is_authentic=False "
+            "means authenticity was NOT ESTABLISHED — route to manual review."
+        ),
+    )
+
+
 @app.post("/api/kyc/analyse", response_model=KYCReport)
 async def analyse_document(
     file: UploadFile = File(...),
@@ -695,14 +724,20 @@ async def analyse_document(
         f"{file.filename} ({len(content) / 1024:.1f}KB)"
     )
 
-    # Determine if this is a PDF (use DocLing) or image (use PaddleOCR)
-    filename = (file.filename or "").lower()
-    is_pdf = filename.endswith(".pdf") or file.content_type == "application/pdf"
+    # SW-FLAG3: choose the parser by sniffing the actual bytes, not the
+    # client-supplied filename or Content-Type header.
+    is_pdf = _is_pdf_bytes(content)
 
     # Layer 1: OCR extraction
     if is_pdf:
         docling_result = await docling.extract_from_pdf(content)
-        # Convert DocLing result to OCRResult format
+        extraction_ok = (
+            bool(docling_result.get("text"))
+            and "error" not in docling_result
+            and "not available" not in str(docling_result.get("text", "")).lower()
+        )
+        # Honest confidence: structural extraction does not measure OCR
+        # confidence — report 0.0 and say so, instead of a hardcoded 0.95.
         ocr_result = OCRResult(
             document_type=document_type,
             language="en",
@@ -710,14 +745,21 @@ async def analyse_document(
                 ExtractedField(
                     field_name="full_text",
                     value=docling_result.get("text", "")[:500],
-                    confidence=0.95,
-                )
+                    confidence=0.0,
+                ),
+                ExtractedField(
+                    field_name="confidence_note",
+                    value="ocr_confidence_not_measured_structural_extraction_only",
+                    confidence=1.0,
+                ),
             ],
             raw_text=docling_result.get("text", ""),
             page_count=docling_result.get("page_count", 1),
-            ocr_confidence=0.95,
+            ocr_confidence=0.0,
             processing_time_ms=0,
         )
+        if not extraction_ok:
+            logger.warning(f"[{report_id}] PDF structural extraction unavailable/failed: {docling_result.get('error')}")
     else:
         ocr_result = await paddle_ocr.extract(content, document_type)
 
@@ -727,19 +769,8 @@ async def analyse_document(
             content, document_type, ocr_result.extracted_fields
         )
     else:
-        # For PDFs, skip visual verification (DocLing handles structure)
-        vlm_result = VLMVerificationResult(
-            is_authentic=True,
-            authenticity_score=0.90,
-            tampering_detected=False,
-            tampering_indicators=[],
-            security_features_present=["digital_signature"],
-            security_features_missing=[],
-            cross_field_consistency=True,
-            consistency_issues=[],
-            expiry_status="VALID",
-            vlm_reasoning="PDF document processed via DocLing structural analysis.",
-        )
+        # SW-FLAG3: no visual verification ran — report honest UNVERIFIED state.
+        vlm_result = _unverified_pdf_vlm_result()
 
     # Layer 3: Entity extraction and risk scoring
     entity = extract_entity_profile(ocr_result, document_type)
@@ -847,8 +878,22 @@ async def extract_bill_of_lading(file: UploadFile = File(...)):
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async def _analyse_single(content: bytes, doc_type: str, filename: str) -> dict[str, Any]:
-    ocr = await paddle_ocr.extract(content, doc_type)
-    vlm = await vlm_verifier.verify_document(content, doc_type, ocr.extracted_fields)
+    # SW-FLAG3: sniff content, and never claim authenticity that was not verified.
+    if _is_pdf_bytes(content):
+        docling_result = await docling.extract_from_pdf(content)
+        ocr = OCRResult(
+            document_type=doc_type,
+            language="en",
+            extracted_fields=[ExtractedField(field_name="full_text", value=docling_result.get("text", "")[:500], confidence=0.0)],
+            raw_text=docling_result.get("text", ""),
+            page_count=docling_result.get("page_count", 1),
+            ocr_confidence=0.0,
+            processing_time_ms=0,
+        )
+        vlm = _unverified_pdf_vlm_result()
+    else:
+        ocr = await paddle_ocr.extract(content, doc_type)
+        vlm = await vlm_verifier.verify_document(content, doc_type, ocr.extracted_fields)
     entity = extract_entity_profile(ocr, doc_type)
     risk = risk_scorer.score(ocr, vlm, entity, doc_type)
     return {
@@ -858,6 +903,7 @@ async def _analyse_single(content: bytes, doc_type: str, filename: str) -> dict[
         "risk_score": risk.overall_score,
         "recommended_action": risk.recommended_action,
         "is_authentic": vlm.is_authentic,
+        "visual_verification_performed": not _is_pdf_bytes(content),
     }
 
 

@@ -5,6 +5,9 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { declarations, freezoneReconciliationRuns } from "../../drizzle/schema";
+import { eq, inArray, desc } from "drizzle-orm";
 
 const FZ_SERVICE_URL = process.env.FREEZONE_SERVICE_URL || "http://localhost:8098";
 
@@ -178,15 +181,35 @@ export const freeZoneRouter = router({
       const unmatched: Array<{ declarationRef: string; fzValue: number; reason: string }> = [];
       const surplus: Array<{ itemId: string; hsCode: string; quantity: number; valueUSD: number }> = [];
 
+      // SW-21: resolve real declared values from the declarations table.
+      const linkedRefs = Object.keys(fzByDecl).filter((r) => r !== "UNLINKED");
+      const declaredByRef = new Map<string, number>();
+      if (linkedRefs.length > 0) {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "DECLARATION_STORE_UNAVAILABLE: cannot reconcile without real declaration values" });
+        const rows = await db
+          .select({ declarationNumber: declarations.declarationNumber, invoiceValue: declarations.invoiceValue })
+          .from(declarations)
+          .where(inArray(declarations.declarationNumber, linkedRefs));
+        for (const row of rows) {
+          if (row.declarationNumber && row.invoiceValue != null) {
+            declaredByRef.set(row.declarationNumber, Number(row.invoiceValue));
+          }
+        }
+      }
+
       for (const [ref, refItems] of Object.entries(fzByDecl)) {
         if (ref === "UNLINKED") {
           surplus.push(...refItems.map((i: { itemId: number; hsCode?: string | null; quantity?: number | null; valueUSD?: number | null }) => ({ itemId: i.itemId, hsCode: i.hsCode, quantity: i.quantity, valueUSD: i.valueUSD })));
           continue;
         }
         const fzValue = refItems.reduce((s: number, i: { valueUSD?: number | null }) => s + (i.valueUSD ?? 0), 0);
-        // In production: query declarations table for the declared value
-        // For now, use a ±tolerance check against the FZ value itself as a baseline
-        const declaredValue = fzValue * (1 + (Math.random() * 0.04 - 0.02)); // simulated ±2% variance
+        // SW-21: declared value comes from the REAL declarations record — never simulated.
+        const declaredValue = declaredByRef.get(ref);
+        if (declaredValue == null) {
+          unmatched.push({ declarationRef: ref, fzValue: Math.round(fzValue * 100) / 100, reason: "No matching customs declaration found for this reference" });
+          continue;
+        }
         const variance = Math.abs(fzValue - declaredValue) / Math.max(declaredValue, 1) * 100;
         const status = variance <= input.tolerancePct ? "matched" : "discrepancy";
         if (status === "matched") {
@@ -196,7 +219,8 @@ export const freeZoneRouter = router({
         }
       }
 
-      return {
+      const rate = items.length > 0 ? Math.round((matched.length / Math.max(matched.length + unmatched.length + surplus.length, 1)) * 10000) / 100 : 100;
+      const report = {
         zoneId: input.zoneId ?? "all",
         tolerancePct: input.tolerancePct,
         reconciledAt: new Date().toISOString(),
@@ -205,12 +229,37 @@ export const freeZoneRouter = router({
           matched: matched.length,
           unmatched: unmatched.length,
           surplus: surplus.length,
-          reconciliationRate: items.length > 0 ? Math.round((matched.length / (matched.length + unmatched.length + surplus.length)) * 10000) / 100 : 100,
+          reconciliationRate: rate,
         },
         matched,
         unmatched,
         surplus,
       };
+
+      // SW-21: persist the real run so history is factual, not fabricated.
+      let runId: number | null = null;
+      try {
+        const db = await getDb();
+        if (db) {
+          const [run] = await db.insert(freezoneReconciliationRuns).values({
+            zoneId: input.zoneId ?? "all",
+            tolerancePct: input.tolerancePct,
+            totalItems: items.length,
+            matched: matched.length,
+            unmatched: unmatched.length,
+            surplus: surplus.length,
+            reconciliationRate: rate,
+            report,
+            triggeredBy: ctx.user.id,
+          }).returning({ id: freezoneReconciliationRuns.id });
+          runId = run?.id ?? null;
+        }
+      } catch (persistErr) {
+        // Persistence failure must not fabricate history — report it honestly.
+        console.error("[FreeZone] Failed to persist reconciliation run:", persistErr);
+      }
+
+      return { runId, runPersisted: runId != null, ...report };
     }),
 
   /**
@@ -245,18 +294,23 @@ export const freeZoneRouter = router({
       offset: z.number().int().min(0).default(0),
     }))
     .query(async ({ input }) => {
-      // Return a simulated history of reconciliation runs
-      const runs = Array.from({ length: Math.min(input.limit, 5) }, (_, i) => ({
-        runId: `RECON-${input.freeZoneId}-${Date.now() - i * 86400000}`,
-        freeZoneId: input.freeZoneId,
-        runAt: new Date(Date.now() - i * 86400000).toISOString(),
-        totalItems: 120 + i * 10,
-        matched: 110 + i * 9,
-        surplus: Math.floor(Math.random() * 5),
-        deficit: Math.floor(Math.random() * 3),
-        status: i === 0 ? "completed" : "completed",
-        triggeredBy: "system",
-      }));
-      return { runs, total: 5, limit: input.limit, offset: input.offset };
+      // SW-21: serve ONLY real persisted reconciliation runs. Empty = no runs yet.
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
+      const runs = await db
+        .select()
+        .from(freezoneReconciliationRuns)
+        .where(eq(freezoneReconciliationRuns.zoneId, String(input.freeZoneId)))
+        .orderBy(desc(freezoneReconciliationRuns.createdAt))
+        .limit(input.limit)
+        .offset(input.offset);
+      return {
+        runs,
+        total: runs.length,
+        limit: input.limit,
+        offset: input.offset,
+        noData: runs.length === 0,
+        message: runs.length === 0 ? "NO_RECONCILIATION_RUNS: no persisted reconciliation runs for this zone." : undefined,
+      };
     }),
 });

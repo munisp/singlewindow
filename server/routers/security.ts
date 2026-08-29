@@ -9,21 +9,25 @@ import { invokeLLM } from "../_core/llm";
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
 
-// Sanctions lists data (real list names, deterministic matching logic)
-const SANCTIONS_LISTS = ["OFAC_SDN", "UN_SC", "EU_CONSOLIDATED", "OFSI"];
+// SW-7: NO list names are claimed here. An LLM cannot consult OFAC/UN/EU lists;
+// claiming "listsChecked: [OFAC_SDN, UN_SC, …]" fabricated compliance evidence.
+// Real list screening is performed by the sanctions-service (deterministic,
+// versioned lists). This LLM path is a heuristic pre-screen ONLY, and the
+// persisted record must say exactly that.
 
-// Real sanctions screening via LLM with structured output
-async function screenEntity(entityName: string, entityType: string): Promise<{
-  result: "clear" | "potential_match" | "confirmed_match";
-  matchDetails: Record<string, unknown>;
-}> {
+export type ScreeningOutcome =
+  | { kind: "heuristic_result"; result: "clear" | "potential_match" | "confirmed_match"; matchDetails: Record<string, unknown> }
+  | { kind: "manual_review_required"; reason: string };
+
+// LLM heuristic pre-screen. On ANY failure → MANUAL_REVIEW_REQUIRED, never "clear".
+async function screenEntity(entityName: string, entityType: string): Promise<ScreeningOutcome> {
   try {
     const response = await invokeLLM({
       messages: [
         {
           role: "system",
-          content: `You are a sanctions screening AI. Screen the given entity against known sanctions lists (OFAC SDN, UN Security Council, EU Consolidated, OFSI).
-Return JSON with: result ("clear", "potential_match", or "confirmed_match"), 
+          content: `You are a sanctions screening HEURISTIC assistant (not a sanctions list). You do NOT have access to OFAC, UN, EU or any other sanctions list — never claim a list was checked. Assess the entity name for sanctions-risk indicators only.
+Return JSON with: result ("clear", "potential_match", or "confirmed_match"),
 matchDetails (object with listName, matchedEntity, matchScore, reason if any match found, else empty object),
 riskIndicators (array of strings describing any concerns).
 Be conservative: flag potential matches for human review. Only mark "confirmed_match" for exact or near-exact matches to known sanctioned entities.`
@@ -64,14 +68,19 @@ Be conservative: flag potential matches for human review. Only mark "confirmed_m
     const content = response.choices[0]?.message?.content;
     if (content && typeof content === "string") {
       const parsed = JSON.parse(content);
-      return { result: parsed.result, matchDetails: parsed };
+      if (["clear", "potential_match", "confirmed_match"].includes(parsed.result)) {
+        return { kind: "heuristic_result", result: parsed.result, matchDetails: parsed };
+      }
+      return { kind: "manual_review_required", reason: "llm_malformed_response" };
     }
+    return { kind: "manual_review_required", reason: "llm_empty_response" };
   } catch (e) {
-    console.error("[Sanctions] LLM error:", e);
+    console.error("[Sanctions] LLM error — routing to manual review (fail closed):", e);
+    return { kind: "manual_review_required", reason: "llm_unavailable" };
   }
-  return { result: "clear", matchDetails: {} };
 }
 
+// (legacy signature kept below for deletion)
 export const securityRouter = router({
   // Get security alerts (security analysts / admin)
   alerts: protectedProcedure
@@ -120,24 +129,34 @@ export const securityRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const screening = await screenEntity(input.entityName, input.entityType);
+
+      // SW-7: on LLM outage/malformed output the outcome is MANUAL_REVIEW_REQUIRED,
+      // persisted as 'potential_match' (human review flag) — NEVER 'clear'.
+      // listsChecked is EMPTY: no deterministic sanctions list was consulted by
+      // this heuristic path, and the record must not claim otherwise.
+      const checkResult = screening.kind === "heuristic_result" ? screening.result : "potential_match";
+      const matchDetails = screening.kind === "heuristic_result"
+        ? { ...screening.matchDetails, screeningMethod: "llm_heuristic_prescreen", noListsConsulted: true }
+        : { screeningMethod: "llm_heuristic_prescreen", outcome: "MANUAL_REVIEW_REQUIRED", reason: screening.reason, noListsConsulted: true };
+
       const check = await createSanctionsCheck({
         declarationId: input.declarationId,
         entityName: input.entityName,
         entityType: input.entityType,
-        checkResult: screening.result,
-        listsChecked: SANCTIONS_LISTS,
-        matchDetails: screening.matchDetails,
+        checkResult,
+        listsChecked: [],
+        matchDetails,
         checkedBy: ctx.user.id,
       });
 
-      // If confirmed match, create a security alert and publish Kafka event
-      if (screening.result === "confirmed_match") {
+      // Confirmed heuristic match → alert + event (same as before, honestly labelled)
+      if (screening.kind === "heuristic_result" && screening.result === "confirmed_match") {
         await createSecurityAlert({
           alertId: `SANCTIONS-${nanoid(12).toUpperCase()}`,
           severity: "critical",
           category: "compliance",
           title: `Sanctions Match: ${input.entityName}`,
-          description: `Entity "${input.entityName}" matched against sanctions lists. Immediate review required.`,
+          description: `Entity "${input.entityName}" flagged by heuristic pre-screen. Immediate review required.`,
           rawEvent: screening.matchDetails,
         });
         // Publish Kafka SANCTIONS_HIT event (fire-and-forget)
@@ -153,6 +172,18 @@ export const securityRouter = router({
             checkedBy: ctx.user.id,
           },
         }).catch(() => {});
+      }
+
+      // Manual-review outcomes also raise an alert so nothing fails silently.
+      if (screening.kind === "manual_review_required") {
+        await createSecurityAlert({
+          alertId: `SANCTIONS-MR-${nanoid(12).toUpperCase()}`,
+          severity: "high",
+          category: "compliance",
+          title: `Manual Sanctions Review Required: ${input.entityName}`,
+          description: `Heuristic pre-screen unavailable (${screening.reason}). Entity "${input.entityName}" requires manual sanctions review. No clearance was issued.`,
+          rawEvent: matchDetails,
+        });
       }
 
       return check;
@@ -207,16 +238,25 @@ export const securityRouter = router({
         const existing = await db.select().from(sanctionsChecks)
           .where(ilike(sanctionsChecks.entityName, `%${entity.name}%`))
           .limit(1);
-        const isHit = existing.length > 0 && existing[0].checkResult !== "clear";
+        // SW-7: this path checks ONLY internal screening history — no external
+        // list is consulted, so listsChecked must say exactly that, the result
+        // must use the real enum, and no match score is fabricated.
+        const prior = existing[0] ?? null;
+        const priorFlagged = prior != null && prior.checkResult !== "clear";
         const [row] = await db.insert(sanctionsChecks).values({
           entityName: entity.name,
           entityType: entity.entityType as any,
-          checkResult: isHit ? "hit" as any : "clear" as any,
-          listsChecked: ["OFAC", "UN", "EU"],
-          matchDetails: isHit ? { matchScore: 85 } : null,
+          checkResult: priorFlagged ? "potential_match" : "clear",
+          listsChecked: ["INTERNAL_SCREENING_HISTORY"],
+          matchDetails: {
+            basis: "internal_screening_history_only",
+            noExternalListsConsulted: true,
+            priorCheckId: prior?.id ?? null,
+            priorCheckResult: prior?.checkResult ?? null,
+          },
           checkedBy: ctx.user.id,
         }).returning();
-        return { ...entity, isHit: row.checkResult !== "clear", matchScore: isHit ? 85 : 0, checkId: row.id };
+        return { ...entity, isHit: row.checkResult !== "clear", matchScore: null, checkId: row.id };
       }));
       const hitCount = results.filter(r => r.isHit).length;
       return { results, hitCount, totalChecked: results.length };
