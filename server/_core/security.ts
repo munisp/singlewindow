@@ -227,39 +227,68 @@ export function validateUploadedFile(opts: {
  * Idempotency key validator for financial mutations.
  * Prevents replay attacks on payment endpoints.
  *
+ * P0-6 remediation: DURABLE, DB-backed idempotency. The previous process-local
+ * Map reopened a replay window on every restart/replica. Keys are now stored
+ * in the `payment_idempotency_keys` table (migration 0054) with a database-
+ * enforced UNIQUE(user_id, idempotency_key) constraint — the same pattern as
+ * webhook_receipts (migration 0051). Replays return the originally recorded
+ * response. When the database is unavailable these functions THROW
+ * (fail-closed): a financial mutation whose idempotency cannot be verified
+ * must not proceed.
+ *
  * Usage in tRPC procedure:
  *   const { idempotencyKey } = input;
- *   await assertIdempotency(ctx.user.id, idempotencyKey);
+ *   const { isDuplicate, cachedResult } = await checkIdempotency(ctx.user.id, idempotencyKey);
+ *   if (isDuplicate) return cachedResult;
+ *   ... execute mutation ...
+ *   await recordIdempotency(ctx.user.id, idempotencyKey, result);
  */
-const idempotencyStore = new Map<string, { usedAt: number; result: unknown }>();
-
-// Clean up expired keys every 10 minutes
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours
-  for (const [key, val] of Array.from(idempotencyStore.entries())) {
-    if (val.usedAt < cutoff) idempotencyStore.delete(key);
-  }
-}, 10 * 60 * 1000);
-
-export function checkIdempotency(
+export async function checkIdempotency(
   userId: number,
   idempotencyKey: string
-): { isDuplicate: boolean; cachedResult?: unknown } {
-  const storeKey = `${userId}:${idempotencyKey}`;
-  const existing = idempotencyStore.get(storeKey);
+): Promise<{ isDuplicate: boolean; cachedResult?: unknown }> {
+  const { getDb } = await import("../db");
+  const db = await getDb();
+  if (!db) {
+    throw new Error(
+      "[security] Idempotency store unavailable — refusing to proceed (fail-closed, replay protection cannot be verified)"
+    );
+  }
+  const { paymentIdempotencyKeys } = await import("../../drizzle/schema");
+  const { and, eq } = await import("drizzle-orm");
+  const [existing] = await db
+    .select({ response: paymentIdempotencyKeys.response })
+    .from(paymentIdempotencyKeys)
+    .where(and(
+      eq(paymentIdempotencyKeys.userId, userId),
+      eq(paymentIdempotencyKeys.idempotencyKey, idempotencyKey),
+    ))
+    .limit(1);
   if (existing) {
-    return { isDuplicate: true, cachedResult: existing.result };
+    return { isDuplicate: true, cachedResult: existing.response };
   }
   return { isDuplicate: false };
 }
 
-export function recordIdempotency(
+export async function recordIdempotency(
   userId: number,
   idempotencyKey: string,
   result: unknown
-): void {
-  const storeKey = `${userId}:${idempotencyKey}`;
-  idempotencyStore.set(storeKey, { usedAt: Date.now(), result });
+): Promise<void> {
+  const { getDb } = await import("../db");
+  const db = await getDb();
+  if (!db) {
+    throw new Error(
+      "[security] Idempotency store unavailable — response NOT recorded (fail-closed)"
+    );
+  }
+  const { paymentIdempotencyKeys } = await import("../../drizzle/schema");
+  // Unique constraint (user_id, idempotency_key) enforced by the database;
+  // a concurrent replay inserts nothing and the first response wins.
+  await db
+    .insert(paymentIdempotencyKeys)
+    .values({ userId, idempotencyKey, response: result as unknown })
+    .onConflictDoNothing();
 }
 
 /**
