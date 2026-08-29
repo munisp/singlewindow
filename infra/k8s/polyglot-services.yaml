@@ -454,11 +454,11 @@ spec:
       targetPort: 8080
 ---
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. TigerBeetle Bridge — REMOVED (SW-O3)
-# The Rust tigerbeetle-bridge-rs replica was removed from deploy surfaces: its
-# in-memory ledger is dev-only (TB_ALLOW_SIM_BACKEND=1). The canonical
-# money-rail bridge is the Go service `tigerbeetle-bridge` (HTTP /api/ledger/*,
-# port 8086) — see infra/kubernetes/deployments/ai-services.yaml.
+# 5. TigerBeetle Bridge — Rust replica REMOVED (SW-O3)
+# The Rust bridge replica was removed from deploy surfaces: its in-memory
+# ledger is dev-only (TB_ALLOW_SIM_BACKEND=1). The canonical money-rail bridge
+# is the Go service `tigerbeetle-bridge` (HTTP /api/ledger/*, port 8086) — see
+# infra/kubernetes/deployments/ai-services.yaml.
 # ─────────────────────────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Rust — Kafka Consumer (Domain Event Processor)

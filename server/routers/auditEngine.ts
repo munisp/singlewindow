@@ -42,7 +42,7 @@ export function selectForAudit(params: {
   return null;
 }
 
-export // ─── SW-FLAG1: role gate ─────────────────────────────────────────────────────
+// ─── SW-FLAG1: role gate ─────────────────────────────────────────────────────
 // The entire post-clearance audit lifecycle was publicProcedure — any anonymous
 // caller could create/assign/close audits and fabricate findings. Restricted to
 // customs officers and admins; finding submission additionally requires being
@@ -55,7 +55,7 @@ const auditOfficerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   return next({ ctx });
 });
 
-function calculateDutyDiscrepancy(findings: { findingType: string; amountUsd: number | string }[]): number {
+export function calculateDutyDiscrepancy(findings: { findingType: string; amountUsd: number | string }[]): number {
   return findings.filter((f) => f.findingType !== "no_finding").reduce((sum, f) => sum + Number(f.amountUsd), 0);
 }
 

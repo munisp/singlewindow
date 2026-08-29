@@ -496,55 +496,39 @@ describe("knowledgeGraph.batchScore", () => {
 // ─── FRAUD NETWORK ────────────────────────────────────────────────────────────
 
 describe("knowledgeGraph.fraudNetwork", () => {
-  it("returns synthetic demo data when bridge is unavailable", async () => {
+  // SW-MP12: fraud-network NEVER serves synthetic entities — fabricated
+  // nodes/edges on an investigations console could trigger real enforcement
+  // actions. When the graph bridge is down the procedure fails closed with an
+  // explicit UNAVAILABLE state and empty collections.
+  it("returns explicit UNAVAILABLE state (no synthetic data) when bridge is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.knowledgeGraph.fraudNetwork({});
     expect(result).toMatchObject({
-      nodes: expect.any(Array),
-      edges: expect.any(Array),
-      stats: expect.objectContaining({
-        totalNodes: expect.any(Number),
-        totalEdges: expect.any(Number),
-        highRiskNodes: expect.any(Number),
-        avgRiskScore: expect.any(Number),
-      }),
+      nodes: [],
+      edges: [],
+      stats: { totalNodes: 0, totalEdges: 0, highRiskNodes: 0, avgRiskScore: 0 },
+      fallback: false,
+      unavailable: true,
     });
+    expect(result.unavailableReason).toContain("GRAPH_BRIDGE_UNAVAILABLE");
   });
 
-  it("returns fallback=true when bridge is unavailable", async () => {
+  it("returns fallback=false when bridge is unavailable", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.knowledgeGraph.fraudNetwork({});
-    expect(result.fallback).toBe(true);
+    expect(result.fallback).toBe(false);
   });
 
-  it("fallback nodes have required shape", async () => {
+  it("unavailable response contains no synthetic nodes", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.knowledgeGraph.fraudNetwork({});
-    expect(result.nodes.length).toBeGreaterThan(0);
-    for (const node of result.nodes) {
-      expect(node).toMatchObject({
-        id: expect.any(String),
-        label: expect.any(String),
-        type: expect.stringMatching(/^(trader|hs_code|port|oga|corridor)$/),
-        riskScore: expect.any(Number),
-      });
-      expect(node.riskScore).toBeGreaterThanOrEqual(0);
-      expect(node.riskScore).toBeLessThanOrEqual(1);
-    }
+    expect(result.nodes).toHaveLength(0);
   });
 
-  it("fallback edges have required shape", async () => {
+  it("unavailable response contains no synthetic edges", async () => {
     const caller = appRouter.createCaller(makeCtx());
     const result = await caller.knowledgeGraph.fraudNetwork({});
-    expect(result.edges.length).toBeGreaterThan(0);
-    for (const edge of result.edges) {
-      expect(edge).toMatchObject({
-        source: expect.any(String),
-        target: expect.any(String),
-        type: expect.any(String),
-        weight: expect.any(Number),
-      });
-    }
+    expect(result.edges).toHaveLength(0);
   });
 
   it("accepts optional limit parameter within valid range", async () => {

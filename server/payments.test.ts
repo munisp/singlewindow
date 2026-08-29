@@ -62,10 +62,37 @@ vi.mock("./db", async (importOriginal) => {
       createdAt: new Date(),
     }),
     updateDeclaration: vi.fn().mockResolvedValue({}),
+    updatePayment: vi.fn().mockResolvedValue({}),
     logAuditEvent: vi.fn().mockResolvedValue({}),
     createNotification: vi.fn().mockResolvedValue({}),
+    // SW-26: enqueue failures are no longer swallowed — the happy-path test
+    // needs a working in-memory queue/idempotency store. A generic thenable
+    // query-builder chain supports every drizzle call shape (select/insert/
+    // where/limit/returning/orderBy/offset) without touching a real DB.
+    getDb: vi.fn().mockImplementation(async () => {
+      // Generic thenable drizzle query-builder chain (defined here because
+      // vi.mock factories are hoisted above top-level consts). The chain is
+      // wrapped in a plain object so the top-level db handle is NOT thenable.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const chain: any = new Proxy(function () {}, {
+        get: (_t, prop) => {
+          if (prop === "then") return (resolve: (v: unknown) => void) => resolve([{ id: 1 }]);
+          return () => chain;
+        },
+        apply: () => chain,
+      });
+      return { select: () => chain, insert: () => chain, update: () => chain, delete: () => chain };
+    }),
   };
 });
+
+// SW-MP15: Permify writeTuple now fails closed instead of being silently
+// swallowed — the happy path must run against a reachable (mocked) Permify.
+global.fetch = vi.fn().mockResolvedValue({
+  ok: true,
+  json: async () => ({}),
+  text: async () => "",
+} as Response);
 
 // ─── Test context ─────────────────────────────────────────────────────────────
 function createContext(role: "user" | "admin" | "finance" = "user", userId = 9702): TrpcContext {
