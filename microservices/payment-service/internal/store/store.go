@@ -133,6 +133,17 @@ func (s *Store) UpdateInvoicePayment(ctx context.Context, id int64, mojaloopTxID
 	return err
 }
 
+// SetInvoiceMojaloopTxID persists the switch transfer ids at initiation so the
+// real Mojaloop callback can resolve the invoice (SW-M3).
+func (s *Store) SetInvoiceMojaloopTxID(ctx context.Context, id int64, mojaloopTxID, tbTxID string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE payment_invoices
+		SET mojaloop_tx_id = $1, tigerbeetle_tx_id = $2, updated_at = NOW()
+		WHERE id = $3`,
+		mojaloopTxID, tbTxID, id)
+	return err
+}
+
 // UpdateInvoiceStatus updates the status of an invoice
 func (s *Store) UpdateInvoiceStatus(ctx context.Context, id int64, status string) error {
 	_, err := s.db.ExecContext(ctx, `

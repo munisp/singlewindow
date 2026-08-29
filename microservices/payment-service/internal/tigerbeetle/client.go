@@ -5,6 +5,8 @@
 package tigerbeetle
 
 import (
+	"log"
+	"os"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -162,7 +164,14 @@ type mockClient struct {
 }
 
 // NewMock creates a mock TigerBeetle client for testing/graceful degradation
+// NewMock returns an in-memory DEV-ONLY client. It panics when constructed in
+// a production environment (SW-M3: an in-memory ledger must never serve a
+// production path).
 func NewMock() Client {
+	if os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production" {
+		panic("tigerbeetle.NewMock must not be constructed when APP_ENV/NODE_ENV=production")
+	}
+	log.Printf("[tigerbeetle] DEV-ONLY in-memory mock in use — NOT for production")
 	return &mockClient{
 		accounts:  make(map[string]Account),
 		transfers: make(map[string]Transfer),

@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,10 +26,14 @@ import (
 func main() {
 	port := getEnv("PORT", "8082")
 	daprPort := getEnv("DAPR_HTTP_PORT", "3502")
-	dbURL := getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
+	// SW-M3: no secret defaults. DATABASE_URL is mandatory in production.
+	dbURL := getEnv("DATABASE_URL", devOnly("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway"))
 	tbAddr := getEnv("TIGERBEETLE_ADDRESS", "localhost:3000")
 	mojaloopURL := getEnv("MOJALOOP_URL", "http://localhost:3001")
 	temporalAddr := getEnv("TEMPORAL_ADDRESS", "localhost:7233")
+	if isProduction() && os.Getenv("PAYMENT_SERVICE_TOKEN") == "" {
+		log.Fatal("[payment-service] FATAL: PAYMENT_SERVICE_TOKEN must be set in production (service auth). Refusing to boot.")
+	}
 
 	log.Printf("[payment-service] Starting on port %s", port)
 
@@ -39,10 +44,15 @@ func main() {
 	}
 	defer st.Close()
 
-	// Initialize TigerBeetle client (graceful degradation if unavailable)
+	// Initialize TigerBeetle client.
+	// SW-M3: FAIL CLOSED — an unavailable ledger is a boot-fatal error in
+	// production. The mock is strictly a development convenience.
 	tb, tbErr := tigerbeetle.New(tbAddr)
 	if tbErr != nil {
-		log.Printf("[payment-service] Warning: TigerBeetle unavailable (%v) — ledger operations will be simulated", tbErr)
+		if isProduction() {
+			log.Fatalf("[payment-service] FATAL: TigerBeetle unavailable (%v) — refusing to boot without a ledger", tbErr)
+		}
+		log.Printf("[payment-service] DEV-ONLY WARNING: TigerBeetle unavailable (%v) — using in-memory mock. This would be fatal in production.", tbErr)
 		tb = tigerbeetle.NewMock()
 	}
 	// Seed the five standard ledger accounts (idempotent — safe to call on every startup).
@@ -102,7 +112,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", port),
-		Handler:      mux,
+		Handler:      authMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -129,4 +139,56 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production"
+}
+
+// devOnly returns the fallback outside production and refuses to boot in
+// production when the variable is unset (no secret/dev defaults in prod).
+func devOnly(key, fallback string) string {
+	if isProduction() {
+		log.Fatalf("[payment-service] FATAL: %s must be set in production — no default exists. Refusing to boot.", key)
+	}
+	log.Printf("[payment-service] DEV-ONLY WARNING: %s not set — using development default", key)
+	return fallback
+}
+
+// authMiddleware enforces the platform service-auth pattern (SW-M3):
+// every non-health request must carry either a valid X-Service-Token
+// (service-to-service, incl. the Mojaloop switch callback) or verified
+// caller identity headers (X-User-Id / X-User-Role) from the gateway.
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" || r.URL.Path == "/dapr/subscribe" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if token := r.Header.Get("X-Service-Token"); token != "" {
+			expected := os.Getenv("PAYMENT_SERVICE_TOKEN")
+			if expected == "" {
+				if isProduction() {
+					http.Error(w, `{"error":"service auth not configured"}`, http.StatusInternalServerError)
+					return
+				}
+				expected = "dev-service-token"
+			}
+			if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+				http.Error(w, `{"error":"invalid service token"}`, http.StatusUnauthorized)
+				return
+			}
+			ctx := context.WithValue(r.Context(), "role", "service")
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+		uid := r.Header.Get("X-User-Id")
+		if uid == "" {
+			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), "userID", uid)
+		ctx = context.WithValue(ctx, "role", r.Header.Get("X-User-Role"))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
