@@ -3391,6 +3391,43 @@ export const webhookReceipts = pgTable("webhook_receipts", {
 export type WebhookReceipt = typeof webhookReceipts.$inferSelect;
 export type InsertWebhookReceipt = typeof webhookReceipts.$inferInsert;
 
+// ─── Phase-7 Remediation: Device Push Tokens ─────────────────────────────────
+// Primary store for device push tokens (P0-5). The previous implementation
+// kept tokens in a process-local Map and ran a MySQL-dialect upsert
+// (ON DUPLICATE KEY UPDATE) against PostgreSQL that always threw and was
+// swallowed. The DB is now the authoritative store with a PG-native upsert.
+export const pushTokens = pgTable("push_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  token: varchar("token", { length: 512 }).notNull(),
+  platform: varchar("platform", { length: 16 }).notNull(), // ios | android | web
+  registeredAt: timestamp("registered_at").defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+}, (t) => [
+  unique("push_tokens_user_platform_unique").on(t.userId, t.platform),
+  index("idx_push_tokens_user").on(t.userId),
+]);
+export type PushToken = typeof pushTokens.$inferSelect;
+export type InsertPushToken = typeof pushTokens.$inferInsert;
+
+// ─── Phase-7 Remediation: Durable Payment Idempotency ────────────────────────
+// DB-backed idempotency keys for financial mutations (P0-6). The previous
+// process-local Map reopened a replay window on every restart/replica. Unique
+// constraint is enforced by the database; replays return the stored response
+// (follows the webhook_receipts pattern from migration 0051).
+export const paymentIdempotencyKeys = pgTable("payment_idempotency_keys", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 255 }).notNull(),
+  response: jsonb("response"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("payment_idempotency_user_key_unique").on(t.userId, t.idempotencyKey),
+  index("idx_payment_idempotency_user").on(t.userId),
+]);
+export type PaymentIdempotencyKey = typeof paymentIdempotencyKeys.$inferSelect;
+export type InsertPaymentIdempotencyKey = typeof paymentIdempotencyKeys.$inferInsert;
+
 // ─── Phase-6 Remediation: 4-Eyes (Dual Control) Requests ─────────────────────
 // Postgres-backed dual-control approvals for privileged mutations. Consume-on-use:
 // a request can authorise exactly one execution of the action it approved.
