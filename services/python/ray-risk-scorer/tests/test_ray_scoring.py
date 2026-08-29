@@ -174,11 +174,17 @@ class TestAPIEndpoints:
         assert len(data["results"]) == 2
 
     def test_model_stats_endpoint(self):
+        """Without a deployed model, /model-stats must report NO_MODEL_DEPLOYED
+        and must NOT contain fabricated performance metrics."""
         r = client.get("/model-stats")
         assert r.status_code == 200
         data = r.json()
-        assert "model_version" in data
-        assert "auc_roc" in data
+        assert data["status"] == "NO_MODEL_DEPLOYED"
+        assert "message" in data
+        # No invented metrics may leak through
+        for fabricated in ("auc_roc", "precision", "recall", "f1_score",
+                           "training_samples", "last_trained"):
+            assert fabricated not in data
 
     def test_feature_importance_endpoint(self):
         r = client.get("/feature-importance")
@@ -190,3 +196,99 @@ class TestAPIEndpoints:
     def test_score_missing_required_fields_returns_422(self):
         r = client.post("/score", json={"ucr": "X"})
         assert r.status_code == 422
+
+
+# ─── Honest ML layer (fail-closed + real ONNX inference) ─────────────────────
+
+FIXTURE_MODEL = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fixtures", "tiny_risk_model.onnx"
+)
+
+
+@pytest.fixture
+def restore_model_layer():
+    """Snapshot and restore the global model layer + config."""
+    saved = (svc.MODEL_LAYER, svc.RISK_MODEL_PATH, svc.RISK_MODEL_VERSION,
+             svc.RISK_MODEL_METRICS_PATH)
+    yield
+    (svc.MODEL_LAYER, svc.RISK_MODEL_PATH, svc.RISK_MODEL_VERSION,
+     svc.RISK_MODEL_METRICS_PATH) = saved
+
+
+class TestNoFakeNoise:
+    def test_scoring_is_deterministic(self):
+        """Regression guard: MD5-hash 'noise' was removed — identical input
+        must produce identical scores."""
+        a = svc.score_declaration(_decl())
+        b = svc.score_declaration(_decl())
+        assert a.score == b.score
+
+    def test_scores_have_no_hash_jitter(self):
+        """Two declarations differing only in UCR must get the same score
+        (previously the UCR MD5 hash injected ±5 points of fake variance)."""
+        a = svc.score_declaration(_decl(ucr="UCR-AAA"))
+        b = svc.score_declaration(_decl(ucr="UCR-ZZZ"))
+        assert a.score == b.score
+
+
+class TestFailClosedModelLayer:
+    def test_unloadable_model_stays_unavailable(self, restore_model_layer):
+        svc.RISK_MODEL_PATH = "/nonexistent/model.onnx"
+        svc.MODEL_LAYER = svc._load_model_layer()
+        assert not svc.MODEL_LAYER.available
+        r = client.post("/score", json=_decl().model_dump())
+        assert r.status_code == 200
+        assert r.json()["ml_augmentation"] == "UNAVAILABLE"
+
+    def test_score_reports_unavailable_without_model(self, restore_model_layer):
+        svc.MODEL_LAYER = svc.OnnxModelLayer(None)
+        data = client.post("/score", json=_decl().model_dump()).json()
+        assert data["ml_augmentation"] == "UNAVAILABLE"
+        assert data["ml_model_version"] is None
+
+
+class TestRealOnnxInference:
+    def test_real_model_loaded_and_applied(self, restore_model_layer):
+        """With a real ONNX artefact, inference runs and the score is blended."""
+        svc.RISK_MODEL_PATH = FIXTURE_MODEL
+        svc.RISK_MODEL_VERSION = "tiny-fixture-1"
+        svc.MODEL_LAYER = svc._load_model_layer()
+        assert svc.MODEL_LAYER.available
+
+        data = client.post("/score", json=_decl().model_dump()).json()
+        assert data["ml_augmentation"] == "APPLIED"
+        assert data["ml_model_version"] == "tiny-fixture-1"
+        assert 0 <= data["score"] <= 100
+
+        # Direct layer call returns a real 0-100 score
+        features = svc.extract_features(_decl())
+        ml_score = svc.MODEL_LAYER.score(features)
+        assert ml_score is not None and 0 <= ml_score <= 100
+
+    def test_model_stats_with_real_model(self, restore_model_layer, tmp_path):
+        svc.RISK_MODEL_PATH = FIXTURE_MODEL
+        svc.RISK_MODEL_VERSION = "tiny-fixture-1"
+        svc.MODEL_LAYER = svc._load_model_layer()
+
+        # No metrics file -> metrics null, never invented
+        svc.RISK_MODEL_METRICS_PATH = None
+        data = client.get("/model-stats").json()
+        assert data["status"] == "MODEL_DEPLOYED"
+        assert data["model_version"] == "tiny-fixture-1"
+        assert data["metrics"] is None
+        assert "auc_roc" not in data
+
+        # Real metrics file -> surfaced verbatim
+        metrics_file = tmp_path / "metrics.json"
+        metrics_file.write_text('{"auc_roc": 0.71, "evaluated_on": "2026-01-01"}')
+        svc.RISK_MODEL_METRICS_PATH = str(metrics_file)
+        data = client.get("/model-stats").json()
+        assert data["metrics"]["auc_roc"] == 0.71
+
+    def test_rules_red_never_softened_by_ml(self):
+        """Fail-closed blend: rule-layer RED (>=65) is returned unchanged."""
+        assert svc.blend_scores(80.0, 0.0) == 80.0
+        assert svc.blend_scores(65.0, 0.0) == 65.0
+        # Below RED, the ML layer genuinely augments
+        assert svc.blend_scores(50.0, 0.0) == pytest.approx(0.6 * 50.0)
+        assert svc.blend_scores(50.0, 100.0) == pytest.approx(0.6 * 50.0 + 40.0)
