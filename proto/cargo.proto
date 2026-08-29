@@ -105,5 +105,5 @@ message PortCongestionResponse {
   int32 vessels_at_anchor = 3;
   int32 avg_dwell_hours = 4;
   string congestion_level = 5;    // LOW | MEDIUM | HIGH | CRITICAL
-  int32 containers_awaiting_clearance = 4;
+  int32 containers_awaiting_clearance = 6;
 }
