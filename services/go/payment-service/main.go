@@ -10,7 +10,13 @@
 //   - NO fabricated ledger ids. Settlement is posted to the canonical Go
 //     tigerbeetle-bridge (/api/ledger/*, port 8086); when the bridge is down
 //     the payment is marked LEDGER_UNAVAILABLE — never "TB-LOCAL-*".
-//   - The Mojaloop webhook is HMAC-authenticated (timing-safe), idempotent,
+//   - P0-8: FSPIOP JWS (Ed25519) is the single platform signing convention
+//     for switch-facing traffic: outbound /transfers are signed body-bound
+//     (kid in protected header) and are NEVER sent unsigned; inbound
+//     callbacks verify the hub JWS when configured, with the legacy
+//     env-required HMAC as documented interop fallback. Unsigned callbacks
+//     are always rejected.
+//   - The Mojaloop webhook is authenticated (timing-safe), idempotent,
 //     state-guarded, and completes ONLY after a real ledger post.
 //   - Money is integer minor units with explicit guards (no float money math).
 //   - Duty assessment uses the authoritative tariff service; in production it
@@ -76,8 +82,11 @@ func enforceProductionConfig() {
 	if os.Getenv("MOJALOOP_BASE_URL") == "" {
 		missing = append(missing, "MOJALOOP_BASE_URL")
 	}
-	if os.Getenv("MOJALOOP_CALLBACK_SECRET") == "" {
-		missing = append(missing, "MOJALOOP_CALLBACK_SECRET")
+	if os.Getenv("MOJALOOP_CALLBACK_SECRET") == "" && os.Getenv("MOJALOOP_HUB_PUBLIC_KEY_PATH") == "" && os.Getenv("MOJALOOP_HUB_PUBLIC_KEY_PEM") == "" {
+		missing = append(missing, "MOJALOOP_HUB_PUBLIC_KEY_PATH or MOJALOOP_CALLBACK_SECRET")
+	}
+	if os.Getenv("DFSP_JWS_PRIVATE_KEY_PATH") == "" && os.Getenv("DFSP_JWS_PRIVATE_KEY_PEM") == "" {
+		missing = append(missing, "DFSP_JWS_PRIVATE_KEY_PATH or DFSP_JWS_PRIVATE_KEY_PEM")
 	}
 	if os.Getenv("TARIFF_SERVICE_URL") == "" {
 		missing = append(missing, "TARIFF_SERVICE_URL")
@@ -397,6 +406,16 @@ func initiateMojaloopTransfer(ctx context.Context, paymentID int64, reference st
 	req.Header.Set("Content-Type", "application/vnd.interoperability.transfers+json;version=1.1")
 	req.Header.Set("FSPIOP-Source", "gh-customs-payer-dfsp")
 	req.Header.Set("FSPIOP-Destination", "gh-customs-authority")
+	// P0-8: FSPIOP JWS (Ed25519) is the platform signing convention for
+	// switch-facing traffic. Signing failure is fail-closed — an unsigned
+	// money-movement request is NEVER sent.
+	signer, err := fspiopSigner()
+	if err != nil {
+		return "", fmt.Errorf("FSPIOP signing unavailable (fail-closed, transfer NOT sent): %w", err)
+	}
+	if err := signer.SignRequest(req, "gh-customs-authority", body); err != nil {
+		return "", fmt.Errorf("FSPIOP sign transfer (fail-closed, transfer NOT sent): %w", err)
+	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -452,15 +471,32 @@ func postSettlementToLedger(ctx context.Context, paymentID int64, reference stri
 
 // ─── WEBHOOK AUTHENTICATION (SW-11) ─────────────────────────────────────────
 
+// verifyCallbackAuth authenticates a Mojaloop callback on the money path.
+// Platform convention (P0-8): FSPIOP JWS (Ed25519) verified against the hub's
+// public key when MOJALOOP_HUB_PUBLIC_KEY_PATH/_PEM is configured. The legacy
+// HMAC-SHA256 path (X-Mojaloop-Signature) remains ONLY as a documented
+// interop fallback and its secret is env-required — there is no dev default.
+// Unsigned callbacks are ALWAYS rejected (fail-closed).
+func verifyCallbackAuth(r *http.Request, rawBody []byte) bool {
+	if pub := hubPublicKey(); pub != nil {
+		if err := verifyFSPIOPSignature(pub, r.Method, r.URL.RequestURI(), rawBody, r.Header.Get("FSPIOP-Signature")); err != nil {
+			log.Printf("[Payment Service] inbound JWS verification failed: %v", err)
+			return false
+		}
+		return true
+	}
+	return verifyWebhookSignature(rawBody, r.Header.Get("X-Mojaloop-Signature"))
+}
+
 // verifyWebhookSignature authenticates a Mojaloop callback via HMAC-SHA256
-// over the raw body (X-Mojaloop-Signature header), timing-safe.
+// over the raw body (X-Mojaloop-Signature header), timing-safe. Legacy
+// interop path — secret is env-required (no default); when the hub public
+// key is configured the JWS path above is used instead.
 func verifyWebhookSignature(rawBody []byte, signatureHeader string) bool {
 	secret := os.Getenv("MOJALOOP_CALLBACK_SECRET")
 	if secret == "" {
-		if isProduction() {
-			return false
-		}
-		secret = "dev-callback-secret"
+		// Fail-closed: no credential configured => nothing is accepted.
+		return false
 	}
 	sig := strings.TrimPrefix(signatureHeader, "sha256=")
 	provided, err := hex.DecodeString(sig)
@@ -532,7 +568,7 @@ func handleMojaloopWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "invalid callback"})
 		return
 	}
-	if !verifyWebhookSignature(rawBody, r.Header.Get("X-Mojaloop-Signature")) {
+	if !verifyCallbackAuth(r, rawBody) {
 		writeJSON(w, 401, map[string]string{"error": "invalid callback signature"})
 		return
 	}
