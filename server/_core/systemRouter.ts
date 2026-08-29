@@ -160,7 +160,7 @@ export const systemRouter = router({
    */
   ledgerStats: adminProcedure
     .query(async () => {
-      const tbBridgeURL = process.env.TB_GO_BRIDGE_HTTP_ADDR ?? "http://localhost:9100";
+      const tbBridgeURL = ENV.tbBridgeUrl;
       try {
         const res = await fetch(`${tbBridgeURL}/api/ledger/summary`, {
           signal: AbortSignal.timeout(5000),
@@ -232,7 +232,7 @@ export const systemRouter = router({
    */
   systemStatus: publicProcedure
     .query(async () => {
-      const tbBridgeURL = process.env.TB_GO_BRIDGE_HTTP_ADDR ?? "http://localhost:9100";
+      const tbBridgeURL = ENV.tbBridgeUrl;
 
       // Check DB
       let dbOk = false;

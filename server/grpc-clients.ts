@@ -103,9 +103,9 @@ const WAZUH_PROXY_GRPC        = process.env.WAZUH_PROXY_GRPC_ADDR        || "loc
 const OPENCTI_PROXY_GRPC      = process.env.OPENCTI_PROXY_GRPC_ADDR      || "localhost:9097";
 const KEYCLOAK_PROXY_GRPC     = process.env.KEYCLOAK_PROXY_GRPC_ADDR     || "localhost:8080";
 
-// TigerBeetle bridges expose HTTP (not gRPC) health endpoints
+// The canonical Go TigerBeetle bridge exposes an HTTP (not gRPC) health
+// endpoint. The Rust bridge replica was removed from deploy surfaces (SW-O3).
 const TB_GO_BRIDGE_HTTP       = process.env.TB_GO_BRIDGE_HTTP_ADDR        || "localhost:8086";
-const TB_RUST_BRIDGE_HTTP     = process.env.TB_RUST_BRIDGE_HTTP_ADDR      || "localhost:8093";
 
 // ─── PROTO LOADER ─────────────────────────────────────────────────────────────
 
@@ -302,7 +302,6 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
   const [grpcResults, tbGoResult, tbRustResult] = await Promise.all([
     Promise.allSettled(grpcChecks.map(([, addr]) => checkGRPCHealth(addr))),
     checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
-    checkTigerBeetleBridgeHealth(TB_RUST_BRIDGE_HTTP),
   ]);
 
   const summary: Record<string, boolean> = Object.fromEntries(
@@ -330,7 +329,6 @@ export async function getTigerBeetleBridgeModes(): Promise<{
 }> {
   const [go, rust] = await Promise.all([
     checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
-    checkTigerBeetleBridgeHealth(TB_RUST_BRIDGE_HTTP),
   ]);
   return { go, rust };
 }

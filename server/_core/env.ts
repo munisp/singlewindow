@@ -1,3 +1,57 @@
+// ─── SW-MP8: PORT REGISTRY (single source of truth) ─────────────────────────
+// Every internal service port used by the Node gateway is declared here once.
+// URL defaults below are derived from these constants — never hardcode a port
+// literal in this file or in routers; add it here instead. Services that bind
+// their own listen port read their own env (documented per service), but any
+// gateway-side default MUST come from this registry.
+//
+// Canonical assignments (docker-compose published ports):
+//   8086 tigerbeetle-bridge (CANONICAL money-rail bridge, HTTP /api/ledger/*)
+//   9086 tigerbeetle-bridge gRPC health
+//   8097 profile-service HTTP (renumbered off 8086 — SW-MP7 collision fix)
+export const PORTS = {
+  keycloak: 8080,
+  keycloakSvc: 8087,
+  permify: 3476,
+  redis: 6379,
+  kafka: 9092,
+  temporal: 7233,
+  tigerBeetle: 3000,
+  fluvio: 9003,
+  apisixAdmin: 9180,
+  wazuhApi: 55000,
+  opencti: 4000,
+  kubecost: 9090,
+  aseanSwService: 8091,
+  aseanGatewayGrpc: 50091,
+  freeZoneService: 8092,
+  cenService: 8093,
+  tigerBeetleBridge: 8086, // CANONICAL — the only money-rail bridge
+  fluvioSvc: 8096,
+  fluvioWs: 8097, // ws endpoint of the fluvio streaming stack (NOT profile-service)
+  deltaLakeSvc: 8098,
+  flinkCepSvc: 8099,
+  flinkStreamGrpc: 50099,
+  sedonaSvc: 8100,
+  sedonaGeoGrpc: 50100,
+  rustFsSvc: 8101,
+  graphBridge: 8102,
+  riskScorer: 8103,
+  paymentRisk: 8104,
+  visionService: 8105,
+  warehouseService: 8106,
+  mojaloop: 3001,
+  declarationGrpc: 50051,
+  riskEngineGrpc: 50052,
+  paymentGrpc: 50053,
+  cargoTrackingGrpc: 50054,
+  documentVaultGrpc: 50055,
+  profileGrpc: 50056,
+  bondedWarehouseGrpc: 50057,
+  auditSvcGrpc: 50058,
+  profileService: 8097, // HTTP (compose-published; SW-MP7 renumber)
+} as const;
+
 export const ENV = {
   cookieSecret: process.env.JWT_SECRET ?? "",
   apiKeyHashSecret: process.env.API_KEY_HASH_SECRET ?? "",
@@ -84,8 +138,10 @@ export const ENV = {
   cenServiceUrl: process.env.CEN_SERVICE_URL ?? "http://localhost:8093",
 
   // ─── TigerBeetle Bridge ───────────────────────────────────────────────────
-  tbBridgeUrl: process.env.TB_BRIDGE_URL ?? process.env.TB_GO_BRIDGE_HTTP_ADDR ?? "http://localhost:8094",
-  tbRustBridgeUrl: process.env.TB_RUST_BRIDGE_HTTP_ADDR ?? "http://localhost:8095",
+  // SW-MP8/MP9: the canonical money-rail bridge is the Go service on 8086
+  // (HTTP /api/ledger/*). The old 8094 default was stale, and the Rust
+  // bridge alias was removed entirely (dev-only per SW-A/SW-O3).
+  tbBridgeUrl: process.env.TB_BRIDGE_URL ?? process.env.TB_GO_BRIDGE_HTTP_ADDR ?? `http://localhost:${PORTS.tigerBeetleBridge}`,
 
   // ─── Fluvio Extended ──────────────────────────────────────────────────────
   fluvioSvcUrl: process.env.FLUVIO_SVC_URL ?? "http://localhost:8096",
