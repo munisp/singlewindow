@@ -25,6 +25,7 @@ import { sanitizeMiddleware } from "./sanitize";
 import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 import { sdk } from "./sdk";
+import { PAYMENT_STATUS } from "./statuses";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // General tRPC API: 200 requests per minute per IP
@@ -521,9 +522,10 @@ async function runPortCongestionAlertScan() {
       .orderBy(desc(portCongestionEvents.recordedAt))
       .limit(activePorts.length * 3); // fetch recent events, we'll pick latest per port
 
-    // Build map: portCode -> latest event
+    // Build map: portCode -> latest event (SW-O4: demo-seeded rows NEVER alert)
     const latestByPort = new Map<string, typeof latestEvents[0]>();
     for (const ev of latestEvents) {
+      if ((ev as { source?: string }).source === "demo") continue;
       if (!latestByPort.has(ev.portCode)) latestByPort.set(ev.portCode, ev);
     }
 
@@ -777,7 +779,7 @@ async function runWeeklyAnalyticsReport() {
       .from(payments)
       .where(
         and(
-          sql`${payments.status} = 'completed'`,
+          sql`${payments.status} = ${PAYMENT_STATUS.CONFIRMED}`,
           gte(payments.createdAt, since7d)
         )
       );
@@ -1521,7 +1523,18 @@ async function startServer() {
     // Seed default KPI targets on startup (idempotent)
     import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
     // Seed demo data (bonded warehouses, CEP patterns, cost records) — idempotent
-    import("../seedDemoData").then(({ seedAllDemoData }) => seedAllDemoData()).catch(() => {});
+    // SW-O4: demo seeding ONLY in explicit demo mode (never in production —
+    // productionGates already boot-refuses DEMO_MODE there). Seeded rows are
+    // marked source='demo' so dashboards/alerts can exclude them.
+    import("./productionGates").then(({ isDemoModeEnabled }) => {
+      if (!isDemoModeEnabled()) return;
+      import("../seedDemoData")
+        .then(({ seedAllDemoData }) => seedAllDemoData())
+        .catch((err) => {
+          // Fail loudly in dev — a half-seeded demo env is worse than none.
+          console.error("[Seed] FATAL: demo data seeding failed:", err);
+        });
+    });
 
     // v52: Check CEP pattern threshold breaches every 30 minutes and notify owner
     const checkThresholdBreaches = async () => {

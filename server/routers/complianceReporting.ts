@@ -68,44 +68,49 @@ export const complianceReportingRouter = router({
         const controlResults: any[] = [];
         let reqPassed = true;
 
+        let reqNotAssessed = 0;
         for (const control of req.controls) {
-          // Check control implementation in the database
           const controlStatus = await checkControlImplementation(db, control);
           controlResults.push({
             control,
-            status: controlStatus.implemented ? "PASS" : "FAIL",
+            status: controlStatus.assessment === "ASSESSED_PASS" ? "PASS" : controlStatus.assessment === "ASSESSED_FAIL" ? "FAIL" : "NOT_ASSESSED",
             evidence: controlStatus.evidence,
             gap: controlStatus.gap,
           });
-          if (!controlStatus.implemented) {
-            reqPassed = false;
-          }
+          if (controlStatus.assessment === "ASSESSED_FAIL") reqPassed = false;
+          if (controlStatus.assessment === "NOT_ASSESSED") reqNotAssessed++;
         }
 
-        if (reqPassed) passCount++;
-        else failCount++;
+        // SW-O7: a requirement is only PASS/FAIL when its controls were actually
+        // assessed; NOT_ASSESSED requirements are excluded from the score.
+        const reqStatus = !reqPassed ? "FAIL" : reqNotAssessed === req.controls.length ? "NOT_ASSESSED" : reqNotAssessed > 0 ? "PARTIAL" : "PASS";
+        if (reqStatus === "PASS") passCount++;
+        else if (reqStatus === "FAIL" || reqStatus === "PARTIAL") failCount++;
 
         results.push({
           requirement_id: req.id,
           title: req.title,
-          status: reqPassed ? "PASS" : "FAIL",
+          status: reqStatus,
           controls: controlResults,
         });
       }
 
-      const score = (passCount / PCI_DSS_REQUIREMENTS.length) * 100;
+      // Score computed ONLY over assessed requirements.
+      const assessedCount = passCount + failCount;
+      const score = assessedCount > 0 ? (passCount / assessedCount) * 100 : null;
       const report = {
         audit_id: auditId,
         standard: "PCI-DSS v4.0",
         scope: input.scope,
-        score: Math.round(score * 100) / 100,
-        status: score >= 100 ? "COMPLIANT" : score >= 80 ? "PARTIALLY_COMPLIANT" : "NON_COMPLIANT",
+        score: score != null ? Math.round(score * 100) / 100 : null,
+        score_basis: `${passCount}/${assessedCount} assessed requirements passed; unassessed controls excluded`,
+        status: score == null ? "NOT_ASSESSED" : score >= 100 ? "COMPLIANT" : score >= 80 ? "PARTIALLY_COMPLIANT" : "NON_COMPLIANT",
         requirements_passed: passCount,
         requirements_failed: failCount,
+        requirements_not_assessed: PCI_DSS_REQUIREMENTS.length - assessedCount,
         total_requirements: PCI_DSS_REQUIREMENTS.length,
         results,
         audited_at: new Date().toISOString(),
-        next_audit_due: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
       // Persist audit result
@@ -113,7 +118,7 @@ export const complianceReportingRouter = router({
         `INSERT INTO compliance_audit_results (id, standard, scope, score, status, report_data, audited_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())
          ON CONFLICT (id) DO NOTHING`,
-        [auditId, "PCI-DSS v4.0", input.scope, score, report.status, JSON.stringify(report)]
+        [auditId, "PCI-DSS v4.0", input.scope, score ?? 0, report.status, JSON.stringify(report)]
       );
 
       return report;
@@ -129,27 +134,33 @@ export const complianceReportingRouter = router({
       const results: any[] = [];
       let passCount = 0;
 
+      let notAssessed = 0;
       for (const criterion of SOC2_CRITERIA) {
         const status = await checkSOC2Criterion(db, criterion.id);
-        if (status.met) passCount++;
+        if (status.assessment === "ASSESSED_PASS") passCount++;
+        if (status.assessment === "NOT_ASSESSED") notAssessed++;
         results.push({
           criterion_id: criterion.id,
           title: criterion.title,
           category: criterion.category,
-          status: status.met ? "MET" : "NOT_MET",
+          status: status.assessment === "ASSESSED_PASS" ? "MET" : status.assessment === "ASSESSED_FAIL" ? "NOT_MET" : "NOT_ASSESSED",
           evidence: status.evidence,
           observations: status.observations,
         });
       }
 
-      const score = (passCount / SOC2_CRITERIA.length) * 100;
+      // Score computed ONLY over assessed criteria.
+      const assessedCount = SOC2_CRITERIA.length - notAssessed;
+      const score = assessedCount > 0 ? (passCount / assessedCount) * 100 : null;
       const report = {
         audit_id: auditId,
         standard: `SOC 2 ${input.type}`,
-        score: Math.round(score * 100) / 100,
-        status: score >= 95 ? "UNQUALIFIED" : score >= 80 ? "QUALIFIED" : "ADVERSE",
+        score: score != null ? Math.round(score * 100) / 100 : null,
+        score_basis: `${passCount}/${assessedCount} assessed criteria met; NOT_ASSESSED criteria excluded`,
+        status: score == null ? "NOT_ASSESSED" : score >= 95 ? "UNQUALIFIED" : score >= 80 ? "QUALIFIED" : "ADVERSE",
         criteria_met: passCount,
-        criteria_not_met: SOC2_CRITERIA.length - passCount,
+        criteria_not_met: assessedCount - passCount,
+        criteria_not_assessed: notAssessed,
         total_criteria: SOC2_CRITERIA.length,
         results,
         period_start: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
@@ -160,7 +171,7 @@ export const complianceReportingRouter = router({
       await db.$client.query(
         `INSERT INTO compliance_audit_results (id, standard, scope, score, status, report_data, audited_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [auditId, `SOC 2 ${input.type}`, "full", score, report.status, JSON.stringify(report)]
+        [auditId, `SOC 2 ${input.type}`, "full", score ?? 0, report.status, JSON.stringify(report)]
       );
 
       return report;
@@ -319,7 +330,7 @@ export const complianceReportingRouter = router({
         data_subject_requests: dsrStats.rows[0],
         data_breaches: breachStats.rows[0],
         consent_records: consentStats.rows[0],
-        compliance_status: "COMPLIANT",
+        compliance_status: "NOT_ASSESSED", // SW-O7: no automated basis to declare compliance
         dpo_name: "TradeGateway Data Protection Officer",
         generated_at: new Date().toISOString(),
         next_submission_due: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
@@ -465,130 +476,140 @@ export const complianceReportingRouter = router({
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 
-async function checkControlImplementation(db: any, control: string): Promise<{
-  implemented: boolean;
+// ─── SW-16/SW-O7: evidence-based control assessment ONLY ─────────────────────
+// Nothing here may claim a control is implemented without a verifiable probe.
+// Unknown/unverifiable controls are NOT_ASSESSED; scores are computed ONLY over
+// assessed controls. Canned always-pass evidence strings were removed.
+
+type ControlAssessment = {
+  assessment: "ASSESSED_PASS" | "ASSESSED_FAIL" | "NOT_ASSESSED";
   evidence: string;
   gap?: string;
-}> {
-  const controlChecks: Record<string, () => Promise<{ implemented: boolean; evidence: string; gap?: string }>> = {
-    "firewall": async () => ({
-      implemented: true,
-      evidence: "APISIX gateway with OpenAppSec WAF deployed. Network policies enforce zero-trust.",
-    }),
-    "zero-trust": async () => ({
-      implemented: true,
-      evidence: "Kubernetes NetworkPolicy default-deny-all with explicit allow rules. Permify RBAC.",
-    }),
+};
+
+const NOT_ASSESSED = (control: string): ControlAssessment => ({
+  assessment: "NOT_ASSESSED",
+  evidence: `No automated verifiable probe exists for '${control}'. It is reported NOT_ASSESSED — never assumed implemented.`,
+  gap: `Manual evidence collection required for ${control}`,
+});
+
+async function checkControlImplementation(db: any, control: string): Promise<ControlAssessment> {
+  const controlChecks: Record<string, () => Promise<ControlAssessment>> = {
+    // REAL probe: PostgreSQL SSL setting
     "encryption-at-rest": async () => {
       const result = await db.$client.query(`SELECT setting FROM pg_settings WHERE name = 'ssl'`);
+      const on = result.rows[0]?.setting === "on";
       return {
-        implemented: result.rows[0]?.setting === "on",
-        evidence: "PostgreSQL SSL enabled. TigerBeetle data encrypted at rest.",
+        assessment: on ? "ASSESSED_PASS" : "ASSESSED_FAIL",
+        evidence: `Live probe: PostgreSQL ssl = '${result.rows[0]?.setting ?? "unknown"}'`,
+        gap: on ? undefined : "PostgreSQL SSL is not enabled",
       };
     },
-    "tls-1.3": async () => ({
-      implemented: true,
-      evidence: "APISIX configured with TLS 1.3 minimum. Mutual TLS on inter-service communication.",
-    }),
-    "waf": async () => ({
-      implemented: true,
-      evidence: "OpenAppSec WAF deployed as APISIX plugin. Layer 1-5 intrusion simulation passed.",
-    }),
-    "permify-rbac": async () => ({
-      implemented: true,
-      evidence: "Permify authorization model v3 deployed with tenant isolation verified.",
-    }),
-    "keycloak-mfa": async () => ({
-      implemented: true,
-      evidence: "Keycloak with MFA (TOTP) enabled. JWT RS256 algorithm enforced.",
-    }),
-    "jwt-rs256": async () => ({
-      implemented: true,
-      evidence: "APISIX jwt-auth plugin configured with RS256. Strict 3-part structure enforced.",
-    }),
+    // REAL probe: audit events actually flowing
     "audit-logs": async () => {
       const result = await db.$client.query(`SELECT COUNT(*) FROM audit_events WHERE created_at > NOW() - INTERVAL '24 hours'`);
+      const n = parseInt(result.rows[0]?.count ?? "0");
       return {
-        implemented: parseInt(result.rows[0]?.count ?? "0") > 0,
-        evidence: `${result.rows[0]?.count ?? 0} audit events in last 24 hours. Immutable audit trail in PostgreSQL.`,
+        assessment: n > 0 ? "ASSESSED_PASS" : "ASSESSED_FAIL",
+        evidence: `Live probe: ${n} audit events in last 24 hours`,
+        gap: n > 0 ? undefined : "No audit events recorded in the last 24h",
       };
     },
-    "pentest": async () => ({
-      implemented: true,
-      evidence: "Security scanner service deployed. Penetration tests run against APISIX, Keycloak, Permify.",
-    }),
-    "chaos-engineering": async () => ({
-      implemented: true,
-      evidence: "Chaos engine deployed. Redis+TigerBeetle failure tests, network partition tests implemented.",
-    }),
+    // Honest signal: Permify authz configured (env presence), per remediation doctrine
+    "permify-rbac": async () => {
+      const configured = Boolean(process.env.PERMIFY_URL?.trim() && process.env.PERMIFY_API_KEY?.trim());
+      return {
+        assessment: configured ? "ASSESSED_PASS" : "ASSESSED_FAIL",
+        evidence: configured
+          ? "Live probe: PERMIFY_URL and PERMIFY_API_KEY are configured (authorization service wired)"
+          : "Permify is not configured (PERMIFY_URL / PERMIFY_API_KEY missing)",
+        gap: configured ? undefined : "Permify not configured",
+      };
+    },
   };
 
   const checker = controlChecks[control];
   if (checker) {
     try {
       return await checker();
-    } catch {
-      return { implemented: false, evidence: "Check failed", gap: `Unable to verify ${control}` };
+    } catch (e) {
+      return { assessment: "NOT_ASSESSED", evidence: `Probe for '${control}' failed: ${String(e)}`, gap: `Probe failure for ${control}` };
     }
   }
-
-  // Default: assume implemented for controls not explicitly checked
-  return {
-    implemented: true,
-    evidence: `${control} is part of the TradeGateway security architecture.`,
-  };
+  // Unlisted controls are NEVER assumed implemented.
+  return NOT_ASSESSED(control);
 }
 
-async function checkSOC2Criterion(db: any, criterionId: string): Promise<{
-  met: boolean;
+type CriterionAssessment = {
+  assessment: "ASSESSED_PASS" | "ASSESSED_FAIL" | "NOT_ASSESSED";
   evidence: string;
   observations: string;
-}> {
-  const criterionChecks: Record<string, () => Promise<{ met: boolean; evidence: string; observations: string }>> = {
-    "CC6": async () => ({
-      met: true,
-      evidence: "Keycloak MFA, Permify RBAC, zero-trust network policies, JWT RS256",
-      observations: "All access controls verified. Tenant isolation confirmed.",
-    }),
-    "CC7": async () => ({
-      met: true,
-      evidence: "Prometheus monitoring, Grafana dashboards, alerting rules configured",
-      observations: "System operations monitored 24/7. Incident response procedures documented.",
-    }),
-    "A1": async () => {
-      const result = await db.$client.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) AS avg_response FROM payments WHERE created_at > NOW() - INTERVAL '7 days' AND status='completed'`);
-      const avgMs = parseFloat(result.rows[0]?.avg_response ?? "0") * 1000;
+};
+
+async function checkSOC2Criterion(db: any, criterionId: string): Promise<CriterionAssessment> {
+  const criterionChecks: Record<string, () => Promise<CriterionAssessment>> = {
+    // CC6 logical access: honest signal = Keycloak + Permify actually configured
+    "CC6": async () => {
+      const kc = Boolean(process.env.KEYCLOAK_URL?.trim() && process.env.KEYCLOAK_CLIENT_SECRET?.trim());
+      const pf = Boolean(process.env.PERMIFY_URL?.trim() && process.env.PERMIFY_API_KEY?.trim());
+      const pass = kc && pf;
       return {
-        met: avgMs < 5000,
-        evidence: `Average payment processing time: ${avgMs.toFixed(0)}ms`,
-        observations: avgMs < 5000 ? "Availability SLA met" : "Performance degradation detected",
+        assessment: pass ? "ASSESSED_PASS" : "ASSESSED_FAIL",
+        evidence: `Live probe: Keycloak configured=${kc}, Permify configured=${pf}`,
+        observations: pass
+          ? "Identity and authorization services are configured. MFA policy, network segmentation and session controls are NOT verifiable via automated probes and require manual audit evidence."
+          : "Access-control infrastructure is not fully configured.",
       };
     },
-    "C1": async () => ({
-      met: true,
-      evidence: "AES-256 encryption at rest, TLS 1.3 in transit, data classification implemented",
-      observations: "Confidentiality controls verified.",
-    }),
-    "P1": async () => ({
-      met: true,
-      evidence: "NDPR privacy notice published. Data subject request handling implemented.",
-      observations: "Privacy notice available at /privacy. DSR portal implemented.",
-    }),
-    "PI1": async () => ({
-      met: true,
-      evidence: "TigerBeetle double-entry ledger ensures processing integrity. Idempotency keys prevent duplicate processing.",
-      observations: "Zero double-entry violations detected.",
-    }),
+    // CC7 monitoring: honest signal = metrics endpoint exposed by this process
+    "CC7": async () => {
+      let metricsExposed = false;
+      try {
+        const { metricsRegistry } = await import("../_core/metrics");
+        const body = await metricsRegistry.metrics();
+        metricsExposed = Boolean(body && body.length > 0);
+      } catch { metricsExposed = false; }
+      return {
+        assessment: metricsExposed ? "ASSESSED_PASS" : "NOT_ASSESSED",
+        evidence: metricsExposed
+          ? "Live probe: Prometheus metrics registry renders (monitoring instrumentation active)"
+          : "No verifiable monitoring probe available",
+        observations: "Dashboards, alert routing and 24/7 coverage require manual audit evidence.",
+      };
+    },
+    // A1 availability: REAL query on payment processing latency
+    "A1": async () => {
+      const result = await db.$client.query(`SELECT AVG(EXTRACT(EPOCH FROM (completed_at - created_at))) AS avg_response FROM payments WHERE created_at > NOW() - INTERVAL '7 days' AND status='confirmed'`);
+      const avgMs = parseFloat(result.rows[0]?.avg_response ?? "0") * 1000;
+      return {
+        assessment: avgMs < 5000 ? "ASSESSED_PASS" : "ASSESSED_FAIL",
+        evidence: `Live probe: average confirmed-payment processing time ${avgMs.toFixed(0)}ms over 7 days`,
+        observations: avgMs < 5000 ? "Processing latency within threshold" : "Performance degradation detected",
+      };
+    },
+    // C1 confidentiality: REAL probe of PostgreSQL SSL
+    "C1": async () => {
+      const result = await db.$client.query(`SELECT setting FROM pg_settings WHERE name = 'ssl'`);
+      const on = result.rows[0]?.setting === "on";
+      return {
+        assessment: on ? "ASSESSED_PASS" : "ASSESSED_FAIL",
+        evidence: `Live probe: PostgreSQL ssl = '${result.rows[0]?.setting ?? "unknown"}'`,
+        observations: "Data classification, key management and field-level encryption require manual audit evidence.",
+      };
+    },
   };
 
   const checker = criterionChecks[criterionId];
   if (checker) {
     try {
       return await checker();
-    } catch {
-      return { met: false, evidence: "Check failed", observations: `Unable to verify ${criterionId}` };
+    } catch (e) {
+      return { assessment: "NOT_ASSESSED", evidence: `Probe failed: ${String(e)}`, observations: `Unable to assess ${criterionId}` };
     }
   }
-
-  return { met: true, evidence: "Control implemented as part of TradeGateway architecture.", observations: "" };
+  return {
+    assessment: "NOT_ASSESSED",
+    evidence: `No automated verifiable probe exists for ${criterionId}. Reported NOT_ASSESSED — never assumed met.`,
+    observations: "Manual audit evidence required.",
+  };
 }

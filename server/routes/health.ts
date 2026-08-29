@@ -135,15 +135,33 @@ async function buildHealthReport(): Promise<HealthReport> {
       ),
     ]);
 
-  // Only database is critical — everything else is optional
+  // SW-O8: criticality is per-environment. In PRODUCTION the money rail and
+  // authz pipeline are critical — a down TigerBeetle/Temporal/Kafka/Permify
+  // must degrade overall status honestly instead of reporting "ok".
+  // In dev/demo only the database gates overall status (prevents false alarms).
+  const isProduction = process.env.NODE_ENV === "production";
+  const productionCritical: Array<[string, ComponentHealth]> = [
+    ["tigerbeetle", tigerbeetle],
+    ["temporal", temporal],
+    ["kafka", kafka],
+    ["permify", permify],
+  ];
+  if (isProduction) {
+    for (const [, c] of productionCritical) c.optional = false;
+  }
+
   let overallStatus: HealthStatus = "ok";
+  const anyDown = (c: ComponentHealth) => c.status === "down";
+  const anyDegraded = (c: ComponentHealth) => c.status === "degraded" || c.status === "down";
   if (database.status === "down") {
     overallStatus = "down";
-  } else if (database.status === "degraded") {
+  } else if (isProduction && productionCritical.some(([, c]) => anyDown(c))) {
+    overallStatus = "down";
+  } else if (anyDegraded(database)) {
+    overallStatus = "degraded";
+  } else if (isProduction && productionCritical.some(([, c]) => anyDegraded(c))) {
     overallStatus = "degraded";
   }
-  // Optional services being degraded does NOT make overall status worse
-  // This prevents false alarms in demo/dev environments
 
   return {
     status: overallStatus,

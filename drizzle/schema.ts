@@ -496,6 +496,9 @@ export const portCongestionEvents = pgTable("port_congestion_events", {
   declarationBacklog: integer("declaration_backlog").default(0),
   inspectionQueueSize: integer("inspection_queue_size").default(0),
   metadata: json("metadata"),
+  // SW-O4: 'demo' for seeded rows, 'live' for real observations — alerts must
+  // never fire on demo data.
+  source: varchar("source", { length: 32 }).default("live"),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_pce_port_code").on(t.portCode),
