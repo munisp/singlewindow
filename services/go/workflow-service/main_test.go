@@ -15,7 +15,10 @@ func TestHealthEndpoint(t *testing.T) {
 	t.Run("liveness probe returns 200", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 		w := httptest.NewRecorder()
-		// Simulate health handler
+		// NOTE: this is a placeholder smoke test — it asserts only the recorder's
+	// own writes, not a real handler. Kept minimal; `_ = req` fixes the
+	// pre-existing compile break (declared and not used).
+		_ = req
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 		if w.Code != http.StatusOK {

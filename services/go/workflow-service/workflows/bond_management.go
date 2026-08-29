@@ -7,22 +7,23 @@ import (
 	"fmt"
 	"time"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
 // ─── BOND LODGEMENT WORKFLOW (Scenario 5) ─────────────────────────────────────
 
 type BondLodgementInput struct {
-	BondID          int64   `json:"bond_id"`
-	TraderID        string  `json:"trader_id"`
-	TraderAccountID string  `json:"trader_account_id"`
-	EscrowAccountID string  `json:"escrow_account_id"`
-	AmountMinor     int64   `json:"amount_minor"`
-	Currency        string  `json:"currency"`
-	Ledger          uint32  `json:"ledger"`
-	BondType        string  `json:"bond_type"` // "general" | "specific" | "transit"
-	ExpiryDate      string  `json:"expiry_date"` // ISO 8601
-	DeclarationRef  string  `json:"declaration_ref"`
+	BondID          int64  `json:"bond_id"`
+	TraderID        string `json:"trader_id"`
+	TraderAccountID string `json:"trader_account_id"`
+	EscrowAccountID string `json:"escrow_account_id"`
+	AmountMinor     int64  `json:"amount_minor"`
+	Currency        string `json:"currency"`
+	Ledger          uint32 `json:"ledger"`
+	BondType        string `json:"bond_type"`   // "general" | "specific" | "transit"
+	ExpiryDate      string `json:"expiry_date"` // ISO 8601
+	DeclarationRef  string `json:"declaration_ref"`
 }
 
 type BondLodgementResult struct {
@@ -205,4 +206,46 @@ func BondForfeitureWorkflow(ctx workflow.Context, input BondForfeitureInput) (*B
 	result.Status = "forfeited"
 	result.CompletedAt = workflow.Now(ctx)
 	return result, nil
+}
+
+// ─── FAIL-CLOSED NOT-IMPLEMENTED WORKFLOWS (PRA-129) ─────────────────────────
+// registry.go and cmd/worker registered BondReleaseWorkflow and
+// ExBondDutyPaymentWorkflow, but no implementation ever existed — the package
+// did not compile. Rather than deleting the registrations (which would make
+// client starts fail with an opaque "workflow type not registered" error at
+// the worker), these honest stubs fail immediately and non-retryably with
+// NOT_IMPLEMENTED, so callers get an explicit answer instead of a silent hang
+// or an infinite retry loop. Implement for real when scenarios 7 (bond
+// release) and 10 (ex-bond duty payment) are scheduled.
+
+type BondReleaseInput struct {
+	BondID string `json:"bond_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type BondReleaseResult struct {
+	BondID string `json:"bond_id"`
+	Status string `json:"status"`
+}
+
+func BondReleaseWorkflow(ctx workflow.Context, input BondReleaseInput) (*BondReleaseResult, error) {
+	return nil, temporal.NewNonRetryableApplicationError(
+		"bond release workflow is not implemented on this platform",
+		"NOT_IMPLEMENTED", nil, input.BondID)
+}
+
+type ExBondDutyPaymentInput struct {
+	DeclarationID int64  `json:"declaration_id"`
+	BondID        string `json:"bond_id"`
+}
+
+type ExBondDutyPaymentResult struct {
+	DeclarationID int64  `json:"declaration_id"`
+	Status        string `json:"status"`
+}
+
+func ExBondDutyPaymentWorkflow(ctx workflow.Context, input ExBondDutyPaymentInput) (*ExBondDutyPaymentResult, error) {
+	return nil, temporal.NewNonRetryableApplicationError(
+		"ex-bond duty payment workflow is not implemented on this platform",
+		"NOT_IMPLEMENTED", nil, input.DeclarationID)
 }

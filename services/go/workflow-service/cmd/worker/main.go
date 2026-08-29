@@ -6,22 +6,24 @@
 //   - "ngswtp-clearance"   — declaration clearance workflow
 //
 // Usage:
-//   go run ./cmd/worker/main.go
-//   # or in Docker:
-//   docker run --rm tradegateway/workflow-worker:latest
+//
+//	go run ./cmd/worker/main.go
+//	# or in Docker:
+//	docker run --rm tradegateway/workflow-worker:latest
 //
 // Environment variables (all have sensible defaults for local dev):
-//   TEMPORAL_HOST          — Temporal frontend address (default: localhost:7233)
-//   TEMPORAL_NAMESPACE     — Temporal namespace (default: tradegateway)
-//   WORKER_HEALTH_PORT     — HTTP health check port (default: 8090)
-//   DATABASE_URL           — PostgreSQL connection string
-//   TIGERBEETLE_BRIDGE_URL — TigerBeetle Rust bridge URL (default: http://localhost:4600)
-//   MOJALOOP_URL           — Mojaloop FSPIOP adapter URL (default: http://localhost:3001)
-//   KAFKA_BROKERS          — Kafka broker list (default: localhost:9092)
-//   KAFKA_REST_URL         — Kafka REST proxy URL (default: http://localhost:8082)
-//   FLUVIO_HTTP_URL        — Fluvio HTTP gateway URL (default: http://localhost:9003)
-//   PERMIFY_URL            — Permify HTTP URL (default: http://localhost:3476)
-//   DELTALAKE_SERVICE_URL  — Delta Lake Python service URL (default: http://localhost:8090)
+//
+//	TEMPORAL_HOST          — Temporal frontend address (default: localhost:7233)
+//	TEMPORAL_NAMESPACE     — Temporal namespace (default: tradegateway)
+//	WORKER_HEALTH_PORT     — HTTP health check port (default: 8090)
+//	DATABASE_URL           — PostgreSQL connection string
+//	TIGERBEETLE_BRIDGE_URL — TigerBeetle Rust bridge URL (default: http://localhost:4600)
+//	MOJALOOP_URL           — Mojaloop FSPIOP adapter URL (default: http://localhost:3001)
+//	KAFKA_BROKERS          — Kafka broker list (default: localhost:9092)
+//	KAFKA_REST_URL         — Kafka REST proxy URL (default: http://localhost:8082)
+//	FLUVIO_HTTP_URL        — Fluvio HTTP gateway URL (default: http://localhost:9003)
+//	PERMIFY_URL            — Permify HTTP URL (default: http://localhost:3476)
+//	DELTALAKE_SERVICE_URL  — Delta Lake Python service URL (default: http://localhost:8090)
 package main
 
 import (
@@ -50,14 +52,12 @@ func main() {
 	}
 	defer logger.Sync()
 
+	buildVersion := getEnv("BUILD_VERSION", "dev")
 	temporalHost := getEnv("TEMPORAL_HOST", "localhost:7233")
 	temporalNamespace := getEnv("TEMPORAL_NAMESPACE", "tradegateway")
-	healthPort := getEnv("WORKER_HEALTH_PORT", "8090")
-
 	logger.Info("TradeGateway NGSWTP Temporal Worker starting",
 		zap.String("temporal_host", temporalHost),
 		zap.String("temporal_namespace", temporalNamespace),
-		zap.String("health_port", healthPort),
 	)
 
 	// ── Connect to Temporal server ────────────────────────────────────────────
@@ -107,7 +107,7 @@ func main() {
 		MaxConcurrentActivityExecutionSize:      50,
 		MaxConcurrentWorkflowTaskExecutionSize:  20,
 		MaxConcurrentLocalActivityExecutionSize: 20,
-		WorkerStopTimeout: 30 * time.Second,
+		WorkerStopTimeout:                       30 * time.Second,
 	})
 
 	// ── Register all workflows and activities ─────────────────────────────────
@@ -115,7 +115,13 @@ func main() {
 	registerClearanceWorker(clearanceWorker, logger)
 
 	// ── Start HTTP health check server ────────────────────────────────────────
-	healthServer := startHealthServer(healthPort, logger)
+	// Canonical implementation in health.go: /ready gates on Temporal
+	// connectivity + registration counts (fail-closed readiness).
+	// 18 workflow types are registered (17 real + 2 fail-closed stubs counted
+	// as their registrations succeed).
+	if err := startHealthServer(c, 18, buildVersion, logger); err != nil {
+		logger.Fatal("Failed to start health server", zap.Error(err))
+	}
 
 	// ── Start workers ─────────────────────────────────────────────────────────
 	var wg sync.WaitGroup
@@ -154,13 +160,6 @@ func main() {
 	fundFlowWorker.Stop()
 	clearanceWorker.Stop()
 
-	// Shutdown health server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := healthServer.Shutdown(ctx); err != nil {
-		logger.Warn("Health server shutdown error", zap.Error(err))
-	}
-
 	wg.Wait()
 	logger.Info("All workers stopped cleanly")
 }
@@ -175,15 +174,15 @@ func registerFundFlowWorker(w worker.Worker, logger *zap.Logger) {
 	logger.Debug("Registered workflow: DutyDrawbackWorkflow")
 
 	// Scenarios 5–7: Bond management
-	w.RegisterWorkflow(workflows.BondManagementWorkflow)
+	w.RegisterWorkflow(workflows.BondLodgementWorkflow)
 	w.RegisterWorkflow(workflows.BondForfeitureWorkflow)
 	w.RegisterWorkflow(workflows.BondReleaseWorkflow)
-	logger.Debug("Registered workflows: BondManagement, BondForfeiture, BondRelease")
+	logger.Debug("Registered workflows: BondLodgement, BondForfeiture, BondRelease(stub)")
 
 	// Scenarios 8–9: Transit guarantee
-	w.RegisterWorkflow(workflows.TransitGuaranteeWorkflow)
-	w.RegisterWorkflow(workflows.TransitGuaranteeDischargeWorkflow)
-	logger.Debug("Registered workflows: TransitGuarantee, TransitGuaranteeDischarge")
+	w.RegisterWorkflow(workflows.TransitLodgementWorkflow)
+	w.RegisterWorkflow(workflows.TransitReleaseWorkflow)
+	logger.Debug("Registered workflows: TransitLodgement, TransitRelease")
 
 	// Scenario 10: Ex-bond duty
 	w.RegisterWorkflow(workflows.ExBondDutyPaymentWorkflow)
@@ -280,38 +279,6 @@ func registerClearanceWorker(w worker.Worker, logger *zap.Logger) {
 		zap.Int("workflows", 1),
 		zap.Int("activities", 8),
 	)
-}
-
-// startHealthServer starts a minimal HTTP server for Kubernetes liveness/readiness probes.
-func startHealthServer(port string, logger *zap.Logger) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","service":"temporal-worker","timestamp":"%s"}`,
-			time.Now().UTC().Format(time.RFC3339))
-	})
-	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ready","workflows":10,"activities":26,"clearance_activities":8}`)
-	})
-
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
-	}
-
-	go func() {
-		logger.Info("Health server listening", zap.String("port", port))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Warn("Health server error", zap.Error(err))
-		}
-	}()
-
-	return srv
 }
 
 // seedSystemAccounts calls POST /seed/system on the Rust TigerBeetle bridge.
