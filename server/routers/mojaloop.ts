@@ -5,18 +5,25 @@
  * Supports bank transfers, mobile money (MTN, Vodafone, AirtelTigo), and
  * real-time settlement confirmation via ILP (Interledger Protocol).
  *
- * Sprint 30 enhancements:
- *   - All transactions persisted to mojaloop_transactions DB table
- *   - Webhook callback procedure for Mojaloop switch notifications
- *   - Audit events logged on initiation and settlement
- *   - TigerBeetle ledger entry created on COMMITTED status
- *   - Payment record updated when transfer is committed
+ * Phase-6 remediation (SW-M1, SW-10):
+ *   - Status reads are SIDE-EFFECT FREE. Settlement state only ever changes
+ *     via the authenticated switch webhook (webhookCallback). No simulated
+ *     state progression exists anywhere in this module.
+ *   - Webhook authentication is HMAC-SHA256 (timing-safe) via the
+ *     X-Mojaloop-Signature header. There is NO default webhook secret in
+ *     production — the process refuses to boot without one.
+ *   - COMMITTED callbacks must present a fulfilment whose SHA-256 matches the
+ *     condition stored at initiation (ILP v4 semantics).
+ *   - Amounts are server-authoritative (declaration.totalDue), never caller
+ *     supplied, and are handled as integer minor units.
+ *   - Webhook events are deduplicated by event id and by terminal state, so
+ *     replays never mint duplicate ledger entries.
  *
  * Procedures:
  *   mojaloop.getSupportedFSPs      — List available Financial Service Providers
  *   mojaloop.getExchangeRate       — Get current exchange rate for duty calculation
  *   mojaloop.initiatePayment       — Initiate a duty payment via Mojaloop
- *   mojaloop.getPaymentStatus      — Poll payment status (DB + live API)
+ *   mojaloop.getPaymentStatus      — Poll payment status (read-only)
  *   mojaloop.listTransactions      — List Mojaloop transactions for a declaration
  *   mojaloop.listMyTransactions    — List current user's transaction history
  *   mojaloop.webhookCallback       — Receive settlement callback from Mojaloop switch
@@ -24,6 +31,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import nodeCrypto from "crypto";
 import { getDb } from "../db";
 import { paymentIdempotencyKeys } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
@@ -36,15 +44,39 @@ import {
   updateMojaloopTransaction,
   getMojaloopTransactionsByDeclaration,
   getMojaloopTransactionsByUser,
+  getDeclarationById,
   logAuditEvent,
   createLedgerEntry,
-  updatePayment,
 } from "../db";
 
 const MOJALOOP_URL = process.env.MOJALOOP_URL || "http://localhost:3003";
 const MOJALOOP_API_KEY = process.env.MOJALOOP_API_KEY || "";
-// Shared secret for verifying webhook callbacks from the Mojaloop switch
-const MOJALOOP_WEBHOOK_SECRET = process.env.MOJALOOP_WEBHOOK_SECRET || "dev-webhook-secret";
+// Canonical TigerBeetle bridge (Go service, /api/ledger/* dialect).
+const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8086";
+
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+/**
+ * SW-10: no default webhook secret in production — refuse to boot.
+ * In non-production a clearly-labelled dev secret is tolerated so local
+ * development and tests can compute signatures.
+ */
+function loadWebhookSecret(): string {
+  const secret = process.env.MOJALOOP_WEBHOOK_SECRET;
+  const weak = !secret || secret.length < 32 || secret.toLowerCase().includes("dev-webhook-secret");
+  if (weak && IS_PRODUCTION) {
+    throw new Error(
+      "[Mojaloop] FATAL: MOJALOOP_WEBHOOK_SECRET must be set to a strong (>= 32 char), " +
+      "non-default value when NODE_ENV=production. Refusing to boot."
+    );
+  }
+  if (weak) {
+    console.warn("[Mojaloop] MOJALOOP_WEBHOOK_SECRET not set — using dev-only secret. DO NOT use in production.");
+    return "dev-webhook-secret";
+  }
+  return secret;
+}
+const MOJALOOP_WEBHOOK_SECRET = loadWebhookSecret();
 
 // ─── Mojaloop service client ───────────────────────────────────────────────
 
@@ -136,27 +168,103 @@ const SUPPORTED_FSPS = [
 
 type FspType = "BANK" | "MOBILE_MONEY" | "RTGS";
 
-// ─── ILP helpers ──────────────────────────────────────────────────────────
+// ─── Money helpers (integer minor units — no float money math) ──────────────
 
-function generateILPPacket(): string {
+/**
+ * Converts a decimal string/number (major units, max 2dp) to integer minor
+ * units using exact decimal arithmetic. Throws on invalid input.
+ */
+export function toMinorUnits(amount: string | number): number {
+  const s = String(amount).trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Invalid monetary amount: ${s}` });
+  }
+  const [maj, frac = ""] = s.split(".");
+  return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
+}
+
+function minorToMajorString(minor: number): string {
+  return (minor / 100).toFixed(2);
+}
+
+// ─── ILP helpers (SW-10/SW-M15: CSPRNG preimage, derived condition) ─────────
+
+/** Generates a 32-byte CSPRNG preimage (server-side secret). */
+export function generateIlpPreimage(): Buffer {
+  return nodeCrypto.randomBytes(32);
+}
+
+/** ILP condition = base64url(SHA-256(preimage)). */
+export function ilpConditionFromPreimage(preimage: Buffer): string {
+  return nodeCrypto.createHash("sha256").update(preimage).digest("base64url");
+}
+
+/**
+ * Verifies a presented fulfilment against a stored condition:
+ * base64url-decode the fulfilment and check SHA-256(preimage) == condition.
+ * Timing-safe comparison.
+ */
+export function verifyIlpFulfilment(fulfilmentB64: string, conditionB64: string): boolean {
+  try {
+    const preimage = Buffer.from(fulfilmentB64, "base64url");
+    if (preimage.length !== 32) return false;
+    const computed = nodeCrypto.createHash("sha256").update(preimage).digest();
+    const expected = Buffer.from(conditionB64, "base64url");
+    return computed.length === expected.length && nodeCrypto.timingSafeEqual(computed, expected);
+  } catch {
+    return false;
+  }
+}
+
+/** Builds an ILP Prepare packet payload with the REAL amount and destination. */
+function buildILPPacket(amountMinorUnits: number, destinationAccount: string, data: string): string {
   return Buffer.from(JSON.stringify({
-    amount: 500000,
-    account: `g.gh.customs.${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}`,
-    data: Buffer.from("TradeGateway Duty Payment").toString("base64"),
+    amount: amountMinorUnits.toString(),
+    account: destinationAccount,
+    data: Buffer.from(data).toString("base64"),
   })).toString("base64");
 }
 
-function generateCondition(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  return Array.from({ length: 43 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+// ─── Webhook signature helpers ───────────────────────────────────────────────
+
+/** Canonical string that the switch signs for a webhook callback. */
+export function webhookSigningPayload(parts: {
+  transferId: string;
+  transferState: string;
+  fulfilment?: string;
+  completedTimestamp?: string;
+  eventId?: string;
+}): string {
+  return [
+    parts.transferId,
+    parts.transferState,
+    parts.fulfilment ?? "",
+    parts.completedTimestamp ?? "",
+    parts.eventId ?? "",
+  ].join(".");
 }
 
-// ─── TigerBeetle account IDs ───────────────────────────────────────────────
-// In production these would be fetched from the TB bridge service.
-// For simulation, we use fixed account IDs for the customs authority ledger.
+export function computeWebhookSignature(payload: string, secret: string = MOJALOOP_WEBHOOK_SECRET): string {
+  return nodeCrypto.createHmac("sha256", secret).update(payload).digest("hex");
+}
 
-const TB_CUSTOMS_REVENUE_ACCOUNT = "0000000000000001";  // Customs revenue credit account
-const TB_TRADER_DEBIT_ACCOUNT    = "0000000000000002";  // Trader debit account (per-trader in prod)
+/** Timing-safe verification of the X-Mojaloop-Signature header. */
+export function verifyWebhookSignature(payload: string, signatureHeader: string | undefined): boolean {
+  if (!signatureHeader) return false;
+  const provided = signatureHeader.replace(/^sha256=/, "");
+  if (!/^[0-9a-f]{64}$/i.test(provided)) return false;
+  const expected = computeWebhookSignature(payload);
+  try {
+    return nodeCrypto.timingSafeEqual(Buffer.from(provided, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 
 // ─── Router ───────────────────────────────────────────────────────────────
 
@@ -209,12 +317,16 @@ export const mojaloopRouter = router({
 
   /**
    * Initiate a duty payment via the Mojaloop payment switch.
-   * Persists a mojaloop_transactions record and logs an audit event.
+   * The amount is SERVER-AUTHORITATIVE: it is read from the declaration's
+   * assessed totalDue, never from the request body. Persists a
+   * mojaloop_transactions record and logs an audit event.
    */
   initiatePayment: protectedProcedure
     .input(z.object({
       declarationId: z.number().int().positive(),
-      amount: z.number().positive(),
+      // Optional caller expectation — validated against the server-authoritative
+      // amount. A mismatch is rejected; it is NEVER used as the transfer amount.
+      amount: z.number().positive().optional(),
       currency: z.string().length(3).default("GHS"),
       fspId: z.string().min(1),
       payerAccount: z.string().min(5).describe("Bank account number or mobile money number"),
@@ -229,7 +341,41 @@ export const mojaloopRouter = router({
       if (!fsp.active) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `FSP ${fsp.name} is currently unavailable` });
       }
-      if (input.amount < fsp.minAmount || input.amount > fsp.maxAmount) {
+
+      // ── Server-authoritative amount (SW-10) ──────────────────────────────
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Declaration not found" });
+      }
+      const officerRoles = ["admin", "customs_officer", "finance"];
+      if (decl.traderId !== ctx.user.id && !officerRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You can only pay for your own declarations" });
+      }
+      if (!decl.totalDue || Number(decl.totalDue) <= 0) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Declaration has no assessed amount due. An assessment must exist before payment can be initiated.",
+        });
+      }
+      // SW-17: an unverified flat-rate estimate is not a payable amount in production.
+      const explanation = (decl as { aiExplanation?: Record<string, unknown> | null }).aiExplanation;
+      if (IS_PRODUCTION && explanation && (explanation as any).dutyAssessment === "ESTIMATE_UNVERIFIED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Duty amount is an unverified estimate. An authoritative tariff assessment is required before payment.",
+        });
+      }
+
+      const amountMinorUnits = toMinorUnits(decl.totalDue);
+      const amountMajor = Number(minorToMajorString(amountMinorUnits));
+
+      if (input.amount !== undefined && Math.abs(input.amount - amountMajor) > 0.005) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Amount mismatch: declaration total due is ${amountMajor.toFixed(2)} ${decl.invoiceCurrency ?? input.currency}. Refresh and retry.`,
+        });
+      }
+      if (amountMajor < fsp.minAmount || amountMajor > fsp.maxAmount) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: `Amount must be between ${fsp.minAmount} and ${fsp.maxAmount} ${fsp.currency} for ${fsp.name}`,
@@ -237,11 +383,8 @@ export const mojaloopRouter = router({
       }
 
       // ── Idempotency check (1B payments/day pattern) ─────────────────────────
-      // Hash: userId + declarationId + amount + currency + fspId + payerAccount
-      const idempotencyInput = `${ctx.user.id}:${input.declarationId}:${input.amount}:${input.currency}:${input.fspId}:${input.payerAccount}`;
-      const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(idempotencyInput));
-      const keyHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+      const idempotencyInput = `${ctx.user.id}:${input.declarationId}:${amountMinorUnits}:${input.currency}:${input.fspId}:${input.payerAccount}`;
+      const keyHash = await sha256Hex(idempotencyInput);
       const idemDb = await getDb();
       if (idemDb) {
         const [existingKey] = await idemDb.select().from(paymentIdempotencyKeys).where(eq(paymentIdempotencyKeys.keyHash, keyHash)).limit(1);
@@ -254,9 +397,19 @@ export const mojaloopRouter = router({
         }
       }
       // ─────────────────────────────────────────────────────────────────────────
-      const transferId = `TRF-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
-      const ilpPacket = generateILPPacket();
-      const condition = generateCondition();
+      const transferId = `TRF-${Date.now()}-${nodeCrypto.randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+
+      // SW-10/SW-M15: CSPRNG preimage, derived condition. The preimage is stored
+      // server-side ONLY (in the fulfilment column) and is never returned to the
+      // client. It is revealed to the switch only at execution time.
+      const preimage = generateIlpPreimage();
+      const condition = ilpConditionFromPreimage(preimage);
+      const fulfilmentPreimage = preimage.toString("base64url");
+      const ilpPacket = buildILPPacket(
+        amountMinorUnits,
+        `g.gh.customs.declaration-${input.declarationId}`,
+        `TradeGateway Duty Payment ${decl.declarationNumber ?? input.declarationId}`,
+      );
       const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
       // Persist to DB
@@ -269,11 +422,12 @@ export const mojaloopRouter = router({
         fspType: fsp.type as FspType,
         payerAccount: input.payerAccount,
         payerName: input.payerName,
-        amount: input.amount.toString(),
+        amount: minorToMajorString(amountMinorUnits),
         currency: input.currency,
         status: "PENDING",
         ilpPacket,
         condition,
+        fulfilment: fulfilmentPreimage,
         paymentNote: input.paymentNote ?? null,
         expiresAt,
       });
@@ -295,10 +449,12 @@ export const mojaloopRouter = router({
         action: "mojaloop_payment_initiated",
         actorId: ctx.user.id,
         actorType: "trader",
-        newState: { transferId, fspId: input.fspId, amount: input.amount, currency: input.currency },
+        newState: { transferId, fspId: input.fspId, amountMinorUnits, currency: input.currency },
       });
 
-      // Forward to live Mojaloop switch if available
+      // Forward to live Mojaloop switch. If the switch is unreachable the
+      // transfer stays PENDING and the caller is told honestly — no simulated
+      // progression will ever move it forward.
       const available = await mojaloopAvailable();
       if (available) {
         try {
@@ -314,7 +470,7 @@ export const mojaloopRouter = router({
               transferId,
               payerFsp: input.fspId,
               payeeFsp: "CUSTOMS_AUTHORITY",
-              amount: { amount: input.amount.toString(), currency: input.currency },
+              amount: { amount: minorToMajorString(amountMinorUnits), currency: input.currency },
               ilpPacket,
               condition,
               expiration: expiresAt.toISOString(),
@@ -322,14 +478,15 @@ export const mojaloopRouter = router({
             signal: AbortSignal.timeout(10_000),
           });
         } catch (e) {
-          console.warn(`[Mojaloop] Transfer request failed: ${e}. Using simulation.`);
+          console.warn(`[Mojaloop] Transfer request to switch failed: ${e}. Transfer remains PENDING.`);
         }
       }
 
       return {
         transferId,
         status: "PENDING",
-        amount: input.amount,
+        amount: amountMajor,
+        amountMinorUnits,
         currency: input.currency,
         fspName: fsp.name,
         fspType: fsp.type,
@@ -338,14 +495,16 @@ export const mojaloopRouter = router({
         expiresAt: expiresAt.toISOString(),
         paymentInstructions: fsp.type === "MOBILE_MONEY"
           ? `Approve the payment request on your ${fsp.name} app or dial *170# to complete payment.`
-          : `Transfer ${input.amount} ${input.currency} to account: CUSTOMS-DUTY-${input.declarationId} at ${fsp.name}.`,
-        simulationNote: !available ? "Running in simulation mode — no real payment processed." : undefined,
+          : `Transfer ${amountMajor.toFixed(2)} ${input.currency} to account: CUSTOMS-DUTY-${input.declarationId} at ${fsp.name}.`,
+        switchReachable: available,
       };
     }),
 
   /**
    * Get the current status of a Mojaloop payment transfer.
-   * Reads from DB first; simulates state progression in dev mode.
+   * SIDE-EFFECT FREE (SW-M1): this query never mutates the transfer, never
+   * fabricates a fulfilment, and never writes ledger or audit rows. Settlement
+   * state advances only via the authenticated switch webhook.
    */
   getPaymentStatus: protectedProcedure
     .input(z.object({ transferId: z.string() }))
@@ -368,58 +527,11 @@ export const mojaloopRouter = router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
       }
 
-      // Simulate state progression in dev/simulation mode
-      const elapsedMs = Date.now() - dbRecord.createdAt.getTime();
-      let status = dbRecord.status;
-
-      if (status === "PENDING" && elapsedMs > 5_000) {
-        status = "PROCESSING";
-        await updateMojaloopTransaction(input.transferId, { status });
-      }
-
-      if (status === "PROCESSING" && elapsedMs > 15_000) {
-        const fulfilment = generateCondition();
-        status = "COMMITTED";
-        await updateMojaloopTransaction(input.transferId, {
-          status,
-          fulfilment,
-          committedAt: new Date(),
-        });
-
-        // Create TigerBeetle ledger entry for this settlement
-        const tbTransferId = crypto.randomUUID().replace(/-/g, "").slice(0, 32).padStart(32, "0");
-        await createLedgerEntry({
-          tbTransferId,
-          debitAccountId: TB_TRADER_DEBIT_ACCOUNT,
-          creditAccountId: TB_CUSTOMS_REVENUE_ACCOUNT,
-          amountMinorUnits: Math.round(dbRecord.amount as unknown as number * 100),
-          currency: dbRecord.currency,
-          ledger: 1,
-          entryType: "duty_payment",
-          status: "posted",
-          declarationId: dbRecord.declarationId ?? undefined,
-          mojaloopTransferId: input.transferId,
-          reference: `DUTY-${dbRecord.declarationId ?? "N/A"}`,
-          description: `Duty payment via ${dbRecord.fspName} (${input.transferId})`,
-          postedAt: new Date(),
-        }).catch(e => console.warn("[TigerBeetle] Failed to create ledger entry:", e));
-
-        // Log audit event for settlement
-        await logAuditEvent({
-          entityType: "payment",
-          entityId: dbRecord.id,
-          action: "mojaloop_payment_committed",
-          actorId: dbRecord.initiatedBy,
-          actorType: "system",
-          newState: { transferId: input.transferId, status: "COMMITTED", fulfilment },
-        });
-      }
-
-      const updated = await getMojaloopTransactionByTransferId(input.transferId);
+      const status = dbRecord.status;
 
       return {
         transferId: input.transferId,
-        status: updated?.status ?? status,
+        status,
         amount: Number(dbRecord.amount),
         currency: dbRecord.currency,
         fspId: dbRecord.fspId,
@@ -427,12 +539,14 @@ export const mojaloopRouter = router({
         fspType: dbRecord.fspType,
         payerAccount: dbRecord.payerAccount,
         createdAt: dbRecord.createdAt.toISOString(),
-        committedAt: updated?.committedAt?.toISOString() ?? null,
+        committedAt: dbRecord.committedAt?.toISOString() ?? null,
         ilpPacket: dbRecord.ilpPacket,
         condition: dbRecord.condition,
-        fulfilment: updated?.fulfilment ?? null,
-        isSettled: (updated?.status ?? status) === "COMMITTED",
-        isFailed: (updated?.status ?? status) === "ABORTED",
+        // The fulfilment preimage is only ever disclosed after the switch has
+        // committed the transfer. Before that it stays server-side.
+        fulfilment: status === "COMMITTED" ? dbRecord.fulfilment ?? null : null,
+        isSettled: status === "COMMITTED",
+        isFailed: status === "ABORTED",
         paymentInstructions: dbRecord.fspType === "MOBILE_MONEY"
           ? `Approve the payment request on your ${dbRecord.fspName} app or dial *170# to complete payment.`
           : `Transfer to account: CUSTOMS-DUTY-${dbRecord.declarationId} at ${dbRecord.fspName}.`,
@@ -467,9 +581,18 @@ export const mojaloopRouter = router({
     }),
 
   /**
-   * Webhook callback from Mojaloop switch.
-   * Verifies the shared secret header and updates the transaction status.
-   * In production, this would be called by the Mojaloop switch directly.
+   * Webhook callback from the Mojaloop switch.
+   *
+   * Authentication (SW-10): HMAC-SHA256 signature in the X-Mojaloop-Signature
+   * header over the canonical payload, verified timing-safe against
+   * MOJALOOP_WEBHOOK_SECRET (no production default — boot-fatal).
+   *
+   * Verification: a COMMITTED callback must carry a fulfilment whose SHA-256
+   * matches the condition stored at initiation (ILP v4).
+   *
+   * Idempotency: event ids are deduplicated via the payment_idempotency_keys
+   * table, and a COMMITTED replay on an already-COMMITTED transfer is a no-op —
+   * replays never mint a second ledger entry.
    */
   webhookCallback: publicProcedure
     .input(z.object({
@@ -477,21 +600,46 @@ export const mojaloopRouter = router({
       transferState: z.enum(["RECEIVED", "RESERVED", "COMMITTED", "ABORTED"]),
       fulfilment: z.string().optional(),
       completedTimestamp: z.string().optional(),
+      eventId: z.string().max(128).optional(),
       errorInformation: z.object({
         errorCode: z.string(),
         errorDescription: z.string(),
       }).optional(),
-      webhookSecret: z.string(),
     }))
-    .mutation(async ({ input }) => {
-      // Verify webhook secret
-      if (input.webhookSecret !== MOJALOOP_WEBHOOK_SECRET) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid webhook secret" });
+    .mutation(async ({ input, ctx }) => {
+      // ── Verify HMAC signature (timing-safe, from header — never the body) ──
+      const signatureHeader = (ctx as any).req?.headers?.["x-mojaloop-signature"] as string | undefined;
+      const signingPayload = webhookSigningPayload(input);
+      if (!verifyWebhookSignature(signingPayload, signatureHeader)) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid or missing webhook signature" });
+      }
+
+      // ── Event-id replay dedupe ────────────────────────────────────────────
+      const db = await getDb();
+      if (input.eventId && db) {
+        const eventHash = await sha256Hex(`mojaloop-webhook:${input.eventId}`);
+        const [seen] = await db.select().from(paymentIdempotencyKeys)
+          .where(eq(paymentIdempotencyKeys.keyHash, eventHash)).limit(1);
+        if (seen) {
+          return { success: true, transferId: input.transferId, idempotentReplay: true };
+        }
       }
 
       const tx = await getMojaloopTransactionByTransferId(input.transferId);
       if (!tx) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Transfer not found" });
+      }
+
+      // Terminal-state replay dedupe: a second COMMITTED never mints a second
+      // ledger entry.
+      if (tx.status === "COMMITTED" && input.transferState === "COMMITTED") {
+        return { success: true, transferId: input.transferId, newStatus: "COMMITTED", idempotentReplay: true };
+      }
+      if (tx.status === "COMMITTED" || tx.status === "ABORTED") {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: `Transfer ${input.transferId} is already in terminal state ${tx.status}`,
+        });
       }
 
       const updateData: Record<string, unknown> = {
@@ -500,18 +648,60 @@ export const mojaloopRouter = router({
       };
 
       if (input.transferState === "COMMITTED") {
-        updateData.fulfilment = input.fulfilment ?? null;
+        // ── ILP fulfilment verification (SW-10) ──────────────────────────────
+        if (!input.fulfilment || !tx.condition || !verifyIlpFulfilment(input.fulfilment, tx.condition)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Fulfilment does not satisfy the transfer condition",
+          });
+        }
+
+        updateData.fulfilment = input.fulfilment;
         updateData.committedAt = input.completedTimestamp
           ? new Date(input.completedTimestamp)
           : new Date();
 
-        // Create TigerBeetle ledger entry
-        const tbTransferId = crypto.randomUUID().replace(/-/g, "").slice(0, 32).padStart(32, "0");
+        // ── Post the settlement to the canonical TigerBeetle bridge ─────────
+        // No fabricated transfer ids: the ledger row is written only with the
+        // id returned by the bridge. If the bridge is down we return 503 so the
+        // switch retries — the mirror is never written for an unexecuted post.
+        const amountMinorUnits = toMinorUnits(tx.amount as unknown as string);
+        const bridgeRes = await fetch(`${TB_BRIDGE_URL}/api/ledger/transfers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            debitAccountId: `trader-${tx.initiatedBy}-liability`,
+            creditAccountId: "customs-duty-revenue",
+            amount: minorToMajorString(amountMinorUnits),
+            currency: tx.currency,
+            reference: `DUTY-${tx.declarationId ?? "N/A"}`,
+            description: `Duty payment settled via Mojaloop (${input.transferId})`,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        }).catch(() => null);
+
+        if (!bridgeRes || !bridgeRes.ok) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Ledger bridge unavailable — settlement not recorded; switch should retry the callback",
+          });
+        }
+        const bridgeBody = await bridgeRes.json().catch(() => ({})) as Record<string, unknown>;
+        const tbTransferId = typeof bridgeBody.id === "string" && bridgeBody.id.length > 0 && bridgeBody.id.length <= 40
+          ? bridgeBody.id
+          : null;
+        if (!tbTransferId) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Ledger bridge did not return a transfer id — settlement not recorded; switch should retry",
+          });
+        }
+
         await createLedgerEntry({
           tbTransferId,
-          debitAccountId: TB_TRADER_DEBIT_ACCOUNT,
-          creditAccountId: TB_CUSTOMS_REVENUE_ACCOUNT,
-          amountMinorUnits: Math.round(Number(tx.amount) * 100),
+          debitAccountId: `trader-${tx.initiatedBy}-liability`,
+          creditAccountId: "customs-duty-revenue",
+          amountMinorUnits,
           currency: tx.currency,
           ledger: 1,
           entryType: "duty_payment",
@@ -521,7 +711,7 @@ export const mojaloopRouter = router({
           reference: `DUTY-${tx.declarationId ?? "N/A"}`,
           description: `Duty payment settled via Mojaloop webhook (${input.transferId})`,
           postedAt: new Date(),
-        }).catch(e => console.warn("[TigerBeetle] Webhook ledger entry failed:", e));
+        }).catch(e => console.warn("[TigerBeetle] Webhook ledger mirror failed:", e));
 
         // Log audit event
         await logAuditEvent({
@@ -530,7 +720,7 @@ export const mojaloopRouter = router({
           action: "mojaloop_webhook_committed",
           actorId: tx.initiatedBy,
           actorType: "system",
-          newState: { transferId: input.transferId, status: "COMMITTED" },
+          newState: { transferId: input.transferId, status: "COMMITTED", tbTransferId },
         });
       }
 
@@ -550,6 +740,17 @@ export const mojaloopRouter = router({
 
       await updateMojaloopTransaction(input.transferId, updateData as any);
 
+      // Record the processed event id AFTER successful handling
+      if (input.eventId && db) {
+        const eventHash = await sha256Hex(`mojaloop-webhook:${input.eventId}`);
+        await db.insert(paymentIdempotencyKeys).values({
+          keyHash: eventHash,
+          transferId: input.transferId,
+          responseSnapshot: { transferId: input.transferId, status: input.transferState },
+          expiresAt: new Date(Date.now() + 86_400_000),
+        }).onConflictDoNothing();
+      }
+
       return { success: true, transferId: input.transferId, newStatus: input.transferState };
     }),
 
@@ -561,7 +762,7 @@ export const mojaloopRouter = router({
 
     return {
       connected: available,
-      mode: available ? "LIVE" : "SIMULATION",
+      mode: available ? "LIVE" : "OFFLINE",
       switchUrl: MOJALOOP_URL,
       supportedFSPs: SUPPORTED_FSPS.filter(f => f.active).length,
       ilpVersion: "v4",
