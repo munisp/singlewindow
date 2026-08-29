@@ -142,23 +142,30 @@ Green: 0-30 (auto-clear), Yellow: 31-60 (doc review), Red: 61-100 (physical insp
     const content = response.choices[0]?.message?.content;
     if (content && typeof content === 'string') {
       const parsed = JSON.parse(content);
+      // SW-18: LLM output is NOT a model score — label it, and never let an
+      // LLM-assigned lane auto-clear (green is clamped to yellow/manual review).
+      const llmLane = parsed.lane === "green" ? "yellow" : parsed.lane;
       return {
         score: parsed.score,
-        lane: parsed.lane,
-        explanation: parsed
+        lane: llmLane,
+        explanation: {
+          ...parsed,
+          source: "llm-fallback",
+          modelScore: false,
+          warning: "LLM heuristic assessment — NOT an authoritative model score. Manual review required; auto-clearance prohibited.",
+        }
       };
     }
   } catch (e) {
     console.error("[RiskScore] LLM error:", e);
   }
-  // Fallback: deterministic score based on HS code hash (no randomness)
-  const hsHash = data.hsCode ? data.hsCode.split("").reduce((a, c) => a + c.charCodeAt(0), 0) : 50;
-  const score = (hsHash % 40) + 10;
-  return {
-    score,
-    lane: score < 30 ? "green" : score < 60 ? "yellow" : "red",
-    explanation: { summary: "Automated assessment", factors: [] }
-  };
+  // SW-18: fail CLOSED. No HS-code charcode pseudo-scores, no synthesized lanes.
+  // When neither the ML scorer nor the LLM is available, scoring is UNAVAILABLE
+  // and the declaration must go to manual review — never a fabricated lane.
+  throw new TRPCError({
+    code: "SERVICE_UNAVAILABLE",
+    message: "SCORING_UNAVAILABLE: neither the ML risk scorer nor the LLM fallback is available. Declaration remains in draft for manual review — no risk lane was assigned.",
+  });
 }
 
 export const declarationsRouter = router({
@@ -252,11 +259,30 @@ export const declarationsRouter = router({
         }
       );
 
-      // Compute duties (simplified: 10% duty + 15% VAT on CIF value)
-      const cif = parseFloat(decl.invoiceValue ?? "0");
-      const duty = cif * 0.10;
-      const vat = (cif + duty) * 0.15;
-      const total = duty + vat;
+      // Compute duties (flat-rate ESTIMATE: 10% duty + 15% VAT on CIF value).
+      // SW-17: exact integer minor-unit arithmetic — no float money math.
+      // This is NOT an authoritative tariff assessment: it is labelled
+      // ESTIMATE_UNVERIFIED and payment initiation against it is blocked in
+      // production (see payments.initiate / mojaloop.initiatePayment).
+      const cifMinor = (() => {
+        const s = String(decl.invoiceValue ?? "").trim();
+        if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid invoice value '${s}' — cannot compute duties` });
+        }
+        const [maj, frac = ""] = s.split(".");
+        return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
+      })();
+      const dutyMinor = Math.round(cifMinor * 0.10);
+      const vatMinor = Math.round((cifMinor + dutyMinor) * 0.15);
+      const totalMinor = dutyMinor + vatMinor;
+      const duty = dutyMinor / 100;
+      const vat = vatMinor / 100;
+      const total = totalMinor / 100;
+      const dutyEstimateExplanation = {
+        ...risk.explanation,
+        dutyAssessment: "ESTIMATE_UNVERIFIED",
+        dutyBasis: "Flat-rate estimate (10% duty + 15% VAT on CIF) — NOT from an authoritative tariff service. Payment against this amount is blocked in production until a real assessment exists.",
+      };
 
       // Permify: setOwner is called on create; submit is gated by traderId check above.
       // assertCan is reserved for cross-role operations (approve, release, assess).
@@ -265,7 +291,7 @@ export const declarationsRouter = router({
         status: "under_assessment",
         riskScore: String(risk.score),
         riskLane: risk.lane as any,
-        aiExplanation: risk.explanation,
+        aiExplanation: dutyEstimateExplanation,
         dutyAmount: String(duty.toFixed(2)),
         vatAmount: String(vat.toFixed(2)),
         totalDue: String(total.toFixed(2)),
@@ -534,6 +560,28 @@ export const declarationsRouter = router({
         input.status as DeclarationStatus,
         ctx.user.role
       );
+
+      // SW-M13: clearance additionally requires that no active hold exists.
+      // A red/yellow risk lane is an inspection hold: it must have been
+      // discharged through examination_complete before clearance.
+      if (input.status === "cleared") {
+        const lane = (decl as { riskLane?: string | null }).riskLane;
+        if ((lane === "red" || lane === "yellow") && decl.status !== "examination_complete") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Active ${lane}-lane inspection hold — declaration must complete examination before clearance`,
+          });
+        }
+        // SW-18: a declaration whose risk output is a non-model estimate (LLM
+        // fallback) may not be cleared without a manual-review annotation.
+        const explanation = (decl as { aiExplanation?: Record<string, unknown> | null }).aiExplanation;
+        if (explanation && (explanation as any).modelScore === false && !(explanation as any).manualReviewCompleted) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Risk assessment is a non-model (LLM heuristic) output — manual review must be recorded before clearance",
+          });
+        }
+      }
 
       // Permify: assert officer can assess this declaration
       const permifyAction = input.status === "cleared" ? "release" :
