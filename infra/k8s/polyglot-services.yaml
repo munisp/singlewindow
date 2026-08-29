@@ -1000,7 +1000,14 @@ spec:
         fsGroup: 1000
       containers:
         - name: openappsec-agent
-          image: openappsec/agent:latest
+          # P0-11 (PRA-104): mutable tags are FORBIDDEN on the WAF agent. Pin by
+          # digest of the approved openappsec/agent release. This manifest
+          # intentionally carries a placeholder digest: deploying without
+          # substituting a real digest fails closed (the pod cannot start)
+          # rather than silently running an unpinned/possibly tampered image.
+          # Resolve at deploy time, e.g.:
+          #   docker buildx imagetools inspect openappsec/agent:<approved-tag>
+          image: openappsec/agent@sha256:REPLACE_WITH_APPROVED_OPENAPPSEC_AGENT_DIGEST
           ports:
             - containerPort: 8090
               name: http
