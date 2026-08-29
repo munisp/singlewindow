@@ -6,8 +6,13 @@ apisix:
     ip: 0.0.0.0
     port: 9180
   admin_key:
+    # P0-12 (PRA-107): NO hardcoded admin key. The key is env-required —
+    # render this config from the sealed secret
+    # (infra/k8s/secrets/sealed-secrets-templates.yaml: APISIX_ADMIN_KEY),
+    # e.g. `envsubst < config.yaml`. Deploying with the placeholder
+    # unresolved fails closed: the admin API rejects every call.
     - name: admin
-      key: tradegateway-apisix-admin-key-2026
+      key: ${APISIX_ADMIN_KEY}
       role: admin
   ssl:
     enable: false
