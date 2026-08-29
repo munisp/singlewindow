@@ -4,6 +4,35 @@
  *         and typed retrigger form schema registry.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
+
+// SW-E: the mutation paths (uploadGeoipCsv, upsertSchema, seedDefaultSchemas)
+// call db.ts helpers that throw "Database unavailable" without a database.
+// Mock the db module so the ROUTER logic is unit-tested (both routers import
+// ../db dynamically, which resolves to this mock). Query paths keep their
+// honest empty-state behaviour.
+vi.mock("./db", () => ({
+  createGeoipSeedJob: vi.fn().mockImplementation(async (data: Record<string, unknown>) => ({
+    id: 1,
+    status: "pending",
+    ...data,
+  })),
+  getGeoipSeedJobs: vi.fn().mockResolvedValue([]),
+  getGeoipSeedJobById: vi.fn().mockResolvedValue(null),
+  getGeoipSeedStats: vi.fn().mockResolvedValue({
+    totalRowsInserted: 0,
+    lastSeedAt: null,
+    seedJobs: { total: 0, pending: 0, running: 0, completed: 0, failed: 0 },
+  }),
+  getGeoIp: vi.fn().mockResolvedValue(null),
+  listWorkflowInputSchemas: vi.fn().mockResolvedValue([]),
+  getWorkflowInputSchema: vi.fn().mockResolvedValue(null),
+  upsertWorkflowInputSchema: vi.fn().mockImplementation(async (data: Record<string, unknown>) => ({
+    id: 1,
+    ...data,
+  })),
+  getSchemaVersionHistory: vi.fn().mockResolvedValue([]),
+}));
+
 import { geoipRouter } from "./routers/geoip";
 import { workflowSchemasRouter } from "./routers/workflowSchemas";
 

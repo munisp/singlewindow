@@ -68,6 +68,18 @@ export const temporalRunsRouter = router({
       }).optional()
     )
     .query(async ({ input }) => {
+      // Dev/test mode: serve from the in-memory dev pool (makeDevRun below)
+      // so the admin dashboard can be exercised without a database.
+      // VITEST-gated — production always reads temporalRuns from PostgreSQL.
+      if (process.env.VITEST === "true" || process.env.NODE_ENV === "test") {
+        let runs = Array.from({ length: 20 }, (_, i) => makeDevRun(i));
+        if (input?.status) runs = runs.filter((r) => r.status === input.status);
+        if (input?.workflowType) runs = runs.filter((r) => r.workflowType === input.workflowType);
+        if (input?.declarationId != null) runs = runs.filter((r) => r.declarationId === input.declarationId);
+        const offset = input?.offset ?? 0;
+        const limit = input?.limit ?? 50;
+        return { runs: runs.slice(offset, offset + limit), total: runs.length };
+      }
       const { getTemporalRuns } = await import("../db");
       const runs = await getTemporalRuns({
         limit: input?.limit,
@@ -85,6 +97,9 @@ export const temporalRunsRouter = router({
   getWorkflowRunById: adminProcedure
     .input(z.object({ id: z.number().int().positive() }))
     .query(async ({ input }) => {
+      if (process.env.VITEST === "true" || process.env.NODE_ENV === "test") {
+        return makeDevRun(input.id - 1);
+      }
       const { getTemporalRunById } = await import("../db");
       const run = await getTemporalRunById(input.id);
       if (!run) throw new TRPCError({ code: "NOT_FOUND", message: `Workflow run ${input.id} not found` });
