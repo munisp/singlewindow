@@ -59,7 +59,12 @@ class APISIXMiddleware:
     def __init__(self, service_name: str):
         self.service_name = service_name
         self.admin_url = os.getenv("APISIX_ADMIN_URL", "http://apisix:9180")
-        self.admin_key = os.getenv("APISIX_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+        # SW-S2-4: no default admin key — fail closed when unset.
+        self.admin_key = os.environ.get("APISIX_ADMIN_KEY")
+        if not self.admin_key:
+            raise RuntimeError(
+                "APISIX_ADMIN_KEY must be set — no default is provided (fail closed, SW-S2-4)"
+            )
         self.keycloak_url = os.getenv("KEYCLOAK_URL", "http://keycloak:8080")
         self.keycloak_realm = os.getenv("KEYCLOAK_REALM", "tradegateway")
         self.session = requests.Session()

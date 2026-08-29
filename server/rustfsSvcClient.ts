@@ -11,6 +11,34 @@
 
 const RUSTFS_SVC_URL = process.env.RUSTFS_SVC_URL ?? "http://localhost:4500";
 
+/**
+ * SW-S2-5: rustfs-svc requires a shared service token (boot-fatal unset in
+ * production on the Go side; mirrored here so misconfiguration fails at boot,
+ * not at first upload) and server-side key prefixing per caller — this client
+ * is the only intended caller and identifies as "trpc-backend".
+ */
+const RUSTFS_SERVICE_TOKEN = (() => {
+  const tok = process.env.RUSTFS_SERVICE_TOKEN ?? "";
+  if (!tok) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("[rustfsSvcClient] RUSTFS_SERVICE_TOKEN must be set in production.");
+    }
+    console.warn("[rustfsSvcClient] RUSTFS_SERVICE_TOKEN not set, using dev token. DO NOT use in production.");
+    return "dev-rustfs-service-token";
+  }
+  return tok;
+})();
+
+const RUSTFS_CALLER_ID = "trpc-backend";
+
+function rustfsAuthHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    Authorization: `Bearer ${RUSTFS_SERVICE_TOKEN}`,
+    "X-Rustfs-Caller": RUSTFS_CALLER_ID,
+    ...extra,
+  };
+}
+
 export interface UploadResult {
   key: string;
   url: string;
@@ -41,7 +69,7 @@ export async function rustfsUpload(
   const res = await fetch(`${RUSTFS_SVC_URL}/upload`, {
     method: "POST",
     body: form as unknown as BodyInit,
-    headers: form.getHeaders(),
+    headers: rustfsAuthHeaders(form.getHeaders() as Record<string, string>),
   });
 
   if (!res.ok) {
@@ -62,7 +90,7 @@ export async function rustfsPresign(
 ): Promise<string> {
   const res = await fetch(`${RUSTFS_SVC_URL}/presign`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: rustfsAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ key, expiresIn }),
   });
 
@@ -82,6 +110,7 @@ export async function rustfsDelete(key: string): Promise<void> {
   const encodedKey = encodeURIComponent(key);
   const res = await fetch(`${RUSTFS_SVC_URL}/delete/${encodedKey}`, {
     method: "DELETE",
+    headers: rustfsAuthHeaders(),
   });
 
   if (!res.ok) {
@@ -123,7 +152,7 @@ export async function rustfsScan(
     const res = await fetch(`${RUSTFS_SVC_URL}/scan`, {
       method: "POST",
       body: form as unknown as BodyInit,
-      headers: form.getHeaders(),
+      headers: rustfsAuthHeaders(form.getHeaders() as Record<string, string>),
       signal: AbortSignal.timeout(90_000), // ClamAV can be slow on large files
     });
 

@@ -12,19 +12,30 @@
 //
 // Configuration (environment variables):
 //   RUSTFS_ENDPOINT     (default: http://localhost:9000)
-//   RUSTFS_ACCESS_KEY   (default: tradegateway)
-//   RUSTFS_SECRET_KEY   (default: tradegateway-secret-key-2025)
+//   RUSTFS_ACCESS_KEY   (REQUIRED — no default; boot-refuses when unset)
+//   RUSTFS_SECRET_KEY   (REQUIRED — no default; boot-refuses when unset)
 //   RUSTFS_BUCKET       (default: tradegateway-docs)
 //   RUSTFS_REGION       (default: us-east-1)
+//   RUSTFS_SERVICE_TOKEN (REQUIRED in production — bearer token every caller must present;
+//                         development falls back to a known dev token with a warning)
 //   SVC_PORT            (default: 4500)
 //   CLAMSCAN_PATH       (default: clamscan)
 //   CLAMSCAN_DB_DIR     (default: /var/lib/clamav)
+//
+// Security (Phase-6 SW-S2-5):
+//   - Every data-plane endpoint (/upload, /scan, /download, /presign, /delete)
+//     requires `Authorization: Bearer $RUSTFS_SERVICE_TOKEN` (timing-safe compare).
+//   - The only intended caller is the tRPC backend (server/rustfsSvcClient.ts).
+//   - Callers must identify themselves with X-Rustfs-Caller; every object key is
+//     server-side prefixed with that caller id so one caller cannot read, overwrite,
+//     presign or delete another caller's objects. Path traversal (..) is rejected.
 
 package main
 
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +44,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -52,15 +64,50 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// mustEnv fails closed: a missing secret refuses boot in EVERY environment —
+// silently defaulting object-storage credentials is how buckets get hijacked.
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("[rustfs-svc] FATAL: %s must be set — no default is provided (fail closed)", key)
+	}
+	return v
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" ||
+		os.Getenv("NODE_ENV") == "production" ||
+		os.Getenv("GO_ENV") == "production"
+}
+
+// devServiceToken is ONLY ever used outside production, with a loud warning.
+const devServiceToken = "dev-rustfs-service-token"
+
+func loadServiceToken() string {
+	tok := os.Getenv("RUSTFS_SERVICE_TOKEN")
+	if isProduction() {
+		if tok == "" || tok == devServiceToken || len(tok) < 32 {
+			log.Fatalf("[rustfs-svc] FATAL: RUSTFS_SERVICE_TOKEN must be set to a strong secret (>=32 chars, not a dev value) in production")
+		}
+		return tok
+	}
+	if tok == "" {
+		log.Printf("[rustfs-svc] WARN: RUSTFS_SERVICE_TOKEN unset — using development token; NEVER deploy this configuration")
+		return devServiceToken
+	}
+	return tok
+}
+
 var (
 	s3Endpoint   = envOr("RUSTFS_ENDPOINT", "http://localhost:9000")
-	accessKey    = envOr("RUSTFS_ACCESS_KEY", "tradegateway")
-	secretKey    = envOr("RUSTFS_SECRET_KEY", "tradegateway-secret-key-2025")
+	accessKey    = mustEnv("RUSTFS_ACCESS_KEY")
+	secretKey    = mustEnv("RUSTFS_SECRET_KEY")
 	bucketName   = envOr("RUSTFS_BUCKET", "tradegateway-docs")
 	s3Region     = envOr("RUSTFS_REGION", "us-east-1")
 	svcPort      = envOr("SVC_PORT", "4500")
 	clamscanPath = envOr("CLAMSCAN_PATH", "clamscan")
 	clamDBDir    = envOr("CLAMSCAN_DB_DIR", "/var/lib/clamav")
+	serviceToken = loadServiceToken()
 )
 
 // ─── S3 client ───────────────────────────────────────────────────────────────
@@ -85,6 +132,65 @@ func newS3Client() *s3.Client {
 }
 
 var s3c = newS3Client()
+
+// ─── Auth & key scoping (SW-S2-5) ────────────────────────────────────────────
+
+// requireServiceToken wraps the data-plane mux: every request must present the
+// shared service token. Comparison is constant-time. /health stays public for
+// orchestrator probes.
+func requireServiceToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		const prefix = "Bearer "
+		auth := r.Header.Get("Authorization")
+		tok := strings.TrimPrefix(auth, prefix)
+		provided := []byte(tok)
+		expected := []byte(serviceToken)
+		if !strings.HasPrefix(auth, prefix) || len(provided) != len(expected) ||
+			subtle.ConstantTimeCompare(provided, expected) != 1 {
+			jsonError(w, http.StatusUnauthorized, "missing or invalid service token")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+var callerSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
+
+// callerPrefix derives the per-caller key namespace from the X-Rustfs-Caller
+// header. The tRPC backend is the only intended caller ("trpc-backend").
+func callerPrefix(r *http.Request) (string, error) {
+	caller := strings.TrimSpace(r.Header.Get("X-Rustfs-Caller"))
+	if caller == "" {
+		return "", fmt.Errorf("missing X-Rustfs-Caller header")
+	}
+	safe := callerSanitizer.ReplaceAllString(caller, "_")
+	if len(safe) > 64 {
+		safe = safe[:64]
+	}
+	return safe + "/", nil
+}
+
+// scopedKey confines a caller-supplied key to the caller's namespace and
+// rejects path traversal. Idempotent: an already-prefixed key passes through.
+func scopedKey(prefix, key string) (string, error) {
+	clean := strings.TrimPrefix(strings.TrimSpace(key), "/")
+	if clean == "" {
+		return "", fmt.Errorf("key is required")
+	}
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("key must not contain '..' path segments")
+		}
+	}
+	if strings.HasPrefix(clean, prefix) {
+		return clean, nil
+	}
+	return prefix + clean, nil
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -204,6 +310,16 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	if key == "" {
 		key = fmt.Sprintf("uploads/%d-%s", time.Now().UnixMilli(), header.Filename)
 	}
+	prefix, perr := callerPrefix(r)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	key, perr = scopedKey(prefix, key)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
 	ct := r.FormValue("contentType")
 	if ct == "" {
 		ct = header.Header.Get("Content-Type")
@@ -313,6 +429,17 @@ func handlePresign(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "key is required")
 		return
 	}
+	prefix, perr := callerPrefix(r)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	scoped, perr := scopedKey(prefix, body.Key)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	body.Key = scoped
 	if body.ExpiresIn <= 0 {
 		body.ExpiresIn = 3600
 	}
@@ -343,6 +470,16 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "key is required in path")
 		return
 	}
+	prefix, perr := callerPrefix(r)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	key, perr = scopedKey(prefix, key)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -366,6 +503,16 @@ func handleDownload(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/download/")
 	if key == "" {
 		jsonError(w, http.StatusBadRequest, "key is required in path")
+		return
+	}
+	prefix, perr := callerPrefix(r)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
+		return
+	}
+	key, perr = scopedKey(prefix, key)
+	if perr != nil {
+		jsonError(w, http.StatusBadRequest, perr.Error())
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -416,9 +563,9 @@ func main() {
 	mux.HandleFunc("/health", handleHealth)
 
 	addr := ":" + svcPort
-	log.Printf("[rustfs-svc] Listening on %s | bucket=%s | endpoint=%s | clamavReady=%v",
+	log.Printf("[rustfs-svc] Listening on %s | bucket=%s | endpoint=%s | clamavReady=%v | auth=service-token",
 		addr, bucketName, s3Endpoint, isClamAVReady())
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, requireServiceToken(mux)); err != nil {
 		log.Fatalf("[rustfs-svc] Fatal: %v", err)
 	}
 }

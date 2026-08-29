@@ -42,7 +42,14 @@ app.add_middleware(
 
 WAZUH_BASE_URL = os.getenv("WAZUH_BASE_URL", "https://wazuh-manager:55000")
 WAZUH_USER = os.getenv("WAZUH_USER", "wazuh")
-WAZUH_PASSWORD = os.getenv("WAZUH_PASSWORD", "wazuh")
+def _required_env(name):
+    """SW-S2-4: secrets have no defaults — refuse to boot when unset."""
+    _v = os.getenv(name)
+    if not _v:
+        raise RuntimeError(f"{name} must be set — no default is provided (fail closed, SW-S2-4)")
+    return _v
+
+WAZUH_PASSWORD = _required_env("WAZUH_PASSWORD")
 
 # ─── MITRE ATT&CK Tactic/Technique mapping ──────────────────────────────────
 

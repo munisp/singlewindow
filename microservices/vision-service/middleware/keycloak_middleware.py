@@ -20,6 +20,9 @@ class KeycloakMiddleware:
         realm = os.getenv("KEYCLOAK_REALM", "tradegateway")
         self.jwks_url = f"{base}/realms/{realm}/protocol/openid-connect/certs"
         self.issuer = f"{base}/realms/{realm}"
+        # SW-S2-6: audience + issuer are enforced on every token (fail closed).
+        # Set KEYCLOAK_EXPECTED_AUDIENCE to the client id tokens are issued for.
+        self.expected_audience = os.getenv("KEYCLOAK_EXPECTED_AUDIENCE", "tradegateway-api")
         self._jwks: Optional[Dict] = None
         self._jwks_lock = threading.Lock()
         self._last_fetch = 0.0
@@ -70,11 +73,14 @@ class KeycloakMiddleware:
                 return None
             from jwt.algorithms import RSAAlgorithm
             public_key = RSAAlgorithm.from_jwk(key)
+            # SW-S2-6: enforce audience and issuer against configured expected
+            # values — a token for another audience or issuer is rejected.
             claims = jwt.decode(
                 token,
                 public_key,
                 algorithms=["RS256"],
-                options={"verify_aud": False},
+                audience=self.expected_audience,
+                issuer=self.issuer,
             )
             return claims
         except Exception as e:

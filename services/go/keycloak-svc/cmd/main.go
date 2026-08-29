@@ -395,7 +395,7 @@ func (s *KeycloakService) ValidateToken(ctx context.Context, tokenStr string) (*
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return pubKey, nil
-	}, jwt.WithIssuer(cfg.RealmURL), jwt.WithExpirationRequired())
+	}, jwt.WithIssuer(cfg.RealmURL), jwt.WithAudience(cfg.Audience), jwt.WithExpirationRequired())
 
 	if err != nil {
 		return &ValidationResult{Valid: false, Error: fmt.Sprintf("token validation failed: %v", err)}, nil

@@ -213,7 +213,15 @@ export async function getOpenSearchClient() {
 
   const OPENSEARCH_URL = process.env.OPENSEARCH_URL ?? "http://localhost:9200";
   const OPENSEARCH_USER = process.env.OPENSEARCH_USERNAME ?? "admin";
-  const OPENSEARCH_PASS = process.env.OPENSEARCH_PASSWORD ?? "admin";
+  // SW-S2-4: no default password. Unset → fail closed (no client), never "admin/admin".
+  const OPENSEARCH_PASS = process.env.OPENSEARCH_PASSWORD ?? "";
+  if (!OPENSEARCH_PASS) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("[middlewareClients] OPENSEARCH_PASSWORD must be set in production (no default).");
+    }
+    console.warn("[middlewareClients] OPENSEARCH_PASSWORD not set — OpenSearch client unavailable (fail closed).");
+    return null;
+  }
 
   try {
     const { Client } = await import("@opensearch-project/opensearch");

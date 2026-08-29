@@ -53,8 +53,15 @@ logger = logging.getLogger("opensearch-indexer")
 # ─── Configuration ─────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
 OPENSEARCH_URL = os.getenv("OPENSEARCH_URL", "http://opensearch:9200")
+def _required_env(name):
+    """SW-S2-4: secrets have no defaults — refuse to boot when unset."""
+    _v = os.getenv(name)
+    if not _v:
+        raise RuntimeError(f"{name} must be set — no default is provided (fail closed, SW-S2-4)")
+    return _v
+
 OPENSEARCH_USER = os.getenv("OPENSEARCH_USER", "admin")
-OPENSEARCH_PASS = os.getenv("OPENSEARCH_PASSWORD", "TradeGateway_OS_2026!")
+OPENSEARCH_PASS = _required_env("OPENSEARCH_PASSWORD")
 PORT = int(os.getenv("PORT", "8102"))
 
 # ─── Index Mappings ────────────────────────────────────────────────────────────
