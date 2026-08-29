@@ -1,4 +1,8 @@
 import "dotenv/config";
+// Phase-7 OTel: start the SDK BEFORE any instrumented module (express, pg,
+// ioredis, kafkajs, undici) is loaded. No-op unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set — telemetry is fail-open and must never break boot (OTEL_DESIGN.md §1).
+import "./telemetryBootstrap";
 // Override DATABASE_URL: use LOCAL_DATABASE_URL if set, otherwise keep injected URL only
 // if it is a PostgreSQL URL; otherwise fall back to the default local postgres connection.
 const _injectedDbUrl = process.env.DATABASE_URL ?? "";
@@ -1200,6 +1204,14 @@ async function startServer() {
   }).catch(() => {});
   // Sprint 63: WebSocket server for real-time notifications
   setupWebSocketServer(server);
+
+  // ── OTel tenant attribution — JWT claim / edge header → baggage (Phase-7) ────
+  // Must run before any handler so downstream server spans inherit the baggage.
+  // No-op when telemetry is disabled; never blocks a request.
+  {
+    const { tenantBaggageMiddleware } = await import("./telemetry");
+    app.use(tenantBaggageMiddleware);
+  }
 
   // ── Request correlation ID middleware ───────────────────────────────────────────────
   // Injects X-Request-ID header for distributed tracing. Uses incoming header if

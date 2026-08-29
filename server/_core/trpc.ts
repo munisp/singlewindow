@@ -4,6 +4,8 @@ import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { redisRateLimit } from './redis';
 import crypto from 'crypto';
+import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import { withSpan } from "./telemetry";
 
 // ─── CSRF Token Utilities (B3 FIX) ────────────────────────────────────────────
 // Implements the Double Submit Cookie pattern:
@@ -80,7 +82,37 @@ const t = initTRPC.context<TrpcContext>().create({
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
+
+// ─── OTel tracing middleware (Phase-7) ────────────────────────────────────────
+// One span per tRPC procedure invocation; span name = procedure path.
+// No-op (non-recording span) when telemetry is disabled; tenant.id/agency are
+// copied from request baggage onto the span.
+const otelProcedureSpan = t.middleware(async opts => {
+  const { path, type, next } = opts;
+  return withSpan(
+    path,
+    {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        "rpc.system": "trpc",
+        "rpc.procedure": path,
+        "rpc.trpc.method": type,
+      },
+    },
+    async span => {
+      const result = await next(opts);
+      if (!result.ok) {
+        span.recordException(result.error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: result.error.message });
+      }
+      return result;
+    }
+  );
+});
+
+// All procedures derive from this base so every procedure gets a span.
+const baseProcedure = t.procedure.use(otelProcedureSpan);
+export const publicProcedure = baseProcedure;
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -103,14 +135,14 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+export const protectedProcedure = baseProcedure.use(requireUser);
 
 /**
  * SW-G7: finance-console procedures — restricted to the finance and admin
  * roles. Finance dashboards expose platform-wide money data (payment queues,
  * balances, ledger mirrors) and must never be reachable by ordinary traders.
  */
-export const financeProcedure = t.procedure.use(
+export const financeProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
@@ -127,7 +159,7 @@ export const financeProcedure = t.procedure.use(
   }),
 );
 
-export const adminProcedure = t.procedure.use(
+export const adminProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
@@ -167,7 +199,7 @@ export const adminProcedure = t.procedure.use(
  *   export const customsOfficerProcedure = keycloakRoleProcedure("tradegateway-customs-officer");
  */
 export function keycloakRoleProcedure(requiredRole: string) {
-  return t.procedure.use(
+  return baseProcedure.use(
     t.middleware(async opts => {
       const { ctx, next } = opts;
       if (!ctx.user) {
@@ -218,7 +250,7 @@ export const keycloakAdminProcedure = keycloakRoleProcedure("tradegateway-admin"
 /**
  * keycloakCustomsOfficerProcedure — requires customs_officer or higher.
  */
-export const keycloakCustomsOfficerProcedure = t.procedure.use(
+export const keycloakCustomsOfficerProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
     if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });

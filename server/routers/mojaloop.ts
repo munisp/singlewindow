@@ -34,6 +34,8 @@ import { TRPCError } from "@trpc/server";
 import nodeCrypto from "crypto";
 import { getDb } from "../db";
 import { fetchWithResilience } from "../_core/middlewareClients";
+import { SpanKind as OtelSpanKind } from "@opentelemetry/api";
+import { withSpan as withOtelSpan, injectKafkaHeaders as injectOtelHeaders } from "../_core/telemetry";
 import { paymentIdempotencyKeys } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -462,25 +464,43 @@ export const mojaloopRouter = router({
           // P0-7: money-movement calls go through the resilience wrapper
           // (timeout + retry + circuit breaker) — a raw fetch without a
           // timeout can hang a payment request indefinitely.
-          await fetchWithResilience(`${MOJALOOP_URL}/transfers`, {
-            method: "POST",
-            timeoutMs: 10_000,
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-              "FSPIOP-Source": "CUSTOMS_AUTHORITY",
-              "FSPIOP-Destination": input.fspId,
+          // Phase-7 OTel: FSPIOP client span per transfer call; the FSPIOP
+          // correlation ID (transferId) is a span attribute, and traceparent is
+          // propagated to the switch via the fetch headers.
+          const transferHeaders: Record<string, string> = {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+            "FSPIOP-Source": "CUSTOMS_AUTHORITY",
+            "FSPIOP-Destination": input.fspId,
+          };
+          injectOtelHeaders(transferHeaders);
+          await withOtelSpan(
+            "mojaloop.transfers.prepare",
+            {
+              kind: OtelSpanKind.CLIENT,
+              attributes: {
+                "mojaloop.correlation_id": transferId,
+                "fspiop.source": "CUSTOMS_AUTHORITY",
+                "fspiop.destination": input.fspId,
+                "payment.amount_minor_units": amountMinorUnits,
+                "payment.currency": input.currency,
+              },
             },
-            body: JSON.stringify({
-              transferId,
-              payerFsp: input.fspId,
-              payeeFsp: "CUSTOMS_AUTHORITY",
-              amount: { amount: minorToMajorString(amountMinorUnits), currency: input.currency },
-              ilpPacket,
-              condition,
-              expiration: expiresAt.toISOString(),
-            }),
-          }, "mojaloop-switch");
+            () => fetchWithResilience(`${MOJALOOP_URL}/transfers`, {
+              method: "POST",
+              timeoutMs: 10_000,
+              headers: transferHeaders,
+              body: JSON.stringify({
+                transferId,
+                payerFsp: input.fspId,
+                payeeFsp: "CUSTOMS_AUTHORITY",
+                amount: { amount: minorToMajorString(amountMinorUnits), currency: input.currency },
+                ilpPacket,
+                condition,
+                expiration: expiresAt.toISOString(),
+              }),
+            }, "mojaloop-switch")
+          );
         } catch (e) {
           console.warn(`[Mojaloop] Transfer request to switch failed: ${e}. Transfer remains PENDING.`);
         }
@@ -521,10 +541,19 @@ export const mojaloopRouter = router({
         const available = await mojaloopAvailable();
         if (available) {
           try {
-            const res = await fetch(`${MOJALOOP_URL}/transfers/${input.transferId}`, {
-              headers: { "Authorization": `Bearer ${MOJALOOP_API_KEY}` },
-              signal: AbortSignal.timeout(5_000),
-            });
+            const statusHeaders: Record<string, string> = { "Authorization": `Bearer ${MOJALOOP_API_KEY}` };
+            injectOtelHeaders(statusHeaders);
+            const res = await withOtelSpan(
+              "mojaloop.transfers.status",
+              {
+                kind: OtelSpanKind.CLIENT,
+                attributes: { "mojaloop.correlation_id": input.transferId },
+              },
+              () => fetch(`${MOJALOOP_URL}/transfers/${input.transferId}`, {
+                headers: statusHeaders,
+                signal: AbortSignal.timeout(5_000),
+              })
+            );
             if (res.ok) return res.json();
           } catch { /* fall through */ }
         }

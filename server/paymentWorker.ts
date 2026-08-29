@@ -23,6 +23,8 @@ import {
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import crypto from "crypto";
+import { SpanKind } from "@opentelemetry/api";
+import { withSpan, injectKafkaHeaders } from "./_core/telemetry";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -141,16 +143,31 @@ async function callMojaloopTransfer(
 
   // ── Phase 1: POST /transfers — RESERVED ────────────────────────────────────
   try {
-    const prepareRes = await fetch(`${MOJALOOP_URL}/transfers`, {
-      method: "POST",
-      headers: {
-        "Content-Type": MOJALOOP_CONTENT_TYPE,
-        "Accept": MOJALOOP_CONTENT_TYPE,
-        "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-        "FSPIOP-Source": FSPIOP_SOURCE,
-        "FSPIOP-Destination": FSPIOP_DESTINATION,
-        "Date": new Date().toUTCString(),
+    // Phase-7 OTel: FSPIOP span per transfer call + traceparent propagation.
+    const prepareHeaders: Record<string, string> = {
+      "Content-Type": MOJALOOP_CONTENT_TYPE,
+      "Accept": MOJALOOP_CONTENT_TYPE,
+      "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+      "FSPIOP-Source": FSPIOP_SOURCE,
+      "FSPIOP-Destination": FSPIOP_DESTINATION,
+      "Date": new Date().toUTCString(),
+    };
+    injectKafkaHeaders(prepareHeaders);
+    const prepareRes = await withSpan(
+      "mojaloop.transfers.prepare",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "mojaloop.correlation_id": item.transferId,
+          "fspiop.source": FSPIOP_SOURCE,
+          "fspiop.destination": FSPIOP_DESTINATION,
+          "payment.amount_minor_units": Number(item.amountMinorUnits),
+          "payment.currency": item.currency,
+        },
       },
+      () => fetch(`${MOJALOOP_URL}/transfers`, {
+      method: "POST",
+      headers: prepareHeaders,
       body: JSON.stringify({
         transferId: item.transferId,
         payerFsp: FSPIOP_SOURCE,
@@ -168,7 +185,8 @@ async function callMojaloopTransfer(
         expiration,
       }),
       signal: AbortSignal.timeout(15_000),
-    });
+      })
+    );
 
     // Mojaloop returns 202 Accepted for async processing; 200 for sync
     if (!prepareRes.ok && prepareRes.status !== 202) {
@@ -181,23 +199,36 @@ async function callMojaloopTransfer(
 
   // ── Phase 2: PUT /transfers/{id} — COMMITTED ────────────────────────────────
   try {
-    const fulfillRes = await fetch(`${MOJALOOP_URL}/transfers/${item.transferId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": MOJALOOP_CONTENT_TYPE,
-        "Accept": MOJALOOP_CONTENT_TYPE,
-        "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-        "FSPIOP-Source": FSPIOP_SOURCE,
-        "FSPIOP-Destination": FSPIOP_DESTINATION,
-        "Date": new Date().toUTCString(),
+    const fulfillHeaders: Record<string, string> = {
+      "Content-Type": MOJALOOP_CONTENT_TYPE,
+      "Accept": MOJALOOP_CONTENT_TYPE,
+      "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+      "FSPIOP-Source": FSPIOP_SOURCE,
+      "FSPIOP-Destination": FSPIOP_DESTINATION,
+      "Date": new Date().toUTCString(),
+    };
+    injectKafkaHeaders(fulfillHeaders);
+    const fulfillRes = await withSpan(
+      "mojaloop.transfers.fulfil",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "mojaloop.correlation_id": item.transferId,
+          "fspiop.source": FSPIOP_SOURCE,
+          "fspiop.destination": FSPIOP_DESTINATION,
+        },
       },
+      () => fetch(`${MOJALOOP_URL}/transfers/${item.transferId}`, {
+      method: "PUT",
+      headers: fulfillHeaders,
       body: JSON.stringify({
         fulfilment,
         completedTimestamp: new Date().toISOString(),
         transferState: "COMMITTED",
       }),
       signal: AbortSignal.timeout(15_000),
-    });
+      })
+    );
 
     if (fulfillRes.ok || fulfillRes.status === 202) {
       const body = await fulfillRes.json().catch(() => ({}));

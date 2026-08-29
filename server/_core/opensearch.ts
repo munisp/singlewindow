@@ -9,8 +9,38 @@
  */
 
 import { Client } from "@opensearch-project/opensearch";
+import { SpanKind } from "@opentelemetry/api";
+import { withSpan } from "./telemetry";
 
 let _client: Client | null = null;
+
+// Phase-7 OTel: wrap the OpenSearch client so every index/search call emits a
+// CLIENT span. No-op (non-recording) when telemetry is disabled.
+const TRACED_METHODS = new Set(["index", "search", "bulk", "delete", "update", "count"]);
+
+function traceClient(client: Client): Client {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof prop === "string" && TRACED_METHODS.has(prop) && typeof value === "function") {
+        return (...args: any[]) =>
+          withSpan(
+            `opensearch.${prop}`,
+            {
+              kind: SpanKind.CLIENT,
+              attributes: {
+                "db.system": "opensearch",
+                "db.operation": prop,
+                "db.opensearch.index": (args[0] as any)?.index,
+              },
+            },
+            () => value.apply(target, args)
+          );
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 export function getOpenSearchClient(): Client | null {
   if (_client) return _client;
@@ -19,7 +49,7 @@ export function getOpenSearchClient(): Client | null {
     // Graceful degradation — OpenSearch is optional in dev
     return null;
   }
-  _client = new Client({
+  _client = traceClient(new Client({
     node: url,
     auth: process.env.OPENSEARCH_USERNAME
       ? {
@@ -30,7 +60,7 @@ export function getOpenSearchClient(): Client | null {
     ssl: {
       rejectUnauthorized: process.env.NODE_ENV === "production",
     },
-  });
+  }));
   return _client;
 }
 
