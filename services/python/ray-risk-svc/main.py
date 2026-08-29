@@ -1,10 +1,31 @@
 """
-TradeGateway NGSWTP — Ray Distributed ML Risk Scoring Service
+TradeGateway NGSWTP — Declaration Risk Scoring Service
 Port: 8106
 
-Provides gradient-boosting risk scoring for customs declarations using
-Ray Serve for distributed inference. Includes a model registry, A/B test
-framework, and feature importance reporting.
+Scoring is performed by a deterministic, transparent rule engine (HS chapter
+risk, origin risk, transshipment risk, trader history, value anomaly, AEO).
+The rules are the first line of defence and always run.
+
+Model registry: this service is a THIN, HONEST client of a real MLflow
+registry (env MLFLOW_TRACKING_URI). It keeps no model data of its own:
+  * MLFLOW_TRACKING_URI unset / registry unreachable / mlflow not installed
+    -> registry endpoints return 503 {"status": "REGISTRY_UNAVAILABLE"}.
+    Fake registry entries are never served. A previous version hard-coded a
+    MODEL_REGISTRY list with invented accuracy figures; it was removed.
+
+A/B testing: deterministic, hash-based traffic split on entity ID between
+two env-configured model versions (AB_CHAMPION_MODEL / AB_CHALLENGER_MODEL,
+format "name:version" or "name/version", AB_TRAFFIC_SPLIT_PCT percent to the
+champion). Both versions' REAL metrics are surfaced live from MLflow. No
+invented request counts or win rates.
+
+Environment:
+  PORT                   — listen port (default 8106)
+  MLFLOW_TRACKING_URI    — MLflow tracking server URI (e.g. http://mlflow:5000)
+  MLFLOW_REGISTRY_TTL_S  — registry read cache TTL seconds (default 30)
+  AB_CHAMPION_MODEL      — "name:version" serving the champion slice
+  AB_CHALLENGER_MODEL    — "name:version" serving the challenger slice
+  AB_TRAFFIC_SPLIT_PCT   — percent of entities hashed to champion (default 50)
 """
 
 from __future__ import annotations
@@ -14,9 +35,7 @@ import hashlib
 import json
 import math
 import os
-import random
 import time
-from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
@@ -62,69 +81,185 @@ HS_CHAPTER_RISK: dict[str, float] = {
 HIGH_RISK_ORIGINS = {"IR", "KP", "SY", "CU", "VE", "MM", "BY", "RU"}
 HIGH_RISK_TRANSSHIP = {"AEDXB", "SGSIN", "MYPKG", "TRTPE", "CNSHA", "CNNGB", "UAODS", "PKKAR"}
 
-# ─── Model Registry ───────────────────────────────────────────────────────────
+# ─── Real MLflow registry client (fail-closed) ────────────────────────────────
 
-@dataclass
-class ModelVersion:
-    version_id: str
-    version: str
-    algorithm: str
-    accuracy: float
-    f1_score: float
-    precision: float
-    recall: float
-    auc_roc: float
-    training_samples: int
-    feature_count: int
-    status: str  # "champion" | "challenger" | "archived"
-    created_at: str
-    promoted_at: Optional[str] = None
-    ab_test_id: Optional[str] = None
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "").strip() or None
+MLFLOW_REGISTRY_TTL_S = int(os.getenv("MLFLOW_REGISTRY_TTL_S", "30"))
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+AB_CHAMPION_MODEL = os.getenv("AB_CHAMPION_MODEL", "").strip() or None
+AB_CHALLENGER_MODEL = os.getenv("AB_CHALLENGER_MODEL", "").strip() or None
+AB_TRAFFIC_SPLIT_PCT = int(os.getenv("AB_TRAFFIC_SPLIT_PCT", "50"))
+
+_mlflow_client = None
+_mlflow_client_error: Optional[str] = None
+_registry_cache: dict[str, tuple[float, Any]] = {}
 
 
-def _make_version(ver: str, algo: str, acc: float, f1: float, prec: float,
-                  rec: float, auc: float, samples: int, status: str,
-                  created: str, promoted: Optional[str] = None) -> ModelVersion:
-    vid = hashlib.sha1(f"{ver}{algo}{created}".encode()).hexdigest()[:12]
-    return ModelVersion(
-        version_id=vid, version=ver, algorithm=algo,
-        accuracy=acc, f1_score=f1, precision=prec, recall=rec, auc_roc=auc,
-        training_samples=samples, feature_count=12, status=status,
-        created_at=created, promoted_at=promoted,
+def get_mlflow_client():
+    """
+    Lazily build a real MLflow client. Returns None (and records the reason)
+    when the registry is unconfigured or mlflow is unavailable. Never fakes
+    a registry.
+    """
+    global _mlflow_client, _mlflow_client_error
+    if _mlflow_client is not None:
+        return _mlflow_client
+    if not MLFLOW_TRACKING_URI:
+        _mlflow_client_error = "MLFLOW_TRACKING_URI not set"
+        return None
+    try:
+        from mlflow.tracking import MlflowClient
+        _mlflow_client = MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
+        # Cheap liveness check: list registered models (may be empty).
+        _mlflow_client.search_registered_models(max_results=1)
+        _mlflow_client_error = None
+        return _mlflow_client
+    except Exception as exc:
+        _mlflow_client_error = f"{type(exc).__name__}: {exc}"
+        _mlflow_client = None
+        return None
+
+
+def registry_unavailable(detail: Optional[str] = None) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "status": "REGISTRY_UNAVAILABLE",
+            "message": "No real MLflow model registry is reachable. This service "
+                       "never fabricates registry entries.",
+            "reason": detail or _mlflow_client_error or "unknown",
+        },
     )
 
 
-MODEL_REGISTRY: list[ModelVersion] = [
-    _make_version("v1.0.0", "GradientBoosting", 0.812, 0.798, 0.821, 0.776, 0.871,
-                  50000, "archived", "2024-06-01T00:00:00Z", "2024-07-01T00:00:00Z"),
-    _make_version("v1.1.0", "GradientBoosting", 0.841, 0.829, 0.848, 0.811, 0.893,
-                  75000, "archived", "2024-09-01T00:00:00Z", "2024-10-01T00:00:00Z"),
-    _make_version("v2.0.0", "XGBoost", 0.878, 0.864, 0.882, 0.847, 0.921,
-                  120000, "archived", "2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"),
-    _make_version("v2.1.0", "XGBoost", 0.891, 0.879, 0.894, 0.865, 0.934,
-                  150000, "champion", "2025-06-01T00:00:00Z", "2025-07-01T00:00:00Z"),
-    _make_version("v3.0.0-beta", "LightGBM", 0.903, 0.891, 0.908, 0.875, 0.948,
-                  200000, "challenger", "2025-12-01T00:00:00Z"),
-]
+def _cached(key: str, producer):
+    """Small TTL cache so live registry reads don't hammer MLflow."""
+    now = time.time()
+    hit = _registry_cache.get(key)
+    if hit and now - hit[0] < MLFLOW_REGISTRY_TTL_S:
+        return hit[1]
+    value = producer()
+    _registry_cache[key] = (now, value)
+    return value
 
-AB_TESTS: list[dict] = [
-    {
-        "test_id": "ab-2025-q4-001",
-        "champion_version": "v2.1.0",
-        "challenger_version": "v3.0.0-beta",
-        "traffic_split_pct": 10,
-        "status": "running",
-        "started_at": "2026-01-01T00:00:00Z",
-        "champion_accuracy": 0.891,
-        "challenger_accuracy": 0.903,
-        "champion_requests": 45230,
-        "challenger_requests": 5025,
-        "winner": None,
+
+def _parse_model_ref(ref: str) -> tuple[str, str]:
+    """Parse 'name:version' or 'name/version' into (name, version)."""
+    if ":" in ref:
+        name, _, version = ref.partition(":")
+    elif "/" in ref:
+        name, _, version = ref.partition("/")
+    else:
+        raise ValueError(f"Invalid model reference {ref!r}; expected 'name:version'")
+    return name.strip(), version.strip()
+
+
+def _version_to_dict(mv, run_metrics: Optional[dict] = None) -> dict:
+    """Convert a real MLflow ModelVersion to a plain dict with REAL data only."""
+    return {
+        "name": mv.name,
+        "version": str(mv.version),
+        "status": mv.status,
+        "current_stage": getattr(mv, "current_stage", None),
+        "aliases": sorted(getattr(mv, "aliases", []) or []),
+        "description": getattr(mv, "description", None),
+        "run_id": getattr(mv, "run_id", None),
+        "source": getattr(mv, "source", None),
+        "creation_timestamp": getattr(mv, "creation_timestamp", None),
+        "last_updated_timestamp": getattr(mv, "last_updated_timestamp", None),
+        "tags": dict(getattr(mv, "tags", {}) or {}),
+        # Real run metrics from MLflow, or None — never invented.
+        "metrics": run_metrics,
     }
-]
+
+
+def _run_metrics_for_version(client, mv) -> Optional[dict]:
+    """Fetch the REAL metrics of the MLflow run that produced this version."""
+    run_id = getattr(mv, "run_id", None)
+    if not run_id:
+        return None
+    try:
+        run = client.get_run(run_id)
+        return dict(run.data.metrics) or None
+    except Exception:
+        return None
+
+
+def list_registry_models() -> list[dict]:
+    client = get_mlflow_client()
+    if client is None:
+        raise registry_unavailable()
+    try:
+        def _produce():
+            out = []
+            for rm in client.search_registered_models():
+                for mv in client.search_model_versions(f"name='{rm.name}'"):
+                    out.append(_version_to_dict(mv, _run_metrics_for_version(client, mv)))
+            return out
+        return _cached("models", _produce)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise registry_unavailable(str(exc))
+
+
+def get_registry_model(ref: str) -> dict:
+    client = get_mlflow_client()
+    if client is None:
+        raise registry_unavailable()
+    try:
+        name, version = _parse_model_ref(ref)
+        mv = client.get_model_version(name, version)
+        return _version_to_dict(mv, _run_metrics_for_version(client, mv))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"status": "MODEL_NOT_FOUND", "reference": ref,
+                    "reason": f"{type(exc).__name__}: {exc}"},
+        )
+
+
+# ─── Deterministic A/B assignment ─────────────────────────────────────────────
+
+def ab_configured() -> bool:
+    return bool(AB_CHAMPION_MODEL and AB_CHALLENGER_MODEL)
+
+
+def assign_ab_bucket(entity_id: str) -> dict:
+    """
+    Deterministic hash-based split on entity ID. The same entity always lands
+    in the same bucket; no randomness, no state, reproducible across replicas.
+    """
+    digest = hashlib.sha256(entity_id.encode("utf-8")).hexdigest()
+    bucket = int(digest[:8], 16) % 100
+    variant = "champion" if bucket < AB_TRAFFIC_SPLIT_PCT else "challenger"
+    model_ref = AB_CHAMPION_MODEL if variant == "champion" else AB_CHALLENGER_MODEL
+    return {"bucket": bucket, "variant": variant, "model": model_ref}
+
+
+def describe_ab_test() -> dict:
+    """
+    Describe the env-configured deterministic A/B split and surface BOTH
+    versions' real metrics from MLflow. No fabricated request counts.
+    """
+    if not ab_configured():
+        return {
+            "status": "AB_NOT_CONFIGURED",
+            "message": "Set AB_CHAMPION_MODEL and AB_CHALLENGER_MODEL "
+                       "('name:version') to enable the deterministic A/B split.",
+        }
+    champion = get_registry_model(AB_CHAMPION_MODEL)      # 503/404 propagate
+    challenger = get_registry_model(AB_CHALLENGER_MODEL)
+    return {
+        "status": "RUNNING",
+        "assignment": "deterministic sha256(entity_id) bucket split",
+        "traffic_split_pct": {"champion": AB_TRAFFIC_SPLIT_PCT,
+                              "challenger": 100 - AB_TRAFFIC_SPLIT_PCT},
+        "champion": {"reference": AB_CHAMPION_MODEL, **champion},
+        "challenger": {"reference": AB_CHALLENGER_MODEL, **challenger},
+    }
 
 # ─── Feature Engineering ──────────────────────────────────────────────────────
 
@@ -237,7 +372,13 @@ def feature_importances(features: dict[str, float]) -> list[dict]:
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "ray-risk-svc"}
+    return {
+        "status": "ok",
+        "service": "ray-risk-svc",
+        "scoring_layer": "deterministic-rules",
+        "registry": "configured" if MLFLOW_TRACKING_URI else "unconfigured",
+        "ab_configured": ab_configured(),
+    }
 
 
 @app.post("/score")
@@ -246,15 +387,20 @@ def score_declaration(d: DeclarationInput):
     score = compute_risk_score(features)
     lane = assign_lane(score)
     importances = feature_importances(features)
-    champion = next((m for m in MODEL_REGISTRY if m.status == "champion"), MODEL_REGISTRY[-2])
-    return {
+    response = {
         "declaration_id": d.declaration_id,
         "risk_score": score,
         "lane": lane,
-        "model_version": champion.version,
+        # Honest identity: the score above comes from the deterministic rules.
+        "model_version": "rules-only-2.0.0",
         "feature_importances": importances,
         "scored_at": datetime.now(timezone.utc).isoformat(),
     }
+    # Deterministic A/B assignment: which registered model version WOULD serve
+    # this entity once the ML layer is promoted into the scoring path.
+    if ab_configured():
+        response["ab_assignment"] = assign_ab_bucket(d.declaration_id)
+    return response
 
 
 @app.post("/score/batch")
@@ -264,71 +410,86 @@ def score_batch(declarations: list[DeclarationInput]):
 
 @app.get("/models")
 def list_models():
-    return [m.to_dict() for m in MODEL_REGISTRY]
-
-
-@app.get("/models/{version_id}")
-def get_model(version_id: str):
-    m = next((m for m in MODEL_REGISTRY if m.version_id == version_id), None)
-    if not m:
-        raise HTTPException(status_code=404, detail="Model version not found")
-    return m.to_dict()
-
-
-@app.post("/models/{version_id}/promote")
-def promote_model(version_id: str):
-    target = next((m for m in MODEL_REGISTRY if m.version_id == version_id), None)
-    if not target:
-        raise HTTPException(status_code=404, detail="Model version not found")
-    for m in MODEL_REGISTRY:
-        if m.status == "champion":
-            m.status = "archived"
-    target.status = "champion"
-    target.promoted_at = datetime.now(timezone.utc).isoformat()
-    return {"message": f"Model {target.version} promoted to champion", "model": target.to_dict()}
+    """List REAL model versions from the MLflow registry (503 if unavailable)."""
+    return list_registry_models()
 
 
 @app.get("/models/metrics/history")
 def metrics_history():
+    """REAL metrics history: every registered version with its MLflow run metrics."""
+    models = list_registry_models()
     return [
         {
-            "version": m.version,
-            "algorithm": m.algorithm,
-            "accuracy": m.accuracy,
-            "f1_score": m.f1_score,
-            "precision": m.precision,
-            "recall": m.recall,
-            "auc_roc": m.auc_roc,
-            "training_samples": m.training_samples,
-            "status": m.status,
-            "created_at": m.created_at,
+            "name": m["name"],
+            "version": m["version"],
+            "aliases": m["aliases"],
+            "metrics": m["metrics"],
+            "creation_timestamp": m["creation_timestamp"],
         }
-        for m in MODEL_REGISTRY
+        for m in models
     ]
+
+
+@app.get("/models/{model_ref:path}")
+def get_model(model_ref: str):
+    """Fetch one REAL model version, referenced as 'name:version' or 'name/version'."""
+    return get_registry_model(model_ref)
+
+
+@app.post("/models/{model_ref:path}/promote")
+def promote_model(model_ref: str):
+    """
+    Promote a model version by setting the REAL MLflow 'champion' alias on it.
+    Fails closed (503) when no registry is reachable.
+    """
+    client = get_mlflow_client()
+    if client is None:
+        raise registry_unavailable()
+    try:
+        name, version = _parse_model_ref(model_ref)
+        client.set_registered_model_alias(name, "champion", version)
+        _registry_cache.clear()
+        return {
+            "message": f"Model {name}:{version} promoted to champion in MLflow",
+            "model": get_registry_model(model_ref),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"status": "MODEL_NOT_FOUND", "reference": model_ref,
+                    "reason": f"{type(exc).__name__}: {exc}"},
+        )
 
 
 @app.get("/ab-tests")
 def list_ab_tests():
-    return AB_TESTS
+    """
+    The single env-configured deterministic A/B split, with BOTH versions'
+    real metrics from MLflow. 503 when the registry is unavailable;
+    AB_NOT_CONFIGURED when the split is not env-configured.
+    """
+    return describe_ab_test()
 
 
 @app.post("/ab-tests")
-def create_ab_test(body: dict):
-    test = {
-        "test_id": f"ab-{int(time.time())}",
-        "champion_version": body.get("champion_version"),
-        "challenger_version": body.get("challenger_version"),
-        "traffic_split_pct": body.get("traffic_split_pct", 10),
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "champion_accuracy": 0.0,
-        "challenger_accuracy": 0.0,
-        "champion_requests": 0,
-        "challenger_requests": 0,
-        "winner": None,
-    }
-    AB_TESTS.append(test)
-    return test
+def create_ab_test():
+    """
+    A/B tests are configuration, not runtime state: they are defined via
+    AB_CHAMPION_MODEL / AB_CHALLENGER_MODEL / AB_TRAFFIC_SPLIT_PCT environment
+    variables so the split is identical across replicas. This endpoint cannot
+    invent an ad-hoc test.
+    """
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "status": "AB_ENV_CONFIGURED",
+            "message": "A/B tests are configured via environment variables "
+                       "(AB_CHAMPION_MODEL, AB_CHALLENGER_MODEL, "
+                       "AB_TRAFFIC_SPLIT_PCT) and cannot be created ad-hoc.",
+        },
+    )
 
 
 
