@@ -1,4 +1,4 @@
-// Package middleware provides Kafka, Dapr, Fluvio, and OpenTelemetry integration for workflow-service.
+// Package middleware provides Kafka, Dapr, and OpenTelemetry integration for workflow-service.
 // Kafka topics published:  workflow.started        (Temporal workflow initiated)
 //                          workflow.completed      (workflow reached terminal state)
 //                          workflow.failed         (workflow failed after retries)
@@ -8,7 +8,7 @@
 //                          payments.confirmed      (payment received — advance workflow)
 //                          oga.approved            (OGA permit received — advance workflow)
 // Dapr pub/sub:            publishes workflow state changes to pubsub
-// Fluvio:                  streams real-time workflow step progress to operations dashboard
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every workflow activity
 package middleware
 
@@ -61,13 +61,6 @@ func daprPort() string {
 		return p
 	}
 	return "3500"
-}
-
-func fluvioEndpoint() string {
-	if e := os.Getenv("FLUVIO_ENDPOINT"); e != "" {
-		return e
-	}
-	return "http://fluvio-sc:9003"
 }
 
 // ─── Event Schemas ────────────────────────────────────────────────────────────
@@ -307,52 +300,11 @@ func (d *DaprPublisher) PublishWorkflowEvent(ctx context.Context, evt WorkflowEv
 	return nil
 }
 
-// ─── Fluvio Publisher ─────────────────────────────────────────────────────────
-
-type FluvioPublisher struct {
-	endpoint   string
-	httpClient *http.Client
-	logger     *slog.Logger
-}
-
-func NewFluvioPublisher() *FluvioPublisher {
-	return &FluvioPublisher{
-		endpoint:   fluvioEndpoint(),
-		httpClient: &http.Client{Timeout: 3 * time.Second},
-		logger:     slog.Default().With("component", "fluvio-publisher", "service", ServiceName),
-	}
-}
-
-type FluvioWorkflowUpdate struct {
-	WorkflowID    string    `json:"workflow_id"`
-	DeclarationID int64     `json:"declaration_id"`
-	UCR           string    `json:"ucr"`
-	CurrentStep   string    `json:"current_step"`
-	Status        string    `json:"status"`
-	RiskLane      string    `json:"risk_lane,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-func (f *FluvioPublisher) PublishWorkflowUpdate(ctx context.Context, update FluvioWorkflowUpdate) error {
-	if update.UpdatedAt.IsZero() {
-		update.UpdatedAt = time.Now().UTC()
-	}
-	payload, _ := json.Marshal(update)
-	url := fmt.Sprintf("%s/api/v1/produce/workflow.progress.stream", f.endpoint)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := f.httpClient.Do(req)
-	if err != nil {
-		f.logger.WarnContext(ctx, "fluvio publish failed (non-fatal)", "error", err)
-		return nil
-	}
-	defer resp.Body.Close()
-	f.logger.InfoContext(ctx, "fluvio workflow update published", "workflow_id", update.WorkflowID)
-	return nil
-}
+// ─── Fluvio Publisher — REMOVED (P0 remediation) ────────────────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio-sc:9003/...) and swallowed the errors. Fluvio is NOT deployed
+// on this platform; Kafka (above) is the real event bus. Real-time status
+// updates must flow through the Kafka publisher in this file.
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
@@ -390,7 +342,6 @@ type MiddlewareClients struct {
 	KafkaPublisher  *KafkaPublisher
 	KafkaConsumer   *KafkaConsumer
 	DaprPublisher   *DaprPublisher
-	FluvioPublisher *FluvioPublisher
 }
 
 func NewMiddlewareClients(
@@ -412,7 +363,6 @@ func NewMiddlewareClients(
 		KafkaPublisher:  kp,
 		KafkaConsumer:   kc,
 		DaprPublisher:   NewDaprPublisher(),
-		FluvioPublisher: NewFluvioPublisher(),
 	}, nil
 }
 

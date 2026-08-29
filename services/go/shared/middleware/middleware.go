@@ -23,7 +23,8 @@ KafkaClientID   string
 DaprHTTPPort    string
 DaprGRPCPort    string
 DaprAppID       string
-// Fluvio
+// Fluvio — P0 remediation: Fluvio is NOT deployed on this platform; Kafka is
+// the real event bus. No default endpoint: empty means honestly disabled.
 FluvioEndpoint  string
 // Temporal
 TemporalAddress  string
@@ -60,7 +61,7 @@ KafkaClientID:     getEnv("KAFKA_CLIENT_ID", serviceName),
 DaprHTTPPort:      getEnv("DAPR_HTTP_PORT", "3500"),
 DaprGRPCPort:      getEnv("DAPR_GRPC_PORT", "50001"),
 DaprAppID:         getEnv("DAPR_APP_ID", serviceName),
-FluvioEndpoint:    getEnv("FLUVIO_ENDPOINT", "fluvio-sc:9003"),
+FluvioEndpoint:    getEnv("FLUVIO_ENDPOINT", ""),
 TemporalAddress:   getEnv("TEMPORAL_ADDRESS", "temporal:7233"),
 TemporalNamespace: getEnv("TEMPORAL_NAMESPACE", "tradegateway"),
 KeycloakURL:       getEnv("KEYCLOAK_URL", "http://keycloak:8080"),

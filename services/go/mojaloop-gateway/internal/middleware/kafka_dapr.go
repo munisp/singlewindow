@@ -4,7 +4,7 @@
 //                          payments.initiated   (payment initiated by trader)
 // Kafka topics consumed:   declarations.cleared (clearance confirmed, payment receipt issued)
 // Dapr pub/sub:            publishes payments.confirmed to pubsub component
-// Fluvio:                  streams real-time payment status to port operators
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
 package middleware
 
@@ -173,50 +173,12 @@ func DaprPublishPayment(ctx context.Context, topic string, payload any) error {
 	return nil
 }
 
-// ─── Fluvio Real-time Streaming ───────────────────────────────────────────────
-
-// FluvioPaymentUpdate represents a real-time payment status update.
-type FluvioPaymentUpdate struct {
-	PaymentID     string    `json:"payment_id"`
-	DeclarationID string    `json:"declaration_id"`
-	Status        string    `json:"status"` // initiated|processing|confirmed|failed
-	Amount        float64   `json:"amount_naira"`
-	Currency      string    `json:"currency"`
-	Timestamp     time.Time `json:"timestamp"`
-}
-
-// PublishFluvioPaymentUpdate streams a real-time payment update to the Fluvio topic.
-// Fluvio consumers (port operators, trader dashboards) receive these updates in < 100ms.
-func PublishFluvioPaymentUpdate(ctx context.Context, update FluvioPaymentUpdate) error {
-	fluvioEndpoint := os.Getenv("FLUVIO_ENDPOINT")
-	if fluvioEndpoint == "" {
-		fluvioEndpoint = "fluvio.tradegateway.svc.cluster.local:9003"
-	}
-
-	data, err := json.Marshal(update)
-	if err != nil {
-		return fmt.Errorf("marshal fluvio update: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("http://%s/produce/payment-status", fluvioEndpoint),
-		bytes.NewReader(data),
-	)
-	if err != nil {
-		return fmt.Errorf("create fluvio request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		slog.Warn("Fluvio publish failed (non-fatal)", "error", err)
-		return nil // Fluvio is best-effort; don't fail the payment flow
-	}
-	defer resp.Body.Close()
-	slog.Info("Fluvio payment update published", "payment_id", update.PaymentID, "status", update.Status)
-	return nil
-}
+// ─── Fluvio Real-time Streaming — REMOVED (P0 remediation) ──────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio:9003/produce/...) and swallowed the resulting errors — Fluvio
+// is NOT deployed on this platform. Kafka is the real event bus; real-time
+// payment status updates flow through PublishPaymentEvent (Kafka topics) and
+// the Dapr pub/sub wrapper above.
 
 // ─── OpenTelemetry Tracing ────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-// Package middleware provides Kafka, Dapr, Fluvio, and OpenTelemetry integration for payment-service.
+// Package middleware provides Kafka, Dapr, and OpenTelemetry integration for payment-service.
 // Kafka topics published:  payments.initiated      (payment session created)
 //                          payments.confirmed      (payment successfully settled via Mojaloop)
 //                          payments.failed         (payment failed or timed out)
@@ -7,7 +7,7 @@
 //                          declarations.cleared    (clearance — trigger receipt generation)
 //                          drawback.approved       (drawback approved — trigger refund)
 // Dapr pub/sub:            publishes to pubsub component
-// Fluvio:                  streams real-time payment status to trader dashboard
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
 package middleware
 
@@ -58,13 +58,6 @@ func daprPort() string {
 		return p
 	}
 	return "3500"
-}
-
-func fluvioEndpoint() string {
-	if e := os.Getenv("FLUVIO_ENDPOINT"); e != "" {
-		return e
-	}
-	return "http://fluvio-sc:9003"
 }
 
 // ─── Event Schemas ────────────────────────────────────────────────────────────
@@ -280,51 +273,11 @@ func (d *DaprPublisher) PublishPaymentEvent(ctx context.Context, evt PaymentEven
 	return nil
 }
 
-// ─── Fluvio Publisher ─────────────────────────────────────────────────────────
-
-type FluvioPublisher struct {
-	endpoint   string
-	httpClient *http.Client
-	logger     *slog.Logger
-}
-
-func NewFluvioPublisher() *FluvioPublisher {
-	return &FluvioPublisher{
-		endpoint:   fluvioEndpoint(),
-		httpClient: &http.Client{Timeout: 3 * time.Second},
-		logger:     slog.Default().With("component", "fluvio-publisher", "service", ServiceName),
-	}
-}
-
-type FluvioPaymentUpdate struct {
-	PaymentID     int64     `json:"payment_id"`
-	DeclarationID int64     `json:"declaration_id"`
-	UCR           string    `json:"ucr"`
-	Status        string    `json:"status"`
-	AmountNaira   float64   `json:"amount_naira"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-func (f *FluvioPublisher) PublishPaymentUpdate(ctx context.Context, update FluvioPaymentUpdate) error {
-	if update.UpdatedAt.IsZero() {
-		update.UpdatedAt = time.Now().UTC()
-	}
-	payload, _ := json.Marshal(update)
-	url := fmt.Sprintf("%s/api/v1/produce/payments.status.stream", f.endpoint)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := f.httpClient.Do(req)
-	if err != nil {
-		f.logger.WarnContext(ctx, "fluvio publish failed (non-fatal)", "error", err)
-		return nil
-	}
-	defer resp.Body.Close()
-	f.logger.InfoContext(ctx, "fluvio payment update published", "payment_id", update.PaymentID)
-	return nil
-}
+// ─── Fluvio Publisher — REMOVED (P0 remediation) ────────────────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio-sc:9003/...) and swallowed the errors. Fluvio is NOT deployed
+// on this platform; Kafka (above) is the real event bus. Real-time status
+// updates must flow through the Kafka publisher in this file.
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
@@ -362,7 +315,6 @@ type MiddlewareClients struct {
 	KafkaPublisher  *KafkaPublisher
 	KafkaConsumer   *KafkaConsumer
 	DaprPublisher   *DaprPublisher
-	FluvioPublisher *FluvioPublisher
 }
 
 func NewMiddlewareClients(
@@ -382,7 +334,6 @@ func NewMiddlewareClients(
 		KafkaPublisher:  kp,
 		KafkaConsumer:   kc,
 		DaprPublisher:   NewDaprPublisher(),
-		FluvioPublisher: NewFluvioPublisher(),
 	}, nil
 }
 

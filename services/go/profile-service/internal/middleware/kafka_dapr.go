@@ -1,4 +1,4 @@
-// Package middleware provides Kafka, Dapr, Fluvio, and OpenTelemetry integration for profile-service.
+// Package middleware provides Kafka, Dapr, and OpenTelemetry integration for profile-service.
 // Kafka topics published:  trader.registered       (new trader account created)
 //                          trader.verified         (KYC verification completed)
 //                          trader.suspended        (account suspended)
@@ -6,7 +6,7 @@
 // Kafka topics consumed:   kyc.completed           (KYC service completed verification)
 //                          declarations.cleared    (update trader clearance statistics)
 // Dapr pub/sub:            publishes trader events to pubsub
-// Fluvio:                  streams real-time trader scorecard updates
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every profile lifecycle event
 package middleware
 
@@ -56,13 +56,6 @@ func daprPort() string {
 		return p
 	}
 	return "3500"
-}
-
-func fluvioEndpoint() string {
-	if e := os.Getenv("FLUVIO_ENDPOINT"); e != "" {
-		return e
-	}
-	return "http://fluvio-sc:9003"
 }
 
 // ─── Event Schemas ────────────────────────────────────────────────────────────
@@ -263,51 +256,11 @@ func (d *DaprPublisher) PublishTraderEvent(ctx context.Context, evt TraderEvent)
 	return nil
 }
 
-// ─── Fluvio Publisher ─────────────────────────────────────────────────────────
-
-type FluvioPublisher struct {
-	endpoint   string
-	httpClient *http.Client
-	logger     *slog.Logger
-}
-
-func NewFluvioPublisher() *FluvioPublisher {
-	return &FluvioPublisher{
-		endpoint:   fluvioEndpoint(),
-		httpClient: &http.Client{Timeout: 3 * time.Second},
-		logger:     slog.Default().With("component", "fluvio-publisher", "service", ServiceName),
-	}
-}
-
-type FluvioTraderScorecardUpdate struct {
-	TraderID          int64   `json:"trader_id"`
-	ComplianceScore   float64 `json:"compliance_score"`
-	TotalDeclarations int     `json:"total_declarations"`
-	GreenLaneRate     float64 `json:"green_lane_rate"`
-	AEOStatus         string  `json:"aeo_status"`
-	UpdatedAt         time.Time `json:"updated_at"`
-}
-
-func (f *FluvioPublisher) PublishScorecardUpdate(ctx context.Context, update FluvioTraderScorecardUpdate) error {
-	if update.UpdatedAt.IsZero() {
-		update.UpdatedAt = time.Now().UTC()
-	}
-	payload, _ := json.Marshal(update)
-	url := fmt.Sprintf("%s/api/v1/produce/trader.scorecard.stream", f.endpoint)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := f.httpClient.Do(req)
-	if err != nil {
-		f.logger.WarnContext(ctx, "fluvio publish failed (non-fatal)", "error", err)
-		return nil
-	}
-	defer resp.Body.Close()
-	f.logger.InfoContext(ctx, "fluvio scorecard update published", "trader_id", update.TraderID)
-	return nil
-}
+// ─── Fluvio Publisher — REMOVED (P0 remediation) ────────────────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio-sc:9003/...) and swallowed the errors. Fluvio is NOT deployed
+// on this platform; Kafka (above) is the real event bus. Real-time status
+// updates must flow through the Kafka publisher in this file.
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
@@ -344,7 +297,6 @@ type MiddlewareClients struct {
 	KafkaPublisher  *KafkaPublisher
 	KafkaConsumer   *KafkaConsumer
 	DaprPublisher   *DaprPublisher
-	FluvioPublisher *FluvioPublisher
 }
 
 func NewMiddlewareClients(
@@ -364,7 +316,6 @@ func NewMiddlewareClients(
 		KafkaPublisher:  kp,
 		KafkaConsumer:   kc,
 		DaprPublisher:   NewDaprPublisher(),
-		FluvioPublisher: NewFluvioPublisher(),
 	}, nil
 }
 
