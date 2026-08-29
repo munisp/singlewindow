@@ -229,12 +229,13 @@ export function validateUploadedFile(opts: {
  *
  * P0-6 remediation: DURABLE, DB-backed idempotency. The previous process-local
  * Map reopened a replay window on every restart/replica. Keys are now stored
- * in the `payment_idempotency_keys` table (migration 0054) with a database-
- * enforced UNIQUE(user_id, idempotency_key) constraint — the same pattern as
- * webhook_receipts (migration 0051). Replays return the originally recorded
- * response. When the database is unavailable these functions THROW
- * (fail-closed): a financial mutation whose idempotency cannot be verified
- * must not proceed.
+ * in the existing `payment_idempotency_keys` table (migration 0028) whose
+ * UNIQUE(key_hash) constraint is enforced by the database — the same
+ * durability pattern as webhook_receipts (migration 0051). The key hash binds
+ * (userId, idempotencyKey) so keys are per-user. Replays return the originally
+ * recorded response snapshot. When the database is unavailable these functions
+ * THROW (fail-closed): a financial mutation whose idempotency cannot be
+ * verified must not proceed.
  *
  * Usage in tRPC procedure:
  *   const { idempotencyKey } = input;
@@ -243,6 +244,10 @@ export function validateUploadedFile(opts: {
  *   ... execute mutation ...
  *   await recordIdempotency(ctx.user.id, idempotencyKey, result);
  */
+function idempotencyKeyHash(userId: number, idempotencyKey: string): string {
+  return crypto.createHash("sha256").update(`${userId}:${idempotencyKey}`).digest("hex");
+}
+
 export async function checkIdempotency(
   userId: number,
   idempotencyKey: string
@@ -255,17 +260,17 @@ export async function checkIdempotency(
     );
   }
   const { paymentIdempotencyKeys } = await import("../../drizzle/schema");
-  const { and, eq } = await import("drizzle-orm");
+  const { eq, gt, and } = await import("drizzle-orm");
   const [existing] = await db
-    .select({ response: paymentIdempotencyKeys.response })
+    .select({ responseSnapshot: paymentIdempotencyKeys.responseSnapshot })
     .from(paymentIdempotencyKeys)
     .where(and(
-      eq(paymentIdempotencyKeys.userId, userId),
-      eq(paymentIdempotencyKeys.idempotencyKey, idempotencyKey),
+      eq(paymentIdempotencyKeys.keyHash, idempotencyKeyHash(userId, idempotencyKey)),
+      gt(paymentIdempotencyKeys.expiresAt, new Date()),
     ))
     .limit(1);
   if (existing) {
-    return { isDuplicate: true, cachedResult: existing.response };
+    return { isDuplicate: true, cachedResult: existing.responseSnapshot };
   }
   return { isDuplicate: false };
 }
@@ -283,11 +288,17 @@ export async function recordIdempotency(
     );
   }
   const { paymentIdempotencyKeys } = await import("../../drizzle/schema");
-  // Unique constraint (user_id, idempotency_key) enforced by the database;
-  // a concurrent replay inserts nothing and the first response wins.
+  // UNIQUE(key_hash) enforced by the database; a concurrent replay inserts
+  // nothing and the first recorded response wins. Keys expire after 24h,
+  // matching the previous in-memory TTL.
   await db
     .insert(paymentIdempotencyKeys)
-    .values({ userId, idempotencyKey, response: result as unknown })
+    .values({
+      keyHash: idempotencyKeyHash(userId, idempotencyKey),
+      transferId: `idem:${idempotencyKey.slice(0, 120)}`,
+      responseSnapshot: result as unknown,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    })
     .onConflictDoNothing();
 }
 
