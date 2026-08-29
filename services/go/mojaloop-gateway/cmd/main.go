@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/tradegateway/mojaloop-gateway/internal/dfsp"
+	"github.com/tradegateway/mojaloop-gateway/internal/telemetry"
 )
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
@@ -80,24 +81,24 @@ type ILPQuote struct {
 
 // PaymentRecord tracks the full lifecycle of a payment.
 type PaymentRecord struct {
-	mu             sync.RWMutex
-	ID             string        `json:"id"`
-	DeclarationID  string        `json:"declarationId"`
-	TraderID       string        `json:"traderId"`
-	Amount         string        `json:"amount"`
-	Currency       string        `json:"currency"`
-	PaymentMethod  string        `json:"paymentMethod"`
-	Status         PaymentStatus `json:"status"`
-	Quote          *ILPQuote     `json:"quote,omitempty"`
-	TransferID     string        `json:"transferId,omitempty"`
-	TBPendingID    uint64        `json:"tbPendingId,omitempty"`
-	TBPostedAt     *time.Time    `json:"tbPostedAt,omitempty"`
-	Fulfilment     string        `json:"fulfilment,omitempty"`
-	ErrorCode      string        `json:"errorCode,omitempty"`
-	ErrorMessage   string        `json:"errorMessage,omitempty"`
-	InitiatedAt    time.Time     `json:"initiatedAt"`
-	ConfirmedAt    *time.Time    `json:"confirmedAt,omitempty"`
-	Steps          []PaymentStep `json:"steps"`
+	mu            sync.RWMutex
+	ID            string        `json:"id"`
+	DeclarationID string        `json:"declarationId"`
+	TraderID      string        `json:"traderId"`
+	Amount        string        `json:"amount"`
+	Currency      string        `json:"currency"`
+	PaymentMethod string        `json:"paymentMethod"`
+	Status        PaymentStatus `json:"status"`
+	Quote         *ILPQuote     `json:"quote,omitempty"`
+	TransferID    string        `json:"transferId,omitempty"`
+	TBPendingID   uint64        `json:"tbPendingId,omitempty"`
+	TBPostedAt    *time.Time    `json:"tbPostedAt,omitempty"`
+	Fulfilment    string        `json:"fulfilment,omitempty"`
+	ErrorCode     string        `json:"errorCode,omitempty"`
+	ErrorMessage  string        `json:"errorMessage,omitempty"`
+	InitiatedAt   time.Time     `json:"initiatedAt"`
+	ConfirmedAt   *time.Time    `json:"confirmedAt,omitempty"`
+	Steps         []PaymentStep `json:"steps"`
 }
 
 // PaymentStep records each stage of the payment lifecycle for audit and UI trace.
@@ -125,8 +126,8 @@ var (
 // ─── Service ─────────────────────────────────────────────────────────────────
 
 type MojaloopGateway struct {
-	logger     *zap.Logger
-	mojalooURL string
+	logger      *zap.Logger
+	mojalooURL  string
 	kafkaBroker string
 }
 
@@ -262,17 +263,17 @@ func (g *MojaloopGateway) stepRequestQuote(r *PaymentRecord) error {
 		"quoteId":       quoteID,
 		"transactionId": r.ID,
 		"payee": map[string]interface{}{
-			"partyIdType":  "MSISDN",
+			"partyIdType":     "MSISDN",
 			"partyIdentifier": "233501234567",
-			"fspId":        "GhanaRevenue",
+			"fspId":           "GhanaRevenue",
 		},
 		"payer": map[string]interface{}{
-			"partyIdType":  "MSISDN",
+			"partyIdType":     "MSISDN",
 			"partyIdentifier": "233209876543",
-			"fspId":        "MTNGhana",
+			"fspId":           "MTNGhana",
 		},
-		"amountType":  "RECEIVE",
-		"amount":      map[string]string{"amount": r.Amount, "currency": r.Currency},
+		"amountType":      "RECEIVE",
+		"amount":          map[string]string{"amount": r.Amount, "currency": r.Currency},
 		"transactionType": map[string]string{"scenario": "TRANSFER", "initiator": "PAYER", "initiatorType": "CONSUMER"},
 	}
 	r.mu.Unlock()
@@ -308,13 +309,13 @@ func (g *MojaloopGateway) stepInitiateTransfer(r *PaymentRecord) error {
 	r.TransferID = transferID
 	r.Status = StatusTransferReq
 	r.Steps[len(r.Steps)-1].Request = map[string]interface{}{
-		"transferId":    transferID,
-		"payerFsp":      "MTNGhana",
-		"payeeFsp":      "GhanaRevenue",
-		"amount":        map[string]string{"amount": r.Amount, "currency": r.Currency},
-		"ilpPacket":     r.Quote.ILPPacket,
-		"condition":     r.Quote.Condition,
-		"expiration":    r.Quote.Expiration,
+		"transferId": transferID,
+		"payerFsp":   "MTNGhana",
+		"payeeFsp":   "GhanaRevenue",
+		"amount":     map[string]string{"amount": r.Amount, "currency": r.Currency},
+		"ilpPacket":  r.Quote.ILPPacket,
+		"condition":  r.Quote.Condition,
+		"expiration": r.Quote.Expiration,
 	}
 	r.mu.Unlock()
 	return nil
@@ -327,19 +328,19 @@ func (g *MojaloopGateway) stepTigerBeetleReserve(r *PaymentRecord) error {
 	r.TBPendingID = pendingID
 	r.Status = StatusReserved
 	r.Steps[len(r.Steps)-1].Request = map[string]interface{}{
-		"operation":  "create_transfer",
-		"id":         pendingID,
+		"operation":      "create_transfer",
+		"id":             pendingID,
 		"debit_account":  "trader_liability_account",
 		"credit_account": "customs_revenue_pending",
-		"amount":     r.Amount,
-		"currency":   r.Currency,
-		"flags":      "pending",
-		"timeout":    300,
+		"amount":         r.Amount,
+		"currency":       r.Currency,
+		"flags":          "pending",
+		"timeout":        300,
 	}
 	r.Steps[len(r.Steps)-1].Response = map[string]interface{}{
-		"result": "ok",
+		"result":     "ok",
 		"pending_id": pendingID,
-		"timestamp": time.Now().UnixNano(),
+		"timestamp":  time.Now().UnixNano(),
 	}
 	r.mu.Unlock()
 	return nil
@@ -352,10 +353,10 @@ func (g *MojaloopGateway) stepReceiveFulfilment(r *PaymentRecord) error {
 	r.Fulfilment = fulfilment
 	r.Status = StatusFulfilled
 	r.Steps[len(r.Steps)-1].Response = map[string]interface{}{
-		"transferId":  r.TransferID,
-		"fulfilment":  fulfilment,
+		"transferId":         r.TransferID,
+		"fulfilment":         fulfilment,
 		"completedTimestamp": time.Now().UTC(),
-		"transferState": "COMMITTED",
+		"transferState":      "COMMITTED",
 	}
 	r.mu.Unlock()
 	return nil
@@ -368,15 +369,15 @@ func (g *MojaloopGateway) stepTigerBeetlePost(r *PaymentRecord) error {
 	r.TBPostedAt = &now
 	r.Status = StatusPosted
 	r.Steps[len(r.Steps)-1].Request = map[string]interface{}{
-		"operation":   "create_transfer",
-		"pending_id":  r.TBPendingID,
-		"flags":       "post_pending_transfer",
+		"operation":      "create_transfer",
+		"pending_id":     r.TBPendingID,
+		"flags":          "post_pending_transfer",
 		"debit_account":  "customs_revenue_pending",
 		"credit_account": "customs_revenue_confirmed",
 	}
 	r.Steps[len(r.Steps)-1].Response = map[string]interface{}{
-		"result": "ok",
-		"posted_at": now.UnixNano(),
+		"result":                "ok",
+		"posted_at":             now.UnixNano(),
 		"immutable_audit_entry": fmt.Sprintf("TB-AUDIT-%d", r.TBPendingID),
 	}
 	r.mu.Unlock()
@@ -387,8 +388,8 @@ func (g *MojaloopGateway) stepPublishConfirmation(r *PaymentRecord) error {
 	time.Sleep(30 * time.Millisecond)
 	r.mu.Lock()
 	r.Steps[len(r.Steps)-1].Request = map[string]interface{}{
-		"topic":   "payment.confirmed",
-		"key":     r.DeclarationID,
+		"topic": "payment.confirmed",
+		"key":   r.DeclarationID,
 		"payload": map[string]interface{}{
 			"paymentId":     r.ID,
 			"declarationId": r.DeclarationID,
@@ -460,9 +461,9 @@ func (g *MojaloopGateway) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (g *MojaloopGateway) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// Receives DFSP fulfilment callbacks from Mojaloop switch
 	var cb struct {
-		TransferID  string `json:"transferId"`
-		Fulfilment  string `json:"fulfilment"`
-		State       string `json:"transferState"`
+		TransferID string `json:"transferId"`
+		Fulfilment string `json:"fulfilment"`
+		State      string `json:"transferState"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&cb); err != nil {
 		http.Error(w, "invalid callback body", http.StatusBadRequest)
@@ -480,6 +481,13 @@ func (g *MojaloopGateway) handleCallback(w http.ResponseWriter, r *http.Request)
 func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
+
+	// Phase-7 OTel: guarded by OTEL_EXPORTER_OTLP_ENDPOINT — unset = telemetry
+	// disabled, boot unaffected (sanctioned fail-open, OTEL_DESIGN.md §1).
+	otelShutdown, otelEnabled := telemetry.Init(context.Background(), "mojaloop-gateway")
+	if otelEnabled {
+		defer otelShutdown(context.Background())
+	}
 
 	gw := NewMojaloopGateway(logger)
 
@@ -512,7 +520,7 @@ func main() {
 	httpPort := getEnv("HTTP_PORT", "8085")
 	httpServer := &http.Server{
 		Addr:         ":" + httpPort,
-		Handler:      r,
+		Handler:      telemetry.Handler("mojaloop-gateway.http", r),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

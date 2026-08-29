@@ -1,11 +1,15 @@
 // Package middleware provides Kafka, Dapr, and OpenTelemetry integration for payment-service.
 // Kafka topics published:  payments.initiated      (payment session created)
-//                          payments.confirmed      (payment successfully settled via Mojaloop)
-//                          payments.failed         (payment failed or timed out)
-//                          payments.refunded       (duty refund processed)
+//
+//	payments.confirmed      (payment successfully settled via Mojaloop)
+//	payments.failed         (payment failed or timed out)
+//	payments.refunded       (duty refund processed)
+//
 // Kafka topics consumed:   declarations.submitted  (new declaration — create duty bill)
-//                          declarations.cleared    (clearance — trigger receipt generation)
-//                          drawback.approved       (drawback approved — trigger refund)
+//
+//	declarations.cleared    (clearance — trigger receipt generation)
+//	drawback.approved       (drawback approved — trigger refund)
+//
 // Dapr pub/sub:            publishes to pubsub component
 // NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
@@ -26,6 +30,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
@@ -33,13 +38,13 @@ import (
 )
 
 const (
-	TopicPaymentsInitiated   = "payments.initiated"
-	TopicPaymentsConfirmed   = "payments.confirmed"
-	TopicPaymentsFailed      = "payments.failed"
-	TopicPaymentsRefunded    = "payments.refunded"
+	TopicPaymentsInitiated    = "payments.initiated"
+	TopicPaymentsConfirmed    = "payments.confirmed"
+	TopicPaymentsFailed       = "payments.failed"
+	TopicPaymentsRefunded     = "payments.refunded"
 	TopicDeclarationSubmitted = "declarations.submitted"
-	TopicDeclarationCleared  = "declarations.cleared"
-	TopicDrawbackApproved    = "drawback.approved"
+	TopicDeclarationCleared   = "declarations.cleared"
+	TopicDrawbackApproved     = "drawback.approved"
 
 	DaprPubsubName = "pubsub"
 	ServiceName    = "payment-service"
@@ -80,22 +85,22 @@ type PaymentEvent struct {
 }
 
 type DeclarationSubmittedEvent struct {
-	DeclarationID   int64   `json:"declaration_id"`
-	UCR             string  `json:"ucr"`
-	TraderID        int64   `json:"trader_id"`
-	DutyAmount      float64 `json:"duty_amount"`
-	VatAmount       float64 `json:"vat_amount"`
-	TotalDue        float64 `json:"total_due"`
-	Currency        string  `json:"currency"`
-	Timestamp       time.Time `json:"timestamp"`
+	DeclarationID int64     `json:"declaration_id"`
+	UCR           string    `json:"ucr"`
+	TraderID      int64     `json:"trader_id"`
+	DutyAmount    float64   `json:"duty_amount"`
+	VatAmount     float64   `json:"vat_amount"`
+	TotalDue      float64   `json:"total_due"`
+	Currency      string    `json:"currency"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 type DrawbackApprovedEvent struct {
-	DrawbackID    int64   `json:"drawback_id"`
-	DeclarationID int64   `json:"declaration_id"`
-	TraderID      int64   `json:"trader_id"`
-	RefundAmount  float64 `json:"refund_amount"`
-	Currency      string  `json:"currency"`
+	DrawbackID    int64     `json:"drawback_id"`
+	DeclarationID int64     `json:"declaration_id"`
+	TraderID      int64     `json:"trader_id"`
+	RefundAmount  float64   `json:"refund_amount"`
+	Currency      string    `json:"currency"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
@@ -131,11 +136,14 @@ func (k *KafkaPublisher) PublishPaymentEvent(ctx context.Context, evt PaymentEve
 	}
 	topic := topicForEventType(evt.EventType)
 	data, _ := json.Marshal(evt)
-	_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+	msg := &sarama.ProducerMessage{
 		Topic: topic,
 		Key:   sarama.StringEncoder(fmt.Sprintf("%d", evt.PaymentID)),
 		Value: sarama.ByteEncoder(data),
-	})
+	}
+	// Phase-7 OTel: inject W3C traceparent so consumers join this trace.
+	InjectTraceContext(ctx, msg)
+	_, _, err := k.producer.SendMessage(msg)
 	if err != nil {
 		k.logger.ErrorContext(ctx, "kafka publish failed", "topic", topic, "error", err)
 		return fmt.Errorf("publish %s: %w", topic, err)
@@ -167,10 +175,10 @@ type DeclarationSubmittedHandler func(ctx context.Context, evt DeclarationSubmit
 type DrawbackApprovedHandler func(ctx context.Context, evt DrawbackApprovedEvent) error
 
 type KafkaConsumer struct {
-	consumer          sarama.ConsumerGroup
+	consumer           sarama.ConsumerGroup
 	declarationHandler DeclarationSubmittedHandler
-	drawbackHandler   DrawbackApprovedHandler
-	logger            *slog.Logger
+	drawbackHandler    DrawbackApprovedHandler
+	logger             *slog.Logger
 }
 
 func NewKafkaConsumer(
@@ -186,10 +194,10 @@ func NewKafkaConsumer(
 		return nil, fmt.Errorf("consumer group: %w", err)
 	}
 	return &KafkaConsumer{
-		consumer:          cg,
+		consumer:           cg,
 		declarationHandler: declarationHandler,
-		drawbackHandler:   drawbackHandler,
-		logger:            slog.Default().With("component", "kafka-consumer", "service", ServiceName),
+		drawbackHandler:    drawbackHandler,
+		logger:             slog.Default().With("component", "kafka-consumer", "service", ServiceName),
 	}, nil
 }
 
@@ -214,7 +222,10 @@ func (c *KafkaConsumer) Cleanup(_ sarama.ConsumerGroupSession) error { return ni
 func (c *KafkaConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	tracer := otel.Tracer(ServiceName)
 	for msg := range claim.Messages() {
-		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("consume.%s", msg.Topic),
+		// Phase-7 OTel: continue the producer's trace via the header carrier.
+		parentCtx := ExtractTraceContext(context.Background(), msg)
+		ctx, span := tracer.Start(parentCtx, fmt.Sprintf("consume.%s", msg.Topic),
+			trace.WithSpanKind(trace.SpanKindConsumer),
 			trace.WithAttributes(
 				attribute.String("messaging.system", "kafka"),
 				attribute.String("messaging.destination", msg.Topic),
@@ -281,15 +292,22 @@ func (d *DaprPublisher) PublishPaymentEvent(ctx context.Context, evt PaymentEven
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
+// InitTracer initialises the OTel tracer provider. Phase-7 contract
+// (OTEL_DESIGN.md §1): OTEL_EXPORTER_OTLP_ENDPOINT unset ⇒ telemetry DISABLED
+// — returns (nil, nil) and the caller must treat a nil provider as "off"
+// (fail-open; telemetry never breaks the business path). When set, spans are
+// exported asynchronously via a BatchSpanProcessor; a down collector drops
+// spans, never requests.
 func InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "http://otel-collector:4318"
+		return nil, nil
 	}
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	opts := []otlptracehttp.Option{}
+	if strings.HasPrefix(endpoint, "http://") || !strings.Contains(endpoint, "://") {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("OTLP exporter: %w", err)
 	}
@@ -303,18 +321,82 @@ func InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 	)
 	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 	return tp, nil
+}
+
+// ─── W3C carriers over sarama message headers ────────────────────────────────
+
+type producerCarrier struct{ msg *sarama.ProducerMessage }
+
+func (c producerCarrier) Get(key string) string {
+	for _, h := range c.msg.Headers {
+		if strings.EqualFold(string(h.Key), key) {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+func (c producerCarrier) Set(key, value string) {
+	for i, h := range c.msg.Headers {
+		if strings.EqualFold(string(h.Key), key) {
+			c.msg.Headers[i].Value = []byte(value)
+			return
+		}
+	}
+	c.msg.Headers = append(c.msg.Headers, sarama.RecordHeader{Key: []byte(key), Value: []byte(value)})
+}
+func (c producerCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.msg.Headers))
+	for _, h := range c.msg.Headers {
+		keys = append(keys, string(h.Key))
+	}
+	return keys
+}
+
+type consumerCarrier struct{ msg *sarama.ConsumerMessage }
+
+func (c consumerCarrier) Get(key string) string {
+	for _, h := range c.msg.Headers {
+		if h != nil && strings.EqualFold(string(h.Key), key) {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+func (c consumerCarrier) Set(_, _ string) {}
+func (c consumerCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.msg.Headers))
+	for _, h := range c.msg.Headers {
+		if h != nil {
+			keys = append(keys, string(h.Key))
+		}
+	}
+	return keys
+}
+
+// InjectTraceContext injects traceparent/tracestate/baggage into a producer message.
+func InjectTraceContext(ctx context.Context, msg *sarama.ProducerMessage) {
+	otel.GetTextMapPropagator().Inject(ctx, producerCarrier{msg: msg})
+}
+
+// ExtractTraceContext extracts a remote trace context from a consumed message.
+func ExtractTraceContext(ctx context.Context, msg *sarama.ConsumerMessage) context.Context {
+	return otel.GetTextMapPropagator().Extract(ctx, consumerCarrier{msg: msg})
 }
 
 // ─── Combined Middleware Clients ──────────────────────────────────────────────
 
 type MiddlewareClients struct {
-	KafkaPublisher  *KafkaPublisher
-	KafkaConsumer   *KafkaConsumer
-	DaprPublisher   *DaprPublisher
+	KafkaPublisher *KafkaPublisher
+	KafkaConsumer  *KafkaConsumer
+	DaprPublisher  *DaprPublisher
 }
 
 func NewMiddlewareClients(
@@ -331,9 +413,9 @@ func NewMiddlewareClients(
 		return nil, err
 	}
 	return &MiddlewareClients{
-		KafkaPublisher:  kp,
-		KafkaConsumer:   kc,
-		DaprPublisher:   NewDaprPublisher(),
+		KafkaPublisher: kp,
+		KafkaConsumer:  kc,
+		DaprPublisher:  NewDaprPublisher(),
 	}, nil
 }
 

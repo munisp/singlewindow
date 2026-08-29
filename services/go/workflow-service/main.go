@@ -4,12 +4,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"go.temporal.io/sdk/client"
+	temporalotel "go.temporal.io/sdk/contrib/opentelemetry"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 	"go.uber.org/zap"
 
@@ -21,10 +24,34 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// Phase-7 OTel: guarded by OTEL_EXPORTER_OTLP_ENDPOINT — unset = telemetry
+	// disabled, boot unaffected (sanctioned fail-open, OTEL_DESIGN.md §1).
+	otelShutdown, otelEnabled := InitTelemetry(context.Background())
+	if otelEnabled {
+		defer otelShutdown(context.Background())
+	}
+
+	// ── Temporal OTel interceptors (official contrib) ─────────────────────────
+	// Workflow/activity spans join the calling service's trace via payload
+	// context propagation. Only wired when telemetry is enabled.
+	var clientInterceptors []interceptor.ClientInterceptor
+	var workerInterceptors []interceptor.WorkerInterceptor
+	if otelEnabled {
+		tracingInterceptor, err := temporalotel.NewTracingInterceptor(temporalotel.TracerOptions{})
+		if err != nil {
+			// Telemetry must never break the worker (fail-open).
+			logger.Warn("[otel] failed to build Temporal tracing interceptor — continuing without it", zap.Error(err))
+		} else {
+			clientInterceptors = append(clientInterceptors, tracingInterceptor)
+			workerInterceptors = append(workerInterceptors, tracingInterceptor)
+		}
+	}
+
 	// ── Connect to Temporal server ────────────────────────────────────────────
 	temporalHost := getEnv("TEMPORAL_HOST", "localhost:7233")
 	c, err := client.Dial(client.Options{
-		HostPort: temporalHost,
+		HostPort:     temporalHost,
+		Interceptors: clientInterceptors,
 	})
 	if err != nil {
 		log.Fatalf("[Temporal] Failed to connect to server at %s: %v", temporalHost, err)
@@ -38,6 +65,7 @@ func main() {
 		MaxConcurrentActivityExecutionSize:      50,
 		MaxConcurrentWorkflowTaskExecutionSize:  20,
 		MaxConcurrentLocalActivityExecutionSize: 20,
+		Interceptors:                            workerInterceptors,
 	})
 
 	// ── Register workflows ────────────────────────────────────────────────────

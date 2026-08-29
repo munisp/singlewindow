@@ -1,10 +1,11 @@
 // admin_server.go — Lightweight HTTP server for operational endpoints.
 //
 // Exposes:
-//   GET  /healthz                  — liveness probe (returns 200 OK)
-//   POST /admin/refresh-tokens     — triggers an immediate token-refresh cycle
-//                                    outside the normal 6-hour interval
-//   GET  /admin/metrics            — returns TokenRefresher stats as JSON
+//
+//	GET  /healthz                  — liveness probe (returns 200 OK)
+//	POST /admin/refresh-tokens     — triggers an immediate token-refresh cycle
+//	                                 outside the normal 6-hour interval
+//	GET  /admin/metrics            — returns TokenRefresher stats as JSON
 //
 // The admin server is started alongside the main dispatcher goroutine and
 // listens on port 8081 (configurable via ADMIN_PORT env var).
@@ -25,7 +26,7 @@ import (
 // AdminServer wraps an http.Server and holds a reference to the TokenRefresher
 // so the /admin/refresh-tokens handler can trigger an immediate cycle.
 type AdminServer struct {
-	server   *http.Server
+	server    *http.Server
 	refresher *TokenRefresher
 }
 
@@ -101,7 +102,7 @@ func NewAdminServer(addr string, refresher *TokenRefresher) *AdminServer {
 
 	as.server = &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      tracedHandler("notification-dispatcher.admin", mux),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,

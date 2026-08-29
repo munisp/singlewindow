@@ -1,7 +1,9 @@
 // Package middleware provides Kafka, Dapr, and OpenTelemetry integration for kubecost-svc.
 // Kafka topics published:  finops.cost.alert       (cost threshold exceeded alert)
-//                          finops.budget.breach    (monthly budget breached)
-//                          finops.report.generated (daily/weekly cost report ready)
+//
+//	finops.budget.breach    (monthly budget breached)
+//	finops.report.generated (daily/weekly cost report ready)
+//
 // Kafka topics consumed:   (none — kubecost-svc is a read/publish-only service)
 // Dapr pub/sub:            publishes FinOps alerts to pubsub
 // OpenTelemetry:           distributed tracing for all cost query operations
@@ -21,6 +23,7 @@ import (
 	"github.com/IBM/sarama"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
@@ -65,13 +68,13 @@ type FinOpsCostAlertEvent struct {
 }
 
 type FinOpsReportEvent struct {
-	EventType     string    `json:"event_type"`
-	ReportPeriod  string    `json:"report_period"`
-	TotalCostUSD  float64   `json:"total_cost_usd"`
-	TopNamespace  string    `json:"top_namespace"`
-	ReportURL     string    `json:"report_url,omitempty"`
-	Source        string    `json:"source"`
-	Timestamp     time.Time `json:"timestamp"`
+	EventType    string    `json:"event_type"`
+	ReportPeriod string    `json:"report_period"`
+	TotalCostUSD float64   `json:"total_cost_usd"`
+	TopNamespace string    `json:"top_namespace"`
+	ReportURL    string    `json:"report_url,omitempty"`
+	Source       string    `json:"source"`
+	Timestamp    time.Time `json:"timestamp"`
 }
 
 // ─── Kafka Publisher ──────────────────────────────────────────────────────────
@@ -107,11 +110,14 @@ func (k *KafkaPublisher) PublishCostAlert(ctx context.Context, evt FinOpsCostAle
 		topic = TopicFinOpsBudgetBreach
 	}
 	data, _ := json.Marshal(evt)
-	_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+	msg := &sarama.ProducerMessage{
 		Topic: topic,
 		Key:   sarama.StringEncoder(evt.Namespace),
 		Value: sarama.ByteEncoder(data),
-	})
+	}
+	// Phase-7 OTel: inject W3C traceparent so consumers join this trace.
+	InjectTraceContext(ctx, msg)
+	_, _, err := k.producer.SendMessage(msg)
 	if err != nil {
 		k.logger.ErrorContext(ctx, "kafka publish failed", "topic", topic, "error", err)
 		return fmt.Errorf("publish %s: %w", topic, err)
@@ -126,11 +132,14 @@ func (k *KafkaPublisher) PublishReport(ctx context.Context, evt FinOpsReportEven
 		evt.Timestamp = time.Now().UTC()
 	}
 	data, _ := json.Marshal(evt)
-	_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+	msg := &sarama.ProducerMessage{
 		Topic: TopicFinOpsReportGenerated,
 		Key:   sarama.StringEncoder(evt.ReportPeriod),
 		Value: sarama.ByteEncoder(data),
-	})
+	}
+	// Phase-7 OTel: inject W3C traceparent so consumers join this trace.
+	InjectTraceContext(ctx, msg)
+	_, _, err := k.producer.SendMessage(msg)
 	if err != nil {
 		k.logger.ErrorContext(ctx, "kafka publish failed", "topic", TopicFinOpsReportGenerated, "error", err)
 		return fmt.Errorf("publish report: %w", err)
@@ -174,15 +183,19 @@ func (d *DaprPublisher) PublishCostAlert(ctx context.Context, evt FinOpsCostAler
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
+// Phase-7 contract (OTEL_DESIGN.md §1): OTEL_EXPORTER_OTLP_ENDPOINT unset ⇒
+// telemetry DISABLED — returns (nil, nil); a nil provider means "off" and the
+// business path never depends on telemetry (the one sanctioned fail-open).
 func InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "http://otel-collector:4318"
+		return nil, nil
 	}
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	opts := []otlptracehttp.Option{}
+	if strings.HasPrefix(endpoint, "http://") || !strings.Contains(endpoint, "://") {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("OTLP exporter: %w", err)
 	}
@@ -198,6 +211,10 @@ func InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))),
 	)
 	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 	return tp, nil
 }
 
@@ -227,10 +244,72 @@ func (m *MiddlewareClients) Close() {
 
 // ─── OTel Tracer Accessor ─────────────────────────────────────────────────────
 
-func Tracer() interface{ Start(context.Context, string, ...interface{}) (context.Context, interface{}) } {
+func Tracer() interface {
+	Start(context.Context, string, ...interface{}) (context.Context, interface{})
+} {
 	return nil // use otel.Tracer(ServiceName) directly in handlers
 }
 
 func GetTracer() interface{} {
 	return otel.Tracer(ServiceName)
+}
+
+// ─── W3C carriers over sarama message headers (Phase-7 OTel) ─────────────────
+
+type producerCarrier struct{ msg *sarama.ProducerMessage }
+
+func (c producerCarrier) Get(key string) string {
+	for _, h := range c.msg.Headers {
+		if strings.EqualFold(string(h.Key), key) {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+func (c producerCarrier) Set(key, value string) {
+	for i, h := range c.msg.Headers {
+		if strings.EqualFold(string(h.Key), key) {
+			c.msg.Headers[i].Value = []byte(value)
+			return
+		}
+	}
+	c.msg.Headers = append(c.msg.Headers, sarama.RecordHeader{Key: []byte(key), Value: []byte(value)})
+}
+func (c producerCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.msg.Headers))
+	for _, h := range c.msg.Headers {
+		keys = append(keys, string(h.Key))
+	}
+	return keys
+}
+
+type consumerCarrier struct{ msg *sarama.ConsumerMessage }
+
+func (c consumerCarrier) Get(key string) string {
+	for _, h := range c.msg.Headers {
+		if h != nil && strings.EqualFold(string(h.Key), key) {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+func (c consumerCarrier) Set(_, _ string) {}
+func (c consumerCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.msg.Headers))
+	for _, h := range c.msg.Headers {
+		if h != nil {
+			keys = append(keys, string(h.Key))
+		}
+	}
+	return keys
+}
+
+// InjectTraceContext injects traceparent/tracestate/baggage into a producer message.
+func InjectTraceContext(ctx context.Context, msg *sarama.ProducerMessage) {
+	otel.GetTextMapPropagator().Inject(ctx, producerCarrier{msg: msg})
+}
+
+// ExtractTraceContext extracts a remote trace context from a consumed message.
+func ExtractTraceContext(ctx context.Context, msg *sarama.ConsumerMessage) context.Context {
+	return otel.GetTextMapPropagator().Extract(ctx, consumerCarrier{msg: msg})
 }

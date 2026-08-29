@@ -15,7 +15,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+
+	"github.com/tradegateway/mojaloop-gateway/internal/telemetry"
 )
 
 // ─── Quote domain types ───────────────────────────────────────────────────────
@@ -41,22 +46,22 @@ type PartyIdInfo struct {
 
 // QuoteRequest is the FSPIOP POST /quotes request body.
 type QuoteRequest struct {
-	QuoteId           string    `json:"quoteId"`
-	TransactionId     string    `json:"transactionId"`
-	TransactionType   TxType    `json:"transactionType"`
-	Payer             Party     `json:"payer"`
-	Payee             Party     `json:"payee"`
-	AmountType        string    `json:"amountType"` // SEND | RECEIVE
-	Amount            Money     `json:"amount"`
-	Note              string    `json:"note,omitempty"`
-	Expiration        string    `json:"expiration,omitempty"`
+	QuoteId         string `json:"quoteId"`
+	TransactionId   string `json:"transactionId"`
+	TransactionType TxType `json:"transactionType"`
+	Payer           Party  `json:"payer"`
+	Payee           Party  `json:"payee"`
+	AmountType      string `json:"amountType"` // SEND | RECEIVE
+	Amount          Money  `json:"amount"`
+	Note            string `json:"note,omitempty"`
+	Expiration      string `json:"expiration,omitempty"`
 }
 
 // TxType describes the Mojaloop transaction type.
 type TxType struct {
-	Scenario    string `json:"scenario"`    // TRANSFER | PAYMENT | DEPOSIT | WITHDRAWAL | REFUND
-	SubScenario string `json:"subScenario,omitempty"`
-	Initiator   string `json:"initiator"`   // PAYER | PAYEE
+	Scenario      string `json:"scenario"` // TRANSFER | PAYMENT | DEPOSIT | WITHDRAWAL | REFUND
+	SubScenario   string `json:"subScenario,omitempty"`
+	Initiator     string `json:"initiator"`     // PAYER | PAYEE
 	InitiatorType string `json:"initiatorType"` // CONSUMER | AGENT | BUSINESS | DEVICE
 }
 
@@ -71,11 +76,11 @@ type QuoteResult struct {
 
 // QuoteBuilder sends FSPIOP quote requests and tracks pending correlations.
 type QuoteBuilder struct {
-	logger        *zap.Logger
-	signer        *Signer
-	hubBaseURL    string
-	dfspID        string
-	httpClient    *http.Client
+	logger     *zap.Logger
+	signer     *Signer
+	hubBaseURL string
+	dfspID     string
+	httpClient *http.Client
 
 	mu            sync.Mutex
 	pendingQuotes map[string]*QuoteResult // quoteId → result
@@ -84,11 +89,12 @@ type QuoteBuilder struct {
 // NewQuoteBuilder creates a new QuoteBuilder.
 func NewQuoteBuilder(hubBaseURL, dfspID string, signer *Signer, logger *zap.Logger) *QuoteBuilder {
 	return &QuoteBuilder{
-		logger:        logger,
-		signer:        signer,
-		hubBaseURL:    hubBaseURL,
-		dfspID:        dfspID,
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		logger:     logger,
+		signer:     signer,
+		hubBaseURL: hubBaseURL,
+		dfspID:     dfspID,
+		// Phase-7 OTel: traced transport → client spans + traceparent injection.
+		httpClient:    &http.Client{Timeout: 30 * time.Second, Transport: telemetry.Transport(nil)},
 		pendingQuotes: make(map[string]*QuoteResult),
 	}
 }
@@ -99,7 +105,23 @@ func NewQuoteBuilder(hubBaseURL, dfspID string, signer *Signer, logger *zap.Logg
 //
 // Returns the generated QuoteRequest so the caller can track the quoteId.
 func (qb *QuoteBuilder) PostQuoteRequest(ctx context.Context, input PostQuoteInput) (*QuoteRequest, error) {
+	// Phase-7 OTel: FSPIOP span per quote call; the FSPIOP correlation ids ride
+	// as attributes and the hub joins this trace via the injected traceparent.
+	tracer := otel.Tracer("mojaloop-gateway")
+	ctx, span := tracer.Start(ctx, "mojaloop.quotes.request",
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End()
+
 	quoteID := uuid.New().String()
+	span.SetAttributes(
+		attribute.String("mojaloop.quote_id", quoteID),
+		attribute.String("mojaloop.correlation_id", input.TransactionId),
+		attribute.String("fspiop.source", qb.dfspID),
+		attribute.String("fspiop.destination", input.PayeeFspId),
+		attribute.String("payment.amount", input.Amount),
+		attribute.String("payment.currency", input.Currency),
+	)
 	expiration := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano)
 
 	req := &QuoteRequest{
@@ -156,19 +178,28 @@ func (qb *QuoteBuilder) PostQuoteRequest(ctx context.Context, input PostQuoteInp
 
 	// Sign with JWS — destination is the payee DFSP ID
 	if qb.signer != nil {
+		// Phase-7 OTel: span the FSPIOP JWS signing operation itself.
+		_, signSpan := tracer.Start(ctx, "fspiop.jws.sign")
 		if err := qb.signer.SignRequest(httpReq, input.PayeeFspId, body); err != nil {
+			signSpan.RecordError(err)
+			signSpan.End()
+			span.RecordError(err)
 			return nil, fmt.Errorf("sign quote request: %w", err)
 		}
+		signSpan.End()
 	}
 
 	resp, err := qb.httpClient.Do(httpReq)
 	if err != nil {
+		span.RecordError(err)
 		return nil, fmt.Errorf("post quote request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("hub rejected quote: HTTP %d", resp.StatusCode)
+		err := fmt.Errorf("hub rejected quote: HTTP %d", resp.StatusCode)
+		span.RecordError(err)
+		return nil, err
 	}
 
 	// Store correlation: quoteId → transactionId

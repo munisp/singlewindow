@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -250,9 +251,15 @@ func parseOKPPublicKey(jwk JWK) (ed25519.PublicKey, error) {
 // It extracts the kid from the JWS protected header, fetches the Hub's public key,
 // and verifies the signature over the canonical payload.
 func verifyInboundJWS(ctx context.Context, r *http.Request, body []byte, cache *hubJWKSCache) error {
+	// Phase-7 OTel: JWS verification on the money path is auth-critical — span it.
+	_, span := otel.Tracer("mojaloop-gateway").Start(ctx, "fspiop.jws.verify")
+	defer span.End()
+
 	sig := r.Header.Get("FSPIOP-Signature")
 	if sig == "" {
-		return fmt.Errorf("missing FSPIOP-Signature header")
+		err := fmt.Errorf("missing FSPIOP-Signature header")
+		span.RecordError(err)
+		return err
 	}
 
 	// JWS compact serialization: header.payload.signature
@@ -352,10 +359,10 @@ func verifySignature(alg string, pubKey crypto.PublicKey, signingInput, sig []by
 
 // CallbackHandler holds dependencies for the FSPIOP callback endpoints.
 type CallbackHandler struct {
-	logger          *zap.Logger
-	jwksCache       *hubJWKSCache
-	tigerbeetleURL  string
-	kafkaRestURL    string
+	logger         *zap.Logger
+	jwksCache      *hubJWKSCache
+	tigerbeetleURL string
+	kafkaRestURL   string
 	// In-memory store for pending ILP conditions (transferID → ILP condition)
 	// In production this is backed by Redis.
 	pendingMu  sync.RWMutex
@@ -366,8 +373,8 @@ type CallbackHandler struct {
 func NewCallbackHandler(logger *zap.Logger) *CallbackHandler {
 	hubJWKSURL := getEnvOrDefault("MOJALOOP_HUB_JWKS_URL", "http://mojaloop-hub:3001/.well-known/jwks.json")
 	return &CallbackHandler{
-		logger:         logger,
-		jwksCache:      newHubJWKSCache(hubJWKSURL, logger),
+		logger:    logger,
+		jwksCache: newHubJWKSCache(hubJWKSURL, logger),
 		// SW-MP2: canonical Go bridge (k8s Service tigerbeetle-bridge, /api/ledger/*, port 8086).
 		tigerbeetleURL: getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
 		kafkaRestURL:   getEnvOrDefault("KAFKA_REST_URL", "http://kafka-rest-proxy:8082"),
@@ -444,16 +451,16 @@ func (h *CallbackHandler) HandlePartyCallback(w http.ResponseWriter, r *http.Req
 
 // QuoteCallbackBody is the body of the PUT /quotes/{id} callback.
 type QuoteCallbackBody struct {
-	QuoteID         string `json:"quoteId"`
-	TransactionID   string `json:"transactionId"`
-	TransferAmount  struct {
+	QuoteID        string `json:"quoteId"`
+	TransactionID  string `json:"transactionId"`
+	TransferAmount struct {
 		Amount   string `json:"amount"`
 		Currency string `json:"currency"`
 	} `json:"transferAmount"`
-	ILPPacket    string `json:"ilpPacket"`
-	Condition    string `json:"condition"` // base64url SHA-256 of fulfilment
-	Expiration   string `json:"expiration"`
-	PayeeFSPFee  *struct {
+	ILPPacket   string `json:"ilpPacket"`
+	Condition   string `json:"condition"` // base64url SHA-256 of fulfilment
+	Expiration  string `json:"expiration"`
+	PayeeFSPFee *struct {
 		Amount   string `json:"amount"`
 		Currency string `json:"currency"`
 	} `json:"payeeFspFee,omitempty"`
@@ -517,7 +524,7 @@ func (h *CallbackHandler) HandleQuoteCallback(w http.ResponseWriter, r *http.Req
 // TransferCallbackBody is the body of the PUT /transfers/{id} callback.
 type TransferCallbackBody struct {
 	TransferID    string `json:"transferId"`
-	TransferState string `json:"transferState"` // "COMMITTED" or "ABORTED"
+	TransferState string `json:"transferState"`        // "COMMITTED" or "ABORTED"
 	Fulfilment    string `json:"fulfilment,omitempty"` // base64url pre-image (only on COMMITTED)
 	CompletedAt   string `json:"completedTimestamp,omitempty"`
 	ErrorInfo     *struct {

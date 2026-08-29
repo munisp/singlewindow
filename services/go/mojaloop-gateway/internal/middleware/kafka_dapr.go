@@ -1,7 +1,9 @@
 // Package middleware provides Dapr pub/sub and OpenTelemetry integration for mojaloop-gateway.
 // Kafka topics published:  payments.confirmed   (duty payment confirmed, triggers clearance workflow)
-//                          payments.failed      (payment failed, triggers retry/alert)
-//                          payments.initiated   (payment initiated by trader)
+//
+//	payments.failed      (payment failed, triggers retry/alert)
+//	payments.initiated   (payment initiated by trader)
+//
 // Kafka topics consumed:   declarations.cleared (clearance confirmed, payment receipt issued)
 // Dapr pub/sub:            publishes payments.confirmed to pubsub component
 // NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
@@ -14,6 +16,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
+
+	"github.com/tradegateway/mojaloop-gateway/internal/telemetry"
 	"net/http"
 	"os"
 	"time"
@@ -31,9 +36,9 @@ import (
 // ─── Topic & Component Constants ─────────────────────────────────────────────
 
 const (
-	TopicPaymentsConfirmed  = "payments.confirmed"
-	TopicPaymentsFailed     = "payments.failed"
-	TopicPaymentsInitiated  = "payments.initiated"
+	TopicPaymentsConfirmed   = "payments.confirmed"
+	TopicPaymentsFailed      = "payments.failed"
+	TopicPaymentsInitiated   = "payments.initiated"
 	TopicDeclarationsCleared = "declarations.cleared"
 
 	DaprPubsubName = "pubsub"
@@ -111,6 +116,8 @@ func NewKafkaProducer() (sarama.SyncProducer, error) {
 }
 
 // PublishPaymentEvent publishes a payment event to the specified Kafka topic.
+// Phase-7 OTel: the active trace context is injected as a W3C traceparent
+// header carrier so downstream consumers join the same trace.
 func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -121,6 +128,7 @@ func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any
 		Value:     sarama.ByteEncoder(data),
 		Timestamp: time.Now().UTC(),
 	}
+	telemetry.InjectKafka(context.Background(), msg)
 	partition, offset, err := producer.SendMessage(msg)
 	if err != nil {
 		return fmt.Errorf("send to %s: %w", topic, err)
@@ -132,7 +140,7 @@ func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any
 // ─── Dapr Pub/Sub ─────────────────────────────────────────────────────────────
 
 type daprPublishRequest struct {
-	Data        any    `json:"data"`
+	Data            any    `json:"data"`
 	DataContentType string `json:"datacontenttype"`
 }
 
@@ -184,16 +192,21 @@ func DaprPublishPayment(ctx context.Context, topic string, payload any) error {
 
 // InitTracer initialises the OTLP trace exporter and sets the global TracerProvider.
 // Call this once at service startup; the returned shutdown function must be deferred.
+// Phase-7 contract (OTEL_DESIGN.md §1): OTEL_EXPORTER_OTLP_ENDPOINT unset ⇒
+// telemetry DISABLED — returns (no-op, nil); the business path never depends on
+// telemetry (the one sanctioned fail-open).
 func InitTracer(serviceName string) (func(context.Context) error, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "otel-collector.monitoring.svc.cluster.local:4317"
+		slog.Info("OTEL_EXPORTER_OTLP_ENDPOINT unset — telemetry disabled (business path unaffected)")
+		return func(context.Context) error { return nil }, nil
 	}
 	ctx := context.Background()
-	exp, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	opts := []otlptracehttp.Option{}
+	if strings.HasPrefix(endpoint, "http://") || !strings.Contains(endpoint, "://") {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	exp, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}

@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -36,13 +37,13 @@ type TenantCost struct {
 }
 
 type IdleResource struct {
-	Namespace          string  `json:"namespace"`
-	ResourceType       string  `json:"resource_type"`
-	ResourceName       string  `json:"resource_name"`
-	IdleCPUCores       float64 `json:"idle_cpu_cores"`
-	IdleMemoryGB       float64 `json:"idle_memory_gb"`
-	IdleCostUSDPerDay  float64 `json:"idle_cost_usd_per_day"`
-	Recommendation     string  `json:"recommendation"`
+	Namespace         string  `json:"namespace"`
+	ResourceType      string  `json:"resource_type"`
+	ResourceName      string  `json:"resource_name"`
+	IdleCPUCores      float64 `json:"idle_cpu_cores"`
+	IdleMemoryGB      float64 `json:"idle_memory_gb"`
+	IdleCostUSDPerDay float64 `json:"idle_cost_usd_per_day"`
+	Recommendation    string  `json:"recommendation"`
 }
 
 type DailyCost struct {
@@ -260,6 +261,13 @@ func summaryHandler(w http.ResponseWriter, r *http.Request) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 func main() {
+	// Phase-7 OTel: guarded by OTEL_EXPORTER_OTLP_ENDPOINT — unset = telemetry
+	// disabled, boot unaffected (sanctioned fail-open, OTEL_DESIGN.md §1).
+	otelShutdown, otelEnabled := InitTelemetry(context.Background())
+	if otelEnabled {
+		defer otelShutdown(context.Background())
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8105"
@@ -274,7 +282,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("kubecost-svc listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, tracedHandler("kubecost-svc.http", mux)); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }

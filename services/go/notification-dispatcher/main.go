@@ -12,13 +12,20 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	kafkaBroker      := getenv("KAFKA_BROKER", "kafka:9092")
-	fcmProjectID     := getenv("FCM_PROJECT_ID", "tradegateway-prod")
-	apnsBundleID     := getenv("APNS_BUNDLE_ID", "ng.gov.tradegateway")
-	pushTokensSvcURL := getenv("PUSH_TOKENS_SVC_URL", "http://push-tokens-svc:8080")
-	adminAddr        := getenv("ADMIN_ADDR", ":8081")
+	// Phase-7 OTel: guarded by OTEL_EXPORTER_OTLP_ENDPOINT — unset = telemetry
+	// disabled, boot unaffected (sanctioned fail-open, OTEL_DESIGN.md §1).
+	otelShutdown, otelEnabled := InitTelemetry(ctx)
+	if otelEnabled {
+		defer otelShutdown(context.Background())
+	}
 
-	fcmClient  := NewFCMClient(fcmProjectID)
+	kafkaBroker := getenv("KAFKA_BROKER", "kafka:9092")
+	fcmProjectID := getenv("FCM_PROJECT_ID", "tradegateway-prod")
+	apnsBundleID := getenv("APNS_BUNDLE_ID", "ng.gov.tradegateway")
+	pushTokensSvcURL := getenv("PUSH_TOKENS_SVC_URL", "http://push-tokens-svc:8080")
+	adminAddr := getenv("ADMIN_ADDR", ":8081")
+
+	fcmClient := NewFCMClient(fcmProjectID)
 	apnsClient := NewAPNsClient(apnsBundleID)
 
 	// ── Main notification dispatcher ────────────────────────────────────────

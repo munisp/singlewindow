@@ -1,11 +1,11 @@
 // token_refresher.go — Periodic FCM/APNs token validation and stale-token purge.
 //
 // The TokenRefresher runs as a background goroutine.  Every RefreshInterval it:
-//   1. Calls the FCM v1 "dry-run" send API to validate each stored token.
-//   2. Marks tokens that return UNREGISTERED or INVALID_ARGUMENT as stale.
-//   3. Publishes a purge event to the insider.push.purge Kafka topic so every
-//      service that caches tokens can evict them.
-//   4. Writes a structured log entry with the refresh summary.
+//  1. Calls the FCM v1 "dry-run" send API to validate each stored token.
+//  2. Marks tokens that return UNREGISTERED or INVALID_ARGUMENT as stale.
+//  3. Publishes a purge event to the insider.push.purge Kafka topic so every
+//     service that caches tokens can evict them.
+//  4. Writes a structured log entry with the refresh summary.
 //
 // The refresher is intentionally lightweight: it does NOT talk to a database
 // directly — it relies on the upstream push-tokens service to consume the Kafka
@@ -56,11 +56,11 @@ type PurgePublisher interface {
 
 // PurgeEvent is the Kafka message payload for stale-token purge events.
 type PurgeEvent struct {
-	Tokens    []string `json:"tokens"`
-	Reason    string   `json:"reason"`
-	Platform  string   `json:"platform"`
-	PurgedAt  int64    `json:"purged_at"` // Unix milliseconds
-	CycleID   string   `json:"cycle_id"`
+	Tokens   []string `json:"tokens"`
+	Reason   string   `json:"reason"`
+	Platform string   `json:"platform"`
+	PurgedAt int64    `json:"purged_at"` // Unix milliseconds
+	CycleID  string   `json:"cycle_id"`
 }
 
 // TokenRefresher validates push tokens and purges stale ones.
@@ -360,5 +360,8 @@ func writeKafkaMessage(ctx context.Context, broker, topic string, value []byte) 
 		Balancer: &kafka.LeastBytes{},
 	}
 	defer w.Close()
-	return w.WriteMessages(ctx, kafka.Message{Value: value})
+	msg := kafka.Message{Value: value}
+	// Phase-7 OTel: propagate the trace context into the purge event.
+	injectKafkaHeaders(ctx, &msg)
+	return w.WriteMessages(ctx, msg)
 }

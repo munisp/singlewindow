@@ -44,6 +44,9 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -202,7 +205,8 @@ func lookupTariff(ctx context.Context, hsCode string) (*tariffRates, string, err
 		if err != nil {
 			return nil, "", err
 		}
-		client := &http.Client{Timeout: 5 * time.Second}
+		// Phase-7 OTel: client span + traceparent propagation to the tariff service.
+		client := &http.Client{Timeout: 5 * time.Second, Transport: tracedTransport()}
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, "", fmt.Errorf("tariff service unreachable: %w", err)
@@ -378,7 +382,23 @@ func createPayment(ctx context.Context, req CreatePaymentRequest) (*Payment, err
 // initiateMojaloopTransfer sends a transfer prepare to the Mojaloop switch
 // (FSPIOP). Returns the transfer id on success; any send failure is an error.
 func initiateMojaloopTransfer(ctx context.Context, paymentID int64, reference string, amountMinor int64, currency, method string) (string, error) {
+	// Phase-7 OTel: FSPIOP span for the outbound money-movement call. The
+	// FSPIOP correlation id (transferId) rides as a span attribute; the hub
+	// joins this trace via the traceparent header otelhttp injects.
+	tracer := otel.Tracer(telemetryServiceName)
+	ctx, span := tracer.Start(ctx, "mojaloop.transfers.prepare",
+		trace.WithSpanKind(trace.SpanKindClient),
+	)
+	defer span.End()
+
 	transferID := newTransferID()
+	span.SetAttributes(
+		attribute.String("mojaloop.correlation_id", transferID),
+		attribute.String("fspiop.source", "gh-customs-payer-dfsp"),
+		attribute.String("fspiop.destination", "gh-customs-authority"),
+		attribute.Int64("payment.amount_minor_units", amountMinor),
+		attribute.String("payment.currency", currency),
+	)
 	payload := map[string]interface{}{
 		"transferId": transferID,
 		"payerFsp":   "gh-customs-payer-dfsp",
@@ -411,20 +431,31 @@ func initiateMojaloopTransfer(ctx context.Context, paymentID int64, reference st
 	// money-movement request is NEVER sent.
 	signer, err := fspiopSigner()
 	if err != nil {
+		span.RecordError(err)
 		return "", fmt.Errorf("FSPIOP signing unavailable (fail-closed, transfer NOT sent): %w", err)
 	}
+	// Phase-7 OTel: span the FSPIOP JWS (Ed25519) signing operation itself —
+	// signing is fail-closed and auth-critical, so it must be visible in traces.
+	_, signSpan := tracer.Start(ctx, "fspiop.jws.sign")
 	if err := signer.SignRequest(req, "gh-customs-authority", body); err != nil {
+		signSpan.RecordError(err)
+		signSpan.End()
+		span.RecordError(err)
 		return "", fmt.Errorf("FSPIOP sign transfer (fail-closed, transfer NOT sent): %w", err)
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	signSpan.End()
+	client := &http.Client{Timeout: 10 * time.Second, Transport: tracedTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
+		span.RecordError(err)
 		return "", fmt.Errorf("switch send failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("switch returned %d: %s", resp.StatusCode, string(respBody))
+		err := fmt.Errorf("switch returned %d: %s", resp.StatusCode, string(respBody))
+		span.RecordError(err)
+		return "", err
 	}
 	return transferID, nil
 }
@@ -450,7 +481,8 @@ func postSettlementToLedger(ctx context.Context, paymentID int64, reference stri
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
+	// Phase-7 OTel: client span + traceparent propagation to the bridge :8086.
+	client := &http.Client{Timeout: 10 * time.Second, Transport: tracedTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("ledger bridge unreachable: %w", err)
@@ -722,6 +754,13 @@ func main() {
 	log.Printf("[Payment Service] Mojaloop: %s | TigerBeetle bridge: %s | Kafka: %s",
 		mojaloopBaseURL, tigerBeetleBridgeURL, kafkaBrokers)
 
+	// Phase-7 OTel: guarded by OTEL_EXPORTER_OTLP_ENDPOINT — unset = telemetry
+	// disabled, boot unaffected (sanctioned fail-open, OTEL_DESIGN.md §1).
+	otelShutdown, otelEnabled := InitTelemetry(context.Background())
+	if otelEnabled {
+		defer otelShutdown(context.Background())
+	}
+
 	if err := initDB(); err != nil {
 		log.Fatalf("[Payment Service] DB init failed: %v", err)
 	}
@@ -743,7 +782,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":" + httpPort,
-		Handler:      mux,
+		Handler:      tracedHandler("payment-service.http", mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
