@@ -1,7 +1,15 @@
 /**
  * Sprint 66 — Cargo Tracking Real-Time Map
  * tRPC router: live AIS vessel positions, route polylines, shipment linkage
- * Simulates sedona-svc AIS feed with realistic vessel data for Mombasa Port area
+ *
+ * P0 remediation (audit): the synthetic BASE_VESSELS fleet and the position
+ * "drift" simulator were REMOVED. Positions are served ONLY from the persisted
+ * vessel_tracking_events store (real ingested AIS events). When that store is
+ * empty or unreachable the procedures return an honest empty state with
+ * sourceService:"none" — no positions are ever synthesized.
+ *
+ * Required upstream for live coverage: an AIS ingestion worker (e.g. sedona-svc
+ * /api/v1/ais/vessels poller) writing into vessel_tracking_events.
  */
 
 import { z } from "zod";
@@ -50,253 +58,14 @@ export interface RouteWaypoint {
   event?: string;
 }
 
-// ─── SEED DATA ────────────────────────────────────────────────────────────────
-
-// Base vessel positions near Mombasa Port, Kenya (-4.05°, 39.67°)
-const BASE_VESSELS: LiveVessel[] = [
-  {
-    id: "v1",
-    mmsi: "636091234",
-    imo: "9234567",
-    vesselName: "MSC NAIROBI",
-    vesselType: "container",
-    flag: "LR",
-    callSign: "A8KN9",
-    lat: -4.0435,
-    lon: 39.6682,
-    speed: 12.4,
-    heading: 285,
-    course: 283,
-    status: "underway",
-    cargoStatus: "pre-arrival",
-    declarationRef: "URN-2026-001234",
-    riskFlag: "green",
-    eta: new Date(Date.now() + 6 * 3600000).toISOString(),
-    destination: "KEMBA",
-    draught: 12.4,
-    length: 294,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Port Said",
-    originLat: 31.2653,
-    originLon: 32.3019,
-  },
-  {
-    id: "v2",
-    mmsi: "636092345",
-    imo: "9345678",
-    vesselName: "EVER GOLDEN GATE",
-    vesselType: "container",
-    flag: "TW",
-    callSign: "BPKL2",
-    lat: -4.0612,
-    lon: 39.6891,
-    speed: 0.2,
-    heading: 180,
-    course: 180,
-    status: "moored",
-    cargoStatus: "berthed",
-    declarationRef: "URN-2026-001235",
-    riskFlag: "amber",
-    eta: null,
-    destination: "KEMBA",
-    draught: 13.1,
-    length: 366,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Shanghai",
-    originLat: 31.2304,
-    originLon: 121.4737,
-  },
-  {
-    id: "v3",
-    mmsi: "636093456",
-    imo: "9456789",
-    vesselName: "AFRICAN EXPLORER",
-    vesselType: "bulk",
-    flag: "GH",
-    callSign: "9GA12",
-    lat: -4.0789,
-    lon: 39.7012,
-    speed: 8.1,
-    heading: 310,
-    course: 308,
-    status: "underway",
-    cargoStatus: "arrived",
-    declarationRef: null,
-    riskFlag: null,
-    eta: new Date(Date.now() + 2 * 3600000).toISOString(),
-    destination: "KEMBA",
-    draught: 9.8,
-    length: 189,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Durban",
-    originLat: -29.8587,
-    originLon: 31.0218,
-  },
-  {
-    id: "v4",
-    mmsi: "636094567",
-    imo: "9567890",
-    vesselName: "KENYA TRADER",
-    vesselType: "general",
-    flag: "KE",
-    callSign: "5YKT4",
-    lat: -4.0234,
-    lon: 39.6543,
-    speed: 0.0,
-    heading: 90,
-    course: 90,
-    status: "anchored",
-    cargoStatus: "loading",
-    declarationRef: "URN-2026-001236",
-    riskFlag: "green",
-    eta: null,
-    destination: "TZDAR",
-    draught: 6.2,
-    length: 142,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Mombasa",
-    originLat: -4.0435,
-    originLon: 39.6682,
-  },
-  {
-    id: "v5",
-    mmsi: "636095678",
-    imo: "9678901",
-    vesselName: "GULF PIONEER",
-    vesselType: "tanker",
-    flag: "AE",
-    callSign: "A6GP5",
-    lat: -4.0956,
-    lon: 39.7234,
-    speed: 5.3,
-    heading: 270,
-    course: 268,
-    status: "underway",
-    cargoStatus: "pre-arrival",
-    declarationRef: "URN-2026-001237",
-    riskFlag: "red",
-    eta: new Date(Date.now() + 4 * 3600000).toISOString(),
-    destination: "KEMBA",
-    draught: 14.2,
-    length: 228,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Fujairah",
-    originLat: 25.1288,
-    originLon: 56.3264,
-  },
-  {
-    id: "v6",
-    mmsi: "636096789",
-    imo: "9789012",
-    vesselName: "EAST AFRICA EXPRESS",
-    vesselType: "roro",
-    flag: "KE",
-    callSign: "5YEA6",
-    lat: -4.0123,
-    lon: 39.6789,
-    speed: 0.1,
-    heading: 0,
-    course: 0,
-    status: "moored",
-    cargoStatus: "unloading",
-    declarationRef: "URN-2026-001238",
-    riskFlag: "green",
-    eta: null,
-    destination: "KEMBA",
-    draught: 7.8,
-    length: 176,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Dar es Salaam",
-    originLat: -6.7924,
-    originLon: 39.2083,
-  },
-  {
-    id: "v7",
-    mmsi: "636097890",
-    imo: "9890123",
-    vesselName: "MAERSK MOMBASA",
-    vesselType: "container",
-    flag: "DK",
-    callSign: "OUMD7",
-    lat: -3.9876,
-    lon: 39.6234,
-    speed: 14.2,
-    heading: 220,
-    course: 218,
-    status: "underway",
-    cargoStatus: "departed",
-    declarationRef: "URN-2026-001239",
-    riskFlag: "green",
-    eta: new Date(Date.now() + 12 * 3600000).toISOString(),
-    destination: "ZACPT",
-    draught: 11.6,
-    length: 294,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Mombasa",
-    originLat: -4.0435,
-    originLon: 39.6682,
-  },
-  {
-    id: "v8",
-    mmsi: "636098901",
-    imo: "9901234",
-    vesselName: "NILE CARRIER",
-    vesselType: "bulk",
-    flag: "EG",
-    callSign: "SUEG8",
-    lat: -4.1234,
-    lon: 39.7456,
-    speed: 3.2,
-    heading: 315,
-    course: 312,
-    status: "underway",
-    cargoStatus: "pre-arrival",
-    declarationRef: "URN-2026-001240",
-    riskFlag: "amber",
-    eta: new Date(Date.now() + 8 * 3600000).toISOString(),
-    destination: "KEMBA",
-    draught: 10.4,
-    length: 195,
-    lastUpdate: new Date().toISOString(),
-    originPort: "Alexandria",
-    originLat: 31.2001,
-    originLon: 29.9187,
-  },
-];
-
-// ─── POSITION DRIFT SIMULATION ────────────────────────────────────────────────
-// Simulates AIS position updates: underway vessels drift along their heading
-
-function driftVessel(vessel: LiveVessel, tickSeconds: number): LiveVessel {
-  if (vessel.speed < 0.5) return { ...vessel, lastUpdate: new Date().toISOString() };
-
-  const speedMs = (vessel.speed * 0.514444) * tickSeconds; // knots → m/s → metres
-  const headingRad = (vessel.heading * Math.PI) / 180;
-
-  // Approximate: 1 degree lat ≈ 111,320 m; 1 degree lon ≈ 111,320 * cos(lat) m
-  const latDelta = (speedMs * Math.cos(headingRad)) / 111320;
-  const lonDelta = (speedMs * Math.sin(headingRad)) / (111320 * Math.cos((vessel.lat * Math.PI) / 180));
-
-  return {
-    ...vessel,
-    lat: vessel.lat + latDelta,
-    lon: vessel.lon + lonDelta,
-    lastUpdate: new Date().toISOString(),
-  };
-}
+// ─── SEED DATA / DRIFT SIMULATION — REMOVED (P0 remediation) ──────────────
+// The hardcoded BASE_VESSELS fleet and driftVessel() position synthesizer were
+// removed: they served fabricated "live" AIS positions on public procedures.
+// Real positions come from the persisted vessel_tracking_events table only.
 
 // ─── ROUTE GENERATION — REMOVED (SW-25) ──────────────────────────────────────
 // The fabricated 12-waypoint route synthesizer with randomized speeds was
 // removed. Vessel history is served only from persisted vessel_tracking_events.
-
-// ─── PORT ARRIVALS ────────────────────────────────────────────────────────────
-
-const PORT_ARRIVALS = [
-  { vesselName: "MSC NAIROBI", mmsi: "636091234", eta: new Date(Date.now() + 6 * 3600000).toISOString(), berth: "Berth 12", cargoType: "Container", teu: 2840, riskFlag: "green" as RiskFlag },
-  { vesselName: "GULF PIONEER", mmsi: "636095678", eta: new Date(Date.now() + 4 * 3600000).toISOString(), berth: "Berth 7 (Liquid)", cargoType: "Crude Oil", teu: null, riskFlag: "red" as RiskFlag },
-  { vesselName: "AFRICAN EXPLORER", mmsi: "636093456", eta: new Date(Date.now() + 2 * 3600000).toISOString(), berth: "Berth 3 (Bulk)", cargoType: "Grain", teu: null, riskFlag: null },
-  { vesselName: "NILE CARRIER", mmsi: "636098901", eta: new Date(Date.now() + 8 * 3600000).toISOString(), berth: "Berth 5 (Bulk)", cargoType: "Fertiliser", teu: null, riskFlag: "amber" as RiskFlag },
-];
 
 // ─── ROUTER// ─── SHARED DATA HELPER (used by Sprint 70 WS broadcast) ───────────────────────
 
@@ -312,22 +81,81 @@ async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown
 
 // getLiveVesselsData (sync) is defined below the router — see end of file.
 
+// ─── REAL-DATA HELPERS (P0 remediation) ──────────────────────────────────────
+// Latest persisted position per vessel from the real AIS ingestion store.
+
+const HIGH_RISK_FLAGS = ["IRN","PRK","SYR","RUS","BLR"];
+const MED_RISK_FLAGS = ["LBY","SOM","SDN","YEM","MMR"];
+
+async function latestVesselRows(limit = 200) {
+  return pgQuery(
+    `SELECT DISTINCT ON (mmsi) mmsi, vessel_name, imo_number, latitude, longitude,
+            speed, heading, destination_port, eta, cargo_type, flag_country, recorded_at
+     FROM vessel_tracking_events
+     ORDER BY mmsi, recorded_at DESC LIMIT $1`,
+    [limit]
+  );
+}
+
+function mapVesselRow(r: any) {
+  const flag = String(r.flag_country ?? "");
+  const speed = Number(r.speed ?? 0);
+  const mmsi = String(r.mmsi);
+  return {
+    id: mmsi,
+    mmsi,
+    vesselName: String(r.vessel_name ?? ""),
+    imoNumber: String(r.imo_number ?? ""),
+    vesselType: null as string | null, // not tracked in the persisted store
+    lat: Number(r.latitude),
+    lon: Number(r.longitude),
+    speed,
+    heading: Number(r.heading ?? 0),
+    status: (speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway") as "moored" | "anchored" | "underway",
+    destinationPort: String(r.destination_port ?? ""),
+    eta: r.eta ? new Date(r.eta).toISOString() : null,
+    cargoType: String(r.cargo_type ?? "General"),
+    flagCountry: flag,
+    riskFlag: (HIGH_RISK_FLAGS.includes(flag) ? "red" : MED_RISK_FLAGS.includes(flag) ? "amber" : "green") as "green" | "amber" | "red",
+    lastUpdate: r.recorded_at ? new Date(r.recorded_at).toISOString() : new Date().toISOString(),
+  };
+}
+
 // ─── ROUTER ──────────────────────────────────────────────────────
 
 export const cargoTrackingRouter = router({
   /**
    * getLiveVessels — returns current AIS positions for all tracked vessels.
-   * In production this calls sedona-svc /api/v1/ais/vessels
+   * P0 remediation: positions are read from the persisted vessel_tracking_events
+   * store (real ingested AIS events). The previous synthetic fleet + drift
+   * simulator was removed. When the store is unreachable this returns an honest
+   * empty state (sourceService:"none") — positions are never synthesized.
+   * Required upstream for live coverage: an AIS ingestion worker (e.g.
+   * sedona-svc /api/v1/ais/vessels poller) writing vessel_tracking_events.
    */
   getLiveVessels: publicProcedure
     .input(z.object({
       riskFilter: z.enum(["all", "green", "amber", "red"]).optional().default("all"),
       statusFilter: z.enum(["all", "underway", "moored", "anchored"]).optional().default("all"),
     }))
-    .query(({ input }) => {
-      // Simulate 30-second drift from base positions (capped at 120 ticks = 1 hour)
-      const tick = Math.floor(Date.now() / 30000) % 120;
-      const vessels = BASE_VESSELS.map(v => driftVessel(v, tick * 0.5));
+    .query(async ({ input }) => {
+      let rows: Awaited<ReturnType<typeof latestVesselRows>>;
+      try {
+        rows = await latestVesselRows(500);
+      } catch {
+        return {
+          vessels: [] as ReturnType<typeof mapVesselRow>[],
+          totalCount: 0,
+          lastRefresh: new Date().toISOString(),
+          sourceService: "none",
+          unavailable: true,
+          message:
+            "TRACKING_STORE_UNAVAILABLE: no live AIS source is wired. " +
+            "Positions require an AIS ingestion worker (e.g. sedona-svc) writing vessel_tracking_events.",
+          coverageArea: "Indian Ocean — East Africa Corridor",
+        };
+      }
+      const vessels = rows.map(mapVesselRow);
 
       let filtered = vessels;
       if (input.riskFilter !== "all") {
@@ -339,9 +167,13 @@ export const cargoTrackingRouter = router({
 
       return {
         vessels: filtered,
-        totalCount: BASE_VESSELS.length,
+        totalCount: vessels.length,
         lastRefresh: new Date().toISOString(),
-        sourceService: "sedona-svc",
+        sourceService: vessels.length > 0 ? "vessel_tracking_events" : "none",
+        unavailable: false,
+        message: vessels.length === 0
+          ? "NO_TRACKING_DATA: no persisted AIS positions. Live coverage requires an AIS ingestion worker (e.g. sedona-svc) writing vessel_tracking_events."
+          : undefined,
         coverageArea: "Indian Ocean — East Africa Corridor",
       };
     }),
@@ -389,22 +221,72 @@ export const cargoTrackingRouter = router({
    */
   getShipmentPosition: publicProcedure
     .input(z.object({ declarationRef: z.string() }))
-    .query(({ input }) => {
-      const vessel = BASE_VESSELS.find(v => v.declarationRef === input.declarationRef);
-      if (!vessel) return { found: false, vessel: null };
-      return { found: true, vessel: driftVessel(vessel, Math.floor(Date.now() / 30000) * 0.5) };
+    .query(async ({ input }) => {
+      // P0 remediation: the previous implementation matched against a
+      // hardcoded fake fleet. vessel_tracking_events has no declaration-ref
+      // linkage column, so there is currently NO real data source that maps a
+      // declaration reference to a live vessel position. Return an honest
+      // not-found state instead of synthesizing one.
+      // Required upstream: a shipment↔vessel linkage table populated at
+      // declaration-lodgement time (vessel MMSI on the declaration).
+      void input;
+      return {
+        found: false,
+        vessel: null,
+        message:
+          "NO_SHIPMENT_LINKAGE: no real data source links declaration references to vessel positions yet.",
+      };
     }),
 
   /**
-   * getPortArrivals — upcoming vessel arrivals at the home port
+   * getPortArrivals — upcoming vessel arrivals at the home port, read from
+   * persisted AIS events with a future ETA. Honest empty state when the
+   * tracking store has no ETA data or is unreachable.
    */
-  getPortArrivals: publicProcedure.query(() => {
-    return {
-      arrivals: PORT_ARRIVALS,
-      port: "Mombasa International Port",
-      portCode: "KEMBA",
-      lastUpdate: new Date().toISOString(),
-    };
+  getPortArrivals: publicProcedure.query(async () => {
+    try {
+      const rows = await pgQuery(
+        `SELECT DISTINCT ON (mmsi) mmsi, vessel_name, eta, cargo_type, flag_country
+         FROM vessel_tracking_events
+         WHERE eta IS NOT NULL AND eta > NOW()
+         ORDER BY mmsi, recorded_at DESC
+         LIMIT 50`
+      );
+      const highRisk = ["IRN","PRK","SYR","RUS","BLR"];
+      const medRisk = ["LBY","SOM","SDN","YEM","MMR"];
+      const arrivals = (rows as any[])
+        .map((r) => {
+          const flag = String(r.flag_country ?? "");
+          return {
+            vesselName: String(r.vessel_name ?? ""),
+            mmsi: String(r.mmsi),
+            eta: r.eta ? new Date(r.eta).toISOString() : null,
+            berth: null as string | null, // berth assignment is not tracked
+            cargoType: r.cargo_type ? String(r.cargo_type) : null,
+            teu: null as number | null,   // TEU is not tracked
+            riskFlag: (highRisk.includes(flag) ? "red" : medRisk.includes(flag) ? "amber" : "green") as RiskFlag,
+          };
+        })
+        .sort((a, b) => String(a.eta).localeCompare(String(b.eta)));
+      return {
+        arrivals,
+        port: "Mombasa International Port",
+        portCode: "KEMBA",
+        lastUpdate: new Date().toISOString(),
+        message: arrivals.length === 0
+          ? "NO_ETA_DATA: no persisted AIS events with a future ETA."
+          : undefined,
+      };
+    } catch {
+      return {
+        arrivals: [] as unknown[],
+        port: "Mombasa International Port",
+        portCode: "KEMBA",
+        lastUpdate: new Date().toISOString(),
+        unavailable: true,
+        message: "TRACKING_STORE_UNAVAILABLE: persisted vessel tracking events could not be queried.",
+      };
+    }
   }),
 
    /**
@@ -437,18 +319,17 @@ export const cargoTrackingRouter = router({
           withDeclaration: 0,
         };
       }
-    } catch { /* fallback */ }
-    // Static fallback
-    const underway = BASE_VESSELS.filter(v => v.status === "underway").length;
-    const moored = BASE_VESSELS.filter(v => v.status === "moored").length;
-    const anchored = BASE_VESSELS.filter(v => v.status === "anchored").length;
-    const redFlag = BASE_VESSELS.filter(v => v.riskFlag === "red").length;
-    const amberFlag = BASE_VESSELS.filter(v => v.riskFlag === "amber").length;
+    } catch { /* fall through to honest unavailable state */ }
+    // P0 remediation: the fabricated BASE_VESSELS fallback was removed. When the
+    // tracking store is unreachable we report an honest unavailable state with
+    // zeroed counts instead of synthesized fleet statistics.
     return {
-      total: BASE_VESSELS.length,
-      underway, moored, anchored, redFlag, amberFlag,
-      greenFlag: BASE_VESSELS.filter(v => v.riskFlag === "green").length,
-      withDeclaration: BASE_VESSELS.filter(v => v.declarationRef !== null).length,
+      total: 0,
+      underway: 0, moored: 0, anchored: 0,
+      redFlag: 0, amberFlag: 0, greenFlag: 0,
+      withDeclaration: 0,
+      unavailable: true,
+      message: "TRACKING_STORE_UNAVAILABLE: vessel statistics could not be computed from the persisted store.",
     };
   }),
 
@@ -564,28 +445,15 @@ export const cargoTrackingRouter = router({
 // ─── Sync shim for WebSocket broadcaster and legacy tests ────────────────────
 // Maintains a hot in-memory cache refreshed every 30s by the async DB query.
 // The sync getLiveVesselsData() returns the last known snapshot immediately.
+// P0 remediation: the cache starts EMPTY. It is populated only by real DB
+// snapshots — never by the removed BASE_VESSELS seed fleet.
 let _vesselCache: Array<{
   mmsi: string; vesselName: string; imoNumber: string;
   lat: number; lon: number; speed: number; heading: number;
   status: string; destinationPort: string; eta: string | null;
   cargoType: string; flagCountry: string; riskFlag: "green" | "amber" | "red";
   lastUpdate: string;
-}> = BASE_VESSELS.map(v => ({
-  mmsi: v.mmsi,
-  vesselName: v.vesselName,
-  imoNumber: v.imo,
-  lat: v.lat,
-  lon: v.lon,
-  speed: v.speed,
-  heading: v.heading,
-  status: v.status,
-  destinationPort: v.destination,
-  eta: v.eta,
-  cargoType: "Container",
-  flagCountry: v.flag,
-  riskFlag: v.riskFlag ?? "green",
-  lastUpdate: v.lastUpdate,
-}));
+}> = [];
 
 // Refresh cache from DB asynchronously (best-effort, non-blocking)
 async function _refreshVesselCache(): Promise<void> {
@@ -632,8 +500,9 @@ if (typeof setInterval !== "undefined") {
 
 /**
  * getLiveVesselsData — synchronous accessor for the in-memory vessel cache.
- * Returns the last known snapshot from the DB (refreshed every 30s).
- * Falls back to BASE_VESSELS seed data when DB is unavailable.
+ * Returns the last known REAL snapshot from the DB (refreshed every 30s).
+ * Returns an empty array when no real positions have been ingested — the
+ * fabricated BASE_VESSELS fallback was removed (P0 remediation).
  */
 export function getLiveVesselsData() {
   return _vesselCache;

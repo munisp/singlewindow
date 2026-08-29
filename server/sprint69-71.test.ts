@@ -86,7 +86,9 @@ describe("Sprint 70 — WebSocket vessel broadcast", () => {
     const { getLiveVesselsData } = await import("./routers/cargoTracking");
     const vessels = getLiveVesselsData();
     expect(Array.isArray(vessels)).toBe(true);
-    expect(vessels.length).toBeGreaterThan(0);
+    // P0 remediation: the fabricated seed fleet was removed. With no real AIS
+    // data ingested (unit-test environment), the honest state is an EMPTY array.
+    expect(vessels.length).toBe(0);
   });
 
   it("each vessel position should have required fields", async () => {
@@ -121,8 +123,8 @@ describe("Sprint 70 — WebSocket vessel broadcast", () => {
     const a = getLiveVesselsData();
     const b = getLiveVesselsData();
     expect(a.length).toBe(b.length);
-    // Same tick → same positions
-    expect(a[0].mmsi).toBe(b[0].mmsi);
+    // Same snapshot → same positions (empty when no real AIS data ingested)
+    if (a.length > 0) expect(a[0].mmsi).toBe(b[0].mmsi);
   });
 
   describe("WebSocket message protocol", () => {
