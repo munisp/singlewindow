@@ -27,16 +27,14 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/tradegateway/temporal-worker/proto/ledger"
 )
@@ -44,7 +42,8 @@ import (
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 var (
-	tbBridgeURL     = getEnv("TIGERBEETLE_BRIDGE_URL", "localhost:50055")
+	// Canonical Go bridge: k8s Service tigerbeetle-bridge, HTTP /api/ledger/*.
+	tbBridgeURL     = getEnv("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086")
 	mojaloopURL     = getEnv("MOJALOOP_SERVICE_URL", "http://localhost:8099")
 	webhookSecret   = getEnv("MOJALOOP_WEBHOOK_SECRET", "")
 )
@@ -202,7 +201,27 @@ func CalculateDutyBreakdown(declaredValue float64, hsCode, originCountry, curren
 
 // GenerateILPComponents creates a cryptographically secure ILP fulfilment,
 // condition, and OER-encoded packet per ILP RFC 0027.
+// maxMinorUnits caps a single transfer at 90 trillion minor units
+// (900 billion major units) — an explicit overflow ceiling (SW-S2-9).
+const maxMinorUnits = int64(9e13 * 100)
+
+// minorUnits converts a major-unit float amount to integer minor units with an
+// explicit guard: amount must be finite, > 0, and within the ceiling. This
+// prevents NaN/negative/overflow from silently wrapping into int64/uint64 at
+// activity boundaries (SW-S2-9).
+func minorUnits(amount float64) (int64, error) {
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 || amount > 9e13 {
+		return 0, fmt.Errorf("invalid amount %v: must be finite, > 0 and <= 9e13", amount)
+	}
+	return int64(math.Round(amount * 100)), nil
+}
+
 func GenerateILPComponents(amount int64, destinationAccount string) (ilpPacket, condition, fulfillment string, err error) {
+	// SW-S2-9: guard the uint64 conversion below — a negative or absurd amount
+	// must not wrap into the ILP packet.
+	if amount <= 0 || amount > maxMinorUnits {
+		return "", "", "", fmt.Errorf("invalid minor-unit amount %d for ILP packet", amount)
+	}
 	// Generate 32-byte random fulfillment preimage
 	preimage := make([]byte, 32)
 	if _, err = rand.Read(preimage); err != nil {
@@ -243,16 +262,11 @@ func GenerateILPComponents(amount int64, destinationAccount string) (ilpPacket, 
 
 // ─── TigerBeetle gRPC client ──────────────────────────────────────────────────
 
-func newTBClient() (pb.LedgerServiceClient, *grpc.ClientConn, error) {
-	conn, err := grpc.Dial(tbBridgeURL,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-		grpc.WithTimeout(5*time.Second),
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("connect to TigerBeetle bridge: %w", err)
-	}
-	return pb.NewLedgerServiceClient(conn), conn, nil
+// newTBClient returns a client for the canonical Go tigerbeetle-bridge
+// (HTTP /api/ledger/*). The returned closer is a no-op kept for call-site
+// compatibility.
+func newTBClient() (pb.LedgerServiceClient, io.Closer, error) {
+	return pb.NewLedgerServiceHTTPClient(tbBridgeURL), pb.NopCloser{}, nil
 }
 
 // ─── Atomic Payment Activities ────────────────────────────────────────────────
@@ -294,8 +308,11 @@ func (a *Activities) CreatePendingLedgerTransfer(ctx context.Context, input stru
 		Currency:    input.Currency,
 	})
 
-	// Convert amount to minor units (kobo for NGN, pesewas for GHS)
-	amountMinor := int64(input.Amount * 100)
+	// SW-S2-9: guarded conversion — no silent NaN/negative/overflow truncation.
+	amountMinor, err := minorUnits(input.Amount)
+	if err != nil {
+		return "", err
+	}
 
 	resp, err := tbClient.CreateTransfer(ctx, &pb.CreateTransferRequest{
 		IdempotencyKey:  fmt.Sprintf("invoice:%d:pending", input.InvoiceID),
@@ -341,7 +358,10 @@ func (a *Activities) PostLedgerTransfer(ctx context.Context, input struct {
 	}
 	defer conn.Close()
 
-	amountMinor := int64(input.Amount * 100)
+	amountMinor, err := minorUnits(input.Amount)
+	if err != nil {
+		return err
+	}
 	resp, err := tbClient.PostTransfer(ctx, &pb.PostTransferRequest{
 		PendingTransferId: input.PendingTransferID,
 		Amount:            amountMinor,
@@ -424,7 +444,10 @@ func (a *Activities) InitiateMojaloopTransfer(ctx context.Context, input struct 
 	IdempotencyKey string  `json:"idempotencyKey"`
 }) (string, error) {
 	// Generate real ILP components
-	amountMinor := int64(input.Amount * 100)
+	amountMinor, err := minorUnits(input.Amount)
+	if err != nil {
+		return "", err
+	}
 	destinationAccount := fmt.Sprintf("g.ng.customs.revenue.%s", strings.ToLower(input.Currency))
 
 	ilpPacket, condition, fulfillment, err := GenerateILPComponents(amountMinor, destinationAccount)
@@ -664,9 +687,3 @@ func (a *Activities) VerifyExportDeclarationFull(ctx context.Context, input stru
 	return nil
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
