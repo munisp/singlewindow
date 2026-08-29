@@ -23,9 +23,12 @@ import express, { Request, Response } from "express";
 import crypto from "crypto";
 import { getPool } from "../db";
 import { notifyOwner } from "../_core/notification";
+import { getWebhookSecret } from "../_core/webhookSecretsValidator";
+import { deriveDeliveryKey, isDuplicateDelivery } from "./dedupe";
 
-const CEP_WEBHOOK_SECRET =
-  process.env.CEP_WEBHOOK_SECRET ?? "tradegateway-cep-webhook-secret-dev";
+// Boot-fatal in production when unset or a known dev value (getWebhookSecret
+// throws); in development the dev default is used with a loud warning.
+const CEP_WEBHOOK_SECRET = getWebhookSecret("CEP_WEBHOOK_SECRET", "tradegateway-cep-webhook-secret-dev");
 
 // ─── Signature verification ───────────────────────────────────────────────────
 function verifySignature(rawBody: string, signature: string): boolean {
@@ -92,16 +95,10 @@ export function registerCepWebhookRoute(app: express.Application) {
       const rawBody = req.body instanceof Buffer ? req.body.toString("utf8") : "";
       const signature = String(req.headers["x-cep-signature"] ?? "");
 
-      // In development (no secret configured) we skip signature check to ease testing.
-      const isDev = process.env.NODE_ENV !== "production";
-      if (!isDev && signature) {
-        if (!verifySignature(rawBody, signature)) {
-          res.status(401).json({ error: "Invalid X-CEP-Signature" });
-          return;
-        }
-      } else if (!isDev && !signature) {
-        // Production requires the header
-        res.status(401).json({ error: "Missing X-CEP-Signature header" });
+      // A valid HMAC signature is ALWAYS required (fail closed) — an unsigned
+      // or badly-signed event must never create alerts.
+      if (!signature || !verifySignature(rawBody, signature)) {
+        res.status(401).json({ error: "Invalid or missing X-CEP-Signature" });
         return;
       }
 
@@ -137,7 +134,22 @@ export function registerCepWebhookRoute(app: express.Application) {
         return;
       }
 
-      // ── 3. Generate alert ID (CEP-YYYY-NNNN) ──────────────────────────────
+      // ── 2b. Replay dedupe by delivery id (or body hash) ────────────────────
+      const deliveryKey = deriveDeliveryKey(req.headers["x-cep-delivery-id"], rawBody);
+      try {
+        if (await isDuplicateDelivery("cep", deliveryKey)) {
+          res.status(200).json({ received: true, duplicate: true, message: "Delivery already processed" });
+          return;
+        }
+      } catch (dedupeErr) {
+        console.error("[CEP Webhook] Dedupe store unavailable:", dedupeErr);
+        res.status(503).json({ error: "Delivery verification unavailable — retry later" });
+        return;
+      }
+
+      // ── 3. Generate alert ID (CEP-YYYY-NNNN) from a DB sequence ────────────
+      // A sequence avoids the COUNT(*)+1 race that produced duplicate alert_ids
+      // under concurrent deliveries.
       const pool = getPool();
       if (!pool) {
         res.status(500).json({ error: "Database unavailable" });
@@ -145,14 +157,13 @@ export function registerCepWebhookRoute(app: express.Application) {
       }
 
       const year = new Date().getFullYear();
-      const { rows: countRows } = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM cep_alerts WHERE alert_id LIKE $1`,
-        [`CEP-${year}-%`]
-      );
-      const seq = (parseInt(String(countRows[0]?.cnt ?? "0"), 10) + 1)
-        .toString()
-        .padStart(4, "0");
-      const alertId = `CEP-${year}-${seq}`;
+      const { rows: seqRows } = await pool.query(`SELECT nextval('cep_alert_seq') AS seq`);
+      const seqVal = seqRows[0]?.seq;
+      if (seqVal == null) {
+        res.status(500).json({ error: "Failed to allocate alert id" });
+        return;
+      }
+      const alertId = `CEP-${year}-${String(seqVal).padStart(4, "0")}`;
 
       const detectedAtTs = detectedAt ? new Date(detectedAt) : new Date();
 

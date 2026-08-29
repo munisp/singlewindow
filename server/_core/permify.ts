@@ -49,8 +49,12 @@ export async function can(
     subject:  { type: "user", id: userId },
   };
 
-  // In demo mode, bypass Permify and allow all checks
-  const isDemoMode = process.env.DEMO_MODE === "true";
+  // In demo mode (dev/test only — production boot-refuses DEMO_MODE via
+  // server/_core/productionGates), bypass Permify and allow all checks.
+  // Defence in depth: never allow the bypass when NODE_ENV=production, even if
+  // the startup gate was somehow skipped.
+  const isDemoMode =
+    process.env.NODE_ENV !== "production" && process.env.DEMO_MODE === "true";
   if (isDemoMode) {
     return true;
   }
@@ -135,10 +139,13 @@ export async function writeTuple(
 
     if (!res.ok) {
       const text = await res.text();
-      console.warn(`[permify] writeTuple failed (${res.status}): ${text}`);
+      // SW-MP15: never swallow a failed grant — surface it so the calling
+      // mutation fails honestly instead of leaving authz silently unwritten.
+      throw new Error(`[permify] writeTuple failed (${res.status}): ${text}`);
     }
   } catch (err) {
-    console.warn("[permify] writeTuple unavailable:", err);
+    if (err instanceof Error && err.message.startsWith("[permify]")) throw err;
+    throw new Error(`[permify] writeTuple unavailable: ${String(err)}`);
   }
 }
 
@@ -176,10 +183,13 @@ export async function deleteTuple(
 
     if (!res.ok) {
       const text = await res.text();
-      console.warn(`[permify] deleteTuple failed (${res.status}): ${text}`);
+      // SW-MP15: never swallow a failed revoke — surface it so the calling
+      // mutation fails honestly instead of leaving access silently in place.
+      throw new Error(`[permify] deleteTuple failed (${res.status}): ${text}`);
     }
   } catch (err) {
-    console.warn("[permify] deleteTuple unavailable:", err);
+    if (err instanceof Error && err.message.startsWith("[permify]")) throw err;
+    throw new Error(`[permify] deleteTuple unavailable: ${String(err)}`);
   }
 }
 

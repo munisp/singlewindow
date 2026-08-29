@@ -183,6 +183,20 @@ function isUnsafeProductionEndpoint(value: string): boolean {
 }
 
 /**
+ * Known development placeholder values that must NEVER pass production
+ * validation (SW-MP14). A secret set to one of these is worse than unset
+ * because it looks configured while being publicly known.
+ */
+const KNOWN_DEV_SECRET_VALUES: Record<string, string[]> = {
+  REDIS_PASSWORD: ["tradegateway_redis_2026"],
+  REDIS_URL: ["redis://:tradegateway_redis_2026@localhost:6379"],
+  JWT_SECRET: ["dev-secret", "changeme", "secret", "password", "tradegateway-jwt-dev"],
+  API_KEY_HASH_SECRET: ["dev-secret", "changeme", "secret", "password"],
+  KEYCLOAK_CLIENT_SECRET: ["dev-secret", "changeme", "secret", "password", "admin"],
+  PERMIFY_API_KEY: ["dev-secret", "changeme", "secret", "password", "key1"],
+};
+
+/**
  * Rejects missing secrets and local/default endpoints before a production process
  * can serve traffic. Tests and local development retain explicit local defaults.
  */
@@ -202,6 +216,22 @@ export function validateProductionConfig(config = ENV): void {
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ];
   const missing = required.filter(([, value]) => !value.trim()).map(([name]) => name);
+
+  // SW-MP14: reject known development secret values even though they are non-empty.
+  const configByEnvVar: Record<string, string> = {
+    REDIS_PASSWORD: config.redisPassword,
+    REDIS_URL: config.redisUrl,
+    JWT_SECRET: config.cookieSecret,
+    API_KEY_HASH_SECRET: config.apiKeyHashSecret,
+    KEYCLOAK_CLIENT_SECRET: config.keycloakClientSecret,
+    PERMIFY_API_KEY: config.permifyApiKey,
+  };
+  const knownDevValues = Object.entries(KNOWN_DEV_SECRET_VALUES)
+    .filter(([envVar, devValues]) => {
+      const actual = (configByEnvVar[envVar] ?? "").trim();
+      return actual !== "" && devValues.includes(actual);
+    })
+    .map(([envVar]) => envVar);
   const unsafeEndpoints = [
     ["DATABASE_URL", config.databaseUrl],
     ["KEYCLOAK_URL", config.keycloakUrl],
@@ -212,10 +242,11 @@ export function validateProductionConfig(config = ENV): void {
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ].filter(([, value]) => isUnsafeProductionEndpoint(value)).map(([name]) => name);
 
-  if (missing.length || unsafeEndpoints.length) {
+  if (missing.length || unsafeEndpoints.length || knownDevValues.length) {
     const details = [
       missing.length ? `missing: ${missing.join(", ")}` : "",
       unsafeEndpoints.length ? `unsafe local endpoint: ${unsafeEndpoints.join(", ")}` : "",
+      knownDevValues.length ? `known dev placeholder value: ${knownDevValues.join(", ")}` : "",
     ].filter(Boolean).join("; ");
     throw new Error(`[ENV] Production configuration rejected (${details}).`);
   }

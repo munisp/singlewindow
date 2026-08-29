@@ -73,7 +73,10 @@ export const documentVaultRouter = router({
         });
       }
       if (scanResult.skipped) {
-        console.warn(`[DocumentVault] ClamAV scan skipped for ${input.filename} — virus DB unavailable`);
+        // SW-S2-8: an unscanned file is NEVER silently activated — it is stored
+        // in 'quarantined' status (invisible to normal 'active' listings) until
+        // a successful AV scan clears it.
+        console.warn(`[DocumentVault] ClamAV scan unavailable for ${input.filename} — storing as QUARANTINED`);
       }
       // ─────────────────────────────────────────────────────────────────────
 
@@ -93,7 +96,8 @@ export const documentVaultRouter = router({
         sizeBytes: input.sizeBytes,
         category: input.category,
         accessLevel: input.accessLevel,
-        status: "active",
+        // Quarantined until a successful AV scan when the scanner was unavailable.
+        status: scanResult.skipped ? "quarantined" : "active",
         description: input.description ?? null,
       }).returning();
 

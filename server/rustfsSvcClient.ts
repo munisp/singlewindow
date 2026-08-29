@@ -95,7 +95,7 @@ export interface ScanResult {
   clean: boolean;
   /** threat name if a virus was detected, null otherwise */
   threat: string | null;
-  /** true when ClamAV virus DB is unavailable — upload is allowed with a warning */
+  /** true when ClamAV virus DB is unavailable — callers MUST quarantine the file, not activate it */
   skipped: boolean;
   /** optional error message from the scanner */
   error?: string;

@@ -30,7 +30,8 @@ export const declarationTypeEnum = pgEnum("declaration_type", [
 export const declarationStatusEnum = pgEnum("declaration_status", [
   "draft", "submitted", "under_assessment", "docs_required",
   "payment_pending", "payment_confirmed", "under_examination",
-  "examination_complete", "cleared", "rejected", "cancelled"
+  "examination_complete", "cleared", "rejected", "cancelled",
+  "held_sanctions"
 ]);
 
 export const riskLaneEnum = pgEnum("risk_lane", ["green", "yellow", "red", "blue"]);
@@ -829,7 +830,7 @@ export const documentVaultAccessEnum = pgEnum("document_vault_access", [
 ]);
 
 export const documentVaultStatusEnum = pgEnum("document_vault_status", [
-  "active", "revoked", "expired"
+  "active", "revoked", "expired", "quarantined"
 ]);
 
 export const documentVault = pgTable("document_vault", {
@@ -3370,3 +3371,39 @@ export const lpcoRecords = pgTable("lpco_records", {
 ]);
 export type LPCORecord = typeof lpcoRecords.$inferSelect;
 export type InsertLPCORecord = typeof lpcoRecords.$inferInsert;
+
+// ─── Phase-6 Remediation: Webhook Delivery Dedupe ────────────────────────────
+// Records every inbound webhook delivery exactly once so replays can be
+// acknowledged without re-applying side effects (see server/webhooks/dedupe.ts).
+export const webhookReceipts = pgTable("webhook_receipts", {
+  id: serial("id").primaryKey(),
+  source: varchar("source", { length: 32 }).notNull(),
+  deliveryKey: varchar("delivery_key", { length: 255 }).notNull(),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+}, (t) => [
+  unique("webhook_receipts_source_key_unique").on(t.source, t.deliveryKey),
+  index("idx_webhook_receipts_source").on(t.source),
+]);
+export type WebhookReceipt = typeof webhookReceipts.$inferSelect;
+export type InsertWebhookReceipt = typeof webhookReceipts.$inferInsert;
+
+// ─── Phase-6 Remediation: 4-Eyes (Dual Control) Requests ─────────────────────
+// Postgres-backed dual-control approvals for privileged mutations. Consume-on-use:
+// a request can authorise exactly one execution of the action it approved.
+export const fourEyesRequests = pgTable("four_eyes_requests", {
+  id: serial("id").primaryKey(),
+  action: varchar("action", { length: 100 }).notNull(),
+  entityType: varchar("entity_type", { length: 100 }).notNull(),
+  entityId: varchar("entity_id", { length: 100 }).notNull(),
+  requestedBy: integer("requested_by").notNull().references(() => users.id),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  consumedAt: timestamp("consumed_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_four_eyes_action_entity").on(t.action, t.entityType, t.entityId),
+]);
+export type FourEyesRequest = typeof fourEyesRequests.$inferSelect;
+export type InsertFourEyesRequest = typeof fourEyesRequests.$inferInsert;

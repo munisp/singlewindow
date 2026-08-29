@@ -2,6 +2,7 @@
  * AEO Renewals Router — manage AEO certificate renewal workflow
  */
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import { aeoRenewals, aeoApplications, aeoRenewalDocuments } from "../../drizzle/schema";
@@ -158,8 +159,21 @@ export const aeoRenewalsRouter = router({
         .where(and(eq(aeoRenewals.id, input.renewalId), eq(aeoRenewals.traderId, ctx.user.id)))
         .limit(1);
       if (!renewal) throw new Error("Renewal not found or access denied");
+      // SW-S2-10: cap the base64 payload BEFORE decoding (16 MB decoded ≈ 21.3 MB
+      // base64) so a giant payload cannot exhaust memory, and sanitise every
+      // path segment — client-supplied docType/fileName must never inject path
+      // separators or traversal into the storage key.
+      const MAX_BASE64_LEN = Math.ceil((16 * 1024 * 1024) / 3) * 4;
+      if (input.fileBase64.length > MAX_BASE64_LEN) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "File too large — maximum 16MB" });
+      }
       const buf = Buffer.from(input.fileBase64, "base64");
-      const key = `aeo-renewal-docs/${ctx.user.id}/${input.renewalId}/${input.docType}-${Date.now()}-${input.fileName}`;
+      if (buf.length > 16 * 1024 * 1024) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "File too large — maximum 16MB" });
+      }
+      const safeDocType = input.docType.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64);
+      const safeFileName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128);
+      const key = `aeo-renewal-docs/${ctx.user.id}/${input.renewalId}/${safeDocType}-${Date.now()}-${safeFileName}`;
       const { url } = await storagePut(key, buf, input.mimeType);
       const [existing] = await db.select().from(aeoRenewalDocuments)
         .where(and(eq(aeoRenewalDocuments.renewalId, input.renewalId), eq(aeoRenewalDocuments.docType, input.docType)))

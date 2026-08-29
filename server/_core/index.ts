@@ -1171,6 +1171,15 @@ async function runPermifySeedOnStartup() {
 }
 
 async function startServer() {
+  // ── Phase-6 startup gates (fail fast, before any listener or route) ─────────
+  // 1. Refuse to boot in production when demo/test/mock surfaces are enabled.
+  // 2. Refuse to boot in production with missing or known-dev webhook secrets.
+  {
+    const { assertNoDemoSurfacesInProduction } = await import("./productionGates");
+    assertNoDemoSurfacesInProduction();
+    const { validateWebhookSecrets } = await import("./webhookSecretsValidator");
+    validateWebhookSecrets();
+  }
   const app = express();
   // Trust the reverse proxy (Manus/nginx) so express-rate-limit reads the correct client IP
   app.set('trust proxy', 1);
