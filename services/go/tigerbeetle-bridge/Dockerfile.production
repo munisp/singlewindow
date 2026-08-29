@@ -30,11 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY go.mod go.sum* ./
+COPY go.mod go.sum ./
 
-# Add tigerbeetle-go dependency
-RUN go get github.com/tigerbeetle/tigerbeetle-go@latest
-
+# tigerbeetle-go is pinned in go.mod (v0.16.x — the last series shipping
+# pkg/types; matches the TigerBeetle server 0.16.x lineage). Never @latest.
 RUN go mod download
 
 COPY . .

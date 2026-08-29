@@ -382,9 +382,6 @@ func (b *LiveBackend) GetRecentTransfers(limit int) []*Transfer {
 
 // bigIntToMinor converts a *big.Int (TigerBeetle Uint128 value) to int64.
 // TigerBeetle stores amounts as 128-bit unsigned integers; we use the lower 64 bits.
-func bigIntToMinor(bi *big.Int) int64 {
-	if bi == nil {
-		return 0
-	}
+func bigIntToMinor(bi big.Int) int64 {
 	return bi.Int64()
 }
