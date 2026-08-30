@@ -1,17 +1,21 @@
-// Package middleware provides Dapr pub/sub and OpenTelemetry integration for mojaloop-gateway.
+// Package middleware provides Kafka and OpenTelemetry integration for mojaloop-gateway.
 // Kafka topics published:  payments.confirmed   (duty payment confirmed, triggers clearance workflow)
 //
 //	payments.failed      (payment failed, triggers retry/alert)
 //	payments.initiated   (payment initiated by trader)
 //
 // Kafka topics consumed:   declarations.cleared (clearance confirmed, payment receipt issued)
-// Dapr pub/sub:            publishes payments.confirmed to pubsub component
 // NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
+// NOTE (PRA-123, Phase 9): the Dapr pub/sub publish path was REMOVED. It was an
+// unreferenced lossy duplicate of the Kafka publish path (Kafka is the
+// authoritative bus; Dapr was never deployed with a pubsub component), and a
+// Dapr failure was non-fatal — a payment event could be durably committed to
+// Kafka while the Dapr copy silently vanished, or vice versa. One bus, one
+// failure posture: PublishPaymentEvent returns the broker error to the caller.
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
 package middleware
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/tradegateway/mojaloop-gateway/internal/telemetry"
-	"net/http"
 	"os"
 	"time"
 
@@ -41,8 +44,7 @@ const (
 	TopicPaymentsInitiated   = "payments.initiated"
 	TopicDeclarationsCleared = "declarations.cleared"
 
-	DaprPubsubName = "pubsub"
-	ServiceName    = "mojaloop-gateway"
+	ServiceName = "mojaloop-gateway"
 )
 
 // ─── Kafka Producer ───────────────────────────────────────────────────────────
@@ -137,49 +139,11 @@ func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any
 	return nil
 }
 
-// ─── Dapr Pub/Sub ─────────────────────────────────────────────────────────────
-
-type daprPublishRequest struct {
-	Data            any    `json:"data"`
-	DataContentType string `json:"datacontenttype"`
-}
-
-// DaprPublishPayment publishes a payment event to Dapr pub/sub (pubsub component).
-// This triggers the Temporal clearance workflow via Dapr subscription.
-func DaprPublishPayment(ctx context.Context, topic string, payload any) error {
-	daprPort := os.Getenv("DAPR_HTTP_PORT")
-	if daprPort == "" {
-		daprPort = "3500"
-	}
-	url := fmt.Sprintf("http://localhost:%s/v1.0/publish/%s/%s", daprPort, DaprPubsubName, topic)
-
-	body, err := json.Marshal(daprPublishRequest{
-		Data:            payload,
-		DataContentType: "application/json",
-	})
-	if err != nil {
-		return fmt.Errorf("marshal dapr payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create dapr request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("dapr publish to %s: %w", topic, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("dapr publish %s returned HTTP %d", topic, resp.StatusCode)
-	}
-	slog.Info("Dapr payment event published", "topic", topic, "status", resp.StatusCode)
-	return nil
-}
+// ─── Dapr Pub/Sub — REMOVED (PRA-123, Phase 9) ──────────────────────────────
+// DaprPublishPayment was an unreferenced lossy duplicate of the Kafka publish
+// path whose failures were non-fatal to the caller. Removed: Kafka
+// (PublishPaymentEvent) is the single authoritative publish path and broker
+// errors are fatal to the publish path.
 
 // ─── Fluvio Real-time Streaming — REMOVED (P0 remediation) ──────────────────
 // The Fluvio HTTP producer posted to a non-existent endpoint
