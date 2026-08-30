@@ -20,6 +20,8 @@ import { getDb } from "../db";
 import { paymentAccounts } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { fetchWithResilience } from "./middlewareClients";
+import { getServiceAuthHeaders } from "./serviceAuth";
 
 // ─── Account type constants ───────────────────────────────────────────────────
 
@@ -182,19 +184,25 @@ async function provisionTigerBeetleAccount(
 ): Promise<void> {
   let res: Response;
   try {
-    res = await fetch(`${TB_BRIDGE_URL}/api/ledger/accounts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: accountId,
-        ledger: 1,
-        code: 1, // trader debit account
-        accountType: "TRADER_LIABILITY",
-        description: `Trader ${userId} payment account (${accountId})`,
-        currency,
-      }),
-      signal: AbortSignal.timeout(5_000),
-    });
+    // PRA-012: authenticated money-rail hop; PRA-024/025: resilience wrapper.
+    const authHeaders = await getServiceAuthHeaders();
+    res = await fetchWithResilience(
+      `${TB_BRIDGE_URL}/api/ledger/accounts`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({
+          id: accountId,
+          ledger: 1,
+          code: 1, // trader debit account
+          accountType: "TRADER_LIABILITY",
+          description: `Trader ${userId} payment account (${accountId})`,
+          currency,
+        }),
+        timeoutMs: 5_000,
+      },
+      "tigerbeetle-bridge"
+    );
   } catch (err) {
     throw new Error(
       `[AccountProvisioner] TigerBeetle bridge unreachable at ${TB_BRIDGE_URL} — account ${accountId} NOT provisioned; payment setup aborted: ${err instanceof Error ? err.message : String(err)}`

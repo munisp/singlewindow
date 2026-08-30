@@ -122,40 +122,25 @@ consumers:
         algorithm: RS256
 
 # ── Route Plugin Config Bindings ──────────────────────────────────────────────
-# Bind the keycloak-oidc plugin config to all protected routes.
-# These IDs correspond to routes defined in apisix.yaml.
-
+# Bind the keycloak-oidc plugin config to protected routes.
+# PRA-108 (Phase 9): these route_id values MUST reference route IDs that
+# actually exist in the deployed declarative route set — infra/apisix/
+# routes.yaml, which uses STRING route ids ("trpc-api", …). The previous
+# numeric ids ("100".."800") matched nothing in routes.yaml, so every binding
+# silently resolved to a non-existent route and NO OIDC plugin config was ever
+# attached. (The separate numeric-id file apisix.yaml carries its OIDC plugin
+# INLINE on each route and needs no bindings.)
+# scripts/lintApisixRoutes.mjs fails CI if a binding/guard references an
+# unresolvable route id or plugin_config_id.
+#
+# NOTE on route coverage: routes.yaml fronts ALL user-facing tRPC traffic
+# (declarations, payments, oga, profiles, risk, cargo, analytics — the Node
+# gateway serves them under /api/trpc/*) through the single protected route
+# "trpc-api". The sibling "*-internal" routes are service-to-service and use
+# key-auth + ip-restriction by design — no OIDC binding.
 route_plugin_bindings:
-  # tRPC API — Keycloak OIDC validation
-  - route_id: "100"
-    plugin_config_id: "keycloak-oidc"
-
-  # Declaration microservice
-  - route_id: "200"
-    plugin_config_id: "keycloak-oidc"
-
-  # Payment microservice
-  - route_id: "300"
-    plugin_config_id: "keycloak-oidc"
-
-  # OGA microservice
-  - route_id: "400"
-    plugin_config_id: "keycloak-oidc"
-
-  # Profile microservice
-  - route_id: "500"
-    plugin_config_id: "keycloak-oidc"
-
-  # Risk engine
-  - route_id: "600"
-    plugin_config_id: "keycloak-oidc"
-
-  # Cargo tracking
-  - route_id: "700"
-    plugin_config_id: "keycloak-oidc"
-
-  # Analytics
-  - route_id: "800"
+  # tRPC API — the single user-facing protected route (all business APIs)
+  - route_id: "trpc-api"
     plugin_config_id: "keycloak-oidc"
 
 # ── Role-Based Route Guards ────────────────────────────────────────────────────
@@ -164,12 +149,16 @@ route_plugin_bindings:
 #
 # This provides a first line of defense; Permify provides resource-level
 # fine-grained authorization inside each service.
+#
+# PRA-108 (Phase 9): route_id values reference routes.yaml string ids
+# ("trpc-api"); uri_pattern values match the REAL tRPC path shape
+# (/api/trpc/<router>.<procedure>) served by the Node gateway.
 
 route_role_guards:
   # Only customs_officer, inspector, admin can call declaration status updates
-  - route_id: "200"
-    method: "PUT"
-    uri_pattern: "/api/declarations/*/status"
+  - route_id: "trpc-api"
+    method: "POST"
+    uri_pattern: "/api/trpc/declarations.*Status*"
     plugin: authz-keycloak
     config:
       token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
@@ -180,9 +169,9 @@ route_role_guards:
       enforcement_mode: ENFORCING
 
   # Only oga_officer, admin can approve/reject permits
-  - route_id: "400"
-    method: "PUT"
-    uri_pattern: "/api/oga/permits/*/approve"
+  - route_id: "trpc-api"
+    method: "POST"
+    uri_pattern: "/api/trpc/oga.*approve*"
     plugin: authz-keycloak
     config:
       token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
@@ -191,9 +180,9 @@ route_role_guards:
       enforcement_mode: ENFORCING
 
   # Only finance, admin can access payment reconciliation
-  - route_id: "300"
-    method: "GET"
-    uri_pattern: "/api/payments/reconciliation*"
+  - route_id: "trpc-api"
+    method: "POST"
+    uri_pattern: "/api/trpc/payments.reconciliation*"
     plugin: authz-keycloak
     config:
       token_endpoint: "http://keycloak.tradegateway.svc.cluster.local:8080/realms/tradegateway/protocol/openid-connect/token"
