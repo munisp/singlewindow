@@ -6,7 +6,7 @@ require (
 	github.com/IBM/sarama v1.60.2
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/google/uuid v1.6.0
-	github.com/tigerbeetle/tigerbeetle-go v0.16.44
+	github.com/tigerbeetle/tigerbeetle-go v0.17.9
 	go.opentelemetry.io/otel v1.46.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0
 	go.opentelemetry.io/otel/sdk v1.46.0
