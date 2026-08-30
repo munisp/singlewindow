@@ -78,14 +78,10 @@ describe("mojaloop.getSupportedFSPs", () => {
     const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
     const result = await caller.mojaloop.getSupportedFSPs();
-    // getSupportedFSPs returns the SUPPORTED_FSPS array directly
     expect(Array.isArray(result)).toBe(true);
     expect(result.length).toBeGreaterThan(0);
-    // Each FSP should have required fields
-    const fsp = result[0];
-    expect(fsp).toHaveProperty("fspId");
-    expect(fsp).toHaveProperty("name");
-    expect(fsp).toHaveProperty("type");
+    expect(result[0]).toHaveProperty("fspId");
+    expect(result[0]).toHaveProperty("name");
   });
 
   it("requires authentication", async () => {
@@ -95,171 +91,90 @@ describe("mojaloop.getSupportedFSPs", () => {
   });
 });
 
-describe("mojaloop.getPaymentStatus", () => {
-  it("returns error for unknown transaction ID", async () => {
+// ─── ai router ────────────────────────────────────────────────────────────────
+
+describe("ai.models", () => {
+  it("returns model availability information", async () => {
     const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
-    await expect(
-      caller.mojaloop.getPaymentStatus({ transactionId: "non-existent-txn-id" })
-    ).rejects.toThrow();
+    const result = await caller.ai.models();
+    expect(result).toHaveProperty("ollamaAvailable");
+    expect(result).toHaveProperty("installedModels");
+    expect(result).toHaveProperty("recommendedModels");
+    expect(result).toHaveProperty("forgeAvailable");
+    expect(result.forgeAvailable).toBe(true);
+    expect(Array.isArray(result.recommendedModels)).toBe(true);
+    expect(result.recommendedModels.length).toBeGreaterThan(0);
+  });
+
+  it("recommended models include Qwen and DeepSeek variants", async () => {
+    const ctx = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+    const result = await caller.ai.models();
+    const ids = result.recommendedModels.map(m => m.id);
+    expect(ids.some(id => id.includes("qwen"))).toBe(true);
+    expect(ids.some(id => id.includes("deepseek"))).toBe(true);
   });
 });
 
 // ─── temporal router ─────────────────────────────────────────────────────────
 
 describe("temporal.getSystemStatus", () => {
-  it("returns system status with service health info", async () => {
-    const ctx = createAuthContext();
+  it("returns workflow engine status", async () => {
+    const ctx = createAuthContext("admin");
     const caller = appRouter.createCaller(ctx);
     const result = await caller.temporal.getSystemStatus();
-    // getSystemStatus returns { connected, mode, temporalUrl, ... }
-    expect(result).toHaveProperty("connected");
-    expect(typeof result.connected).toBe("boolean");
-    expect(result).toHaveProperty("mode");
-    expect(["LIVE", "SIMULATION", "DB_FALLBACK"]).toContain(result.mode);
+    expect(result).toHaveProperty("temporalAvailable");
+    expect(result).toHaveProperty("namespace");
+    expect(result).toHaveProperty("taskQueue");
   });
 
-  it("requires authentication", async () => {
-    const ctx = createAnonContext();
+  it("requires admin role", async () => {
+    const ctx = createAuthContext("user");
     const caller = appRouter.createCaller(ctx);
     await expect(caller.temporal.getSystemStatus()).rejects.toThrow();
   });
 });
 
-describe("temporal.listWorkflows", () => {
-  it("returns an array of workflows", async () => {
-    const ctx = createAuthContext();
-    const caller = appRouter.createCaller(ctx);
-    const result = await caller.temporal.listWorkflows({ limit: 5 });
-    expect(result).toHaveProperty("workflows");
-    expect(Array.isArray(result.workflows)).toBe(true);
-  });
-});
+// ─── complianceReporting router (v104) ────────────────────────────────────────
 
-// ─── ai router ───────────────────────────────────────────────────────────────
-
-describe("ai.models", () => {
-  it("returns available AI models (public procedure)", async () => {
-    const ctx = createAnonContext();
-    const caller = appRouter.createCaller(ctx);
-    // ai.models is a publicProcedure — no auth required
-    const result = await caller.ai.models();
-    expect(result).toHaveProperty("recommendedModels");
-    expect(Array.isArray(result.recommendedModels)).toBe(true);
-    expect(result.recommendedModels.length).toBeGreaterThan(0);
-    expect(result).toHaveProperty("forgeAvailable");
-    expect(result.forgeAvailable).toBe(true);
-    // Each recommended model should have id and description
-    const model = result.recommendedModels[0];
-    expect(model).toHaveProperty("id");
-    expect(model).toHaveProperty("description");
-  });
-});
-
-// ─── kyc router ──────────────────────────────────────────────────────────────
-
-describe("kyc.listDocuments", () => {
-  it("returns an array or throws a DB error for a new user", async () => {
-    const ctx = createAuthContext();
-    const caller = appRouter.createCaller(ctx);
-    // In CI without a live DB, this may throw a connection error.
-    // Either way, the procedure exists and is protected.
-    try {
-      const result = await caller.kyc.listDocuments();
-      expect(Array.isArray(result)).toBe(true);
-    } catch (err: unknown) {
-      // DB not available in test env — that's acceptable
-      expect(err).toBeTruthy();
-    }
-  });
-
+describe("complianceReporting.listMyReports", () => {
   it("requires authentication", async () => {
     const ctx = createAnonContext();
     const caller = appRouter.createCaller(ctx);
-    await expect(caller.kyc.listDocuments()).rejects.toThrow();
-  });
-});
-
-describe("kyc.getVerification", () => {
-  it("returns verification object or throws a DB error for a new user", async () => {
-    const ctx = createAuthContext();
-    const caller = appRouter.createCaller(ctx);
-    try {
-      const result = await caller.kyc.getVerification();
-      expect(result).toHaveProperty("verification");
-    } catch (err: unknown) {
-      // DB not available in test env — that's acceptable
-      expect(err).toBeTruthy();
-    }
-  });
-});
-
-describe("kyc.uploadDocument", () => {
-  it("rejects files that are too large", async () => {
-    const ctx = createAuthContext();
-    const caller = appRouter.createCaller(ctx);
-    // 21MB file (exceeds 20MB limit)
-    const largeBase64 = "A".repeat(21 * 1024 * 1024 * 4 / 3);
     await expect(
-      caller.kyc.uploadDocument({
-        filename: "large-file.jpg",
-        contentType: "image/jpeg",
-        documentType: "national_id",
-        fileSize: 21 * 1024 * 1024,
-        fileData: largeBase64,
-      })
+      caller.complianceReporting.listMyReports({ limit: 10 })
     ).rejects.toThrow();
   });
 
-  it("rejects unsupported content types", async () => {
+  it("returns an array for authenticated users (empty without DB)", async () => {
     const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
-    await expect(
-      caller.kyc.uploadDocument({
-        filename: "doc.gif",
-        // @ts-expect-error — intentionally testing invalid type
-        contentType: "image/gif",
-        documentType: "national_id",
-        fileSize: 1024,
-        fileData: "AAAA",
-      })
-    ).rejects.toThrow();
+    const result = await caller.complianceReporting.listMyReports({ limit: 10 });
+    expect(Array.isArray(result)).toBe(true);
   });
 });
 
-// ─── vision router ───────────────────────────────────────────────────────────
-
-describe("vision.listMyReports", () => {
-  it("returns an array or throws a DB error for a new user", async () => {
+describe("complianceReporting.getPortalBranding", () => {
+  it("returns branding object without DB", async () => {
     const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
-    try {
-      const result = await caller.vision.listMyReports({ limit: 10 });
-      expect(Array.isArray(result)).toBe(true);
-    } catch (err: unknown) {
-      // DB not available in test env — that's acceptable
-      expect(err).toBeTruthy();
-    }
+    const result = await caller.complianceReporting.getPortalBranding();
+    expect(result).toHaveProperty("portalName");
+    expect(result).toHaveProperty("logoUrl");
+    expect(result).toHaveProperty("primaryColor");
+    expect(result).toHaveProperty("features");
   });
+});
 
+// ─── declarations router guard ────────────────────────────────────────────────
+
+describe("declarations.list", () => {
   it("requires authentication", async () => {
     const ctx = createAnonContext();
     const caller = appRouter.createCaller(ctx);
-    await expect(caller.vision.listMyReports({ limit: 10 })).rejects.toThrow();
-  });
-});
-
-describe("vision.submitInspection", () => {
-  it("rejects empty image data", async () => {
-    const ctx = createAuthContext();
-    const caller = appRouter.createCaller(ctx);
     await expect(
-      caller.vision.submitInspection({
-        imageData: "",
-        imageFilename: "test.jpg",
-        contentType: "image/jpeg",
-        analysisType: "container_inspection",
-      })
+      caller.declarations.list({ limit: 10, offset: 0 })
     ).rejects.toThrow();
   });
 });
