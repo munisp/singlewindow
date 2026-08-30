@@ -280,23 +280,56 @@ services:
   # ── Microservices ─────────────────────────────────────────────────────────────
   # All 15 microservices are built from source in microservices/<name>/
   # They communicate with the main app via HTTP REST and gRPC.
-  # Port assignments (no conflicts):
+  #
+  # ⚠ PORT REGISTRY: this list is NOT the source of truth. The canonical
+  # gateway-side registry is PORTS in server/_core/env.ts (SW-MP8), and the
+  # gateway REFUSES TO BOOT when two resolved service URLs share a host:port
+  # (assertNoServiceUrlCollisions, PRA-067). Keep this comment in sync with
+  # that registry — the previous "(no conflicts)" claim was FALSE.
+  #
+  # Port assignments:
   #   declaration-service:  8083  (gRPC: 50051)
   #   payment-service:      8082  (gRPC: 50053)
   #   oga-service:          8084  (gRPC: 50054)
   #   analytics-service:    8085  (gRPC: 50055)
   #   tigerbeetle-bridge:   8086  (gRPC: 9086)  ← canonical money-rail bridge
-  #   profile-service:      8097  (gRPC: 50056)
-  #   risk-engine:          8087  (gRPC: 50052)
+  #   profile-service:      8097  (gRPC: 50056) ← canonical owner of 8097
+  #   risk-engine:          8087  (gRPC: 50052) ← KNOWN COLLISION: 8087 is
+  #                         canonically owned by keycloak-svc (PORTS.keycloakSvc,
+  #                         Go bind default 8087). Gateway default for
+  #                         RISK_ENGINE_URL moved off to 8111-block; compose
+  #                         deployments MUST set RISK_ENGINE_URL=http://risk-engine:8087
+  #                         explicitly (container DNS is unambiguous).
   #   cargo-tracking:       8088  (gRPC: 50057)
   #   sanctions-service:    8089  (gRPC: 50058)
   #   temporal-worker:      8090
-  #   anomaly-detection:    8091
-  #   gnn-risk:             8092
-  #   hs-classifier:        8093
+  #   anomaly-detection:    8091  (no PORTS-registry conflict; gateway default matches)
+  #   gnn-risk:             8092  (no PORTS-registry conflict; gateway default matches.
+  #                         NOTE: services/python/vision-service also defaults to
+  #                         8092 — do not co-locate both on one host without
+  #                         explicit ports.)
+  #   hs-classifier:        8093  ← KNOWN COLLISION: 8093 is canonically owned by
+  #                         cen-service (PORTS.cenService, Go bind default 8093,
+  #                         P0-7 renumber). Gateway HS_CLASSIFIER_URL default
+  #                         moved off; set HS_CLASSIFIER_URL=http://hs-classifier:8093
+  #                         explicitly in compose. SHOULD be renumbered here.
   #   risk-ai:              8094
-  #   vision-service:       8095
-  #   fluvio-consumer:      8096
+  #   vision-service:       8095  ← KNOWN DIVERGENCE: PORTS.visionService is 8105
+  #                         (no real service binds 8105 — fail-closed placeholder).
+  #                         This compose service is the vision-OCR probe target
+  #                         (VISION_SVC_URL, default 8095, matches). Set
+  #                         VISION_SERVICE_URL explicitly for the NLP/vision API.
+  #   fluvio-consumer:      8096  ← KNOWN COLLISION: 8096 is canonically owned by
+  #                         asean-sw-service (PORTS.aseanSwService, Go bind
+  #                         default 8096). Gateway FLUVIO_CONSUMER_URL default
+  #                         moved off; set FLUVIO_CONSUMER_URL=http://fluvio-consumer:8096
+  #                         explicitly in compose. SHOULD be renumbered here.
+  #
+  # Historical note: an earlier wave-4 flag listed anomaly-detection 8091 vs
+  # aseanSwService and gnn-risk 8092 vs freeZoneService as collisions. Those
+  # were resolved when PORTS was aligned to the real Go bind defaults
+  # (asean-sw-service → 8096, freezone-service → 8098); the collisions above
+  # are the ones that remain.
 
   # ── Declaration Service (Go) ─────────────────────────────────────────────────
   declaration-service:

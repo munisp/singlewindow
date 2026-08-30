@@ -9,6 +9,31 @@
 //   8086 tigerbeetle-bridge (CANONICAL money-rail bridge, HTTP /api/ledger/*)
 //   9086 tigerbeetle-bridge gRPC health
 //   8097 profile-service HTTP (renumbered off 8086 — SW-MP7 collision fix)
+//
+// ─── SW-CLOSE / PRA-067 reconciliation (contested ports) ─────────────────────
+// The root docker-compose.yml microservice block binds/publishes Python
+// microservices on ports this registry assigns to Go services. Ownership was
+// adjudicated per THIS registry + the real Go bind defaults (fail-closed:
+// the gateway never guesses which service answers a contested port):
+//   8087 keycloak-svc (Go, KEYCLOAK_SVC_HTTP_PORT default 8087) — compose
+//        risk-engine ALSO binds/publishes 8087 → KNOWN COLLISION.
+//   8093 cen-service (Go bind default 8093, renumbered per P0-7) — compose
+//        hs-classifier ALSO binds/publishes 8093 → KNOWN COLLISION.
+//   8096 asean-sw-service (Go bind default 8096) — compose fluvio-consumer
+//        ALSO binds/publishes 8096; stale fluvioSvc entry → KNOWN COLLISION.
+//   8098 freezone-service (Go bind default 8098) — stale deltaLakeSvc entry
+//        → KNOWN COLLISION (deltaLakeSvc deprecated, unassigned).
+//   8095 compose vision-service (OCR) vs PORTS.visionService 8105 — KNOWN
+//        DIVERGENCE: no real service binds 8105 (microservices/vision-service
+//        compose-binds 8095; services/python/vision-service binds 8092 and
+//        itself collides with compose gnn-risk). VISION_SERVICE_URL must be
+//        set explicitly; 8105 stays a fail-closed placeholder.
+// The gateway defaults for the NON-owning services were moved to the
+// deliberately-unassigned 8111-8116 block (see below) — connection-refused
+// is the honest failure until the operator sets an explicit URL. Compose
+// deployments MUST set explicit *_URL env vars using container DNS names
+// (e.g. HS_CLASSIFIER_URL=http://hs-classifier:8093), which is unambiguous
+// inside the compose network.
 export const PORTS = {
   keycloak: 8080,
   keycloakSvc: 8087,
@@ -70,6 +95,10 @@ export const ENV = {
   keycloakClientSecret: process.env.KEYCLOAK_CLIENT_SECRET ?? "",
   keycloakAdminUser: process.env.KEYCLOAK_ADMIN_USER ?? "admin",
   keycloakAdminPassword: process.env.KEYCLOAK_ADMIN_PASSWORD ?? "",
+  // Canonical owner of 8087 per PORTS.keycloakSvc (Go keycloak-svc bind
+  // default KEYCLOAK_SVC_HTTP_PORT=8087). KNOWN COLLISION: compose
+  // risk-engine also binds/publishes 8087 — RISK_ENGINE_URL was moved off
+  // this port (8112); see the registry header.
   keycloakSvcUrl: process.env.KEYCLOAK_SVC_URL ?? "http://localhost:8087",
 
   // ─── Nigeria National Identity (NIN) Identity Provider ───────────────────
@@ -130,13 +159,22 @@ export const ENV = {
   kubecostUrl: process.env.KUBECOST_URL ?? "http://localhost:9090",
 
   // ─── ASEAN Single Window ──────────────────────────────────────────────────
+  // Canonical owner of 8096 per PORTS.aseanSwService (Go bind default 8096).
+  // KNOWN COLLISION: compose fluvio-consumer also publishes 8096, and the
+  // deprecated fluvioSvc default pointed here too — both moved off (see the
+  // registry header and the Fluvio Extended section).
   aseanSwServiceUrl: process.env.ASEAN_SW_SERVICE_URL ?? process.env.ASEAN_SW_URL ?? "http://localhost:8096", // asean-sw-service bind default
   aseanGatewayGrpcAddr: process.env.ASEAN_GATEWAY_GRPC_ADDR ?? "localhost:50091",
 
   // ─── Free Zone Service ────────────────────────────────────────────────────
+  // Canonical owner of 8098 per PORTS.freeZoneService (Go bind default 8098).
+  // The deprecated deltaLakeSvc default was moved off this port (8116).
   freeZoneServiceUrl: process.env.FREEZONE_SERVICE_URL ?? "http://localhost:8098", // freezone-service bind default
 
   // ─── CEN (WCO) Service ────────────────────────────────────────────────────
+  // Canonical owner of 8093 per PORTS.cenService (Go cen-service bind default
+  // 8093). KNOWN COLLISION: compose hs-classifier also publishes 8093 — see
+  // the registry header. HS_CLASSIFIER_URL was moved off this port.
   cenServiceUrl: process.env.CEN_SERVICE_URL ?? "http://localhost:8093",
 
   // ─── TigerBeetle Bridge ───────────────────────────────────────────────────
@@ -146,11 +184,19 @@ export const ENV = {
   tbBridgeUrl: process.env.TB_BRIDGE_URL ?? process.env.TB_GO_BRIDGE_HTTP_ADDR ?? `http://localhost:${PORTS.tigerBeetleBridge}`,
 
   // ─── Fluvio Extended ──────────────────────────────────────────────────────
-  fluvioSvcUrl: process.env.FLUVIO_SVC_URL ?? "http://localhost:8096",
-  fluvioWsUrl: process.env.FLUVIO_WS_URL ?? "ws://localhost:8097",
+  // DEPRECATED (P0-9): Fluvio is not deployed. The old defaults collided with
+  // the canonical owners (asean-sw-service 8096, profile-service 8097); they
+  // now point at the deliberately-unassigned 811x block so a stale consumer
+  // fails closed (connection refused) instead of silently hitting the wrong
+  // service. routers/stream.ts still reads FLUVIO_SVC_URL directly with its
+  // own stale 8093 literal — KNOWN STRAGGLER, flagged for the next wave.
+  fluvioSvcUrl: process.env.FLUVIO_SVC_URL ?? "http://localhost:8113",
+  fluvioWsUrl: process.env.FLUVIO_WS_URL ?? "ws://localhost:8115",
 
   // ─── Delta Lake / Flink Analytics ────────────────────────────────────────
-  deltaLakeSvcUrl: process.env.DELTALAKE_SVC_URL ?? "http://localhost:8098",
+  // DEPRECATED: deltalake-svc is not deployed; the old 8098 default collided
+  // with the canonical owner freezone-service (Go bind default 8098).
+  deltaLakeSvcUrl: process.env.DELTALAKE_SVC_URL ?? "http://localhost:8116",
   flinkCepSvcUrl: process.env.FLINK_CEP_SVC_URL ?? "http://localhost:8099",
   flinkStreamGrpcAddr: process.env.FLINK_STREAM_GRPC_ADDR ?? "localhost:50099",
 
@@ -169,6 +215,13 @@ export const ENV = {
   paymentRiskUrl: process.env.PAYMENT_RISK_URL ?? "http://localhost:8104",
 
   // ─── Vision / Document AI ─────────────────────────────────────────────────
+  // KNOWN DIVERGENCE (PRA-067): no real service binds PORTS.visionService
+  // (8105) — microservices/vision-service compose-binds 8095 (see
+  // visionSvcUrl, used for the vision-ocr health probe) and
+  // services/python/vision-service binds 8092 (itself colliding with compose
+  // gnn-risk). 8105 remains a fail-closed placeholder: set VISION_SERVICE_URL
+  // explicitly to the real NLP/vision endpoint. routers/vision.ts still
+  // hardcodes its own stale 8092 literal — KNOWN STRAGGLER, flagged.
   visionServiceUrl: process.env.VISION_SERVICE_URL ?? "http://localhost:8105",
 
   // ─── Warehouse Service ────────────────────────────────────────────────────
@@ -187,6 +240,17 @@ export const ENV = {
   // bearer as the requester subject).
   tariffServiceUrl: process.env.TARIFF_SERVICE_URL ?? "",
   tariffServiceToken: process.env.TARIFF_SERVICE_TOKEN ?? "",
+  // Keycloak client-credentials token flow (SW-CLOSE, PRA-100r deferred
+  // remainder): when ALL THREE of KEYCLOAK_TOKEN_URL /
+  // TARIFF_SERVICE_CLIENT_ID / TARIFF_SERVICE_CLIENT_SECRET are set, the
+  // tariff client obtains + caches + refreshes an access token via the
+  // client_credentials grant and uses it as the bearer; the static
+  // TARIFF_SERVICE_TOKEN above is the documented fallback when the Keycloak
+  // env is absent. A PARTIAL set is a misconfiguration and fails closed at
+  // call time with a classified error — never a silent fallback.
+  keycloakTokenUrl: process.env.KEYCLOAK_TOKEN_URL ?? "",
+  tariffServiceClientId: process.env.TARIFF_SERVICE_CLIENT_ID ?? "",
+  tariffServiceClientSecret: process.env.TARIFF_SERVICE_CLIENT_SECRET ?? "",
 
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
@@ -217,17 +281,33 @@ export const ENV = {
   ogaServiceUrl: process.env.OGA_SERVICE_URL ?? "http://localhost:8084",
   analyticsServiceUrl: process.env.ANALYTICS_SERVICE_URL ?? "http://localhost:8085",
   profileServiceUrl: process.env.PROFILE_SERVICE_URL ?? "http://localhost:8097",
-  riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8087",
+  // KNOWN COLLISION: compose risk-engine binds 8087, but PORTS.keycloakSvc is
+  // the canonical owner of 8087 (Go keycloak-svc bind default). The gateway
+  // default is moved to the deliberately-unassigned 8112 — set RISK_ENGINE_URL
+  // explicitly (compose: http://risk-engine:8087); a contested default would
+  // silently route risk scoring to the Keycloak admin service or vice versa.
+  riskEngineUrl: process.env.RISK_ENGINE_URL ?? "http://localhost:8112",
   cargoTrackingServiceUrl: process.env.CARGO_TRACKING_SERVICE_URL ?? "http://localhost:8088",
   sanctionsServiceUrl: process.env.SANCTIONS_SERVICE_URL ?? "http://localhost:8089",
   temporalWorkerUrl: process.env.TEMPORAL_WORKER_URL ?? "http://localhost:8090",
   // Python microservices
   anomalyDetectionUrl: process.env.ANOMALY_DETECTION_URL ?? "http://localhost:8091",
   gnnRiskUrl: process.env.GNN_RISK_URL ?? "http://localhost:8092",
-  hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://localhost:8093",
+  // KNOWN COLLISION: compose hs-classifier binds 8093, but PORTS.cenService
+  // is the canonical owner of 8093 (Go cen-service bind default; P0-7
+  // renumber). The gateway default is moved to the deliberately-unassigned
+  // 8111 — set HS_CLASSIFIER_URL explicitly (compose:
+  // http://hs-classifier:8093). A contested default would silently route HS
+  // classification to the WCO CEN service or vice versa (duty-relevant).
+  // NOTE: routers/insiderThreat.ts reads HS_CLASSIFIER_URL with its own stale
+  // http://hs-classifier:8090 literal — KNOWN STRAGGLER, flagged.
+  hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://localhost:8111",
   riskAiUrl: process.env.RISK_AI_URL ?? "http://localhost:8094",
   visionSvcUrl: process.env.VISION_SVC_URL ?? "http://localhost:8095",
-  fluvioConsumerUrl: process.env.FLUVIO_CONSUMER_URL ?? "http://localhost:8096",
+  // KNOWN COLLISION: compose fluvio-consumer binds 8096, whose canonical
+  // owner per PORTS is asean-sw-service (Go bind default). Default moved to
+  // the deliberately-unassigned 8114 — set FLUVIO_CONSUMER_URL explicitly.
+  fluvioConsumerUrl: process.env.FLUVIO_CONSUMER_URL ?? "http://localhost:8114",
 
   // ─── App Version ──────────────────────────────────────────────────────────
   appVersion: process.env.APP_VERSION ?? "1.0.0",
@@ -324,3 +404,93 @@ export function validateProductionConfig(config = ENV): void {
 }
 
 if (ENV.isProduction) validateProductionConfig();
+
+// ─── Service-URL collision validation (SW-CLOSE / PRA-067) ───────────────────
+// Inter-service base URLs whose RESOLVED values must never share a host:port.
+// Two gateway clients resolving to the same host:port for different services
+// is exactly the PRA-067 defect class: miswired clients boot "healthy" and
+// route duty/risk/ledger calls to the wrong service. We refuse to boot
+// instead (fail-closed). Endpoint-path URLs of a single logical service
+// (NIMC OAuth endpoints on api.nimc.gov.ng, KEYCLOAK_TOKEN_URL on the
+// Keycloak origin) are deliberately NOT in this list — sharing an origin
+// with their own service is correct. Non-URL values and empty strings
+// (e.g. an unset TARIFF_SERVICE_URL) are skipped here; their own
+// fail-closed paths handle them.
+const SERVICE_URL_ENV_VARS: [string, (config: typeof ENV) => string][] = [
+  ["KEYCLOAK_URL", (c) => c.keycloakUrl],
+  ["KEYCLOAK_SVC_URL", (c) => c.keycloakSvcUrl],
+  ["PERMIFY_URL", (c) => c.permifyUrl],
+  ["APISIX_ADMIN_URL", (c) => c.apisixAdminUrl],
+  ["WAZUH_API_URL", (c) => c.wazuhApiUrl],
+  ["OPENCTI_URL", (c) => c.openctiUrl],
+  ["KUBOCOST_URL", (c) => c.kubecostUrl],
+  ["ASEAN_SW_SERVICE_URL", (c) => c.aseanSwServiceUrl],
+  ["FREEZONE_SERVICE_URL", (c) => c.freeZoneServiceUrl],
+  ["CEN_SERVICE_URL", (c) => c.cenServiceUrl],
+  ["TB_BRIDGE_URL", (c) => c.tbBridgeUrl],
+  ["FLUVIO_SVC_URL", (c) => c.fluvioSvcUrl],
+  ["FLUVIO_WS_URL", (c) => c.fluvioWsUrl],
+  ["DELTALAKE_SVC_URL", (c) => c.deltaLakeSvcUrl],
+  ["FLINK_CEP_SVC_URL", (c) => c.flinkCepSvcUrl],
+  ["SEDONA_SVC_URL", (c) => c.sedonaSvcUrl],
+  ["RUSTFS_SVC_URL", (c) => c.rustFsSvcUrl],
+  ["GRAPH_BRIDGE_URL", (c) => c.graphBridgeUrl],
+  ["RISK_SCORER_URL", (c) => c.riskScorerUrl],
+  ["PAYMENT_RISK_URL", (c) => c.paymentRiskUrl],
+  ["VISION_SERVICE_URL", (c) => c.visionServiceUrl],
+  ["WAREHOUSE_SERVICE_URL", (c) => c.warehouseServiceUrl],
+  ["MOJALOOP_URL", (c) => c.mojaloopUrl],
+  ["TARIFF_SERVICE_URL", (c) => c.tariffServiceUrl],
+  ["DECLARATION_SERVICE_URL", (c) => c.declarationServiceUrl],
+  ["PAYMENT_SERVICE_URL", (c) => c.paymentServiceUrl],
+  ["OGA_SERVICE_URL", (c) => c.ogaServiceUrl],
+  ["ANALYTICS_SERVICE_URL", (c) => c.analyticsServiceUrl],
+  ["PROFILE_SERVICE_URL", (c) => c.profileServiceUrl],
+  ["RISK_ENGINE_URL", (c) => c.riskEngineUrl],
+  ["CARGO_TRACKING_SERVICE_URL", (c) => c.cargoTrackingServiceUrl],
+  ["SANCTIONS_SERVICE_URL", (c) => c.sanctionsServiceUrl],
+  ["TEMPORAL_WORKER_URL", (c) => c.temporalWorkerUrl],
+  ["ANOMALY_DETECTION_URL", (c) => c.anomalyDetectionUrl],
+  ["GNN_RISK_URL", (c) => c.gnnRiskUrl],
+  ["HS_CLASSIFIER_URL", (c) => c.hsClassifierUrl],
+  ["RISK_AI_URL", (c) => c.riskAiUrl],
+  ["VISION_SVC_URL", (c) => c.visionSvcUrl],
+  ["FLUVIO_CONSUMER_URL", (c) => c.fluvioConsumerUrl],
+];
+
+/**
+ * Throws when two resolved service URLs share a host:port. Runs at module
+ * load (every environment — a collision is a configuration error in dev just
+ * as much as in prod) and is exported for tests.
+ */
+export function assertNoServiceUrlCollisions(config = ENV): void {
+  const byHostPort = new Map<string, string[]>();
+  for (const [name, read] of SERVICE_URL_ENV_VARS) {
+    const value = read(config).trim();
+    if (!value) continue;
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      continue; // unparseable values are rejected by their own validators
+    }
+    const defaultPort = url.protocol === "https:" || url.protocol === "wss:" ? "443" : "80";
+    const hostPort = `${url.hostname.toLowerCase()}:${url.port || defaultPort}`;
+    const list = byHostPort.get(hostPort) ?? [];
+    list.push(name);
+    byHostPort.set(hostPort, list);
+  }
+  const collisions = [...byHostPort.entries()].filter(([, names]) => names.length > 1);
+  if (collisions.length > 0) {
+    const details = collisions
+      .map(([hostPort, names]) => `${hostPort} ← ${names.join(", ")}`)
+      .join("; ");
+    throw new Error(
+      `[ENV] Service URL collision (${details}). Two gateway clients would resolve to the same ` +
+      `host:port for different services — refusing to boot rather than risk misrouted calls ` +
+      `(PRA-067). Set explicit distinct URLs per service.`
+    );
+  }
+}
+
+assertNoServiceUrlCollisions();
