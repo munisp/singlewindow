@@ -115,6 +115,7 @@ import { wtoValuationRouter } from "./routers/wtoValuation";
 import { advanceRulingRouter } from "./routers/advanceRuling";
 import { tradeFinanceRouter } from "./routers/tradeFinance";
 import { tradeAnalyticsRouter } from "./routers/tradeAnalytics";
+import { openDataRouter } from "./routers/openData";
 import { ncsNrsRouter } from "./routers/ncsNrs";
 import { pcsRouter } from "./routers/pcs";
 
@@ -365,6 +366,8 @@ export const appRouter = router({
   advanceRuling: advanceRulingRouter,
   tradeFinance: tradeFinanceRouter,
   tradeAnalytics: tradeAnalyticsRouter,
+  // PRA-014: the ONLY unauthenticated business endpoint (rate-limited open data)
+  openData: openDataRouter,
   ncsNrs: ncsNrsRouter,
   pcs: pcsRouter,
 });

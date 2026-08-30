@@ -15,7 +15,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import { invokeLLM } from "../_core/llm";
 
 const OLLAMA_PROXY_URL = process.env.OLLAMA_PROXY_URL || "http://localhost:8090";
@@ -106,7 +106,7 @@ export const aiRouter = router({
   /**
    * List available Ollama models and their status.
    */
-  models: publicProcedure.query(async () => {
+  models: protectedProcedure.query(async () => {
     const available = await ollamaAvailable();
     const models = available ? await listOllamaModels() : [];
 
@@ -222,7 +222,7 @@ Respond with this exact JSON structure:
         return {
           riskScore: 35,
           riskLane: "YELLOW" as const,
-          riskFactors: ["LLM unavailable \u2014 manual review recommended"],
+          riskFactors: ["LLM unavailable — manual review recommended"],
           recommendedAction: "DOCUMENT_REVIEW" as const,
           reasoning: "Risk engine temporarily unavailable. Declaration routed for manual document review.",
           hsCodeValid: true,
@@ -252,7 +252,7 @@ Respond with this exact JSON structure:
         return {
           riskScore: 35,
           riskLane: "YELLOW" as const,
-          riskFactors: ["LLM parsing failed \u2014 manual review recommended"],
+          riskFactors: ["LLM parsing failed — manual review recommended"],
           recommendedAction: "DOCUMENT_REVIEW" as const,
           reasoning: result.content.slice(0, 300),
           hsCodeValid: true,

@@ -3,6 +3,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { redisRateLimit } from './redis';
+import { RateLimiterUnavailableError, rateLimiterInMemoryFallbackAllowed } from './redisRateLimiter';
 import crypto from 'crypto';
 import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
 import { withSpan } from "./telemetry";
@@ -294,7 +295,11 @@ function _inMemoryRateLimit(key: string, windowMs: number, max: number): boolean
 
 /**
  * Checks rate limit using Redis INCR+EXPIRE sliding window.
- * Falls back to in-memory Map when Redis is unavailable.
+ * Posture (PRA-026, Phase 9): Redis is the ONLY production path. The
+ * in-memory Map fallback applies solely when the explicit dev-only opt-in
+ * RATE_LIMIT_ALLOW_INMEMORY_FALLBACK=true is set (never in production);
+ * otherwise RateLimiterUnavailableError propagates and the caller answers
+ * with a typed SERVICE_UNAVAILABLE (RATE_LIMITER_UNAVAILABLE) error.
  */
 async function _checkRateLimit(
   namespace: string,
@@ -304,8 +309,11 @@ async function _checkRateLimit(
 ): Promise<boolean> {
   try {
     return await redisRateLimit(namespace, identifier, windowMs, max);
-  } catch {
-    return _inMemoryRateLimit(`${namespace}:${identifier}`, windowMs, max);
+  } catch (err) {
+    if (err instanceof RateLimiterUnavailableError && rateLimiterInMemoryFallbackAllowed()) {
+      return _inMemoryRateLimit(`${namespace}:${identifier}`, windowMs, max);
+    }
+    throw err;
   }
 }
 
@@ -315,7 +323,19 @@ export const rateLimitedProcedure = protectedProcedure.use(
     const ip = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
       ?? (ctx.req.socket as any)?.remoteAddress ?? "unknown";
     const identifier = ctx.user ? `user:${ctx.user.id}` : `ip:${ip}`;
-    const allowed = await _checkRateLimit("std", identifier, 60_000, 300);
+    let allowed: boolean;
+    try {
+      allowed = await _checkRateLimit("std", identifier, 60_000, 300);
+    } catch (err) {
+      if (err instanceof RateLimiterUnavailableError) {
+        // PRA-026: typed fail-closed 503 — never silent allow, never a 500.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "RATE_LIMITER_UNAVAILABLE: distributed rate limiter is unavailable — request refused (fail-closed)",
+        });
+      }
+      throw err;
+    }
     if (!allowed) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded. Try again in 60 seconds." });
     }
