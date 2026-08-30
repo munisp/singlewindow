@@ -435,3 +435,47 @@ export const auditAppendFailuresTotal = new Counter({
   labelNames: ["event_type"] as const,
   registers: [metricsRegistry],
 });
+
+// ─── PCS Trader Portal (Phase 8; spec §7) ─────────────────────────────────────
+export const pcsProjectionEventsTotal = new Counter({
+  name: "tradegateway_pcs_projection_events_total",
+  help: "ports.*.v1 envelope events handled by the PCS projection",
+  labelNames: ["topic", "outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsProjectionLagSeconds = new Histogram({
+  name: "tradegateway_pcs_projection_lag_seconds",
+  help: "Outbox-event → read-model projection lag",
+  labelNames: ["topic"] as const,
+  buckets: [0.1, 0.5, 1, 2, 5, 15, 60, 300],
+  registers: [metricsRegistry],
+});
+
+export const pcsSignatureRejectsTotal = new Counter({
+  name: "tradegateway_pcs_signature_rejects_total",
+  help: "Envelope v1.0 provenance JWS rejections (fail-closed projection)",
+  labelNames: ["reason"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsUpstreamCallsTotal = new Counter({
+  name: "tradegateway_pcs_upstream_calls_total",
+  help: "PCS → port-interop upstream call outcomes",
+  labelNames: ["verb", "code"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsGapRenderedTotal = new Counter({
+  name: "tradegateway_pcs_gap_rendered_total",
+  help: "INTEGRATION_GAPS disclosures returned by the pcs.* router",
+  labelNames: ["gap_id"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsBookingRequestsTotal = new Counter({
+  name: "tradegateway_pcs_booking_requests_total",
+  help: "PCS booking-initiation mutation outcomes (incl. disabled-gate disclosures)",
+  labelNames: ["outcome"] as const,
+  registers: [metricsRegistry],
+});
