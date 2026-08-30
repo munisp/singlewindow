@@ -16,7 +16,7 @@ import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } 
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
 import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
-import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
+import { indexDeclaration, searchDeclarations, OpenSearchUnavailableError } from "../_core/opensearch";
 import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
 import {
   getTariffClient,
@@ -569,7 +569,18 @@ export const declarationsRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const traderId = ctx.user.role === 'admin' || ctx.user.role === 'customs_officer' ? undefined : ctx.user.id;
-      return searchDeclarations(input.query, traderId, input.limit);
+      try {
+        return await searchDeclarations(input.query, traderId, input.limit);
+      } catch (err) {
+        if (err instanceof OpenSearchUnavailableError) {
+          // PRA-110: distinguish cluster-down from zero-results.
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `DECLARATION_SEARCH_UNAVAILABLE: ${err.message}`,
+          });
+        }
+        throw err;
+      }
     }),
   // Get trader's own declarations — RLS-enforced at the database level
   myDeclarations: protectedProcedure
