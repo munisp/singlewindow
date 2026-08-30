@@ -222,7 +222,7 @@ Respond with this exact JSON structure:
         return {
           riskScore: 35,
           riskLane: "YELLOW" as const,
-          riskFactors: ["LLM unavailable — manual review recommended"],
+          riskFactors: ["LLM unavailable \u2014 manual review recommended"],
           recommendedAction: "DOCUMENT_REVIEW" as const,
           reasoning: "Risk engine temporarily unavailable. Declaration routed for manual document review.",
           hsCodeValid: true,
@@ -252,7 +252,7 @@ Respond with this exact JSON structure:
         return {
           riskScore: 35,
           riskLane: "YELLOW" as const,
-          riskFactors: ["LLM parsing failed — manual review recommended"],
+          riskFactors: ["LLM parsing failed \u2014 manual review recommended"],
           recommendedAction: "DOCUMENT_REVIEW" as const,
           reasoning: result.content.slice(0, 300),
           hsCodeValid: true,
