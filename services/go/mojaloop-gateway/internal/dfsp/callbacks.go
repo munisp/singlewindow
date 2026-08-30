@@ -367,6 +367,25 @@ type CallbackHandler struct {
 	// In production this is backed by Redis.
 	pendingMu  sync.RWMutex
 	pendingILP map[string]string // transferID → base64url ILP condition
+
+	// Awaiters let the synchronous payment pipeline block on the REAL
+	// asynchronous FSPIOP callbacks (no simulated responses). A waiter is
+	// registered before the outbound request is sent; the callback handler
+	// resolves it after JWS verification. Buffers are 1 so resolution never
+	// blocks the Hub-facing HTTP handler.
+	awaitMu         sync.Mutex
+	quoteWaiters    map[string]chan quoteAwaitResult
+	transferWaiters map[string]chan transferAwaitResult
+}
+
+type quoteAwaitResult struct {
+	body *QuoteCallbackBody
+	err  error
+}
+
+type transferAwaitResult struct {
+	body *TransferCallbackBody
+	err  error
 }
 
 // NewCallbackHandler creates a new CallbackHandler.
@@ -376,9 +395,89 @@ func NewCallbackHandler(logger *zap.Logger) *CallbackHandler {
 		logger:    logger,
 		jwksCache: newHubJWKSCache(hubJWKSURL, logger),
 		// SW-MP2: canonical Go bridge (k8s Service tigerbeetle-bridge, /api/ledger/*, port 8086).
-		tigerbeetleURL: getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
-		kafkaRestURL:   getEnvOrDefault("KAFKA_REST_URL", "http://kafka-rest-proxy:8082"),
-		pendingILP:     make(map[string]string),
+		tigerbeetleURL:  getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
+		kafkaRestURL:    getEnvOrDefault("KAFKA_REST_URL", "http://kafka-rest-proxy:8082"),
+		pendingILP:      make(map[string]string),
+		quoteWaiters:    make(map[string]chan quoteAwaitResult),
+		transferWaiters: make(map[string]chan transferAwaitResult),
+	}
+}
+
+// AwaitQuote blocks until the Hub delivers the quote callback for quoteID
+// (or its error callback), or ctx expires. The waiter is registered
+// atomically here, so callers MUST invoke AwaitQuote BEFORE sending the
+// outbound POST /quotes to avoid a callback/registration race.
+func (h *CallbackHandler) AwaitQuote(ctx context.Context, quoteID string) (*QuoteCallbackBody, error) {
+	ch := make(chan quoteAwaitResult, 1)
+	h.awaitMu.Lock()
+	if _, exists := h.quoteWaiters[quoteID]; exists {
+		h.awaitMu.Unlock()
+		return nil, fmt.Errorf("a waiter for quote %s is already registered", quoteID)
+	}
+	h.quoteWaiters[quoteID] = ch
+	h.awaitMu.Unlock()
+	defer func() {
+		h.awaitMu.Lock()
+		delete(h.quoteWaiters, quoteID)
+		h.awaitMu.Unlock()
+	}()
+	select {
+	case res := <-ch:
+		return res.body, res.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("quote callback for %s not received before deadline: %w", quoteID, ctx.Err())
+	}
+}
+
+// AwaitTransfer blocks until the Hub delivers the transfer callback for
+// transferID (or its error callback), or ctx expires.
+func (h *CallbackHandler) AwaitTransfer(ctx context.Context, transferID string) (*TransferCallbackBody, error) {
+	ch := make(chan transferAwaitResult, 1)
+	h.awaitMu.Lock()
+	if _, exists := h.transferWaiters[transferID]; exists {
+		h.awaitMu.Unlock()
+		return nil, fmt.Errorf("a waiter for transfer %s is already registered", transferID)
+	}
+	h.transferWaiters[transferID] = ch
+	h.awaitMu.Unlock()
+	defer func() {
+		h.awaitMu.Lock()
+		delete(h.transferWaiters, transferID)
+		h.awaitMu.Unlock()
+	}()
+	select {
+	case res := <-ch:
+		return res.body, res.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("transfer callback for %s not received before deadline: %w", transferID, ctx.Err())
+	}
+}
+
+// resolveQuoteWaiter delivers a callback outcome to a registered waiter, if any.
+// Non-blocking: a duplicate/late resolution is dropped, never wedging the
+// Hub-facing HTTP handler.
+func (h *CallbackHandler) resolveQuoteWaiter(quoteID string, body *QuoteCallbackBody, err error) {
+	h.awaitMu.Lock()
+	ch, ok := h.quoteWaiters[quoteID]
+	h.awaitMu.Unlock()
+	if ok {
+		select {
+		case ch <- quoteAwaitResult{body: body, err: err}:
+		default:
+		}
+	}
+}
+
+// resolveTransferWaiter delivers a callback outcome to a registered waiter, if any.
+func (h *CallbackHandler) resolveTransferWaiter(transferID string, body *TransferCallbackBody, err error) {
+	h.awaitMu.Lock()
+	ch, ok := h.transferWaiters[transferID]
+	h.awaitMu.Unlock()
+	if ok {
+		select {
+		case ch <- transferAwaitResult{body: body, err: err}:
+		default:
+		}
 	}
 }
 
@@ -505,6 +604,10 @@ func (h *CallbackHandler) HandleQuoteCallback(w http.ResponseWriter, r *http.Req
 		h.StorePendingILP(cb.TransactionID, cb.Condition)
 	}
 
+	// Resolve any pipeline waiter blocked on this REAL callback.
+	cbCopy := cb
+	h.resolveQuoteWaiter(cb.QuoteID, &cbCopy, nil)
+
 	// Publish quote.received event to Kafka so the payment worker can proceed to transfer
 	h.publishKafkaEvent(r.Context(), "quote.received", map[string]interface{}{
 		"quoteId":       cb.QuoteID,
@@ -584,6 +687,7 @@ func (h *CallbackHandler) handleTransferCommitted(ctx context.Context, w http.Re
 			zap.String("transferId", cb.TransferID),
 			zap.Error(err),
 		)
+		h.resolveTransferWaiter(cb.TransferID, nil, fmt.Errorf("ILP fulfilment verification failed: %w", err))
 		h.writeError(w, http.StatusUnprocessableEntity, "ERR_ILP_INVALID", err.Error())
 		return
 	}
@@ -609,6 +713,8 @@ func (h *CallbackHandler) handleTransferCommitted(ctx context.Context, w http.Re
 	h.logger.Info("transfer committed successfully",
 		zap.String("transferId", cb.TransferID),
 	)
+	cbCopy := cb
+	h.resolveTransferWaiter(cb.TransferID, &cbCopy, nil)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -640,6 +746,7 @@ func (h *CallbackHandler) handleTransferAborted(ctx context.Context, w http.Resp
 		zap.String("transferId", cb.TransferID),
 		zap.String("errorCode", errCode),
 	)
+	h.resolveTransferWaiter(cb.TransferID, nil, fmt.Errorf("transfer aborted by switch: %s %s", errCode, errDesc))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -872,6 +979,10 @@ func (h *CallbackHandler) HandleQuoteErrorCallback(w http.ResponseWriter, r *htt
 		zap.String("errorDescription", cb.ErrorInformation.ErrorDescription),
 	)
 
+	// Resolve any pipeline waiter: the quote failed at the switch.
+	h.resolveQuoteWaiter(quoteID, nil, fmt.Errorf("quote rejected by switch: %s %s",
+		cb.ErrorInformation.ErrorCode, cb.ErrorInformation.ErrorDescription))
+
 	// Publish compensation event so Temporal workflow can rollback duty reservation.
 	h.publishKafkaEvent(r.Context(), "mojaloop.quote.failed", map[string]interface{}{
 		"quoteID":          quoteID,
@@ -925,6 +1036,10 @@ func (h *CallbackHandler) HandleTransferErrorCallback(w http.ResponseWriter, r *
 	h.pendingMu.Lock()
 	delete(h.pendingILP, transferID)
 	h.pendingMu.Unlock()
+
+	// Resolve any pipeline waiter: the transfer failed at the switch.
+	h.resolveTransferWaiter(transferID, nil, fmt.Errorf("transfer rejected by switch: %s %s",
+		cb.ErrorInformation.ErrorCode, cb.ErrorInformation.ErrorDescription))
 
 	// Publish mojaloop.transfer.failed so Temporal DeclarationClearanceWorkflow compensates.
 	h.publishKafkaEvent(r.Context(), "mojaloop.transfer.failed", map[string]interface{}{
