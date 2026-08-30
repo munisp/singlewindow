@@ -57,9 +57,24 @@ var (
 	mojaloopBaseURL      = getEnv("MOJALOOP_BASE_URL", "http://localhost:3001")
 	tigerBeetleAddr      = getEnv("TIGERBEETLE_ADDR", "localhost:3000")
 	tigerBeetleBridgeURL = getEnv("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086")
-	kafkaBrokers         = getEnv("KAFKA_BROKERS", "localhost:9092")
+	kafkaBrokers         = getEnv("KAFKA_BROKERS", "") // no phantom default: unset = unconfigured (fail-closed)
 	tariffServiceURL     = getEnv("TARIFF_SERVICE_URL", "")
 )
+
+// kafkaBrokerList splits the configured broker list; nil when unconfigured.
+func kafkaBrokerList() []string {
+	if kafkaBrokers == "" {
+		return nil
+	}
+	parts := strings.Split(kafkaBrokers, ",")
+	out := parts[:0]
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -93,6 +108,12 @@ func enforceProductionConfig() {
 	}
 	if os.Getenv("TARIFF_SERVICE_URL") == "" {
 		missing = append(missing, "TARIFF_SERVICE_URL")
+	}
+	// Phase-9 WP-B: the payment.confirmed publication is a real Kafka
+	// producer — production refuses to boot with no broker configured
+	// (never a silent log-only stub).
+	if os.Getenv("KAFKA_BROKERS") == "" {
+		missing = append(missing, "KAFKA_BROKERS")
 	}
 	if len(missing) > 0 {
 		log.Fatalf("[Payment Service] FATAL: missing required production configuration: %s. Refusing to boot.",
@@ -540,10 +561,37 @@ func verifyWebhookSignature(rawBody []byte, signatureHeader string) bool {
 	return subtle.ConstantTimeCompare(provided, mac.Sum(nil)) == 1
 }
 
-func publishKafkaEvent(topic string, payload interface{}) {
-	data, _ := json.Marshal(payload)
-	log.Printf("[Kafka] Publishing to %s: %s", topic, string(data))
-	// Production: use kafka-go or sarama client
+// ─── KAFKA OUTBOX (Phase-9 WP-B) ────────────────────────────────────────────
+// payment.confirmed is written to the durable payment_outbox table in the
+// SAME transaction as the payment completion and drained by a real idempotent
+// Kafka producer (outbox.go). There is no log-only path.
+
+var outboxPublisher *OutboxPublisher
+
+// completePaymentWithOutbox marks the payment completed and enqueues the
+// payment.confirmed event atomically (single transaction).
+func completePaymentWithOutbox(ctx context.Context, paymentID int64, tbTxID, transferID string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin completion tx: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE payments
+		SET status = 'completed', completed_at = NOW(), tigerbeetle_tx_id = $1
+		WHERE id = $2
+	`, tbTxID, paymentID); err != nil {
+		return fmt.Errorf("complete payment: %w", err)
+	}
+	if err := enqueueOutbox(ctx, tx, "payment.confirmed", fmt.Sprintf("payment-%d", paymentID), map[string]interface{}{
+		"paymentId":   paymentID,
+		"transferId":  transferID,
+		"tbTxId":      tbTxID,
+		"confirmedAt": time.Now().UTC(),
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ─── HTTP HANDLERS ────────────────────────────────────────────────────────────
@@ -662,20 +710,10 @@ func handleMojaloopWebhook(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 503, map[string]string{"error": "ledger unavailable — settlement NOT recorded; retry the callback"})
 			return
 		}
-		if _, err := db.ExecContext(ctx, `
-			UPDATE payments
-			SET status = 'completed', completed_at = NOW(), tigerbeetle_tx_id = $1
-			WHERE id = $2
-		`, tbTxID, p.ID); err != nil {
-			writeJSON(w, 500, map[string]string{"error": "failed to complete payment"})
+		if err := completePaymentWithOutbox(ctx, p.ID, tbTxID, callback.TransferID); err != nil {
+			writeJSON(w, 500, map[string]string{"error": "failed to complete payment: " + err.Error()})
 			return
 		}
-		publishKafkaEvent("payment.confirmed", map[string]interface{}{
-			"paymentId":   p.ID,
-			"transferId":  callback.TransferID,
-			"tbTxId":      tbTxID,
-			"confirmedAt": time.Now(),
-		})
 	case "ABORTED":
 		_, _ = db.ExecContext(ctx, `
 			UPDATE payments SET status = 'failed', failure_reason = 'transfer aborted by switch' WHERE id = $1
@@ -729,6 +767,18 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"status": "unhealthy", "error": err.Error()})
 		return
 	}
+	// Honest outbox status: DRAINING when the real producer is up,
+	// NOT_CONFIGURED (explicit gap) otherwise — never a silent log-only mode.
+	outboxStatus := "NOT_CONFIGURED"
+	var outboxDrained int64
+	var outboxErr string
+	if outboxPublisher != nil {
+		outboxStatus = "DRAINING"
+		outboxDrained, outboxErr = outboxPublisher.Status()
+		if outboxErr != "" {
+			outboxStatus = "DEGRADED"
+		}
+	}
 	writeJSON(w, 200, map[string]interface{}{
 		"status":  "healthy",
 		"service": "payment-service",
@@ -738,6 +788,11 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 			"tigerbeetle": tigerBeetleBridgeURL,
 			"kafka":       kafkaBrokers,
 			"tariff":      tariffServiceURL,
+		},
+		"kafkaOutbox": map[string]interface{}{
+			"status":    outboxStatus,
+			"drained":   outboxDrained,
+			"lastError": outboxErr,
 		},
 	})
 }
@@ -765,6 +820,31 @@ func main() {
 		log.Fatalf("[Payment Service] DB init failed: %v", err)
 	}
 	log.Printf("[Payment Service] PostgreSQL connected")
+
+	// Phase-9 WP-B: durable outbox migration + real idempotent Kafka drainer.
+	if err := ensureOutboxMigration(context.Background(), db); err != nil {
+		log.Fatalf("[Payment Service] outbox migration failed (fail-closed): %v", err)
+	}
+	if brokers := kafkaBrokerList(); len(brokers) > 0 {
+		producer, err := newKafkaProducer(brokers)
+		if err != nil {
+			// Broker configured but unreachable: in production this is fatal
+			// (fail-closed); elsewhere the outbox queues durably and /health
+			// reports the gap.
+			if isProduction() {
+				log.Fatalf("[Payment Service] Kafka producer init failed in production (fail-closed): %v", err)
+			}
+			log.Printf("[Payment Service] WARN: Kafka producer init failed: %v — outbox events will queue durably until the broker is reachable", err)
+		} else {
+			outboxPublisher, err = NewOutboxPublisher(db, producer, getEnv("KAFKA_DLQ_SUFFIX", ".dlq"))
+			if err != nil {
+				log.Fatalf("[Payment Service] outbox publisher init failed: %v", err)
+			}
+			log.Printf("[Payment Service] Kafka outbox drainer started (idempotent producer, brokers=%s)", kafkaBrokers)
+		}
+	} else {
+		log.Printf("[Payment Service] WARN: KAFKA_BROKERS not set — payment.confirmed events queue in the durable outbox; /health reports kafkaOutbox=NOT_CONFIGURED")
+	}
 
 	// gRPC server (health + reflection) — defined in grpc_server.go.
 	// NOTE: the earlier suspicion of a StartGRPCServer/startGRPCServer compile
