@@ -338,6 +338,7 @@ describe("SW-MP14: known dev secret values rejected in production config", () =>
     redisPassword: "real-redis-password-0123456789",
     mojaloopUrl: "http://mojaloop.internal",
     tariffServiceUrl: "http://tariff-engine.internal:8080",
+    portInteropUrl: "http://port-interop.internal:8080",
     temporalAddress: "temporal.internal:7233",
     tigerBeetleAddresses: ["tb.internal:3000"],
   };

@@ -116,6 +116,7 @@ import { advanceRulingRouter } from "./routers/advanceRuling";
 import { tradeFinanceRouter } from "./routers/tradeFinance";
 import { tradeAnalyticsRouter } from "./routers/tradeAnalytics";
 import { ncsNrsRouter } from "./routers/ncsNrs";
+import { pcsRouter } from "./routers/pcs";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
 
@@ -247,7 +248,6 @@ export const appRouter = router({
       .input(z.object({ userId: z.number().int().positive(), name: z.string().min(1).max(255) }))
       .mutation(async ({ ctx, input }) => {
         if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN" });
-        const db = await (await import("./db")).getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
         const { users } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
@@ -365,6 +365,7 @@ export const appRouter = router({
   tradeFinance: tradeFinanceRouter,
   tradeAnalytics: tradeAnalyticsRouter,
   ncsNrs: ncsNrsRouter,
+  pcs: pcsRouter,
 });
 
 export type AppRouter = typeof appRouter;

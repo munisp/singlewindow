@@ -43,6 +43,11 @@ const NOTIFICATION_TYPES = [
   "duty_payment_due",
   "clearance_complete",
   "general",
+  // Phase 8 PCS trader portal (spec R6): port-community event notifications.
+  "pcs_booking_confirmed",
+  "pcs_gate_window",
+  "pcs_berth_change",
+  "pcs_invoice_issued",
 ] as const;
 
 type NotificationType = typeof NOTIFICATION_TYPES[number];
@@ -69,6 +74,10 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
   clearance_complete: { label: "Clearance Complete", description: "Final clearance confirmation for released goods", category: "Declarations" },
   system: { label: "System Announcements", description: "Platform maintenance and system-wide announcements", category: "System" },
   general: { label: "General Notifications", description: "Miscellaneous platform notifications", category: "System" },
+  pcs_booking_confirmed: { label: "Port Booking Confirmed", description: "Notification when a terminal booking reaches a confirmed state (slot reserved / paid)", category: "Port Community" },
+  pcs_gate_window: { label: "Gate Window / Call-Up", description: "Notification when a truck is called up or a gate window opens for your booking", category: "Port Community" },
+  pcs_berth_change: { label: "Berth / Port-Call Change", description: "Notification when a port call carrying your cargo changes state", category: "Port Community" },
+  pcs_invoice_issued: { label: "Port Invoice Issued", description: "Notification when a port charge invoice or refund is recorded", category: "Port Community" },
 };
 
 export const notificationPreferencesRouter = router({
