@@ -349,7 +349,7 @@ function Router() {
       {/* Sprint 31 — Finance Ledger (TigerBeetle) */}
       <Route path="/app/finance/ledger">
         <FinanceGuard><Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense></FinanceGuard>
-FinanceLedger
+      </Route>
 
       {/* Sprint 32 — Identity Provider (Keycloak) */}
       <Route path="/app/admin/identity-provider">

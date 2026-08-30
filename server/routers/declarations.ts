@@ -401,7 +401,7 @@ export const declarationsRouter = router({
     .input(z.object({
       declarationId: z.number().int().positive(),
       vesselGrt: z.number().int().positive(),
-      vesselClass: z.enum(TARIFF_VESSEL_CLASSES as [string, ...string[]]),
+      vesselClass: z.enum(TARIFF_VESSEL_CLASSES),
       voyageType: z.enum(["INTERNATIONAL", "CABOTAGE"]),
       routeKind: z.enum(["SEA", "INLAND_WATERWAY"]).default("SEA"),
       // This platform is the Nigerian single window: the declaration's port of
@@ -439,7 +439,7 @@ export const declarationsRouter = router({
 
       const assessRequest: TariffAssessRequest = {
         vesselGrt: input.vesselGrt,
-        vesselClass: input.vesselClass as TariffAssessRequest["vesselClass"],
+        vesselClass: input.vesselClass,
         entityRef: `trader:${decl.traderId}`,
         cargoCategory: input.cargoCategory ?? decl.hsCode ?? "UNSPECIFIED",
         voyageType: input.voyageType,
