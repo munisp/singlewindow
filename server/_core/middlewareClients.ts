@@ -28,7 +28,7 @@ import { TRPCError } from "@trpc/server";
 
 type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
-interface CircuitBreakerOptions {
+export interface CircuitBreakerOptions {
   name: string;
   failureThreshold?: number;   // Failures before opening (default: 5)
   successThreshold?: number;   // Successes to close from half-open (default: 2)
@@ -36,7 +36,10 @@ interface CircuitBreakerOptions {
   windowMs?: number;           // Failure counting window (default: 60_000)
 }
 
-class CircuitBreaker {
+// Exported so dedicated service clients (e.g. the PRA-100 tariff-engine
+// client) can hold their own isolated breaker instance instead of sharing
+// the global registry — the state semantics stay identical.
+export class CircuitBreaker {
   private state: CircuitState = "CLOSED";
   private failures = 0;
   private successes = 0;

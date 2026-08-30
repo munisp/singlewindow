@@ -262,6 +262,19 @@ const kafkaHeaderGetter = {
   },
 };
 
+/**
+ * Injects W3C traceparent/tracestate/baggage from the active context into
+ * outbound HTTP headers (same carrier semantics as injectKafkaHeaders, named
+ * for HTTP call sites — e.g. the PRA-100 tariff-engine client). Never throws.
+ */
+export function injectTraceContext(headers: Record<string, string>): void {
+  try {
+    propagation.inject(context.active(), headers, kafkaHeaderSetter);
+  } catch {
+    // never break the outbound request path
+  }
+}
+
 /** Injects traceparent/tracestate/baggage from the active context into Kafka headers. */
 export function injectKafkaHeaders(headers: Record<string, string>): void {
   try {

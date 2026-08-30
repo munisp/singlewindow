@@ -109,12 +109,14 @@ export const paymentsRouter = router({
       await updateDeclaration(input.declarationId, { status: "payment_pending" });
 
       // SW-17: an unverified flat-rate estimate is not a payable amount in production.
+      // PRA-100: the authoritative path is declarations.assessDuty (tariff engine);
+      // a TARIFF_ENGINE_VERIFIED assessment clears this gate.
       const explanation = (decl as { aiExplanation?: unknown }).aiExplanation;
       if (IS_PRODUCTION && explanation && typeof explanation === "object" &&
           (explanation as Record<string, unknown>).dutyAssessment === "ESTIMATE_UNVERIFIED") {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Duty amount is an unverified estimate. An authoritative tariff assessment is required before payment.",
+          message: "Duty amount is an unverified estimate. Run declarations.assessDuty to obtain an authoritative tariff-engine assessment before payment.",
         });
       }
 

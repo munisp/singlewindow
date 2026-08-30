@@ -177,6 +177,17 @@ export const ENV = {
   // ─── Mojaloop ─────────────────────────────────────────────────────────────
   mojaloopUrl: process.env.MOJALOOP_URL ?? "http://localhost:3001",
 
+  // ─── Tariff Engine (blueeconomy-financial-controls W-FEAT-4) ──────────────
+  // PRA-100: authoritative statutory tariff assessment upstream. NO local
+  // default — an unset URL must fail closed (explicit configuration error),
+  // never fall back to a phantom endpoint or a fabricated rate. The bearer
+  // token authenticates the gateway to the engine; in production it must be
+  // a Keycloak-verifiable service token (the engine verifies RS256 against
+  // KEYCLOAK_BASE_URL/REALM; non-production engine profiles accept any
+  // bearer as the requester subject).
+  tariffServiceUrl: process.env.TARIFF_SERVICE_URL ?? "",
+  tariffServiceToken: process.env.TARIFF_SERVICE_TOKEN ?? "",
+
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
 
@@ -270,6 +281,7 @@ export function validateProductionConfig(config = ENV): void {
     ["REDIS_URL", config.redisUrl],
     ["REDIS_PASSWORD", config.redisPassword],
     ["MOJALOOP_URL", config.mojaloopUrl],
+    ["TARIFF_SERVICE_URL", config.tariffServiceUrl],
     ["TEMPORAL_ADDRESS", config.temporalAddress],
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ];
@@ -296,6 +308,7 @@ export function validateProductionConfig(config = ENV): void {
     ["PERMIFY_URL", config.permifyUrl],
     ["REDIS_URL", config.redisUrl],
     ["MOJALOOP_URL", config.mojaloopUrl],
+    ["TARIFF_SERVICE_URL", config.tariffServiceUrl],
     ["TEMPORAL_ADDRESS", config.temporalAddress],
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ].filter(([, value]) => isUnsafeProductionEndpoint(value)).map(([name]) => name);

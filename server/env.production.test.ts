@@ -14,6 +14,7 @@ function validProductionConfig(): typeof ENV {
     redisUrl: "redis://:strong-password@redis.internal:6379",
     redisPassword: "strong-password",
     mojaloopUrl: "https://sandbox.mojaloop.example",
+    tariffServiceUrl: "https://tariff-engine.internal.example",
     temporalAddress: "temporal.internal:7233",
     tigerBeetleAddresses: ["tigerbeetle.internal:3000"],
   };
@@ -28,6 +29,18 @@ describe("validateProductionConfig", () => {
     const config = validProductionConfig();
     config.mojaloopUrl = "";
     expect(() => validateProductionConfig(config)).toThrow(/MOJALOOP_URL/);
+  });
+
+  it("rejects a missing tariff-engine URL (PRA-100 fail-closed)", () => {
+    const config = validProductionConfig();
+    config.tariffServiceUrl = "";
+    expect(() => validateProductionConfig(config)).toThrow(/TARIFF_SERVICE_URL/);
+  });
+
+  it("rejects a local tariff-engine endpoint in production", () => {
+    const config = validProductionConfig();
+    config.tariffServiceUrl = "http://localhost:8080";
+    expect(() => validateProductionConfig(config)).toThrow(/unsafe local endpoint: TARIFF_SERVICE_URL/);
   });
 
   it("rejects local-only dependency endpoints in production", () => {
