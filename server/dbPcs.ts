@@ -109,7 +109,7 @@ export async function findOwnedDeclaration(
   return value(row ?? null);
 }
 
-// ─── Booking links ──────────────────────────────────────────────────────────
+// ─── Booking links ───────────────────────────────────────────────────────────
 
 export async function listPcsBookingLinksForTrader(
   traderUserId: number,
@@ -189,7 +189,7 @@ export async function findPcsBillingSnapshotForBookings(
   return value(rows.find((r) => r.invoiceId === invoiceOrReceiptId || r.receiptId === invoiceOrReceiptId) ?? null);
 }
 
-// ─── PCS documents (document_vault slice) ───────────────────────────────────
+// ─── PCS documents (document_vault slice) ────────────────────────────────────
 
 export async function listPcsDocuments(
   ownerId: number,
@@ -215,7 +215,7 @@ export async function listPcsDocuments(
   return value(rows);
 }
 
-// ─── PCS notification preferences ───────────────────────────────────────────
+// ─── PCS notification preferences ────────────────────────────────────────────
 
 export async function listPcsNotificationPreferences(
   userId: number,
