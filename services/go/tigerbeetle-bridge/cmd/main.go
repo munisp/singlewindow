@@ -61,6 +61,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/tradegateway/tigerbeetle-bridge/internal/backend"
+	authmw "github.com/tradegateway/tigerbeetle-bridge/internal/middleware"
 )
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -463,6 +464,15 @@ func main() {
 	})
 
 	r.Route("/api/ledger", func(r chi.Router) {
+		// PRA-012 (Phase 9): every money-rail endpoint requires a valid
+		// service-to-service token (Keycloak RS256 in production; static
+		// shared secret is a documented non-production fallback that
+		// production boot refuses). Fail-closed: no verifier, no service.
+		authVerifier, err := authmw.NewAuthVerifier(logger)
+		if err != nil {
+			logger.Fatal("service auth misconfigured — refusing to serve money-rail endpoints (fail-closed)", zap.Error(err))
+		}
+		r.Use(authVerifier.RequireServiceAuth)
 		r.Post("/accounts", bridge.handleCreateAccount)
 		r.Get("/accounts/{id}", bridge.handleGetAccount)
 		r.Get("/accounts/{id}/balance", bridge.handleGetBalance)
@@ -482,7 +492,13 @@ func main() {
 	if err != nil {
 		logger.Fatal("failed to listen for gRPC", zap.Error(err))
 	}
-	grpcServer := grpc.NewServer()
+	// PRA-012: auth interceptor on all non-health gRPC methods (defence in
+	// depth — only the health service is registered today).
+	authVerifier2, authErr := authmw.NewAuthVerifier(logger)
+	if authErr != nil {
+		logger.Fatal("service auth misconfigured — refusing to start gRPC (fail-closed)", zap.Error(authErr))
+	}
+	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(authVerifier2.GRPCUnaryAuthInterceptor))
 	healthSvc := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthSvc)
 	healthSvc.SetServingStatus("tigerbeetle-bridge", grpc_health_v1.HealthCheckResponse_SERVING)

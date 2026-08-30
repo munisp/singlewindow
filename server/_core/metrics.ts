@@ -479,3 +479,26 @@ export const pcsBookingRequestsTotal = new Counter({
   labelNames: ["outcome"] as const,
   registers: [metricsRegistry],
 });
+
+// ─── Phase 9 (WP-A robustness tail) ──────────────────────────────────────────
+
+export const pushDispatchFailuresTotal = new Counter({
+  name: "tradegateway_push_dispatch_failures_total",
+  help: "Push-dispatch Kafka publish failures (PRA-027) — token commit succeeds, dispatch is queued to the durable outbox and surfaced here",
+  labelNames: ["reason"] as const,
+  registers: [metricsRegistry],
+});
+
+export const geoVesselEventsTotal = new Counter({
+  name: "tradegateway_geo_vessel_events_total",
+  help: "vessels.events envelope events handled by the geo vessel projection (PRA-096)",
+  labelNames: ["topic", "outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+export const geoVesselSignatureRejectsTotal = new Counter({
+  name: "tradegateway_geo_vessel_signature_rejects_total",
+  help: "vessels.events envelope v1.0 provenance JWS rejections (fail-closed projection, PRA-096)",
+  labelNames: ["reason"] as const,
+  registers: [metricsRegistry],
+});

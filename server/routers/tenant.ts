@@ -10,7 +10,7 @@ import { protectedProcedure, adminProcedure, publicProcedure, router } from "../
 import { getDb, getDomainVerificationHistory, getDomainHealthSummary } from "../db";
 import { tenants, tenantKeycloakConfig, tenantUsers, tenantBranding } from "../../drizzle/schema";
 import { eq, desc, and, or } from "drizzle-orm";
-import crypto from "crypto";
+import crypto, { timingSafeEqual } from "crypto";
 
 // ─── On-Demand TLS helpers ────────────────────────────────────────────────────
 
@@ -435,13 +435,24 @@ export const tenantRouter = router({
   validateHostname: publicProcedure
     .input(z.object({ domain: z.string().min(1).max(253) }))
     .query(async ({ input, ctx }) => {
-      // Validate the shared secret Caddy sends in X-Caddy-Ask-Secret
+      // PRA-015 (Phase 9): FAIL CLOSED when CADDY_ASK_SECRET is unset.
+      // An unset secret previously DISABLED the check entirely — any caller
+      // could then mint an ACME certificate for any hostname the DB allowed.
+      // The endpoint refuses to serve when unconfigured, in every env.
       const askSecret = process.env.CADDY_ASK_SECRET;
-      if (askSecret) {
-        const incoming = ctx.req.headers["x-caddy-ask-secret"] as string | undefined;
-        if (incoming !== askSecret) {
-          throw new TRPCError({ code: "FORBIDDEN", message: "Invalid ask secret" });
-        }
+      if (!askSecret) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message:
+            "CADDY_ASK_UNAVAILABLE: on-demand TLS ask endpoint is not configured (CADDY_ASK_SECRET unset) — refusing to serve (fail-closed)",
+        });
+      }
+      const incoming = ctx.req.headers["x-caddy-ask-secret"] as string | undefined;
+      // Timing-safe comparison — the secret gates certificate issuance.
+      const a = Buffer.from(askSecret);
+      const b = Buffer.from(incoming ?? "");
+      if (a.length !== b.length || !timingSafeEqual(a, b)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Invalid ask secret" });
       }
       const allowed = await isHostnameAllowed(input.domain);
       if (!allowed) {

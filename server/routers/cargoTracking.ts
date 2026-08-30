@@ -13,7 +13,7 @@
  */
 
 import { z } from "zod";
-import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import { publishEvent, TOPICS } from "../_core/kafka";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ export const cargoTrackingRouter = router({
    * Required upstream for live coverage: an AIS ingestion worker (e.g.
    * sedona-svc /api/v1/ais/vessels poller) writing vessel_tracking_events.
    */
-  getLiveVessels: publicProcedure
+  getLiveVessels: protectedProcedure
     .input(z.object({
       riskFilter: z.enum(["all", "green", "amber", "red"]).optional().default("all"),
       statusFilter: z.enum(["all", "underway", "moored", "anchored"]).optional().default("all"),
@@ -195,7 +195,7 @@ export const cargoTrackingRouter = router({
   /**
    * getVesselRoute — returns historical track (polyline) for a specific vessel
    */
-  getVesselRoute: publicProcedure
+  getVesselRoute: protectedProcedure
     .input(z.object({ mmsi: z.string() }))
     .query(async ({ input }) => {
       // SW-25: serve ONLY real persisted AIS tracking events. An empty result is
@@ -233,7 +233,7 @@ export const cargoTrackingRouter = router({
   /**
    * getShipmentPosition — returns position for a specific declaration reference
    */
-  getShipmentPosition: publicProcedure
+  getShipmentPosition: protectedProcedure
     .input(z.object({ declarationRef: z.string() }))
     .query(async ({ input }) => {
       // P0 remediation: the previous implementation matched against a
@@ -257,7 +257,7 @@ export const cargoTrackingRouter = router({
    * persisted AIS events with a future ETA. Honest empty state when the
    * tracking store has no ETA data or is unreachable.
    */
-  getPortArrivals: publicProcedure.query(async () => {
+  getPortArrivals: protectedProcedure.query(async () => {
     try {
       const rows = await pgQuery(
         `SELECT DISTINCT ON (mmsi) mmsi, vessel_name, eta, cargo_type, flag_country
@@ -306,7 +306,7 @@ export const cargoTrackingRouter = router({
    /**
    * getVesselStats — summary statistics from DB (falls back to static)
    */
-  getVesselStats: publicProcedure.query(async () => {
+  getVesselStats: protectedProcedure.query(async () => {
     try {
       const [stats] = await pgQuery(
         `SELECT
@@ -381,7 +381,7 @@ export const cargoTrackingRouter = router({
       return { success: true, eventType: input.eventType, mmsi: input.mmsi };
     }),
 
-  searchVessels: publicProcedure
+  searchVessels: protectedProcedure
     .input(z.object({ q: z.string().min(2).max(100) }))
     .query(async ({ input }) => {
       const rows = await pgQuery(
