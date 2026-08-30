@@ -115,8 +115,12 @@ export const ENV = {
   permifyApiKey: process.env.PERMIFY_API_KEY ?? "",
 
   // ─── Redis ────────────────────────────────────────────────────────────────
-  redisUrl: process.env.REDIS_URL ?? "redis://:tradegateway_redis_2026@localhost:6379",
-  redisPassword: process.env.REDIS_PASSWORD ?? "tradegateway_redis_2026",
+  // PRA-115 (Phase 9): NO credential defaults anywhere. The dev default is a
+  // passwordless localhost URL; every real environment (staging/prod) must set
+  // REDIS_URL + REDIS_PASSWORD explicitly. Production boot refuses missing,
+  // local, or known-dev-placeholder values (validateProductionConfig below).
+  redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
+  redisPassword: process.env.REDIS_PASSWORD ?? "",
 
   // ─── Kafka ────────────────────────────────────────────────────────────────
   kafkaBrokers: (process.env.KAFKA_BROKERS ?? "localhost:9092").split(","),
@@ -249,6 +253,11 @@ export const ENV = {
   // env is absent. A PARTIAL set is a misconfiguration and fails closed at
   // call time with a classified error — never a silent fallback.
   keycloakTokenUrl: process.env.KEYCLOAK_TOKEN_URL ?? "",
+  // PRA-106 (Phase 9): expected `aud` for user-facing Keycloak tokens verified
+  // by server/_core/keycloakVerifier.ts. REQUIRED in production (boot refusal
+  // via validateProductionConfig); optional in dev with a loud warning. A
+  // token whose aud does not include this value is rejected on every request.
+  keycloakTokenAudience: process.env.KEYCLOAK_TOKEN_AUDIENCE ?? "",
   tariffServiceClientId: process.env.TARIFF_SERVICE_CLIENT_ID ?? "",
   tariffServiceClientSecret: process.env.TARIFF_SERVICE_CLIENT_SECRET ?? "",
 
@@ -281,6 +290,19 @@ export const ENV = {
 
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
+
+  // ─── Caddy On-Demand TLS ask endpoint (PRA-015, Phase 9) ─────────────────
+  // Shared secret gating tenant.validateHostname (Caddy's on_demand_tls.ask).
+  // REQUIRED in production (boot refusal below) — an unset secret must never
+  // disable the check; the endpoint itself also fails closed when unset.
+  caddyAskSecret: process.env.CADDY_ASK_SECRET ?? "",
+
+  // ─── Service-to-service auth: TigerBeetle bridge (PRA-012, Phase 9) ──────
+  // Keycloak client-credentials for money-rail HTTP hops. REQUIRED in
+  // production (boot refusal). TB_BRIDGE_SHARED_SECRET is the documented
+  // non-production fallback the bridge accepts only when APP_ENV!=production.
+  tbBridgeClientId: process.env.TB_BRIDGE_CLIENT_ID ?? "",
+  tbBridgeClientSecret: process.env.TB_BRIDGE_CLIENT_SECRET ?? "",
 
   // ─── Email Digest ─────────────────────────────────────────────────────────
   digestFromEmail: process.env.DIGEST_FROM_EMAIL ?? "digest@tradegateway.gov.ng",
@@ -383,6 +405,11 @@ export function validateProductionConfig(config = ENV): void {
     ["API_KEY_HASH_SECRET or JWT_SECRET", config.apiKeyHashSecret || config.cookieSecret],
     ["KEYCLOAK_URL", config.keycloakUrl],
     ["KEYCLOAK_CLIENT_SECRET", config.keycloakClientSecret],
+    ["KEYCLOAK_TOKEN_AUDIENCE", config.keycloakTokenAudience],
+    ["CADDY_ASK_SECRET", config.caddyAskSecret],
+    // PRA-012: money-rail service-to-service auth (TigerBeetle bridge hops).
+    ["TB_BRIDGE_CLIENT_ID", config.tbBridgeClientId],
+    ["TB_BRIDGE_CLIENT_SECRET", config.tbBridgeClientSecret],
     ["PERMIFY_URL", config.permifyUrl],
     ["PERMIFY_API_KEY", config.permifyApiKey],
     ["REDIS_URL", config.redisUrl],

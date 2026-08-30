@@ -72,18 +72,26 @@ async function checkAndSetIdempotency(key: string, ttlSeconds = 86400): Promise<
 
 // ─── TEMPORAL WORKFLOW TRIGGER ────────────────────────────────────────────────
 
+import { fetchWithResilience } from "../_core/middlewareClients";
+
 const WORKFLOW_SERVICE_URL = process.env.WORKFLOW_SERVICE_URL ?? "http://localhost:8200";
 
 async function triggerTemporalWorkflow(
   workflowType: string,
   input: Record<string, unknown>
 ): Promise<{ workflowId: string; runId: string }> {
-  const resp = await fetch(`${WORKFLOW_SERVICE_URL}/workflows/trigger`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workflow_type: workflowType, input }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  // PRA-024/025: timeout + backoff/jitter + breaker; 4xx verbatim (a
+  // rejected workflow definition is not retried).
+  const resp = await fetchWithResilience(
+    `${WORKFLOW_SERVICE_URL}/workflows/trigger`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workflow_type: workflowType, input }),
+      timeoutMs: 30_000,
+    },
+    "workflow-service"
+  );
   if (!resp.ok) {
     const body = await resp.text();
     throw new TRPCError({
@@ -105,17 +113,23 @@ async function checkPermify(
   action: string
 ): Promise<boolean> {
   try {
-    const resp = await fetch(`${PERMIFY_URL}/v1/permissions/check`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        metadata: { schema_version: "", snap_token: "", depth: 20 },
-        entity: { type: "resource", id: resource },
-        permission: action,
-        subject: { type: subjectType, id: subjectId },
-      }),
-      signal: AbortSignal.timeout(5_000),
-    });
+    // PRA-024/025: resilience wrapper; 4xx verbatim, retry only
+    // network/timeout/5xx. Fail-closed DENY on exhaustion (below).
+    const resp = await fetchWithResilience(
+      `${PERMIFY_URL}/v1/permissions/check`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metadata: { schema_version: "", snap_token: "", depth: 20 },
+          entity: { type: "resource", id: resource },
+          permission: action,
+          subject: { type: subjectType, id: subjectId },
+        }),
+        timeoutMs: 5_000,
+      },
+      "permify"
+    );
     const data = (await resp.json()) as { can: string };
     return data.can === "CHECK_RESULT_ALLOWED";
   } catch {
@@ -722,9 +736,11 @@ export const fundFlowRouter = router({
   getWorkflowStatus: protectedProcedure
     .input(z.object({ workflowId: z.string() }))
     .query(async ({ input }) => {
-      const resp = await fetch(
+      // PRA-024/025: resilience wrapper (4xx verbatim — 404 stays 404).
+      const resp = await fetchWithResilience(
         `${WORKFLOW_SERVICE_URL}/workflows/${input.workflowId}/status`,
-        { signal: AbortSignal.timeout(10_000) }
+        { timeoutMs: 10_000 },
+        "workflow-service"
       );
       if (!resp.ok) throw new TRPCError({ code: "NOT_FOUND", message: "Workflow not found" });
       return resp.json() as Promise<{ status: string; result?: unknown; error?: string }>;
