@@ -45,18 +45,71 @@ async function requireDb() {
   return db;
 }
 
-// ─── Kafka publish helper ─────────────────────────────────────────────────────
+// ─── Kafka publish helper (PRA-027, Phase 9) ─────────────────────────────────
+//
+// Posture: the push-dispatch event is IMPORTANT but not transactional with the
+// token row — the token registration/unregistration MUST still commit even if
+// the publish fails (documented contract: the dispatcher re-reads target
+// tokens from the DB at send time for register-triggered flows, and the
+// outbox carries the anomaly payload for replay). On publish failure we:
+//   1. surface it via the tradegateway_push_dispatch_failures_total metric,
+//   2. emit a structured error log (never silent),
+//   3. persist the event to the durable kafka_event_log outbox for retry.
+// GAP-PUSH-OUTBOX: the outbox table + helpers exist (server/db.ts v78) but no
+// drainer worker ships in this repo — replay requires an operator/script until
+// an outbox-worker lands. Registered in server/_core/gapRegistry.ts.
 
-async function publishPushEvent(payload: Record<string, unknown>): Promise<void> {
+import { createKafkaEventLogEntry } from "../db";
+import { pushDispatchFailuresTotal } from "../_core/metrics";
+
+export type PushPublishOutcome = "published" | "queued_to_outbox";
+
+async function publishPushEvent(payload: Record<string, unknown>): Promise<PushPublishOutcome> {
   const kafkaUrl = process.env.KAFKA_REST_URL ?? "http://kafka-rest:8082";
+  const topic = "insider.push.dispatch";
   try {
-    await fetch(`${kafkaUrl}/topics/insider.push.dispatch`, {
+    const res = await fetch(`${kafkaUrl}/topics/${topic}`, {
       method: "POST",
       headers: { "Content-Type": "application/vnd.kafka.json.v2+json" },
       body: JSON.stringify({ records: [{ value: payload }] }),
+      signal: AbortSignal.timeout(5_000), // PRA-027: bounded, never fire-and-forget
     });
-  } catch {
-    // Non-fatal: push dispatch is best-effort (token CRUD above is not)
+    if (!res.ok) {
+      throw new Error(`Kafka REST proxy answered HTTP ${res.status}`);
+    }
+    return "published";
+  } catch (err) {
+    const reason = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "publish_failed";
+    pushDispatchFailuresTotal.inc({ reason });
+    console.error(JSON.stringify({
+      level: "error",
+      msg: "[pushTokens] push-dispatch Kafka publish failed — event queued to durable outbox (token commit unaffected)",
+      topic,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+      eventType: typeof payload.type === "string" ? payload.type : "unknown",
+    }));
+    // Durable outbox record (at-least-once replay source). A failure to even
+    // record the outbox is logged loudly but still does not roll back the
+    // token commit (documented contract above).
+    try {
+      await createKafkaEventLogEntry({
+        topic,
+        eventType: typeof payload.type === "string" ? payload.type : "push_dispatch",
+        aggregateId: typeof payload.userId === "string" ? payload.userId : "push",
+        payload: payload as Record<string, unknown>,
+        status: "pending",
+      });
+    } catch (outboxErr) {
+      pushDispatchFailuresTotal.inc({ reason: "outbox_write_failed" });
+      console.error(JSON.stringify({
+        level: "error",
+        msg: "[pushTokens] CRITICAL: push-dispatch publish failed AND outbox write failed — event LOST",
+        topic,
+        error: outboxErr instanceof Error ? outboxErr.message : String(outboxErr),
+      }));
+    }
+    return "queued_to_outbox";
   }
 }
 
@@ -161,7 +214,7 @@ export const pushTokensRouter = router({
         .map((r) => r.token);
 
       // Publish to Kafka for the Go notification-dispatcher to handle FCM/APNs dispatch
-      await publishPushEvent({
+      const dispatch = await publishPushEvent({
         ...payload,
         tokens: targetTokens,
         channelId: "tradegateway-anomaly-alerts",
@@ -170,6 +223,7 @@ export const pushTokensRouter = router({
       return {
         success: true,
         tokensTargeted: targetTokens.length,
+        dispatch, // "published" | "queued_to_outbox" — honest delivery posture
         payload,
       };
     }),
