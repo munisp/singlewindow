@@ -12,7 +12,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
-import { searchDocuments } from "../_core/opensearch";
+import { searchDocuments, OpenSearchUnavailableError } from "../_core/opensearch";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -94,7 +94,20 @@ export const opensearchRouter = router({
         },
       };
 
-      const result = await searchDocuments("tradegateway-audit-events", body);
+      let result: Awaited<ReturnType<typeof searchDocuments>>;
+      try {
+        result = await searchDocuments("tradegateway-audit-events", body);
+      } catch (err) {
+        if (err instanceof OpenSearchUnavailableError) {
+          // PRA-110: typed outage — UI shows a degraded banner; never
+          // empty-results-on-outage (that would hide a cluster-down incident).
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `AUDIT_SEARCH_UNAVAILABLE: ${err.message}`,
+          });
+        }
+        throw err;
+      }
       return {
         hits: result.hits as Array<{
           id: number;
