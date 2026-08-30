@@ -91,7 +91,9 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "document_required", "aeo_status_update", "security_alert", "system",
   "declaration_status_change", "permit_expiry_warning", "fraud_case_opened",
   "fraud_case_assigned", "sla_breach", "kyc_approved", "kyc_rejected",
-  "duty_payment_due", "clearance_complete", "general"
+  "duty_payment_due", "clearance_complete", "general",
+  // Phase 8 PCS trader portal (R6): event-driven port-community notifications.
+  "pcs_booking_confirmed", "pcs_gate_window", "pcs_berth_change", "pcs_invoice_issued"
 ]);
 
 // ─── USERS & AUTH ─────────────────────────────────────────────────────────────
@@ -826,7 +828,9 @@ export const documentVaultCategoryEnum = pgEnum("document_vault_category", [
   "certificate_of_origin", "phytosanitary_cert", "import_permit",
   "export_permit", "insurance_cert", "customs_bond",
   "kyc_identity", "kyc_business", "aeo_supporting",
-  "post_clearance", "correspondence", "other"
+  "post_clearance", "correspondence", "other",
+  // Phase 8 PCS trader portal (R5): port-community document exchange.
+  "delivery_order", "gate_pass", "terminal_notice", "pcs_correspondence"
 ]);
 
 export const documentVaultAccessEnum = pgEnum("document_vault_access", [
@@ -1138,7 +1142,7 @@ export const tenantBranding = pgTable("tenant_branding", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   updatedBy: integer("updated_by").references(() => users.id),
 }, (t) => [
-  index("idx_tenant_branding_tenant_id").on(t.tenantId),
+  index("idx_tenant_branding_id").on(t.tenantId),
 ]);
 export type TenantBranding = typeof tenantBranding.$inferSelect;
 export type InsertTenantBranding = typeof tenantBranding.$inferInsert;
@@ -3354,7 +3358,7 @@ export type InsertMojaloopPayment = typeof mojaloopPayments.$inferInsert;
 // ─── LPCO Records ─────────────────────────────────────────────────────────────
 export const lpcoRecords = pgTable("lpco_records", {
   id: serial("id").primaryKey(),
-  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  declarationId: integer("declaration_id").references(() => declarations.id),
   traderId: integer("trader_id").notNull().references(() => users.id),
   lpcoType: varchar("lpco_type", { length: 64 }).notNull(),
   mda: varchar("mda", { length: 32 }).notNull(),
@@ -3456,3 +3460,95 @@ export const freezoneReconciliationRuns = pgTable("freezone_reconciliation_runs"
 ]);
 export type FreezoneReconciliationRun = typeof freezoneReconciliationRuns.$inferSelect;
 export type InsertFreezoneReconciliationRun = typeof freezoneReconciliationRuns.$inferInsert;
+
+// ─── Phase 8: PCS Trader Portal read models ──────────────────────────────────
+// Thin read/projection layer over blueeconomy-port-interoperability (the
+// system of record for port calls, bookings, slots, gate scans and billing).
+// These tables are PROJECTIONS of ports.*.v1 Kafka events (envelope v1.0,
+// EdDSA JWS provenance) — never a system of record. Every row traces to a
+// source event id; unverified events are rejected, never projected.
+export const pcsMilestoneEnum = pgEnum("pcs_milestone", [
+  "pre_arrival", "arrived", "berthed", "ops_started", "discharging",
+  "customs_hold", "customs_released", "gate_out", "departed"
+]);
+
+export const pcsConsignments = pgTable("pcs_consignments", {
+  id: serial("id").primaryKey(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  manifestId: integer("manifest_id").references(() => manifests.id, { onDelete: "set null" }),
+  // Nullable: port-interop booking events do not carry B/L numbers; the
+  // column is populated when a manifest association is established (spec §3
+  // keys the read model by bl_number + manifest_id once both are known).
+  blNumber: varchar("bl_number", { length: 64 }),
+  containerNos: jsonb("container_nos").$type<string[]>().notNull().default([]),
+  consignee: varchar("consignee", { length: 256 }),
+  portCode: varchar("port_code", { length: 8 }),
+  portCallId: varchar("port_call_id", { length: 256 }),
+  declarationUrn: varchar("declaration_urn", { length: 128 }),
+  lastMilestone: pcsMilestoneEnum("last_milestone"),
+  lastMilestoneAt: timestamp("last_milestone_at"),
+  sourceEventIds: jsonb("source_event_ids").$type<string[]>().notNull().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_consignments_trader").on(t.traderUserId),
+  index("idx_pcs_consignments_bl").on(t.blNumber),
+  index("idx_pcs_consignments_port_call").on(t.portCallId),
+  unique("pcs_consignments_bl_manifest_unique").on(t.blNumber, t.manifestId),
+]);
+export type PcsConsignment = typeof pcsConsignments.$inferSelect;
+export type InsertPcsConsignment = typeof pcsConsignments.$inferInsert;
+
+// Append-only milestone projection; replay is idempotent via the
+// (consignment_id, source_event_id) uniqueness constraint.
+export const pcsMilestones = pgTable("pcs_milestones", {
+  id: serial("id").primaryKey(),
+  consignmentId: integer("consignment_id").notNull().references(() => pcsConsignments.id, { onDelete: "cascade" }),
+  milestone: pcsMilestoneEnum("milestone").notNull(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  sourceTopic: varchar("source_topic", { length: 64 }).notNull(),
+  sourceEventId: uuid("source_event_id").notNull(),
+  provenanceSignatureVerified: boolean("provenance_signature_verified").notNull(),
+}, (t) => [
+  index("idx_pcs_milestones_consignment").on(t.consignmentId),
+  unique("pcs_milestones_consignment_event_unique").on(t.consignmentId, t.sourceEventId),
+]);
+export type PcsMilestone = typeof pcsMilestones.$inferSelect;
+export type InsertPcsMilestone = typeof pcsMilestones.$inferInsert;
+
+export const pcsBookingLinks = pgTable("pcs_booking_links", {
+  id: serial("id").primaryKey(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id", { length: 128 }).notNull(),
+  consignmentId: integer("consignment_id").references(() => pcsConsignments.id, { onDelete: "set null" }),
+  createdVia: varchar("created_via", { length: 16 }).notNull(), // pcs | ussd | direct
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_booking_links_trader").on(t.traderUserId),
+  unique("pcs_booking_links_booking_unique").on(t.bookingId),
+]);
+export type PcsBookingLink = typeof pcsBookingLinks.$inferSelect;
+export type InsertPcsBookingLink = typeof pcsBookingLinks.$inferInsert;
+
+// Read-only ledger projection — NOT double-entry truth (billing truth stays in
+// port-interop's TigerBeetle/Mojaloop). projectionLagMs labels every row so UI
+// figures trace to their source event and staleness.
+export const pcsBillingSnapshots = pgTable("pcs_billing_snapshots", {
+  id: serial("id").primaryKey(),
+  bookingId: varchar("booking_id", { length: 128 }).notNull(),
+  invoiceId: varchar("invoice_id", { length: 128 }),
+  amountKobo: bigint("amount_kobo", { mode: "number" }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  status: varchar("status", { length: 32 }).notNull(),
+  receiptId: varchar("receipt_id", { length: 128 }),
+  ledgerCommitHash: varchar("ledger_commit_hash", { length: 128 }),
+  projectionLagMs: integer("projection_lag_ms"),
+  sourceEventId: uuid("source_event_id").notNull().unique(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_billing_booking").on(t.bookingId),
+]);
+export type PcsBillingSnapshot = typeof pcsBillingSnapshots.$inferSelect;
+export type InsertPcsBillingSnapshot = typeof pcsBillingSnapshots.$inferInsert;
