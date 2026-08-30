@@ -47,19 +47,42 @@ async function getRedisClient() {
 
 // ─── OpenSearch helpers ───────────────────────────────────────────────────────
 
+/**
+ * Typed failure (PRA-110): the audit/alert search backend is DOWN.
+ * Callers must surface this as AUDIT_SEARCH_UNAVAILABLE — never as an empty
+ * result set, which is indistinguishable from "no alerts" and would hide an
+ * outage from the SOC UI.
+ */
+export class AuditSearchUnavailableError extends Error {
+  readonly code = "AUDIT_SEARCH_UNAVAILABLE" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "AuditSearchUnavailableError";
+  }
+}
+
 async function queryOpenSearch(index: string, body: Record<string, unknown>) {
   const url = process.env.OPENSEARCH_URL ?? "http://opensearch:9200";
+  let resp: Response;
   try {
-    const resp = await fetch(`${url}/${index}/_search`, {
+    resp = await fetch(`${url}/${index}/_search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5_000),
     });
-    if (!resp.ok) return { hits: { hits: [], total: { value: 0 } } };
-    return resp.json();
-  } catch {
-    return { hits: { hits: [], total: { value: 0 } } };
+  } catch (err) {
+    // Cluster down / unreachable / timeout — NOT zero results.
+    throw new AuditSearchUnavailableError(
+      `OpenSearch unreachable for index "${index}": ${err instanceof Error ? err.message : String(err)}`
+    );
   }
+  if (!resp.ok) {
+    throw new AuditSearchUnavailableError(
+      `OpenSearch query on index "${index}" failed with HTTP ${resp.status}`
+    );
+  }
+  return resp.json();
 }
 
 // ─── Privileged-action audit (SW-O2) ─────────────────────────────────────────
@@ -358,11 +381,25 @@ export const insiderThreatRouter = router({
       }
 
       const query = must.length > 0 ? { bool: { must } } : { match_all: {} };
-      const result = await queryOpenSearch("insider-threat-alerts", {
-        query,
-        sort: [{ timestamp: { order: "desc" } }],
-        size: input?.limit ?? 50,
-      });
+      let result: any;
+      try {
+        result = await queryOpenSearch("insider-threat-alerts", {
+          query,
+          sort: [{ timestamp: { order: "desc" } }],
+          size: input?.limit ?? 50,
+        });
+      } catch (err) {
+        if (err instanceof AuditSearchUnavailableError) {
+          // PRA-110: typed outage signal — the UI shows a degraded banner.
+          // NEVER return an empty list here; that would masquerade an outage
+          // as "no anomalies".
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `AUDIT_SEARCH_UNAVAILABLE: ${err.message}`,
+          });
+        }
+        throw err;
+      }
 
       const hits = result?.hits?.hits ?? [];
       const alerts = hits.map((h: any) => h._source);

@@ -34,6 +34,7 @@ import { TRPCError } from "@trpc/server";
 import nodeCrypto from "crypto";
 import { getDb } from "../db";
 import { fetchWithResilience } from "../_core/middlewareClients";
+import { getServiceAuthHeaders } from "../_core/serviceAuth";
 import { SpanKind as OtelSpanKind } from "@opentelemetry/api";
 import { withSpan as withOtelSpan, injectKafkaHeaders as injectOtelHeaders } from "../_core/telemetry";
 import { paymentIdempotencyKeys } from "../../drizzle/schema";
@@ -701,19 +702,26 @@ export const mojaloopRouter = router({
         // id returned by the bridge. If the bridge is down we return 503 so the
         // switch retries — the mirror is never written for an unexecuted post.
         const amountMinorUnits = toMinorUnits(tx.amount as unknown as string);
-        const bridgeRes = await fetch(`${TB_BRIDGE_URL}/api/ledger/transfers`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            debitAccountId: `trader-${tx.initiatedBy}-liability`,
-            creditAccountId: "customs-duty-revenue",
-            amount: minorToMajorString(amountMinorUnits),
-            currency: tx.currency,
-            reference: `DUTY-${tx.declarationId ?? "N/A"}`,
-            description: `Duty payment settled via Mojaloop (${input.transferId})`,
-          }),
-          signal: AbortSignal.timeout(10_000),
-        }).catch(() => null);
+        // PRA-012: authenticated service-to-service hop (fail closed when
+        // unconfigured); PRA-024/025: timeout + backoff/jitter + breaker.
+        const bridgeAuth = await getServiceAuthHeaders();
+        const bridgeRes = await fetchWithResilience(
+          `${TB_BRIDGE_URL}/api/ledger/transfers`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...bridgeAuth },
+            body: JSON.stringify({
+              debitAccountId: `trader-${tx.initiatedBy}-liability`,
+              creditAccountId: "customs-duty-revenue",
+              amount: minorToMajorString(amountMinorUnits),
+              currency: tx.currency,
+              reference: `DUTY-${tx.declarationId ?? "N/A"}`,
+              description: `Duty payment settled via Mojaloop (${input.transferId})`,
+            }),
+            timeoutMs: 10_000,
+          },
+          "tigerbeetle-bridge"
+        ).catch(() => null);
 
         if (!bridgeRes || !bridgeRes.ok) {
           throw new TRPCError({

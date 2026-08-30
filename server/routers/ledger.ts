@@ -36,6 +36,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { publishEvent, TOPICS } from "../_core/kafka";
+import { fetchWithResilience } from "../_core/middlewareClients";
+import { getServiceAuthHeaders } from "../_core/serviceAuth";
 import {
   getLedgerEntriesByDeclaration,
   getLedgerEntriesByPayment,
@@ -107,11 +109,19 @@ async function riskScorerAvailable(): Promise<boolean> {
 }
 
 async function tbFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${TB_BRIDGE_URL}${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
-    signal: AbortSignal.timeout(10_000),
-  });
+  // PRA-012: service-to-service auth on every money-rail hop (fail closed
+  // when unconfigured); PRA-024/025: timeout + backoff/jitter + breaker via
+  // fetchWithResilience (4xx returns verbatim; only network/timeout/5xx retry).
+  const authHeaders = await getServiceAuthHeaders();
+  const res = await fetchWithResilience(
+    `${TB_BRIDGE_URL}${path}`,
+    {
+      ...options,
+      headers: { "Content-Type": "application/json", ...authHeaders, ...(options?.headers ?? {}) },
+      timeoutMs: 10_000,
+    },
+    "tigerbeetle-bridge"
+  );
   if (!res.ok) {
     const body = await res.text();
     throw new TRPCError({
