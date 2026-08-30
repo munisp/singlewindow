@@ -10,11 +10,53 @@
  *   - Distributed idempotency key storage for payment deduplication
  *
  * Algorithm: Fixed-window counter using INCR + EXPIRE (atomic via Lua script)
- * Fallback: If Redis is unavailable, falls back to in-memory (single-instance safe)
+ * Fallback posture (PRA-013/PRA-026, Phase 9):
+ *   - PRODUCTION: Redis down => FAIL CLOSED. The limiter throws
+ *     RateLimiterUnavailableError and the Express middleware answers
+ *     503 { error: "RATE_LIMITER_UNAVAILABLE" }. A per-process Map fallback is
+ *     NEVER correct in production: with N replicas each pod would grant its
+ *     own allowance, multiplying the effective limit by N.
+ *   - DEV/TEST ONLY: an in-memory per-process fallback is available behind the
+ *     explicit opt-in RATE_LIMIT_ALLOW_INMEMORY_FALLBACK=true. The flag is
+ *     ignored in production.
  */
 
 import type { Request, Response, NextFunction } from "express";
 import Redis from "ioredis";
+
+/** Typed failure surfaced when the distributed limiter cannot serve. */
+export class RateLimiterUnavailableError extends Error {
+  readonly code = "RATE_LIMITER_UNAVAILABLE" as const;
+  constructor(message = "Redis-backed rate limiter is unavailable") {
+    super(message);
+    this.name = "RateLimiterUnavailableError";
+  }
+}
+
+/**
+ * Dev/test-only escape hatch: allow the per-process in-memory fallback.
+ * ALWAYS false in production regardless of the flag (fail closed).
+ */
+export function rateLimiterInMemoryFallbackAllowed(): boolean {
+  return (
+    process.env.NODE_ENV !== "production" &&
+    process.env.RATE_LIMIT_ALLOW_INMEMORY_FALLBACK === "true"
+  );
+}
+
+/**
+ * Shared decision for every Redis-backed limiter path: either a Redis client,
+ * or (dev-only, explicit flag) null meaning "caller may use in-memory", or a
+ * thrown RateLimiterUnavailableError (fail closed).
+ */
+export function resolveLimiterBackend(redis: Redis | null): Redis | null {
+  if (redis) return redis;
+  if (rateLimiterInMemoryFallbackAllowed()) return null;
+  throw new RateLimiterUnavailableError(
+    "Redis is unavailable and the in-memory rate-limiter fallback is not enabled " +
+      "(set RATE_LIMIT_ALLOW_INMEMORY_FALLBACK=true in non-production only) — failing closed"
+  );
+}
 
 // ─── Redis singleton ──────────────────────────────────────────────────────────
 
@@ -34,7 +76,7 @@ function getRedis(): Redis | null {
       enableOfflineQueue: false,
     });
     _redis.on("error", (err) => {
-      console.warn("[Redis] Connection error (rate limiter falling back to in-memory):", err.message);
+      console.error("[Redis] Connection error (rate limiter fails closed unless the dev-only in-memory fallback is enabled):", err.message);
       _redisFailed = true;
       _redis = null;
     });
@@ -65,10 +107,14 @@ function memIncr(key: string, windowMs: number): number {
 /**
  * Increments the request counter for `key` within `windowMs`.
  * Returns the current count (1 = first request in window).
+ *
+ * Fail-closed (PRA-026): when Redis is unavailable this throws
+ * RateLimiterUnavailableError unless the explicit dev-only in-memory fallback
+ * is enabled (rateLimiterInMemoryFallbackAllowed()).
  */
 export async function incrementRateLimit(key: string, windowMs: number): Promise<number> {
-  const redis = getRedis();
-  if (!redis) return memIncr(key, windowMs);
+  const redis = resolveLimiterBackend(getRedis());
+  if (!redis) return memIncr(key, windowMs); // dev-only explicit fallback
 
   try {
     // Lua script: INCR + PEXPIRE in a single atomic operation
@@ -81,8 +127,15 @@ export async function incrementRateLimit(key: string, windowMs: number): Promise
     `;
     const result = await redis.eval(luaScript, 1, key, String(windowMs));
     return typeof result === "number" ? result : parseInt(String(result), 10);
-  } catch {
-    return memIncr(key, windowMs);
+  } catch (err) {
+    // A Redis command error mid-window is an outage too: same posture as
+    // "no client" — fail closed unless the dev fallback is explicitly on.
+    if (rateLimiterInMemoryFallbackAllowed()) {
+      return memIncr(key, windowMs);
+    }
+    throw new RateLimiterUnavailableError(
+      `Redis rate-limit command failed: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 
@@ -120,8 +173,23 @@ export function redisRateLimit(options: RedisRateLimitOptions) {
         res.status(429).json({ error: message, retryAfterMs: windowMs });
         return;
       }
-    } catch {
-      // Rate limiter failure is non-blocking — allow request through
+    } catch (err) {
+      if (err instanceof RateLimiterUnavailableError) {
+        // PRA-026: fail closed — 503 with a typed error, never silent allow.
+        res.status(503).json({
+          error: "RATE_LIMITER_UNAVAILABLE",
+          message: "Rate limiting is temporarily unavailable — request refused (fail-closed).",
+          retryAfterMs: windowMs,
+        });
+        return;
+      }
+      // Unexpected errors: same fail-closed posture.
+      res.status(503).json({
+        error: "RATE_LIMITER_UNAVAILABLE",
+        message: "Rate limiting check failed — request refused (fail-closed).",
+        retryAfterMs: windowMs,
+      });
+      return;
     }
 
     next();
@@ -174,32 +242,49 @@ const SESSION_REVOCATION_TTL_S = 24 * 60 * 60; // 24 hours (matches JWT expiry)
 /**
  * Adds a session token to the Redis revocation blacklist.
  * Called on logout to immediately invalidate the JWT.
+ * Fail-closed in production: if the revocation cannot be durably recorded the
+ * caller gets an error (the logout MUST surface as failed) instead of a
+ * silently-not-revoked session.
  */
 export async function revokeSession(sessionId: string): Promise<void> {
   const redis = getRedis();
   if (!redis) {
-    console.warn("[Redis] Session revocation skipped — Redis unavailable");
+    if (process.env.NODE_ENV === "production") {
+      throw new RateLimiterUnavailableError(
+        "Redis unavailable — session revocation NOT recorded (fail-closed)"
+      );
+    }
+    console.warn("[Redis] Session revocation skipped — Redis unavailable (dev)");
     return;
   }
   try {
     await redis.set(`revoked:${sessionId}`, "1", "EX", SESSION_REVOCATION_TTL_S);
   } catch (err) {
-    console.warn("[Redis] Session revocation failed:", err);
+    if (process.env.NODE_ENV === "production") {
+      throw new RateLimiterUnavailableError(
+        `Redis revocation write failed — session NOT revoked (fail-closed): ${err instanceof Error ? err.message : err}`
+      );
+    }
+    console.warn("[Redis] Session revocation failed (dev):", err);
   }
 }
 
 /**
  * Checks if a session token has been revoked.
  * Returns true if the session is blacklisted (should be rejected).
+ * Fail-closed in production: Redis down => treat every presented session as
+ * revoked (deny) rather than letting logged-out tokens back in.
  */
 export async function isSessionRevoked(sessionId: string): Promise<boolean> {
   const redis = getRedis();
-  if (!redis) return false; // fail-open when Redis is unavailable
+  if (!redis) {
+    return process.env.NODE_ENV === "production"; // prod: deny; dev: allow
+  }
   try {
     const val = await redis.get(`revoked:${sessionId}`);
     return val === "1";
   } catch {
-    return false;
+    return process.env.NODE_ENV === "production";
   }
 }
 

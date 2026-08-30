@@ -149,7 +149,11 @@ export async function withRetry<T>(
       if (attempt === maxAttempts || !retryOn(err)) {
         throw err;
       }
-      await new Promise(resolve => setTimeout(resolve, delay));
+      // PRA-024/025: exponential backoff WITH full jitter — without jitter,
+      // N callers retrying a recovering dependency fire in lock-step
+      // (thundering herd) and re-collapse it.
+      const jittered = Math.floor(delay * (0.5 + Math.random()));
+      await new Promise(resolve => setTimeout(resolve, jittered));
       delay = Math.min(delay * backoffFactor, maxDelayMs);
     }
   }
@@ -371,36 +375,12 @@ export async function getKeycloakJWKS(): Promise<unknown[]> {
   }
 }
 
-// ─── Fluvio Client ────────────────────────────────────────────────────────────
-
-export async function publishToFluvio(
-  topic: string,
-  message: string,
-  key?: string
-): Promise<boolean> {
-  const FLUVIO_URL = process.env.FLUVIO_HTTP_PROXY ?? "http://localhost:9090";
-  const cb = getCircuitBreaker("fluvio");
-
-  if (cb.isOpen) return false;
-
-  try {
-    const res = await fetch(`${FLUVIO_URL}/api/topics/${topic}/produce`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, key }),
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (res.ok) {
-      cb.onSuccess();
-      return true;
-    }
-    cb.onFailure();
-    return false;
-  } catch (err) {
-    cb.onFailure();
-    return false;
-  }
-}
+// ─── Fluvio Client — REMOVED (PRA-101 residual, Phase 9) ────────────────────
+// Fluvio is NOT deployed on this platform (P0-9). The publishToFluvio helper
+// posted to a phantom HTTP proxy and returned boolean success/failure that no
+// caller acted on. Deleted along with the Python fluvio_middleware.py phantom
+// in the six AI microservices and services/python-ai. Kafka is the real event
+// bus (server/_core/kafka.ts).
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
 
