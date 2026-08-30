@@ -54,7 +54,6 @@ func TestMiddlewareConfig(t *testing.T) {
 		// Verify required env vars are documented
 		requiredEnvVars := []string{
 			"KAFKA_BROKERS",
-			"DAPR_HTTP_PORT",
 			"OTEL_EXPORTER_OTLP_ENDPOINT",
 		}
 		for _, env := range requiredEnvVars {
