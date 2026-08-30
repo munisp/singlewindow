@@ -149,7 +149,7 @@ async function runPermitExpiryCheck() {
       const { notifyOwner } = await import("./notification");
       const lines = expiringPermits.slice(0, 10).map((p) => {
         const daysLeft = Math.ceil((new Date(p.expiresAt!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        return `  \u2022 Permit ${p.permitNumber ?? p.id} (${p.permitType ?? "general"}) \u2014 expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} (Declaration ID: ${p.declarationId})`;
+        return `  • Permit ${p.permitNumber ?? p.id} (${p.permitType ?? "general"}) — expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} (Declaration ID: ${p.declarationId})`;
       }).join("\n");
       await notifyOwner({
         title: `Permit Expiry Alert: ${expiringPermits.length} permit${expiringPermits.length !== 1 ? "s" : ""} expiring within 30 days`,
@@ -272,14 +272,14 @@ async function runAmendmentSLACheck() {
       return;
     }
     const lines = rows.map((r: any) =>
-      `  \u2022 Amendment #${r.id} on Declaration #${r.declaration_id} \u2014 field: ${r.field}, ` +
+      `  • Amendment #${r.id} on Declaration #${r.declaration_id} — field: ${r.field}, ` +
       `requested by ${r.requester_name ?? 'unknown'}, ` +
       `${parseFloat(r.age_days).toFixed(1)} days old`
     ).join("\n");
     try {
       const { notifyOwner } = await import("./notification");
       await notifyOwner({
-        title: `\u26a0\ufe0f ${rows.length} Amendment Request(s) Overdue (>5 business days)`,
+        title: `⚠️ ${rows.length} Amendment Request(s) Overdue (>5 business days)`,
         content: `The following amendment requests have exceeded the 5-business-day SLA and require immediate review:\n\n${lines}\n\nPlease log in to AdminDeclarations > Pending Amendments to action these.`,
       });
     } catch { /* non-fatal */ }
@@ -1457,6 +1457,14 @@ async function startServer() {
     const { startInsiderThreatKafkaConsumer } = await import("../kafkaConsumer");
     startInsiderThreatKafkaConsumer().catch((err: Error) =>
       console.warn("[KafkaConsumer] Failed to start insider threat consumer:", err.message)
+    );
+  }
+
+  // Phase 8: PCS projection consumer for ports.*.v1 outbox topics → pcs_* read model
+  {
+    const { startPcsProjectionConsumer } = await import("../pcsProjection");
+    startPcsProjectionConsumer().catch((err: Error) =>
+      console.warn("[PcsProjection] Failed to start PCS projection consumer:", err.message)
     );
   }
 
