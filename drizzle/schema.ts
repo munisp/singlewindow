@@ -3358,7 +3358,7 @@ export type InsertMojaloopPayment = typeof mojaloopPayments.$inferInsert;
 // ─── LPCO Records ─────────────────────────────────────────────────────────────
 export const lpcoRecords = pgTable("lpco_records", {
   id: serial("id").primaryKey(),
-  declarationId: integer("declaration_id").references(() => declarations.id),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
   traderId: integer("trader_id").notNull().references(() => users.id),
   lpcoType: varchar("lpco_type", { length: 64 }).notNull(),
   mda: varchar("mda", { length: 32 }).notNull(),
