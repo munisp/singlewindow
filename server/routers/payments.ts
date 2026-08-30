@@ -21,6 +21,7 @@ import { getDb } from "../db";
 import { emitPaymentInitiated, emitPaymentCompleted } from "../_core/kafkaEventPublisher";
 import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
 import nodeCrypto from "crypto";
+import { fetchWithResilience } from "../_core/middlewareClients";
 
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
@@ -300,23 +301,29 @@ export const paymentsRouter = router({
         const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? "default";
 
         // Trigger Temporal ConfirmPaymentWorkflow (atomic: PostTB + ConfirmDB)
+        // PRA-024/025: resilience wrapper — timeout + backoff/jitter + breaker
+        // (4xx verbatim: a rejected workflow start is not retried).
         const workflowId = `confirm-payment-${input.paymentId}-${mojaloopTxId}`;
-        const workflowResponse = await fetch(`${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            workflow_type: { name: "ConfirmPaymentWorkflow" },
-            workflow_id: workflowId,
-            task_queue: { name: "tradegateway-main" },
-            input: { payloads: [{ data: Buffer.from(JSON.stringify({
-              invoiceId: input.paymentId,
-              mojaloopTxId,
-              tbTxId: input.tbPendingTransferId ?? "",
-              method: "manual",
-            })).toString("base64") }] },
-          }),
-          signal: AbortSignal.timeout(10_000),
-        }).catch((err) => {
+        const workflowResponse = await fetchWithResilience(
+          `${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workflow_type: { name: "ConfirmPaymentWorkflow" },
+              workflow_id: workflowId,
+              task_queue: { name: "tradegateway-main" },
+              input: { payloads: [{ data: Buffer.from(JSON.stringify({
+                invoiceId: input.paymentId,
+                mojaloopTxId,
+                tbTxId: input.tbPendingTransferId ?? "",
+                method: "manual",
+              })).toString("base64") }] },
+            }),
+            timeoutMs: 10_000,
+          },
+          "temporal-frontend"
+        ).catch((err) => {
           throw new TRPCError({
             code: "SERVICE_UNAVAILABLE",
             message: `Payment confirmation workflow is unavailable: ${err instanceof Error ? err.message : String(err)}`,

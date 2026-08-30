@@ -14,6 +14,8 @@ import {
   dutyDrawbackClaims, declarations, payments, auditEvents,
 } from "../../drizzle/schema";
 import { eq, desc, and, sql, count, or, ilike, ne } from "drizzle-orm";
+import { fetchWithResilience } from "../_core/middlewareClients";
+import { getServiceAuthHeaders } from "../_core/serviceAuth";
 
 // Canonical Go TigerBeetle bridge (disbursement rail receipts).
 const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8086";
@@ -48,9 +50,14 @@ function toMinorUnits(amount: string | number): number {
  * Fails closed when the bridge is unreachable.
  */
 async function verifyRailReceipt(railReference: string, expectedMinorUnits: number): Promise<void> {
-  const res = await fetch(`${TB_BRIDGE_URL}/api/ledger/transfers/${encodeURIComponent(railReference)}`, {
-    signal: AbortSignal.timeout(10_000),
-  }).catch(() => null);
+  // PRA-012: authenticated money-rail hop; PRA-024/025: resilience wrapper
+  // (4xx verbatim — 404 below is a business outcome, not a retry).
+  const authHeaders = await getServiceAuthHeaders();
+  const res = await fetchWithResilience(
+    `${TB_BRIDGE_URL}/api/ledger/transfers/${encodeURIComponent(railReference)}`,
+    { headers: { ...authHeaders }, timeoutMs: 10_000 },
+    "tigerbeetle-bridge"
+  ).catch(() => null);
   if (!res) {
     throw new TRPCError({
       code: "SERVICE_UNAVAILABLE",
