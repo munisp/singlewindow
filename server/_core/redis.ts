@@ -11,6 +11,11 @@
 
 import Redis from "ioredis";
 import { ENV } from "./env";
+import {
+  RateLimiterUnavailableError,
+  rateLimiterInMemoryFallbackAllowed,
+  resolveLimiterBackend,
+} from "./redisRateLimiter";
 
 let _redis: Redis | null = null;
 let _connectionFailed = false;
@@ -68,7 +73,11 @@ export function getRedis(): Redis | null {
  *   key = `rl:{namespace}:{identifier}:{window_bucket}`
  *
  * Returns true if the request is allowed, false if the limit is exceeded.
- * Falls back to always-allow (true) when Redis is unavailable.
+ * Fail-closed (PRA-026, Phase 9): when Redis is unavailable this THROWS
+ * RateLimiterUnavailableError unless the explicit dev-only in-memory fallback
+ * (RATE_LIMIT_ALLOW_INMEMORY_FALLBACK=true, non-production) is enabled — in
+ * that case it returns true and the caller applies its per-process Map.
+ * The Redis path is the ONLY production path (multi-replica correctness).
  */
 export async function redisRateLimit(
   namespace: string,
@@ -76,8 +85,8 @@ export async function redisRateLimit(
   windowMs: number,
   max: number
 ): Promise<boolean> {
-  const redis = getRedis();
-  if (!redis) return true; // no Redis — allow all (in-memory fallback handles it)
+  const redis = resolveLimiterBackend(getRedis());
+  if (!redis) return true; // dev-only explicit fallback: caller uses in-memory
 
   const windowBucket = Math.floor(Date.now() / windowMs);
   const key = `rl:${namespace}:${identifier}:${windowBucket}`;
@@ -88,12 +97,21 @@ export async function redisRateLimit(
     pipeline.pexpire(key, windowMs * 2); // TTL = 2x window to handle clock skew
     const results = await pipeline.exec();
 
-    if (!results) return true;
+    if (!results) {
+      throw new RateLimiterUnavailableError("Redis rate-limit pipeline returned no results");
+    }
     const count = results[0]?.[1] as number;
     return count <= max;
   } catch (err) {
-    console.error("[Redis] Rate limit check failed:", err);
-    return true; // fail open — don't block requests on Redis errors
+    if (err instanceof RateLimiterUnavailableError) throw err;
+    if (rateLimiterInMemoryFallbackAllowed()) {
+      console.warn("[Redis] Rate limit check failed — dev-only in-memory fallback:", err);
+      return true;
+    }
+    console.error("[Redis] Rate limit check failed (failing closed):", err);
+    throw new RateLimiterUnavailableError(
+      `Redis rate-limit pipeline failed: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 }
 

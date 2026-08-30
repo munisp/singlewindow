@@ -5,6 +5,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.hoisted(() => {
+  // PRA-012: money-rail hops require service auth; tests use the documented
+  // non-production shared-secret credential (fail-closed semantics preserved).
+  process.env.TB_BRIDGE_SHARED_SECRET = "test-tb-bridge-shared-secret";
+});
+
 // ─── DB mock ─────────────────────────────────────────────────────────────────
 const selectResult: Array<{ accountId: string }[]> = [[]];
 const insertCalls: unknown[] = [];
