@@ -113,7 +113,10 @@ func (qb *QuoteBuilder) PostQuoteRequest(ctx context.Context, input PostQuoteInp
 	)
 	defer span.End()
 
-	quoteID := uuid.New().String()
+	quoteID := input.QuoteID
+	if quoteID == "" {
+		quoteID = uuid.New().String()
+	}
 	span.SetAttributes(
 		attribute.String("mojaloop.quote_id", quoteID),
 		attribute.String("mojaloop.correlation_id", input.TransactionId),
@@ -247,6 +250,10 @@ func (qb *QuoteBuilder) PendingCount() int {
 
 // PostQuoteInput is the caller-facing input for PostQuoteRequest.
 type PostQuoteInput struct {
+	// QuoteID optionally pre-assigns the quote id (a UUID). Callers that must
+	// register a callback waiter before the request goes on the wire generate
+	// the id themselves and pass it here.
+	QuoteID         string
 	TransactionId   string
 	Scenario        string // TRANSFER | PAYMENT | DEPOSIT | WITHDRAWAL | REFUND
 	SubScenario     string
