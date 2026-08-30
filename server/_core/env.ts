@@ -252,6 +252,33 @@ export const ENV = {
   tariffServiceClientId: process.env.TARIFF_SERVICE_CLIENT_ID ?? "",
   tariffServiceClientSecret: process.env.TARIFF_SERVICE_CLIENT_SECRET ?? "",
 
+  // ─── Port Interoperability (PCS trader-portal upstream; Phase 8) ──────────
+  // blueeconomy-port-interoperability is the system of record for port calls,
+  // eCallUp bookings, slots, gate scans and billing. NO local default for the
+  // base URL — an unset URL must fail closed (explicit configuration error),
+  // never fall back to a phantom endpoint or fabricated rows (mirrors the
+  // tariff-engine contract). Auth resolution mirrors tariffClient: ALL of
+  // KEYCLOAK_TOKEN_URL / PORT_INTEROP_CLIENT_ID / PORT_INTEROP_CLIENT_SECRET
+  // set → client_credentials token flow; a PARTIAL set is a misconfiguration
+  // that fails closed at call time; none set → static PORT_INTEROP_TOKEN
+  // (documented non-production fallback).
+  portInteropUrl: process.env.PORT_INTEROP_URL ?? "",
+  portInteropToken: process.env.PORT_INTEROP_TOKEN ?? "",
+  portInteropClientId: process.env.PORT_INTEROP_CLIENT_ID ?? "",
+  portInteropClientSecret: process.env.PORT_INTEROP_CLIENT_SECRET ?? "",
+  // Booking INITIATION (spec R3 write path) is gated on an EXTERNAL product
+  // decision. The portal is read-only unless operators explicitly opt in;
+  // when disabled the mutation returns a typed INTEGRATION_GAPS disclosure,
+  // never a fake success.
+  pcsBookingInitiationEnabled:
+    (process.env.PCS_BOOKING_INITIATION_ENABLED ?? "").trim().toLowerCase() === "true",
+  // Trusted Ed25519 public keys for the envelope v1.0 provenance JWS on
+  // ports.*.v1 Kafka events: a JSON object mapping the JWS kid
+  // ("port-interoperability-<epoch>") to the base64/hex public key. Unset or
+  // unparseable → every consumed event is rejected (fail closed; mirrors the
+  // data-platform consumer). Secrets/key material are env-only.
+  pcsEnvelopeTrustKeys: process.env.PCS_ENVELOPE_TRUST_KEYS ?? "",
+
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
 
@@ -362,6 +389,7 @@ export function validateProductionConfig(config = ENV): void {
     ["REDIS_PASSWORD", config.redisPassword],
     ["MOJALOOP_URL", config.mojaloopUrl],
     ["TARIFF_SERVICE_URL", config.tariffServiceUrl],
+    ["PORT_INTEROP_URL", config.portInteropUrl],
     ["TEMPORAL_ADDRESS", config.temporalAddress],
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ];
@@ -389,6 +417,7 @@ export function validateProductionConfig(config = ENV): void {
     ["REDIS_URL", config.redisUrl],
     ["MOJALOOP_URL", config.mojaloopUrl],
     ["TARIFF_SERVICE_URL", config.tariffServiceUrl],
+    ["PORT_INTEROP_URL", config.portInteropUrl],
     ["TEMPORAL_ADDRESS", config.temporalAddress],
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ].filter(([, value]) => isUnsafeProductionEndpoint(value)).map(([name]) => name);
@@ -441,6 +470,7 @@ const SERVICE_URL_ENV_VARS: [string, (config: typeof ENV) => string][] = [
   ["WAREHOUSE_SERVICE_URL", (c) => c.warehouseServiceUrl],
   ["MOJALOOP_URL", (c) => c.mojaloopUrl],
   ["TARIFF_SERVICE_URL", (c) => c.tariffServiceUrl],
+  ["PORT_INTEROP_URL", (c) => c.portInteropUrl],
   ["DECLARATION_SERVICE_URL", (c) => c.declarationServiceUrl],
   ["PAYMENT_SERVICE_URL", (c) => c.paymentServiceUrl],
   ["OGA_SERVICE_URL", (c) => c.ogaServiceUrl],
