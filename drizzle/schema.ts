@@ -685,7 +685,7 @@ export const fraudCaseLinks = pgTable("fraud_case_links", {
   id: serial("id").primaryKey(),
   caseId: integer("case_id").notNull().references(() => fraudCases.id, { onDelete: "cascade" }),
   linkedCaseId: integer("linked_case_id").notNull().references(() => fraudCases.id, { onDelete: "cascade" }),
-  linkType: fraudCaseLinkTypeEnum("link_type").notNull(),
+  linkType: fraudCaseLinkTypeEnum("linkType").notNull(),
   confidence: real("confidence").default(0.8),
   notes: text("notes"),
   createdBy: integer("created_by").notNull().references(() => users.id),
@@ -1142,7 +1142,7 @@ export const tenantBranding = pgTable("tenant_branding", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   updatedBy: integer("updated_by").references(() => users.id),
 }, (t) => [
-  index("idx_tenant_branding_id").on(t.tenantId),
+  index("idx_tenant_branding_tenant_id").on(t.tenantId),
 ]);
 export type TenantBranding = typeof tenantBranding.$inferSelect;
 export type InsertTenantBranding = typeof tenantBranding.$inferInsert;
@@ -3358,7 +3358,7 @@ export type InsertMojaloopPayment = typeof mojaloopPayments.$inferInsert;
 // ─── LPCO Records ─────────────────────────────────────────────────────────────
 export const lpcoRecords = pgTable("lpco_records", {
   id: serial("id").primaryKey(),
-  declarationId: integer("declaration_id").references(() => declarations.id),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
   traderId: integer("trader_id").notNull().references(() => users.id),
   lpcoType: varchar("lpco_type", { length: 64 }).notNull(),
   mda: varchar("mda", { length: 32 }).notNull(),
