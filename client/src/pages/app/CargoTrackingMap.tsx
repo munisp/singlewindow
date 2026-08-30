@@ -15,39 +15,21 @@ import { Separator } from "@/components/ui/separator";
 import {
   Anchor, Ship, Navigation, AlertTriangle, RefreshCw,
   Clock, MapPin, Gauge, Compass, Package, Radio,
-  TrendingUp, Filter, X, ChevronRight, Activity, Wifi, WifiOff, Layers,
+  Filter, X, ChevronRight, Activity, Wifi, WifiOff, Layers,
 } from "lucide-react";
 import { useVesselWebSocket } from "@/hooks/useVesselWebSocket";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "../../../../server/routers";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
-interface Vessel {
-  id: string;
-  mmsi: string;
-  imo: string;
-  vesselName: string;
-  vesselType: string;
-  flag: string;
-  callSign: string;
-  lat: number;
-  lon: number;
-  speed: number;
-  heading: number;
-  course: number;
-  status: string;
-  cargoStatus: string;
-  declarationRef: string | null;
-  riskFlag: string | null;
-  eta: string | null;
-  destination: string;
-  draught: number;
-  length: number;
-  lastUpdate: string;
-  originPort: string;
-  originLat: number;
-  originLon: number;
-}
+// The vessel shape is derived from the cargoTracking router output — the
+// persisted AIS store is the only source, and fields it does not track
+// (call sign, draught, length, origin port, declaration linkage) are NOT
+// shown here rather than rendered from the removed synthetic fleet.
+type RouterOutputs = inferRouterOutputs<AppRouter>;
+type Vessel = RouterOutputs["cargoTracking"]["getLiveVessels"]["vessels"][number];
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -169,7 +151,7 @@ export default function CargoTrackingMap() {
     vessels.forEach(vessel => {
       const position = { lat: vessel.lat, lng: vessel.lon };
       const riskColor = vessel.riskFlag ? RISK_COLORS[vessel.riskFlag] : "#6b7280";
-      const icon = VESSEL_ICONS[vessel.vesselType] ?? "🚢";
+      const icon = VESSEL_ICONS[vessel.vesselType ?? ""] ?? "🚢";
 
       // Create marker element
       const el = document.createElement("div");
@@ -266,7 +248,7 @@ export default function CargoTrackingMap() {
   useEffect(() => {
     if (mapReady && isWsLive && wsVessels.length > 0) {
       // Merge WS position updates into the full vessel objects from tRPC
-      const fullVessels = (vesselData?.vessels ?? []) as Vessel[];
+      const fullVessels = vesselData?.vessels ?? [];
       const wsMap = new Map(wsVessels.map(v => [v.mmsi, v]));
       const merged = fullVessels.map(v => {
         const ws = wsMap.get(v.mmsi);
@@ -281,7 +263,7 @@ export default function CargoTrackingMap() {
   // Fallback: update markers from tRPC polling when WS is not live
   useEffect(() => {
     if (mapReady && !isWsLive && vesselData?.vessels) {
-      updateMarkers(vesselData.vessels as Vessel[]);
+      updateMarkers(vesselData.vessels);
     }
   }, [mapReady, isWsLive, vesselData, updateMarkers]);
 
@@ -295,7 +277,7 @@ export default function CargoTrackingMap() {
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
 
-  const vessels = (vesselData?.vessels ?? []) as Vessel[];
+  const vessels: Vessel[] = vesselData?.vessels ?? [];
 
   // v100: Apply/remove heatmap layer when toggle changes
   useEffect(() => {
@@ -428,11 +410,11 @@ export default function CargoTrackingMap() {
                   <div className="flex items-start justify-between">
                     <div>
                       <CardTitle className="text-sm flex items-center gap-2">
-                        <span>{VESSEL_ICONS[selectedVessel.vesselType] ?? "🚢"}</span>
+                        <span>{VESSEL_ICONS[selectedVessel.vesselType ?? ""] ?? "🚢"}</span>
                         <span>{selectedVessel.vesselName}</span>
                       </CardTitle>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {flagEmoji(selectedVessel.flag)} {selectedVessel.flag} · {selectedVessel.callSign}
+                        {flagEmoji(selectedVessel.flagCountry)} {selectedVessel.flagCountry || "—"}
                       </p>
                     </div>
                     <Button variant="ghost" size="icon" className="h-6 w-6 -mt-1" onClick={() => setSelectedVessel(null)}>
@@ -457,19 +439,20 @@ export default function CargoTrackingMap() {
                       {selectedVessel.status.toUpperCase()}
                     </Badge>
                     <Badge variant="secondary" className="text-xs capitalize">
-                      {selectedVessel.cargoStatus.replace("-", " ")}
+                      {selectedVessel.cargoType}
                     </Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0 space-y-2 text-xs">
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                    {/* Only fields the persisted AIS store actually tracks are
+                        shown — draught/length/call-sign are not tracked and were
+                        dropped with the removed synthetic fleet. */}
                     {[
                       { label: "MMSI", value: selectedVessel.mmsi, icon: Radio },
-                      { label: "IMO", value: selectedVessel.imo, icon: Ship },
+                      { label: "IMO", value: selectedVessel.imoNumber || "—", icon: Ship },
                       { label: "Speed", value: `${selectedVessel.speed} kn`, icon: Gauge },
                       { label: "Heading", value: `${selectedVessel.heading}°`, icon: Compass },
-                      { label: "Draught", value: `${selectedVessel.draught} m`, icon: TrendingUp },
-                      { label: "Length", value: `${selectedVessel.length} m`, icon: Ship },
                     ].map(item => (
                       <div key={item.label} className="flex items-center gap-1.5">
                         <item.icon className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -481,14 +464,9 @@ export default function CargoTrackingMap() {
                   <Separator />
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5">
-                      <MapPin className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <span className="text-muted-foreground">Origin:</span>
-                      <span className="font-medium">{selectedVessel.originPort}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
                       <MapPin className="h-3 w-3 text-green-400 shrink-0" />
                       <span className="text-muted-foreground">Destination:</span>
-                      <span className="font-medium">{selectedVessel.destination}</span>
+                      <span className="font-medium">{selectedVessel.destinationPort || "—"}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -496,16 +474,6 @@ export default function CargoTrackingMap() {
                       <span className="font-medium">{formatEta(selectedVessel.eta)}</span>
                     </div>
                   </div>
-                  {selectedVessel.declarationRef && (
-                    <>
-                      <Separator />
-                      <div className="flex items-center gap-1.5">
-                        <Package className="h-3 w-3 text-blue-400 shrink-0" />
-                        <span className="text-muted-foreground">Declaration:</span>
-                        <span className="font-mono text-blue-400 text-[10px]">{selectedVessel.declarationRef}</span>
-                      </div>
-                    </>
-                  )}
                   <div className="text-[10px] text-muted-foreground pt-1">
                     Last AIS update: {formatTime(selectedVessel.lastUpdate)} · Source: sedona-svc
                   </div>
@@ -546,7 +514,7 @@ export default function CargoTrackingMap() {
                     }}
                     className={`w-full text-left flex items-center gap-2 p-2 rounded hover:bg-accent transition-colors text-xs ${selectedVessel?.id === v.id ? "bg-accent" : ""}`}
                   >
-                    <span className="text-base">{VESSEL_ICONS[v.vesselType] ?? "🚢"}</span>
+                    <span className="text-base">{VESSEL_ICONS[v.vesselType ?? ""] ?? "🚢"}</span>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{v.vesselName}</p>
                       <p className="text-muted-foreground capitalize">{v.status} · {v.speed} kn</p>

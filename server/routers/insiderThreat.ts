@@ -398,8 +398,11 @@ export const insiderThreatRouter = router({
   verifyAuditChain: adminProcedure.query(async () => {
     // SW-O2: honest state — no tamper-evident chain verification exists against
     // the local audit table yet; report that instead of querying a dead endpoint.
+    // is_valid is tri-state by contract (true/false once real verification
+    // lands, null while unavailable) — widen the literal so clients can
+    // distinguish all three states.
     return {
-      is_valid: null,
+      is_valid: null as boolean | null,
       verified: false,
       source: "local_audit_table",
       note: "CHAIN_VERIFICATION_UNAVAILABLE: tamper-evident chain verification requires the canonical bridge audit API, which is not implemented. Audit entries are persisted in the local audit table.",

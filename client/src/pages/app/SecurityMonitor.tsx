@@ -1002,25 +1002,28 @@ function AuditChainTab() {
       ) : (
         <Card className="p-6">
           <div className="flex items-center gap-4">
-            {data?.is_valid ? (
+            {/* is_valid is tri-state: true = intact, false = compromised,
+                null = verification unavailable (honest server state, SW-O2). */}
+            {data?.is_valid === true ? (
               <CheckCircle2 className="h-12 w-12 text-green-500" />
-            ) : (
+            ) : data?.is_valid === false ? (
               <XCircle className="h-12 w-12 text-red-500" />
+            ) : (
+              <AlertTriangle className="h-12 w-12 text-yellow-500" />
             )}
             <div>
               <p className="text-lg font-semibold">
-                {data?.is_valid ? "Chain Intact" : "Chain Compromised"}
+                {data?.is_valid === true
+                  ? "Chain Intact"
+                  : data?.is_valid === false
+                    ? "Chain Compromised"
+                    : "Verification Unavailable"}
               </p>
               <p className="text-sm text-muted-foreground">
-                {data?.entries_checked ?? 0} entries verified · source: {data?.source ?? "—"}
+                source: {data?.source ?? "—"}
               </p>
-              {data?.first_broken_entry_index != null && (
-                <p className="text-sm text-red-600">
-                  First broken entry index: {data.first_broken_entry_index}
-                </p>
-              )}
-              {data?.error && (
-                <p className="text-xs text-red-500 mt-1">{data.error}</p>
+              {data?.note && (
+                <p className="text-xs text-muted-foreground mt-1">{data.note}</p>
               )}
             </div>
           </div>

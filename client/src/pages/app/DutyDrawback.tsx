@@ -211,6 +211,70 @@ function ReviewClaimDialog({ claim, open, onClose }: {
   );
 }
 
+// ─── MARK-PAID DIALOG ─────────────────────────────────────────────────────────
+// SW-M8: the server requires a verified disbursement rail receipt — the
+// transfer must exist on the canonical ledger bridge with an amount equal to
+// the approved amount. The finance officer pastes the rail transfer reference
+// here; marking paid without one fails closed server-side.
+function MarkPaidDialog({ claim, open, onClose }: {
+  claim: { id: number; claimNumber: string; approvedAmount: string | null; claimedAmount: string };
+  open: boolean;
+  onClose: () => void;
+}) {
+  const utils = trpc.useUtils();
+  const [railReference, setRailReference] = useState("");
+  const paidAmount = parseFloat(claim.approvedAmount ?? claim.claimedAmount);
+
+  const markPaid = trpc.drawback.markPaid.useMutation({
+    onSuccess: (c) => {
+      toast.success("Claim paid", { description: `${c.claimNumber} marked as paid.` });
+      utils.drawback.list.invalidate();
+      utils.drawback.stats.invalidate();
+      onClose();
+    },
+    onError: (e) => toast.error("Error", { description: e.message }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="bg-[#0D1B2E] border-white/10 text-white max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-gold font-display">Mark Paid — {claim.claimNumber}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div>
+            <Label className="text-slate-300 text-sm">Paid Amount (USD)</Label>
+            <Input value={paidAmount.toFixed(2)} readOnly disabled className="bg-white/5 border-white/10 text-white mt-1" />
+            <p className="text-xs text-slate-400 mt-1">Must equal the approved amount.</p>
+          </div>
+          <div>
+            <Label className="text-slate-300 text-sm">Disbursement Rail Reference *</Label>
+            <Input
+              value={railReference}
+              onChange={(e) => setRailReference(e.target.value)}
+              placeholder="Ledger transfer ID of the completed disbursement"
+              className="bg-white/5 border-white/10 text-white mt-1"
+            />
+            <p className="text-xs text-slate-400 mt-1">
+              Verified against the canonical ledger bridge — the transfer must exist with an amount equal to the approved amount.
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} className="border-white/10 text-slate-300">Cancel</Button>
+          <Button
+            onClick={() => markPaid.mutate({ id: claim.id, paidAmount, railReference: railReference.trim() })}
+            disabled={markPaid.isPending || !railReference.trim()}
+            className="font-semibold bg-purple-600 hover:bg-purple-700 text-white"
+          >
+            {markPaid.isPending ? "Verifying…" : "Confirm Payment"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function DutyDrawback() {
   const { user } = useAuth();
@@ -219,6 +283,7 @@ export default function DutyDrawback() {
   const [page, setPage] = useState(0);
   const [newClaimOpen, setNewClaimOpen] = useState(false);
   const [reviewClaim, setReviewClaim] = useState<any | null>(null);
+  const [payClaim, setPayClaim] = useState<any | null>(null);
   const PAGE_SIZE = 15;
 
   const isReviewer = ["customs_officer", "admin", "finance"].includes(user?.role ?? "");
@@ -241,14 +306,8 @@ export default function DutyDrawback() {
     },
     onError: (e) => toast.error("Error", { description: e.message }),
   });
-  const markPaid = trpc.drawback.markPaid.useMutation({
-    onSuccess: (c) => {
-      toast.success("Claim paid", { description: `${c.claimNumber} marked as paid.` });
-      utils.drawback.list.invalidate();
-      utils.drawback.stats.invalidate();
-    },
-    onError: (e) => toast.error("Error", { description: e.message }),
-  });
+  // SW-M8: markPaid is owned by MarkPaidDialog — marking paid requires a
+  // verified disbursement rail reference collected from the finance officer.
 
   const claims = data?.claims ?? [];
   const total = data?.total ?? 0;
@@ -404,8 +463,7 @@ export default function DutyDrawback() {
                           {isReviewer && claim.status === "approved" && (
                             <Button
                               size="sm"
-                              onClick={() => markPaid.mutate({ id: claim.id, paidAmount: parseFloat(claim.approvedAmount ?? claim.claimedAmount) })}
-                              disabled={markPaid.isPending}
+                              onClick={() => setPayClaim(claim)}
                               className="h-7 px-2 bg-purple-600 hover:bg-purple-700 text-white text-xs"
                             >
                               Mark Paid
@@ -454,6 +512,13 @@ export default function DutyDrawback() {
           claim={reviewClaim}
           open={!!reviewClaim}
           onClose={() => setReviewClaim(null)}
+        />
+      )}
+      {payClaim && (
+        <MarkPaidDialog
+          claim={payClaim}
+          open={!!payClaim}
+          onClose={() => setPayClaim(null)}
         />
       )}
     </DashboardLayout>

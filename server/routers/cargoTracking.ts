@@ -58,6 +58,20 @@ export interface RouteWaypoint {
   event?: string;
 }
 
+/**
+ * Port arrival row served by getPortArrivals. Fields the persisted AIS store
+ * does not track are explicit nulls — never fabricated values.
+ */
+export interface PortArrival {
+  vesselName: string;
+  mmsi: string;
+  eta: string | null;
+  berth: string | null; // berth assignment is not tracked
+  cargoType: string | null;
+  teu: number | null; // TEU is not tracked
+  riskFlag: RiskFlag;
+}
+
 // ─── SEED DATA / DRIFT SIMULATION — REMOVED (P0 remediation) ──────────────
 // The hardcoded BASE_VESSELS fleet and driftVessel() position synthesizer were
 // removed: they served fabricated "live" AIS positions on public procedures.
@@ -255,15 +269,15 @@ export const cargoTrackingRouter = router({
       const highRisk = ["IRN","PRK","SYR","RUS","BLR"];
       const medRisk = ["LBY","SOM","SDN","YEM","MMR"];
       const arrivals = (rows as any[])
-        .map((r) => {
+        .map((r): PortArrival => {
           const flag = String(r.flag_country ?? "");
           return {
             vesselName: String(r.vessel_name ?? ""),
             mmsi: String(r.mmsi),
             eta: r.eta ? new Date(r.eta).toISOString() : null,
-            berth: null as string | null, // berth assignment is not tracked
+            berth: null, // berth assignment is not tracked
             cargoType: r.cargo_type ? String(r.cargo_type) : null,
-            teu: null as number | null,   // TEU is not tracked
+            teu: null,   // TEU is not tracked
             riskFlag: (highRisk.includes(flag) ? "red" : medRisk.includes(flag) ? "amber" : "green") as RiskFlag,
           };
         })
@@ -279,7 +293,7 @@ export const cargoTrackingRouter = router({
       };
     } catch {
       return {
-        arrivals: [] as unknown[],
+        arrivals: [] as PortArrival[],
         port: "Mombasa International Port",
         portCode: "KEMBA",
         lastUpdate: new Date().toISOString(),

@@ -224,31 +224,29 @@ export const riskModelRouter = router({
       testId: z.string().min(1),
       autoPromote: z.boolean().default(false),
     }))
-    .mutation(({ input }) => {
+    // Explicit result contract: the mutation currently ALWAYS fails closed
+    // (no real metrics store), but the declared shape keeps the client
+    // contract honest for when the store lands.
+    .mutation(({ input }): {
+      testId: string;
+      winner: "champion" | "challenger" | null;
+      championAccuracy: number;
+      challengerAccuracy: number;
+      autoPromoted: boolean;
+    } => {
       const test = AB_TESTS_DATA.find((t) => t.testId === input.testId);
       if (!test) throw new TRPCError({ code: "NOT_FOUND", message: `A/B test ${input.testId} not found` });
       if (test.status !== "running") throw new TRPCError({ code: "BAD_REQUEST", message: "Test is not running" });
 
       // Metrics must come from the real ML metrics store — never simulated.
       // Until that store is wired, concluding a test honestly fails closed.
+      // (The pre-remediation code below this throw computed a winner from
+      // unsourced variables — it was unreachable and has been removed; when a
+      // real metrics store lands, implement the conclusion against it here.)
       throw new TRPCError({
         code: "SERVICE_UNAVAILABLE",
         message: "AB_METRICS_UNAVAILABLE: A/B test accuracy metrics are not available from a real metrics store; refusing to fabricate a winner.",
       });
-
-      test.status = "concluded";
-      test.championAccuracy = Math.round(championAcc * 10000) / 10000;
-      test.challengerAccuracy = Math.round(challengerAcc * 10000) / 10000;
-      test.winner = winner;
-
-      if (input.autoPromote && winner === "challenger") {
-        const champion = MODEL_REGISTRY_DATA.find((m) => m.version === test.championVersion);
-        const challenger = MODEL_REGISTRY_DATA.find((m) => m.version === test.challengerVersion);
-        if (champion) champion.status = "archived";
-        if (challenger) { challenger.status = "champion"; challenger.promotedAt = new Date().toISOString(); }
-      }
-
-      return { testId: test.testId, winner, championAccuracy: test.championAccuracy, challengerAccuracy: test.challengerAccuracy, autoPromoted: input.autoPromote && winner === "challenger" };
     }),
 
   /**
