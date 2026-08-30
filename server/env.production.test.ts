@@ -15,6 +15,7 @@ function validProductionConfig(): typeof ENV {
     redisPassword: "strong-password",
     mojaloopUrl: "https://sandbox.mojaloop.example",
     tariffServiceUrl: "https://tariff-engine.internal.example",
+    portInteropUrl: "https://port-interop.internal.example",
     temporalAddress: "temporal.internal:7233",
     tigerBeetleAddresses: ["tigerbeetle.internal:3000"],
   };
@@ -35,6 +36,18 @@ describe("validateProductionConfig", () => {
     const config = validProductionConfig();
     config.tariffServiceUrl = "";
     expect(() => validateProductionConfig(config)).toThrow(/TARIFF_SERVICE_URL/);
+  });
+
+  it("rejects a missing port-interop URL (PCS upstream fail-closed)", () => {
+    const config = validProductionConfig();
+    config.portInteropUrl = "";
+    expect(() => validateProductionConfig(config)).toThrow(/PORT_INTEROP_URL/);
+  });
+
+  it("rejects a local port-interop endpoint in production", () => {
+    const config = validProductionConfig();
+    config.portInteropUrl = "http://localhost:18080";
+    expect(() => validateProductionConfig(config)).toThrow(/unsafe local endpoint: PORT_INTEROP_URL/);
   });
 
   it("rejects a local tariff-engine endpoint in production", () => {
