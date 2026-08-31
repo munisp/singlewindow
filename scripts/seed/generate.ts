@@ -16,7 +16,7 @@ import {
 } from "./deterministic";
 import {
   NG_PORTS, NG_TERMINALS, NG_AGENCIES, VESSEL_NAMES, VesselTypes,
-  HS_2022, CARGO_DESC, FIRST_NAMES, LAST_NAMES, COMPANY_SUFFIX,
+  HS_2022, CARGO_DESC, FIRST_NAMES, LAST_NAMES, COMPANY_SUFFIX, VESSEL_REGISTRY,
   COMPANY_WORDS, BANKS_NG, INSURERS_NG, imoWithCheckDigit, mmsiNG,
 } from "./domainData";
 
@@ -341,12 +341,12 @@ function stringValue(col: Column, ctx: GenContext, name: string, key: string): s
   }
   if (/company|organisation|organization|operator|importer|exporter|consignee|shipper|agent_name|carrier/.test(name))
     return companyName(rng);
-  if (/vessel|ship_?name/.test(name)) return rng.pick(VESSEL_NAMES);
+  if (/vessel|ship_?name/.test(name)) return VESSEL_REGISTRY[fnv1a(`${table}.${rowIndex}`) % VESSEL_REGISTRY.length].name;
   if (/(^|_)(first_?name|last_?name|full_?name|officer_?name|contact_?name|created_?by_?name)/.test(name) || name === "name" || name.endsWith("_name") && !/file|user_?name|table|column|event|workflow|feed|queue|topic|rule|template|job|type|method|channel/.test(name))
     return personName(rng);
   if (/phone|msisdn/.test(name)) return `+234${rng.pick(["803", "805", "807", "809", "810", "813", "816", "903"])}${String(rng.int(1000000, 9999999))}`;
-  if (/imo/.test(name)) return imoWithCheckDigit(String(9000000 + fnv1a(key) % 99999).slice(0, 6).padStart(6, "0"));
-  if (/mmsi/.test(name)) return mmsiNG(657000 + (fnv1a(key) % 9999));
+  if (/imo/.test(name)) return VESSEL_REGISTRY[fnv1a(`${table}.${rowIndex}`) % VESSEL_REGISTRY.length].imo;
+  if (/mmsi/.test(name)) return VESSEL_REGISTRY[fnv1a(`${table}.${rowIndex}`) % VESSEL_REGISTRY.length].mmsi;
   if (/hs_?code|commodity_?code|tariff/.test(name)) return rng.pick(HS_2022.flatMap((h) => h.sampleCodes));
   if (/locode/.test(name)) return rng.pick(NG_PORTS).locode;
   if (/port_?code/.test(name)) return rng.pick(NG_PORTS).locode;

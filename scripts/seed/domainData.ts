@@ -62,6 +62,7 @@ export function mmsiNG(serial: number): string {
   return `657${String(serial).padStart(6, "0").slice(-6)}`;
 }
 
+
 export const VesselTypes = [
   "container_ship",
   "bulk_carrier",
@@ -85,6 +86,24 @@ export const VESSEL_NAMES: readonly string[] = [
   "MV Bauchi Rock", "MT Sapele", "MV Minna Pearl", "MV Gusau Wind",
   "MT Burutu", "MV Yola Cross", "MV Makurdi Flow", "MT Degema",
 ];
+
+/** Fixed registry of 40 synthetic-but-valid vessels operating in Nigerian waters. */
+export interface VesselDef {
+  name: string;
+  imo: string;
+  mmsi: string;
+  type: string;
+  flag: string;
+}
+export const VESSEL_REGISTRY: readonly VesselDef[] = VESSEL_NAMES.slice(0, 40).map(
+  (name, i) => ({
+    name,
+    imo: imoWithCheckDigit(String(907000 + i * 137).slice(0, 6).padStart(6, "0")),
+    mmsi: mmsiNG(100 + i),
+    type: VesselTypes[i % VesselTypes.length],
+    flag: i % 5 === 0 ? "NG" : ["PA", "LR", "MT", "MH"][i % 4],
+  })
+);
 
 /** HS-2022 chapters actually traded through Nigerian ports. */
 export const HS_2022: readonly { chapter: string; desc: string; sampleCodes: string[] }[] = [
