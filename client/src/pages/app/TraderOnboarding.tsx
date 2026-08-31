@@ -675,10 +675,11 @@ function RoleSelectionStep({ onSelect }: { onSelect: (role: SelfAssignableRole) 
     if (!selected) return;
     try {
       await selectRoleMutation.mutateAsync({ role: selected });
-    } catch {
-      // Ignore DB errors
+      onSelect(selected);
+    } catch (err) {
+      // Fail-closed: role was NOT saved — do not advance on a fake success
+      toast.error(err instanceof Error ? err.message : "Your role could not be saved. Please try again.");
     }
-    onSelect(selected);
   };
 
   return (
@@ -771,7 +772,8 @@ export default function TraderOnboarding() {
     try {
       await saveStepMutation.mutateAsync({ step, data });
     } catch {
-      // Ignore DB errors in sandbox
+      // Fail-closed: progress was NOT persisted — tell the user honestly
+      toast.error("Your progress could not be saved to the platform. It is kept only on this screen and will be lost if you leave. Please retry.");
     }
 
     if (isLast) {

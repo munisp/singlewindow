@@ -2,7 +2,7 @@
   "name": "TradeGateway™ NGSWTP",
   "short_name": "TradeGateway",
   "description": "Nigeria's Next Generation Single Window Trade Platform — Customs Declarations, LPCO Management, Manifest Submission, and Real-Time Cargo Tracking",
-  "start_url": "/app/dashboard",
+  "start_url": "/app/trader",
   "display": "standalone",
   "background_color": "#0A1628",
   "theme_color": "#006400",
@@ -31,7 +31,7 @@
       "name": "New Declaration",
       "short_name": "Declaration",
       "description": "Submit a new customs declaration",
-      "url": "/app/declarations/new",
+      "url": "/app/trader/declarations/new",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     },
     {
@@ -52,7 +52,7 @@
       "name": "OGA Permits",
       "short_name": "Permits",
       "description": "Manage licenses, permits and certificates",
-      "url": "/app/oga/permits",
+      "url": "/app/oga",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ],

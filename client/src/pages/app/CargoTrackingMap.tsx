@@ -121,19 +121,21 @@ export default function CargoTrackingMap() {
 
   // ─── DATA FETCHING (polling fallback) ────────────────────────────────────────────────
 
-  const { data: vesselData, refetch: refetchVessels } = trpc.cargoTracking.getLiveVessels.useQuery(
+  const { data: vesselData, refetch: refetchVessels, isLoading: vesselsLoading, isError: vesselsError, refetch: retryVessels } = trpc.cargoTracking.getLiveVessels.useQuery(
     { riskFilter, statusFilter },
     // Only poll when WebSocket is not live
     { refetchInterval: isWsLive ? false : 30000 }
   );
 
-  const { data: statsData } = trpc.cargoTracking.getVesselStats.useQuery(undefined, {
+  const { data: statsData, isError: statsError } = trpc.cargoTracking.getVesselStats.useQuery(undefined, {
     refetchInterval: 30000,
   });
 
-  const { data: arrivalsData } = trpc.cargoTracking.getPortArrivals.useQuery(undefined, {
+  const { data: arrivalsData, isError: arrivalsError } = trpc.cargoTracking.getPortArrivals.useQuery(undefined, {
     refetchInterval: 60000,
   });
+
+  const trackingUnavailable = !isWsLive && (vesselsError || statsError || arrivalsError);
 
   const { data: routeData } = trpc.cargoTracking.getVesselRoute.useQuery(
     { mmsi: selectedVessel?.mmsi ?? "" },
@@ -323,23 +325,39 @@ export default function CargoTrackingMap() {
     <DashboardLayout title="Cargo Tracking — Live AIS Map">
       <div className="flex flex-col gap-4 h-full">
 
+        {trackingUnavailable && (
+          <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5">
+            <p className="text-sm text-destructive">
+              Live tracking data is unavailable — figures below are not shown rather than stale values. The map may be empty until the connection recovers.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => retryVessels()}>Retry</Button>
+          </div>
+        )}
+        {vesselsLoading && !vesselData && !isWsLive && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3" aria-busy="true" aria-label="Loading vessel statistics">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        )}
+
         {/* ── HEADER STATS ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
           {[
-            { label: "Total Vessels", value: statsData?.total ?? 0, icon: Ship, color: "text-blue-400" },
-            { label: "Underway", value: statsData?.underway ?? 0, icon: Navigation, color: "text-blue-400" },
-            { label: "Moored", value: statsData?.moored ?? 0, icon: Anchor, color: "text-purple-400" },
-            { label: "Anchored", value: statsData?.anchored ?? 0, icon: Anchor, color: "text-yellow-400" },
-            { label: "Red Flag", value: statsData?.redFlag ?? 0, icon: AlertTriangle, color: "text-red-400" },
-            { label: "Amber Flag", value: statsData?.amberFlag ?? 0, icon: AlertTriangle, color: "text-yellow-400" },
-            { label: "Declared", value: statsData?.withDeclaration ?? 0, icon: Package, color: "text-green-400" },
+            { label: "Total Vessels", value: statsData?.total, icon: Ship, color: "text-blue-400" },
+            { label: "Underway", value: statsData?.underway, icon: Navigation, color: "text-blue-400" },
+            { label: "Moored", value: statsData?.moored, icon: Anchor, color: "text-purple-400" },
+            { label: "Anchored", value: statsData?.anchored, icon: Anchor, color: "text-yellow-400" },
+            { label: "Red Flag", value: statsData?.redFlag, icon: AlertTriangle, color: "text-red-400" },
+            { label: "Amber Flag", value: statsData?.amberFlag, icon: AlertTriangle, color: "text-yellow-400" },
+            { label: "Declared", value: statsData?.withDeclaration, icon: Package, color: "text-green-400" },
           ].map(stat => (
             <Card key={stat.label} className="bg-card/50">
               <CardContent className="p-3 flex items-center gap-2">
                 <stat.icon className={`h-4 w-4 shrink-0 ${stat.color}`} />
                 <div>
                   <p className="text-xs text-muted-foreground leading-none">{stat.label}</p>
-                  <p className="text-lg font-bold leading-tight">{stat.value}</p>
+                  <p className="text-lg font-bold leading-tight">{stat.value ?? "—"}</p>
                 </div>
               </CardContent>
             </Card>

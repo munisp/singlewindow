@@ -156,9 +156,36 @@ export default function AseanSingleWindow() {
   const ackCount = stats?.by_status?.acknowledged ?? 0;
   const totalMsgs = stats?.total ?? 0;
 
+  const aseanLoading = (connectionsQ.isLoading || statsQ.isLoading) && !connectionsQ.data && !statsQ.data;
+  const aseanError = connectionsQ.error || messagesQ.error || inboundQ.error || statsQ.error || connectivityQ.error;
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
+        {aseanLoading && (
+          <div className="space-y-3" aria-busy="true" aria-label="Loading ASEAN connectivity data">
+            <div className="h-8 w-72 animate-pulse rounded bg-muted" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+              ))}
+            </div>
+            <div className="h-56 animate-pulse rounded-lg bg-muted" />
+          </div>
+        )}
+        {!aseanLoading && aseanError && (
+          <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-6 text-center">
+            <p className="font-medium text-destructive">ASEAN connectivity data is unavailable</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {aseanError.message || "The platform could not be reached. Connection statuses are not shown rather than guessed."}
+            </p>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => { connectionsQ.refetch(); messagesQ.refetch(); inboundQ.refetch(); statsQ.refetch(); connectivityQ.refetch(); }}>
+              <RefreshCw className="h-4 w-4 mr-1" /> Retry
+            </Button>
+          </div>
+        )}
+        {!aseanLoading && !aseanError && (
+        <>
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -291,6 +318,8 @@ export default function AseanSingleWindow() {
             </div>
           </TabsContent>
         </Tabs>
+        </>
+        )}
       </div>
 
       {/* Send Message Dialog */}

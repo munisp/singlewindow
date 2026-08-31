@@ -2,6 +2,7 @@ import { PageSkeleton as _PageSkeleton } from "@/components/LoadingIndicator";
 import { Toaster } from "@/components/ui/sonner";
 import DemoModeBanner from "@/components/DemoModeBanner";
 import OfflineBanner from "@/components/OfflineBanner";
+import InstallPrompt from "@/components/InstallPrompt";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -631,6 +632,7 @@ function App() {
           <Toaster />
           <OfflineBanner />
           <DemoModeBanner />
+          <InstallPrompt />
           <Router />
           <MobileBottomNav />
         </TooltipProvider>
