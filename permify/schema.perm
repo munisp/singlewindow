@@ -347,3 +347,26 @@ entity trade_finance_facility {
   permission approve        = bank_officer or org.admin
   permission disburse       = bank_officer or org.admin or org.finance
 }
+
+// ─── MSW VISIT (Maritime Single Window / IMO FAL; Phase 9 WP-C) ─────────────
+entity msw_visit {
+  // Relations — PBAC roles msw-agent / msw-port-health / msw-nis /
+  // msw-customs / msw-ndlea / msw-nimasa / msw-npa (docs/msw.md).
+  relation agent               @user   // Shipping agent (declares visit, submits FAL forms)
+  relation port_health_officer @user   // Port Health: boards first, decides pratique (NPPM 2021)
+  relation nis_officer         @user   // Nigeria Immigration Service
+  relation customs_officer     @user   // Nigeria Customs Service
+  relation ndlea_officer       @user   // National Drug Law Enforcement Agency
+  relation nimasa_officer      @user   // NIMASA
+  relation npa_officer         @user   // Nigerian Ports Authority
+  relation org                 @organisation
+
+  // Permissions
+  permission create             = agent or org.admin
+  permission view               = agent or port_health_officer or nis_officer or customs_officer or ndlea_officer or nimasa_officer or npa_officer or org.admin
+  permission submit_declaration = agent
+  permission review_declaration = port_health_officer or nis_officer or customs_officer or ndlea_officer or nimasa_officer or npa_officer
+  permission decide_pratique    = port_health_officer
+  permission board              = port_health_officer or nis_officer or customs_officer or ndlea_officer or nimasa_officer
+  permission decide_clearance   = nis_officer or customs_officer or ndlea_officer or nimasa_officer or npa_officer
+}

@@ -91,6 +91,7 @@ const DOMAIN_ENTITY_MAP = {
   vision: "document",
   tenant: "site_settings",
   devPortal: "site_settings",
+  msw: "msw_visit",
 };
 
 /** Routers deliberately out of authorization-coverage scope (public,
