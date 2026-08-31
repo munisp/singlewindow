@@ -44,9 +44,32 @@ export function resetJwksCache(): void {
   _jwks = null;
 }
 
+// ─── Audience enforcement (PRA-106, Phase 9) ────────────────────────────────
+// A Keycloak-issued token is only valid for THIS API if its `aud` claim
+// includes ENV.keycloakTokenAudience. Production refuses to boot without
+// KEYCLOAK_TOKEN_AUDIENCE (validateProductionConfig); as defence in depth the
+// verifier itself also fails closed in production if it is somehow unset.
+let _audWarningLogged = false;
+
+function requiredAudience(): string | null {
+  const aud = ENV.keycloakTokenAudience.trim();
+  if (aud) return aud;
+  if (ENV.isProduction) return null; // fail closed — reject every token
+  if (!_audWarningLogged) {
+    _audWarningLogged = true;
+    console.warn(
+      "[KeycloakVerifier] KEYCLOAK_TOKEN_AUDIENCE unset — token audience is NOT being " +
+        "verified (dev-only posture; production refuses to boot without it)."
+    );
+  }
+  return ""; // dev: no audience check, warning logged once
+}
+
 // ─── Token verification ───────────────────────────────────────────────────────
 /**
  * Verifies a Keycloak Bearer token using the realm's JWKS endpoint.
+ * Enforces issuer, RS256, expiry, and (when configured — always in
+ * production) the expected audience.
  *
  * @returns Decoded payload on success, null if the token is absent/invalid/expired
  *          or if Keycloak is unreachable.
@@ -63,15 +86,22 @@ export async function verifyKeycloakToken(
 
   if (!token) return null;
 
+  const audience = requiredAudience();
+  if (audience === null) {
+    console.error("[KeycloakVerifier] KEYCLOAK_TOKEN_AUDIENCE unset in production — rejecting token (fail closed)");
+    return null;
+  }
+
   try {
     const issuer = `${ENV.keycloakUrl}/realms/${ENV.keycloakRealm}`;
     const { payload } = await jwtVerify(token, getJwks(), {
       issuer,
       algorithms: ["RS256"],
+      ...(audience ? { audience } : {}),
     });
     return payload as KeycloakTokenPayload;
   } catch (err) {
-    // Token invalid, expired, or Keycloak unreachable — log at debug level
+    // Token invalid, expired, wrong audience, or Keycloak unreachable — log at debug level
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes("fetch") && !msg.includes("ECONNREFUSED")) {
       // Only log non-connectivity errors (connectivity failures are expected in dev)

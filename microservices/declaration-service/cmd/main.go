@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -23,7 +24,11 @@ import (
 func main() {
 	port := getEnv("PORT", "8081")
 	daprPort := getEnv("DAPR_HTTP_PORT", "3501")
-	dbURL := getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
+	// SW-M4: no secret defaults in production; service auth mandatory.
+	dbURL := getEnv("DATABASE_URL", devOnly("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway"))
+	if isProduction() && os.Getenv("DECLARATION_SERVICE_TOKEN") == "" {
+		log.Fatal("[declaration-service] FATAL: DECLARATION_SERVICE_TOKEN must be set in production. Refusing to boot.")
+	}
 
 	log.Printf("[declaration-service] Starting on port %s (Dapr HTTP port: %s)", port, daprPort)
 
@@ -114,7 +119,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", port),
-		Handler:      mux,
+		Handler:      authMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -139,6 +144,54 @@ func main() {
 		log.Fatalf("[declaration-service] Forced shutdown: %v", err)
 	}
 	log.Println("[declaration-service] Stopped.")
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production"
+}
+
+func devOnly(key, fallback string) string {
+	if isProduction() {
+		log.Fatalf("[declaration-service] FATAL: %s must be set in production. Refusing to boot.", key)
+	}
+	log.Printf("[declaration-service] DEV-ONLY WARNING: %s not set — using development default", key)
+	return fallback
+}
+
+// authMiddleware enforces the platform service-auth pattern (SW-M4): all
+// non-health routes require a service token or verified identity headers.
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SW-M4: event endpoints (e.g. /events/payment-confirmed) are the ONLY
+		// writers of payment_confirmed — they must carry the service token.
+		if r.URL.Path == "/health" || r.URL.Path == "/dapr/subscribe" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if token := r.Header.Get("X-Service-Token"); token != "" {
+			expected := os.Getenv("DECLARATION_SERVICE_TOKEN")
+			if expected == "" {
+				if isProduction() {
+					http.Error(w, `{"error":"service auth not configured"}`, http.StatusInternalServerError)
+					return
+				}
+				expected = "dev-service-token"
+			}
+			if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+				http.Error(w, `{"error":"invalid service token"}`, http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), "role", "service")))
+			return
+		}
+		if r.Header.Get("X-User-Id") == "" {
+			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+			return
+		}
+		ctx := context.WithValue(r.Context(), "userID", r.Header.Get("X-User-Id"))
+		ctx = context.WithValue(ctx, "role", r.Header.Get("X-User-Role"))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func getEnv(key, fallback string) string {

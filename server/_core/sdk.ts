@@ -22,6 +22,32 @@ export type AuthenticatedUser = User & {
   taskUid?: string;
 };
 
+// ─── Cron / scheduled-task identity ──────────────────────────────────────────
+// Scheduled tasks (heartbeat crons) authenticate with a signed session whose
+// openId is `${CRON_OPEN_ID_PREFIX}${taskUid}`. They have no users-table row;
+// buildCronUser materialises the synthetic identity for the request context.
+// Fail-closed: cron sessions still require a VALID signed session cookie —
+// this prefix grants nothing by itself.
+export const CRON_OPEN_ID_PREFIX = "cron_";
+
+export function buildCronUser(openId: string): AuthenticatedUser {
+  const taskUid = openId.slice(CRON_OPEN_ID_PREFIX.length);
+  const now = new Date();
+  return {
+    id: 0,
+    openId,
+    name: "Manus Scheduled Task",
+    email: null,
+    loginMethod: "cron",
+    role: "admin",
+    isCron: true,
+    taskUid,
+    createdAt: now,
+    updatedAt: now,
+    lastSignedIn: now,
+  };
+}
+
 class LocalSessionService {
   private parseCookies(cookieHeader: string | undefined) {
     if (!cookieHeader) return new Map<string, string>();
@@ -151,6 +177,10 @@ class LocalSessionService {
       } finally {
         client.release();
       }
+    }
+
+    if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {
+      return buildCronUser(session.openId);
     }
 
     const user = await db.getUserByOpenId(session.openId);

@@ -11,6 +11,7 @@ import {
   getDeclarationById, updateDeclaration, logAuditEvent, createNotification,
   getAllPayments, createUserNotification, withRlsContext,
   getPaymentTrend, getPendingPaymentsList, getLedgerEntriesByPayment,
+  getMojaloopTransactionByTransferId,
 } from "../db";
 import { payments, declarations } from "../../drizzle/schema";
 import { eq, desc, and, gte, lte, count, sql, or } from "drizzle-orm";
@@ -19,6 +20,55 @@ import { assertCan, setOwner } from "../_core/permify";
 import { getDb } from "../db";
 import { emitPaymentInitiated, emitPaymentCompleted } from "../_core/kafkaEventPublisher";
 import { getOrProvisionTraderAccount, SYSTEM_ACCOUNTS } from "../_core/paymentAccountProvisioner";
+import nodeCrypto from "crypto";
+import { fetchWithResilience } from "../_core/middlewareClients";
+
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+/**
+ * Exact decimal → integer minor units conversion (SW-17). No float money math.
+ * Accepts "1234.56" / 1234.56 (max 2 decimal places) and returns minor units.
+ */
+export function toMinorUnits(amount: string | number | null | undefined): bigint {
+  const s = String(amount ?? "").trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid or missing monetary amount: '${s}'` });
+  }
+  const [maj, frac = ""] = s.split(".");
+  return BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2));
+}
+
+/**
+ * Switch-secret for authenticating payment-confirmation callbacks (SW-9).
+ * No default in production — a missing/weak secret refuses the mutation.
+ */
+function switchSecret(): string {
+  const secret = process.env.MOJALOOP_WEBHOOK_SECRET;
+  const weak = !secret || secret.length < 32 || secret.toLowerCase().includes("dev-webhook-secret");
+  if (weak) {
+    if (IS_PRODUCTION) {
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "MOJALOOP_WEBHOOK_SECRET is not configured" });
+    }
+    return "dev-webhook-secret";
+  }
+  return secret;
+}
+
+export function computeConfirmSignature(paymentId: number, mojaloopTransferId: string): string {
+  return nodeCrypto.createHmac("sha256", switchSecret())
+    .update(`confirm:${paymentId}:${mojaloopTransferId}`)
+    .digest("hex");
+}
+
+function verifyConfirmSignature(paymentId: number, mojaloopTransferId: string, signature: string | undefined): boolean {
+  if (!signature || !/^[0-9a-f]{64}$/i.test(signature)) return false;
+  const expected = computeConfirmSignature(paymentId, mojaloopTransferId);
+  try {
+    return nodeCrypto.timingSafeEqual(Buffer.from(signature, "hex"), Buffer.from(expected, "hex"));
+  } catch {
+    return false;
+  }
+}
 
 export const paymentsRouter = router({
   // ── INITIATE PAYMENT ─────────────────────────────────────────────────────────
@@ -59,12 +109,28 @@ export const paymentsRouter = router({
 
       await updateDeclaration(input.declarationId, { status: "payment_pending" });
 
-      // Enqueue into batchPayments for async Mojaloop ILP processing
+      // SW-17: an unverified flat-rate estimate is not a payable amount in production.
+      // PRA-100: the authoritative path is declarations.assessDuty (tariff engine);
+      // a TARIFF_ENGINE_VERIFIED assessment clears this gate.
+      const explanation = (decl as { aiExplanation?: unknown }).aiExplanation;
+      if (IS_PRODUCTION && explanation && typeof explanation === "object" &&
+          (explanation as Record<string, unknown>).dutyAssessment === "ESTIMATE_UNVERIFIED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Duty amount is an unverified estimate. Run declarations.assessDuty to obtain an authoritative tariff-engine assessment before payment.",
+        });
+      }
+
+      // Enqueue into batchPayments for async Mojaloop ILP processing.
+      // SW-26: enqueue failures are NOT swallowed — the mutation fails honestly
+      // (the payment row is marked failed) instead of lying queuedForProcessing:true.
+      let queuedForProcessing = false;
       try {
         const db = await getDb();
-        if (db) {
+        if (!db) throw new Error("Database unavailable");
+        {
           const { paymentQueue, paymentIdempotencyKeys } = await import("../../drizzle/schema");
-          const amountMinorUnits = BigInt(Math.round(parseFloat(decl.totalDue ?? "0") * 100));
+          const amountMinorUnits = toMinorUnits(decl.totalDue);
           const debitAccountId = input.debitAccountId ?? traderAccountId;
           const creditAccountId = input.creditAccountId ?? SYSTEM_ACCOUNTS.NCS_REVENUE;
           const transferId = `tg-${reference}`;
@@ -105,9 +171,22 @@ export const paymentsRouter = router({
               expiresAt,
             });
           }
+          queuedForProcessing = true;
         }
-      } catch {
-        // Non-blocking: payment record already created, queue failure is recoverable
+      } catch (enqueueErr) {
+        // Fail the mutation honestly: the payment record is marked failed so no
+        // phantom "pending but unqueued" payment can exist.
+        console.error(`[Payments] Failed to enqueue ${reference} for processing:`, enqueueErr);
+        if (payment) {
+          await updatePayment(payment.id, {
+            status: "failed",
+            failureReason: "Failed to enqueue for processing — retry initiation",
+          }).catch(() => {});
+        }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Payment could not be queued for processing. No charge was initiated — please retry.",
+        });
       }
 
       await logAuditEvent({
@@ -118,19 +197,26 @@ export const paymentsRouter = router({
         actorType: "trader",
         newState: { status: "pending", reference, paymentMethod: input.paymentMethod },
       });
-      // R3: Kafka event
+      // R3: Kafka event — publish failures are surfaced in logs and in the
+      // response flag, never silently swallowed (SW-26).
+      let eventPublished = false;
       if (payment) {
-        await emitPaymentInitiated({
-          paymentId: payment.id,
-          declarationId: input.declarationId,
-          traderId: ctx.user.id,
-          amount: parseFloat(decl.totalDue ?? '0'),
-          currency: decl.invoiceCurrency ?? 'USD',
-          idempotencyKey: reference,
-        }).catch(() => {});
+        try {
+          await emitPaymentInitiated({
+            paymentId: payment.id,
+            declarationId: input.declarationId,
+            traderId: ctx.user.id,
+            amount: Number((Number(toMinorUnits(decl.totalDue)) / 100).toFixed(2)),
+            currency: decl.invoiceCurrency ?? 'USD',
+            idempotencyKey: reference,
+          });
+          eventPublished = true;
+        } catch (eventErr) {
+          console.error(`[Payments] Failed to publish payment.initiated for ${reference}:`, eventErr);
+        }
       }
 
-      return { ...payment, queuedForProcessing: true };
+      return { ...payment, queuedForProcessing, eventPublished };
     }),
 
     // ── CONFIRM PAYMENT (Mojaloop webhook → Temporal saga → TigerBeetle post) ────
@@ -140,7 +226,12 @@ export const paymentsRouter = router({
   //   2. Marks the payment confirmed in PostgreSQL
   //   3. Emits payment.confirmed to Kafka via transactional outbox
   //
-  // Security: HMAC-SHA256 signature verification prevents spoofed callbacks.
+  // Security (SW-9): callers must either be an admin OR present a valid
+  // HMAC-SHA256 signature over `confirm:{paymentId}:{mojaloopTransferId}`
+  // computed with the switch secret (timing-safe comparison). Additionally,
+  // the referenced Mojaloop transfer must exist, be COMMITTED, and belong to
+  // the same declaration — a payment owner cannot dispatch confirmation with
+  // an arbitrary transfer id.
   // Idempotency: Redis cache prevents duplicate processing of the same transferId.
   confirm: protectedProcedure
     .input(z.object({
@@ -152,6 +243,15 @@ export const paymentsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "DB unavailable" });
+
+      // SW-9: authenticate the confirmation request before any state change.
+      if (ctx.user.role !== "admin" &&
+          !verifyConfirmSignature(input.paymentId, input.mojaloopTransferId, input.signature)) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "A valid switch signature is required to confirm a payment",
+        });
+      }
 
       // Acquire distributed lock — prevents concurrent double-confirmation
       const { acquireLock, releaseLock, getIdempotencyKey, setIdempotencyKey } = await import("../_core/distributedLock");
@@ -180,28 +280,50 @@ export const paymentsRouter = router({
           });
         }
 
+        // SW-9: the referenced transfer must be a real, settled switch transfer
+        // for this declaration — never a caller-invented id.
+        const mojaTx = await getMojaloopTransactionByTransferId(input.mojaloopTransferId);
+        if (!mojaTx || mojaTx.status !== "COMMITTED") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "The referenced Mojaloop transfer is not in COMMITTED state",
+          });
+        }
+        if (existing.declarationId && mojaTx.declarationId && mojaTx.declarationId !== existing.declarationId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "The referenced transfer belongs to a different declaration",
+          });
+        }
+
         const mojaloopTxId = input.mojaloopTransferId;
         const TEMPORAL_URL = process.env.TEMPORAL_URL ?? "http://localhost:7233";
         const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE ?? "default";
 
         // Trigger Temporal ConfirmPaymentWorkflow (atomic: PostTB + ConfirmDB)
+        // PRA-024/025: resilience wrapper — timeout + backoff/jitter + breaker
+        // (4xx verbatim: a rejected workflow start is not retried).
         const workflowId = `confirm-payment-${input.paymentId}-${mojaloopTxId}`;
-        const workflowResponse = await fetch(`${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            workflow_type: { name: "ConfirmPaymentWorkflow" },
-            workflow_id: workflowId,
-            task_queue: { name: "tradegateway-main" },
-            input: { payloads: [{ data: Buffer.from(JSON.stringify({
-              invoiceId: input.paymentId,
-              mojaloopTxId,
-              tbTxId: input.tbPendingTransferId ?? "",
-              method: "manual",
-            })).toString("base64") }] },
-          }),
-          signal: AbortSignal.timeout(10_000),
-        }).catch((err) => {
+        const workflowResponse = await fetchWithResilience(
+          `${TEMPORAL_URL}/api/v1/namespaces/${TEMPORAL_NAMESPACE}/workflows`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workflow_type: { name: "ConfirmPaymentWorkflow" },
+              workflow_id: workflowId,
+              task_queue: { name: "tradegateway-main" },
+              input: { payloads: [{ data: Buffer.from(JSON.stringify({
+                invoiceId: input.paymentId,
+                mojaloopTxId,
+                tbTxId: input.tbPendingTransferId ?? "",
+                method: "manual",
+              })).toString("base64") }] },
+            }),
+            timeoutMs: 10_000,
+          },
+          "temporal-frontend"
+        ).catch((err) => {
           throw new TRPCError({
             code: "SERVICE_UNAVAILABLE",
             message: `Payment confirmation workflow is unavailable: ${err instanceof Error ? err.message : String(err)}`,

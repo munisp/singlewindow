@@ -22,8 +22,13 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -46,6 +51,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -88,22 +94,53 @@ func init() {
 
 type DeclarationStatus string
 
+// SW-14: status vocabulary unified with the PG declaration_status enum
+// (drizzle/schema.ts declarationStatusEnum). The previous vocabulary
+// ("assessed", "amended") did not exist in the enum — writes violated it.
 const (
-	StatusDraft      DeclarationStatus = "draft"
-	StatusSubmitted  DeclarationStatus = "submitted"
-	StatusAssessed   DeclarationStatus = "assessed"
-	StatusCleared    DeclarationStatus = "cleared"
-	StatusRejected   DeclarationStatus = "rejected"
-	StatusAmended    DeclarationStatus = "amended"
+	StatusDraft               DeclarationStatus = "draft"
+	StatusSubmitted           DeclarationStatus = "submitted"
+	StatusUnderAssessment     DeclarationStatus = "under_assessment"
+	StatusDocsRequired        DeclarationStatus = "docs_required"
+	StatusPaymentPending      DeclarationStatus = "payment_pending"
+	StatusPaymentConfirmed    DeclarationStatus = "payment_confirmed"
+	StatusUnderExamination    DeclarationStatus = "under_examination"
+	StatusExaminationComplete DeclarationStatus = "examination_complete"
+	StatusCleared             DeclarationStatus = "cleared"
+	StatusRejected            DeclarationStatus = "rejected"
+	StatusCancelled           DeclarationStatus = "cancelled"
 )
 
-// Valid state machine transitions
+// Valid state machine transitions — mirrors server/businessRules.ts
+// VALID_TRANSITIONS (WCO RKC Standard 6.1). "cleared" is reachable ONLY from
+// payment_confirmed or examination_complete (SW-16).
 var allowedTransitions = map[DeclarationStatus][]DeclarationStatus{
-	StatusDraft:     {StatusSubmitted},
-	StatusSubmitted: {StatusAssessed, StatusRejected},
-	StatusAssessed:  {StatusCleared, StatusRejected},
-	StatusCleared:   {StatusAmended},
-	StatusRejected:  {},
+	StatusDraft:               {StatusSubmitted, StatusUnderAssessment, StatusCancelled},
+	StatusSubmitted:           {StatusUnderAssessment, StatusDocsRequired, StatusPaymentPending, StatusUnderExamination, StatusRejected},
+	StatusUnderAssessment:     {StatusDocsRequired, StatusPaymentPending, StatusUnderExamination, StatusRejected},
+	StatusDocsRequired:        {StatusSubmitted, StatusUnderAssessment, StatusRejected, StatusCancelled},
+	StatusPaymentPending:      {StatusPaymentConfirmed, StatusUnderExamination, StatusRejected},
+	StatusPaymentConfirmed:    {StatusUnderExamination, StatusCleared, StatusRejected},
+	StatusUnderExamination:    {StatusExaminationComplete, StatusDocsRequired, StatusRejected},
+	StatusExaminationComplete: {StatusCleared, StatusRejected, StatusPaymentPending},
+	StatusCleared:             {},
+	StatusRejected:            {StatusSubmitted, StatusUnderAssessment, StatusCancelled},
+	StatusCancelled:           {},
+}
+
+// canClear enforces the clearance gate (SW-16): payment must be confirmed and
+// no red/yellow inspection hold may be active (such holds must have been
+// discharged through examination_complete).
+func canClear(currentStatus, riskLane string) error {
+	status := DeclarationStatus(currentStatus)
+	if !canTransition(status, StatusCleared) {
+		return fmt.Errorf("cannot clear declaration in status %s — clearance requires payment_confirmed (or examination_complete after a hold)", currentStatus)
+	}
+	lane := strings.ToUpper(strings.TrimSpace(riskLane))
+	if (lane == "RED" || lane == "YELLOW") && status != StatusExaminationComplete {
+		return fmt.Errorf("active %s-lane inspection hold — examination must complete before clearance", lane)
+	}
+	return nil
 }
 
 func canTransition(from, to DeclarationStatus) bool {
@@ -308,7 +345,7 @@ func (s *declarationServer) AssessDeclaration(ctx context.Context, req *declarat
 		return nil, status.Error(codes.NotFound, "declaration not found")
 	}
 
-	if !canTransition(DeclarationStatus(currentStatus), StatusAssessed) {
+	if !canTransition(DeclarationStatus(currentStatus), StatusUnderAssessment) {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"cannot assess declaration in status %s", currentStatus)
 	}
@@ -319,39 +356,29 @@ func (s *declarationServer) AssessDeclaration(ctx context.Context, req *declarat
 		SET status = $1, risk_score = $2, risk_lane = $3,
 		    ai_explanation = $4, updated_at = $5
 		WHERE id = $6`,
-		string(StatusAssessed), req.RiskScore, req.RiskLane,
+		string(StatusUnderAssessment), req.RiskScore, req.RiskLane,
 		req.AiExplanation, now, req.DeclarationId,
 	)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to assess declaration")
 	}
 
+	// SW-16: the phantom "DeclarationReviewWorkflow" string-start was removed —
+	// no worker ever implemented that workflow, so reporting
+	// workflow_triggered=true was a fabrication. YELLOW/RED lanes are honestly
+	// routed to MANUAL review until a real review workflow is implemented and
+	// registered by the temporal-worker service.
 	workflowTriggered := false
-
-	// Trigger Temporal workflow for YELLOW and RED lanes
-	if s.temporal != nil && (req.RiskLane == "YELLOW" || req.RiskLane == "RED") {
-		workflowOptions := client.StartWorkflowOptions{
-			ID:        fmt.Sprintf("declaration-review-%s", req.DeclarationId),
-			TaskQueue: "declaration-review",
-		}
-		_, err = s.temporal.ExecuteWorkflow(ctx, workflowOptions,
-			"DeclarationReviewWorkflow",
-			map[string]interface{}{
-				"declaration_id": req.DeclarationId,
-				"risk_lane":      req.RiskLane,
-				"risk_score":     req.RiskScore,
-			},
-		)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("id", req.DeclarationId).Msg("Failed to trigger Temporal workflow")
-		} else {
-			workflowTriggered = true
-		}
+	reviewMode := "AUTO"
+	if req.RiskLane == "YELLOW" || req.RiskLane == "RED" {
+		reviewMode = "REVIEW_MANUAL"
+		s.logger.Warn().Str("id", req.DeclarationId).Str("lane", req.RiskLane).
+			Msg("Declaration requires MANUAL review (no automated review workflow is registered)")
 	}
 
-	// Publish DECLARATION_ASSESSED event
-	payload := fmt.Sprintf(`{"declaration_id":"%s","risk_score":%d,"risk_lane":"%s","timestamp":"%s"}`,
-		req.DeclarationId, req.RiskScore, req.RiskLane, now.Format(time.RFC3339))
+	// Publish DECLARATION_ASSESSED event (honest review routing included)
+	payload := fmt.Sprintf(`{"declaration_id":"%s","risk_score":%d,"risk_lane":"%s","review":"%s","timestamp":"%s"}`,
+		req.DeclarationId, req.RiskScore, req.RiskLane, reviewMode, now.Format(time.RFC3339))
 	s.publishEvent(ctx, "declaration-events", "DECLARATION_ASSESSED", req.DeclarationId, []byte(payload))
 
 	s.logger.Info().
@@ -378,17 +405,37 @@ func (s *declarationServer) ClearDeclaration(ctx context.Context, req *declarati
 	}()
 
 	var currentStatus string
+	var riskLane *string
 	err := s.db.QueryRow(ctx,
-		`SELECT status FROM declarations WHERE id = $1`,
+		`SELECT status, risk_lane FROM declarations WHERE id = $1`,
 		req.DeclarationId,
-	).Scan(&currentStatus)
+	).Scan(&currentStatus, &riskLane)
 	if err != nil {
 		return nil, status.Error(codes.NotFound, "declaration not found")
 	}
 
-	if !canTransition(DeclarationStatus(currentStatus), StatusCleared) {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"cannot clear declaration in status %s", currentStatus)
+	// SW-16: clearance requires payment_confirmed (or examination_complete
+	// after a discharged hold) and no active red/yellow inspection hold.
+	lane := ""
+	if riskLane != nil {
+		lane = *riskLane
+	}
+	if err := canClear(currentStatus, lane); err != nil {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+
+	// SW-16: officer identity comes from the VERIFIED credentials (JWT via the
+	// auth interceptor), never from the request body. A mismatching request
+	// body officer id is rejected.
+	officerID, _ := ctx.Value(ctxKeyOfficerID).(string)
+	if officerID == "" {
+		return nil, status.Error(codes.Unauthenticated, "verified officer identity is required for clearance")
+	}
+	if req.OfficerId != "" && req.OfficerId != officerID {
+		return nil, status.Error(codes.InvalidArgument, "officer_id does not match the authenticated officer")
+	}
+	if role, _ := ctx.Value(ctxKeyRole).(string); role != "customs_officer" && role != "admin" && role != "service" {
+		return nil, status.Error(codes.PermissionDenied, "clearance requires a customs officer role")
 	}
 
 	now := time.Now().UTC()
@@ -397,7 +444,7 @@ func (s *declarationServer) ClearDeclaration(ctx context.Context, req *declarati
 		SET status = $1, clearance_code = $2, cleared_by = $3,
 		    cleared_at = $4, updated_at = $5
 		WHERE id = $6`,
-		string(StatusCleared), req.ClearanceCode, req.OfficerId, now, now, req.DeclarationId,
+		string(StatusCleared), req.ClearanceCode, officerID, now, now, req.DeclarationId,
 	)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "failed to clear declaration")
@@ -407,10 +454,10 @@ func (s *declarationServer) ClearDeclaration(ctx context.Context, req *declarati
 
 	// Publish DECLARATION_CLEARED event
 	payload := fmt.Sprintf(`{"declaration_id":"%s","officer_id":"%s","clearance_code":"%s","timestamp":"%s"}`,
-		req.DeclarationId, req.OfficerId, req.ClearanceCode, now.Format(time.RFC3339))
+		req.DeclarationId, officerID, req.ClearanceCode, now.Format(time.RFC3339))
 	s.publishEvent(ctx, "declaration-events", "DECLARATION_CLEARED", req.DeclarationId, []byte(payload))
 
-	s.logger.Info().Str("id", req.DeclarationId).Str("officer", req.OfficerId).Msg("Declaration cleared")
+	s.logger.Info().Str("id", req.DeclarationId).Str("officer", officerID).Msg("Declaration cleared")
 
 	return s.GetDeclaration(ctx, &declarationv1.GetDeclarationRequest{
 		DeclarationId: req.DeclarationId,
@@ -585,6 +632,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// SW-16: secrets are env-only in production — refuse to boot otherwise.
+	if isProduction() {
+		if os.Getenv("DECLARATION_ENGINE_JWT_SECRET") == "" {
+			log.Fatal().Msg("FATAL: DECLARATION_ENGINE_JWT_SECRET must be set in production. Refusing to boot.")
+		}
+		if os.Getenv("DATABASE_URL") == "" {
+			log.Fatal().Msg("FATAL: DATABASE_URL must be set in production — no default exists. Refusing to boot.")
+		}
+	}
+
 	// PostgreSQL
 	dbURL := getEnv("DATABASE_URL", "postgres://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
 	db, err := pgxpool.New(ctx, dbURL)
@@ -642,6 +699,7 @@ func main() {
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
+			authInterceptor,
 			loggingInterceptor,
 			recoveryInterceptor,
 		),
@@ -680,6 +738,108 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatal().Err(err).Msg("gRPC server failed")
 	}
+}
+
+// ─── Authentication (SW-16) ─────────────────────────────────────────────────
+
+type ctxKey string
+
+const (
+	ctxKeyOfficerID ctxKey = "officerID"
+	ctxKeyRole      ctxKey = "role"
+)
+
+// jwtSecret returns the HMAC secret for verifying caller JWTs. Mandatory in
+// production (enforced in main); a labelled dev default exists otherwise.
+func jwtSecret() string {
+	secret := os.Getenv("DECLARATION_ENGINE_JWT_SECRET")
+	if secret == "" {
+		if isProduction() {
+			return ""
+		}
+		return "dev-jwt-secret"
+	}
+	return secret
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production"
+}
+
+// parseAndVerifyJWT verifies an HS256 JWT and returns (subject, role, error).
+// Only the HMAC-SHA256 alg is accepted; exp is enforced.
+func parseAndVerifyJWT(token, secret string) (string, string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", "", fmt.Errorf("malformed token")
+	}
+	header, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", "", fmt.Errorf("malformed header")
+	}
+	if !strings.Contains(string(header), `"HS256"`) {
+		return "", "", fmt.Errorf("unsupported alg — only HS256 accepted")
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(parts[0] + "." + parts[1]))
+	expected := mac.Sum(nil)
+	provided, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || subtle.ConstantTimeCompare(provided, expected) != 1 {
+		return "", "", fmt.Errorf("invalid signature")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", "", fmt.Errorf("malformed payload")
+	}
+	var claims struct {
+		Sub  string `json:"sub"`
+		Role string `json:"role"`
+		Exp  int64  `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", "", fmt.Errorf("malformed claims")
+	}
+	if claims.Sub == "" {
+		return "", "", fmt.Errorf("missing sub claim")
+	}
+	if claims.Exp != 0 && time.Now().Unix() > claims.Exp {
+		return "", "", fmt.Errorf("token expired")
+	}
+	return claims.Sub, claims.Role, nil
+}
+
+// authInterceptor verifies the caller's JWT (metadata authorization: Bearer)
+// and injects the verified officer identity into the context (SW-16).
+// Health and reflection endpoints are exempt.
+func authInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if strings.HasPrefix(info.FullMethod, "/grpc.health") || strings.HasPrefix(info.FullMethod, "/grpc.reflection") {
+		return handler(ctx, req)
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "missing credentials")
+	}
+	var token string
+	for _, v := range md.Get("authorization") {
+		if strings.HasPrefix(strings.ToLower(v), "bearer ") {
+			token = strings.TrimSpace(v[7:])
+			break
+		}
+	}
+	if token == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
+	}
+	secret := jwtSecret()
+	if secret == "" {
+		return nil, status.Error(codes.Internal, "authentication is not configured")
+	}
+	sub, role, err := parseAndVerifyJWT(token, secret)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
+	}
+	ctx = context.WithValue(ctx, ctxKeyOfficerID, sub)
+	ctx = context.WithValue(ctx, ctxKeyRole, role)
+	return handler(ctx, req)
 }
 
 // ─── Interceptors ─────────────────────────────────────────────────────────────

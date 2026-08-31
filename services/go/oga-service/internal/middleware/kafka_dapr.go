@@ -1,4 +1,4 @@
-// Package middleware provides Kafka, Dapr, Fluvio, and OpenTelemetry integration for oga-service.
+// Package middleware provides Kafka, Dapr, and OpenTelemetry integration for oga-service.
 // Kafka topics published:  oga.permit.requested    (permit request sent to OGA)
 //                          oga.approved            (permit approved by OGA)
 //                          oga.rejected            (permit rejected by OGA)
@@ -6,7 +6,7 @@
 // Kafka topics consumed:   declarations.submitted  (new declaration — check OGA requirements)
 //                          workflow.oga.dispatched (workflow engine dispatched OGA request)
 // Dapr pub/sub:            publishes OGA decisions to pubsub
-// Fluvio:                  streams real-time OGA queue status to customs officers
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every OGA permit lifecycle event
 package middleware
 
@@ -56,13 +56,6 @@ func daprPort() string {
 		return p
 	}
 	return "3500"
-}
-
-func fluvioEndpoint() string {
-	if e := os.Getenv("FLUVIO_ENDPOINT"); e != "" {
-		return e
-	}
-	return "http://fluvio-sc:9003"
 }
 
 // ─── Event Schemas ────────────────────────────────────────────────────────────
@@ -266,51 +259,11 @@ func (d *DaprPublisher) PublishOGAEvent(ctx context.Context, evt OGAPermitEvent)
 	return nil
 }
 
-// ─── Fluvio Publisher ─────────────────────────────────────────────────────────
-
-type FluvioPublisher struct {
-	endpoint   string
-	httpClient *http.Client
-	logger     *slog.Logger
-}
-
-func NewFluvioPublisher() *FluvioPublisher {
-	return &FluvioPublisher{
-		endpoint:   fluvioEndpoint(),
-		httpClient: &http.Client{Timeout: 3 * time.Second},
-		logger:     slog.Default().With("component", "fluvio-publisher", "service", ServiceName),
-	}
-}
-
-type FluvioOGAQueueUpdate struct {
-	AgencyCode    string    `json:"agency_code"`
-	AgencyName    string    `json:"agency_name"`
-	PendingCount  int       `json:"pending_count"`
-	AvgWaitHours  float64   `json:"avg_wait_hours"`
-	SLABreachCount int      `json:"sla_breach_count"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-func (f *FluvioPublisher) PublishOGAQueueUpdate(ctx context.Context, update FluvioOGAQueueUpdate) error {
-	if update.UpdatedAt.IsZero() {
-		update.UpdatedAt = time.Now().UTC()
-	}
-	payload, _ := json.Marshal(update)
-	url := fmt.Sprintf("%s/api/v1/produce/oga.queue.stream", f.endpoint)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := f.httpClient.Do(req)
-	if err != nil {
-		f.logger.WarnContext(ctx, "fluvio publish failed (non-fatal)", "error", err)
-		return nil
-	}
-	defer resp.Body.Close()
-	f.logger.InfoContext(ctx, "fluvio OGA queue update published", "agency", update.AgencyCode)
-	return nil
-}
+// ─── Fluvio Publisher — REMOVED (P0 remediation) ────────────────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio-sc:9003/...) and swallowed the errors. Fluvio is NOT deployed
+// on this platform; Kafka (above) is the real event bus. Real-time status
+// updates must flow through the Kafka publisher in this file.
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
@@ -347,7 +300,6 @@ type MiddlewareClients struct {
 	KafkaPublisher  *KafkaPublisher
 	KafkaConsumer   *KafkaConsumer
 	DaprPublisher   *DaprPublisher
-	FluvioPublisher *FluvioPublisher
 }
 
 func NewMiddlewareClients(
@@ -367,7 +319,6 @@ func NewMiddlewareClients(
 		KafkaPublisher:  kp,
 		KafkaConsumer:   kc,
 		DaprPublisher:   NewDaprPublisher(),
-		FluvioPublisher: NewFluvioPublisher(),
 	}, nil
 }
 

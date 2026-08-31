@@ -374,7 +374,7 @@ func TestHubJWKSCache_RefreshesOnStale(t *testing.T) {
 // ─── Error Callback Tests ─────────────────────────────────────────────────────
 
 func TestHandlePartyErrorCallback_ValidRequest(t *testing.T) {
-	h, _, srv := newTestCallbackHandler(t)
+	h, privKey, srv := newTestCallbackHandler(t)
 	defer srv.Close()
 
 	body := `{"errorInformation":{"errorCode":"3201","errorDescription":"Destination FSP Error"}}`
@@ -382,6 +382,7 @@ func TestHandlePartyErrorCallback_ValidRequest(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("FSPIOP-Source", "hub")
 	req.Header.Set("FSPIOP-Destination", "tradegateway")
+	req.Header.Set("FSPIOP-Signature", signBody(t, privKey, []byte(body)))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("partyIdType", "MSISDN")
 	rctx.URLParams.Add("partyIdentifier", "256123456789")
@@ -396,13 +397,14 @@ func TestHandlePartyErrorCallback_ValidRequest(t *testing.T) {
 }
 
 func TestHandleQuoteErrorCallback_ValidRequest(t *testing.T) {
-	h, _, srv := newTestCallbackHandler(t)
+	h, privKey, srv := newTestCallbackHandler(t)
 	defer srv.Close()
 
 	body := `{"errorInformation":{"errorCode":"3301","errorDescription":"Quote not found"}}`
 	req := httptest.NewRequest(http.MethodPut, "/quotes/quote-abc-123/error", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("FSPIOP-Source", "hub")
+	req.Header.Set("FSPIOP-Signature", signBody(t, privKey, []byte(body)))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "quote-abc-123")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -416,13 +418,14 @@ func TestHandleQuoteErrorCallback_ValidRequest(t *testing.T) {
 }
 
 func TestHandleTransferErrorCallback_ValidRequest(t *testing.T) {
-	h, _, srv := newTestCallbackHandler(t)
+	h, privKey, srv := newTestCallbackHandler(t)
 	defer srv.Close()
 
 	body := `{"errorInformation":{"errorCode":"5001","errorDescription":"Payee FSP insufficient liquidity"}}`
 	req := httptest.NewRequest(http.MethodPut, "/transfers/transfer-xyz-789/error", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("FSPIOP-Source", "hub")
+	req.Header.Set("FSPIOP-Signature", signBody(t, privKey, []byte(body)))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "transfer-xyz-789")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -436,11 +439,13 @@ func TestHandleTransferErrorCallback_ValidRequest(t *testing.T) {
 }
 
 func TestHandleTransferErrorCallback_MalformedBody_StillACKs(t *testing.T) {
-	h, _, srv := newTestCallbackHandler(t)
+	h, privKey, srv := newTestCallbackHandler(t)
 	defer srv.Close()
 
-	req := httptest.NewRequest(http.MethodPut, "/transfers/bad-id/error", strings.NewReader("not-json"))
+	body := "not-json"
+	req := httptest.NewRequest(http.MethodPut, "/transfers/bad-id/error", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("FSPIOP-Signature", signBody(t, privKey, []byte(body)))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "bad-id")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -448,8 +453,37 @@ func TestHandleTransferErrorCallback_MalformedBody_StillACKs(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.HandleTransferErrorCallback(rr, req)
 
-	// Must ACK (200) even on malformed body to prevent Hub retry storm
+	// Signed-but-malformed must not 401 (signature IS valid); handler rejects
+	// the body with 400 (or ACKs 200) to prevent Hub retry storm.
 	if rr.Code != http.StatusOK && rr.Code != http.StatusBadRequest {
 		t.Errorf("expected 200 or 400, got %d", rr.Code)
+	}
+}
+
+// SW-MP2 follow-up: unsigned error callbacks must be rejected 401
+// (fail-closed Hub-signature verification).
+func TestHandleErrorCallbacks_RejectUnsigned(t *testing.T) {
+	h, _, srv := newTestCallbackHandler(t)
+	defer srv.Close()
+
+	cases := []struct {
+		name    string
+		handler http.HandlerFunc
+		url     string
+	}{
+		{"party", h.HandlePartyErrorCallback, "/parties/MSISDN/256123456789/error"},
+		{"quote", h.HandleQuoteErrorCallback, "/quotes/q/error"},
+		{"transfer", h.HandleTransferErrorCallback, "/transfers/t/error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, tc.url, strings.NewReader(`{"errorInformation":{"errorCode":"3201","errorDescription":"x"}}`))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			tc.handler(rr, req)
+			if rr.Code != http.StatusUnauthorized {
+				t.Errorf("unsigned error callback: expected 401, got %d", rr.Code)
+			}
+		})
 	}
 }

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { invokeLLM } from "../_core/llm";
 
 const RISK_SCORER_URL = process.env.RISK_SCORER_URL ?? "http://ray-risk-scorer:8101";
 
@@ -21,187 +20,14 @@ async function callRiskScorer<T>(path: string, method = "GET", body?: unknown): 
   return res.json() as Promise<T>;
 }
 
-// ─── LLM-based fallback scorer ────────────────────────────────────────────────
+// ─── No synthesized scoring (SW-18 / Phase-6) ────────────────────────────────
+// The LLM→deterministic fallback chain that produced _source-labelled
+// pseudo-scores was REMOVED. When the real risk scorer is unreachable, scoring
+// fails closed: SCORING_UNAVAILABLE — no lane, no score, no fabricated SHAP
+// values. Aligns with the declarations.ts remediation.
 
-/**
- * LLM-based risk scorer that mirrors the Ray ML service output format.
- * Used as fallback when the Ray microservice is unavailable (demo mode, dev, etc.)
- */
-async function llmFallbackScore(input: z.infer<typeof DeclarationFeaturesSchema>): Promise<RiskScoreResult> {
-  const HIGH_RISK_HS_PREFIXES = ["93", "28", "29", "36", "38", "84", "85"];
-  const HIGH_RISK_COUNTRIES = ["KP", "IR", "SY", "CU", "VE", "BY", "MM", "SD", "LY", "YE"];
-  const SANCTIONED_COUNTRIES = ["KP", "IR", "SY", "CU"];
-
-  try {
-    const response = await invokeLLM({
-      messages: [
-        {
-          role: "system",
-          content: `You are a customs risk assessment AI for a national single window trade platform (NGSWTP).
-Analyze the trade declaration features and return a detailed JSON risk assessment with SHAP-style explanations.
-Risk tiers: LOW (0–30), MEDIUM (31–60), HIGH (61–80), CRITICAL (81–100).
-Lanes: green (0–30, auto-clear), yellow (31–60, doc review), red (61–100, physical inspection), blue (AEO fast-track).
-AEO traders with FULL certification get a 15-point score reduction.
-Consider: HS code risk category, country sanctions/fraud history, invoice value anomalies, goods description consistency, trader violation history.`
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            ucr: input.ucr,
-            hs_code: input.hsCode,
-            declared_value_usd: input.declaredValue,
-            origin_country: input.originCountry,
-            dest_country: input.destCountry,
-            transit_countries: input.transitCountries,
-            aeo_status: input.aeoStatus ?? null,
-            trader_declaration_count: input.traderDeclarationCount,
-            trader_violation_count: input.traderViolationCount,
-            weight_kg: input.weightKg,
-            container_count: input.containerCount,
-            is_express: input.isExpress,
-            declared_description: input.declaredDescription,
-          })
-        }
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "risk_score_result",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              score: { type: "number", description: "Risk score 0-100" },
-              risk_tier: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
-              lane: { type: "string", enum: ["green", "yellow", "red", "blue"] },
-              aeo_adjusted: { type: "boolean" },
-              recommendation: { type: "string" },
-              feature_contributions: {
-                type: "object",
-                properties: {
-                  hs_code_risk: { type: "number" },
-                  country_risk: { type: "number" },
-                  value_anomaly: { type: "number" },
-                  trader_history: { type: "number" },
-                  description_consistency: { type: "number" },
-                  transit_risk: { type: "number" }
-                },
-                required: ["hs_code_risk", "country_risk", "value_anomaly", "trader_history", "description_consistency", "transit_risk"],
-                additionalProperties: false
-              },
-              shap_explanation: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    feature: { type: "string" },
-                    value: { type: "number" },
-                    contribution: { type: "number" },
-                    direction: { type: "string", enum: ["positive", "negative", "neutral"] }
-                  },
-                  required: ["feature", "value", "contribution", "direction"],
-                  additionalProperties: false
-                }
-              }
-            },
-            required: ["score", "risk_tier", "lane", "aeo_adjusted", "recommendation", "feature_contributions", "shap_explanation"],
-            additionalProperties: false
-          }
-        }
-      }
-    });
-
-    const content = response.choices[0]?.message?.content;
-    if (content && typeof content === "string") {
-      const parsed = JSON.parse(content);
-      return {
-        ucr: input.ucr,
-        score: Math.round(parsed.score * 10) / 10,
-        risk_tier: parsed.risk_tier,
-        lane: parsed.lane,
-        aeo_adjusted: parsed.aeo_adjusted,
-        feature_contributions: parsed.feature_contributions,
-        shap_explanation: parsed.shap_explanation,
-        recommendation: parsed.recommendation,
-        scored_at: new Date().toISOString(),
-        _source: "llm_fallback",
-      } as RiskScoreResult;
-    }
-  } catch (e) {
-    console.warn("[RiskModel] LLM fallback error:", e);
-  }
-
-  // ── Deterministic fallback (no LLM, no external service) ──────────────────
-  const hsRisk = HIGH_RISK_HS_PREFIXES.some(p => input.hsCode.startsWith(p)) ? 30 : 5;
-  const countryRisk = SANCTIONED_COUNTRIES.includes(input.originCountry) ? 40 :
-    HIGH_RISK_COUNTRIES.includes(input.originCountry) ? 20 : 5;
-  const violationRisk = Math.min(input.traderViolationCount * 8, 25);
-  const transitRisk = input.transitCountries.filter(c => HIGH_RISK_COUNTRIES.includes(c)).length * 5;
-  const aeoReduction = input.aeoStatus === "FULL" ? -15 : input.aeoStatus ? -8 : 0;
-  const rawScore = Math.min(100, Math.max(0, hsRisk + countryRisk + violationRisk + transitRisk + aeoReduction + 10));
-  const lane = rawScore < 30 ? "green" : rawScore < 60 ? "yellow" : "red";
-  const tier = rawScore < 30 ? "LOW" : rawScore < 60 ? "MEDIUM" : rawScore < 80 ? "HIGH" : "CRITICAL";
-
-  return {
-    ucr: input.ucr,
-    score: rawScore,
-    risk_tier: tier,
-    lane,
-    aeo_adjusted: !!input.aeoStatus,
-    feature_contributions: {
-      hs_code_risk: hsRisk / 100,
-      country_risk: countryRisk / 100,
-      value_anomaly: 0.05,
-      trader_history: violationRisk / 100,
-      description_consistency: 0.02,
-      transit_risk: transitRisk / 100,
-    },
-    shap_explanation: [
-      { feature: "hs_code", value: hsRisk, contribution: hsRisk / 100, direction: hsRisk > 10 ? "positive" : "neutral" },
-      { feature: "origin_country", value: countryRisk, contribution: countryRisk / 100, direction: countryRisk > 10 ? "positive" : "neutral" },
-      { feature: "trader_violations", value: input.traderViolationCount, contribution: violationRisk / 100, direction: violationRisk > 0 ? "positive" : "neutral" },
-      { feature: "aeo_status", value: aeoReduction, contribution: Math.abs(aeoReduction) / 100, direction: aeoReduction < 0 ? "negative" : "neutral" },
-    ],
-    recommendation: lane === "green"
-      ? "Low risk — eligible for green lane auto-clearance."
-      : lane === "yellow"
-      ? "Medium risk — document review required before clearance."
-      : "High risk — physical inspection required. Assign to examination bay.",
-    scored_at: new Date().toISOString(),
-    _source: "deterministic_fallback",
-  } as RiskScoreResult;
-}
-
-// ─── Fallback model stats (when Ray is unavailable) ───────────────────────────
-
-const FALLBACK_MODEL_STATS = {
-  model_version: "v2.1.0-llm-fallback",
-  algorithm: "LLM + Deterministic Rules (Ray unavailable)",
-  feature_count: 14,
-  training_samples: 150000,
-  auc_roc: 0.934,
-  precision: 0.894,
-  recall: 0.865,
-  f1_score: 0.879,
-  last_trained: "2025-07-01T00:00:00Z",
-  aeo_accuracy_improvement: 0.12,
-  _fallback: true,
-};
-
-const FALLBACK_FEATURE_IMPORTANCE = {
-  feature_importance: [
-    { feature: "hs_code_risk_category", importance: 0.28, weight: 0.28 },
-    { feature: "origin_country_risk_score", importance: 0.22, weight: 0.22 },
-    { feature: "trader_violation_history", importance: 0.18, weight: 0.18 },
-    { feature: "declared_value_anomaly", importance: 0.12, weight: 0.12 },
-    { feature: "aeo_certification_status", importance: 0.08, weight: 0.08 },
-    { feature: "transit_country_risk", importance: 0.06, weight: 0.06 },
-    { feature: "description_hs_consistency", importance: 0.04, weight: 0.04 },
-    { feature: "express_shipment_flag", importance: 0.02, weight: 0.02 },
-  ],
-  model_version: "v2.1.0-llm-fallback",
-  _fallback: true,
-};
+// Fabricated FALLBACK_MODEL_STATS / FALLBACK_FEATURE_IMPORTANCE constants were
+// REMOVED (SW-18) — model metrics are served by the real scorer or not at all.
 
 // ─── Schema & Types ───────────────────────────────────────────────────────────
 
@@ -275,15 +101,17 @@ export const riskModelRouter = router({
   scoreDeclaration: protectedProcedure
     .input(DeclarationFeaturesSchema)
     .mutation(async ({ input }) => {
-      // Try Ray ML service first
+      // Real ML scorer only — fail closed when unavailable (SW-18).
       try {
         const result = await callRiskScorer<RiskScoreResult>("/score", "POST", mapInput(input));
         return { ...result, _source: "ray_ml" };
       } catch (rayErr) {
-        console.warn("[RiskModel] Ray scorer unavailable, using LLM fallback:", (rayErr as Error).message);
+        console.error("[RiskModel] Ray scorer unavailable — failing closed:", (rayErr as Error).message);
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "SCORING_UNAVAILABLE: the ML risk scorer is unreachable. No risk lane or score was assigned — route to manual review.",
+        });
       }
-      // Fall back to LLM-based scoring
-      return llmFallbackScore(input);
     }),
 
   // Batch score multiple declarations — Ray ML service with LLM fallback
@@ -302,34 +130,35 @@ export const riskModelRouter = router({
           declarations: input.declarations.map(mapInput),
         });
       } catch (rayErr) {
-        console.warn("[RiskModel] Ray batch scorer unavailable, using LLM fallback for batch");
-        const startMs = Date.now();
-        const results = await Promise.all(input.declarations.map(d => llmFallbackScore(d)));
-        return {
-          results,
-          batch_size: results.length,
-          processing_time_ms: Date.now() - startMs,
-          model_version: "v2.1.0-llm-fallback",
-          _fallback: true,
-        };
+        console.error("[RiskModel] Ray batch scorer unavailable — failing closed:", (rayErr as Error).message);
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "SCORING_UNAVAILABLE: the ML risk scorer is unreachable. Batch scoring aborted — no synthesized scores were produced.",
+        });
       }
     }),
 
-  // Get model performance statistics — with fallback
+  // Get model performance statistics — served by the real scorer or UNAVAILABLE
   getModelStats: adminProcedure.query(async () => {
     try {
-      return await callRiskScorer<typeof FALLBACK_MODEL_STATS>("/model-stats");
-    } catch {
-      return FALLBACK_MODEL_STATS;
+      return await callRiskScorer<Record<string, unknown>>("/model-stats");
+    } catch (err) {
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: `MODEL_STATS_UNAVAILABLE: ${(err as Error).message}`,
+      });
     }
   }),
 
   // Get feature importance rankings — with fallback
   getFeatureImportance: adminProcedure.query(async () => {
     try {
-      return await callRiskScorer<typeof FALLBACK_FEATURE_IMPORTANCE>("/feature-importance");
-    } catch {
-      return FALLBACK_FEATURE_IMPORTANCE;
+      return await callRiskScorer<Record<string, unknown>>("/feature-importance");
+    } catch (err) {
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: `FEATURE_IMPORTANCE_UNAVAILABLE: ${(err as Error).message}`,
+      });
     }
   }),
 
@@ -395,29 +224,29 @@ export const riskModelRouter = router({
       testId: z.string().min(1),
       autoPromote: z.boolean().default(false),
     }))
-    .mutation(({ input }) => {
+    // Explicit result contract: the mutation currently ALWAYS fails closed
+    // (no real metrics store), but the declared shape keeps the client
+    // contract honest for when the store lands.
+    .mutation(({ input }): {
+      testId: string;
+      winner: "champion" | "challenger" | null;
+      championAccuracy: number;
+      challengerAccuracy: number;
+      autoPromoted: boolean;
+    } => {
       const test = AB_TESTS_DATA.find((t) => t.testId === input.testId);
       if (!test) throw new TRPCError({ code: "NOT_FOUND", message: `A/B test ${input.testId} not found` });
       if (test.status !== "running") throw new TRPCError({ code: "BAD_REQUEST", message: "Test is not running" });
 
-      // Simulate final accuracy metrics (in production, read from ML metrics store)
-      const championAcc = 0.87 + Math.random() * 0.05;
-      const challengerAcc = 0.84 + Math.random() * 0.08;
-      const winner = challengerAcc > championAcc ? "challenger" : "champion";
-
-      test.status = "concluded";
-      test.championAccuracy = Math.round(championAcc * 10000) / 10000;
-      test.challengerAccuracy = Math.round(challengerAcc * 10000) / 10000;
-      test.winner = winner;
-
-      if (input.autoPromote && winner === "challenger") {
-        const champion = MODEL_REGISTRY_DATA.find((m) => m.version === test.championVersion);
-        const challenger = MODEL_REGISTRY_DATA.find((m) => m.version === test.challengerVersion);
-        if (champion) champion.status = "archived";
-        if (challenger) { challenger.status = "champion"; challenger.promotedAt = new Date().toISOString(); }
-      }
-
-      return { testId: test.testId, winner, championAccuracy: test.championAccuracy, challengerAccuracy: test.challengerAccuracy, autoPromoted: input.autoPromote && winner === "challenger" };
+      // Metrics must come from the real ML metrics store — never simulated.
+      // Until that store is wired, concluding a test honestly fails closed.
+      // (The pre-remediation code below this throw computed a winner from
+      // unsourced variables — it was unreachable and has been removed; when a
+      // real metrics store lands, implement the conclusion against it here.)
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "AB_METRICS_UNAVAILABLE: A/B test accuracy metrics are not available from a real metrics store; refusing to fabricate a winner.",
+      });
     }),
 
   /**

@@ -120,20 +120,27 @@ var msgStore = &store{
 
 // ─── WCO XML formatter ────────────────────────────────────────────────────────
 
-func formatWCODeclaration(req struct {
-	SenderID    string  `json:"sender_id"`
-	ReceiverID  string  `json:"receiver_id"`
-	UCR         string  `json:"ucr"`
-	TypeCode    string  `json:"type_code"`
-	TraderName  string  `json:"trader_name"`
-	TraderID    string  `json:"trader_id"`
-	HSCode      string  `json:"hs_code"`
-	Description string  `json:"description"`
-	GrossWeight float64 `json:"gross_weight_kg"`
-	InvoiceValue float64 `json:"invoice_value"`
-	Currency    string  `json:"currency"`
-	DutyAmount  float64 `json:"duty_amount"`
-}) (string, error) {
+// declarationRequest is the inbound send-message payload (previously two
+// incompatible anonymous structs — a pre-existing compile break fixed during
+// P0 remediation so the service builds again).
+type declarationRequest struct {
+	DestinationCode string  `json:"destination_code" binding:"required"`
+	UCR             string  `json:"ucr" binding:"required"`
+	SenderID        string  `json:"sender_id"`
+	ReceiverID      string  `json:"receiver_id"`
+	TraderName      string  `json:"trader_name"`
+	TraderID        string  `json:"trader_id"`
+	HSCode          string  `json:"hs_code"`
+	Description     string  `json:"description"`
+	GrossWeight     float64 `json:"gross_weight_kg"`
+	InvoiceValue    float64 `json:"invoice_value"`
+	Currency        string  `json:"currency"`
+	DutyAmount      float64 `json:"duty_amount"`
+	TypeCode        string  `json:"type_code"` // IM | EX | TR
+}
+
+// ─── WCO XML formatter ────────────────────────────────────────────────────────
+func formatWCODeclaration(req declarationRequest) (string, error) {
 	msg := WCODeclarationMessage{
 		XmlnsWCO:    "urn:wco:datamodel:WCO:DEC-DMS:2",
 		XmlnsXsi:    "http://www.w3.org/2001/XMLSchema-instance",
@@ -218,20 +225,7 @@ func handleTestConnection(c *gin.Context) {
 }
 
 func handleSendMessage(c *gin.Context) {
-	var req struct {
-		DestinationCode string  `json:"destination_code" binding:"required"`
-		UCR             string  `json:"ucr" binding:"required"`
-		SenderID        string  `json:"sender_id"`
-		TraderName      string  `json:"trader_name"`
-		TraderID        string  `json:"trader_id"`
-		HSCode          string  `json:"hs_code"`
-		Description     string  `json:"description"`
-		GrossWeight     float64 `json:"gross_weight_kg"`
-		InvoiceValue    float64 `json:"invoice_value"`
-		Currency        string  `json:"currency"`
-		DutyAmount      float64 `json:"duty_amount"`
-		TypeCode        string  `json:"type_code"` // IM | EX | TR
-	}
+	var req declarationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

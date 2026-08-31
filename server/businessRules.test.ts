@@ -24,8 +24,15 @@ describe("assertValidTransition", () => {
     expect(() => assertValidTransition("draft", "submitted", "user")).not.toThrow();
   });
 
-  it("allows submitted → cleared for customs_officer", () => {
-    expect(() => assertValidTransition("submitted", "cleared", "customs_officer")).not.toThrow();
+  // SW-M13: "cleared" is NOT reachable directly from submitted — clearance
+  // requires payment + examination. The valid officer clearance paths are
+  // payment_confirmed→cleared and examination_complete→cleared.
+  it("rejects submitted → cleared (must pass payment/examination first)", () => {
+    expect(() => assertValidTransition("submitted", "cleared", "customs_officer")).toThrow("Invalid status transition");
+  });
+
+  it("allows examination_complete → cleared for customs_officer", () => {
+    expect(() => assertValidTransition("examination_complete", "cleared", "customs_officer")).not.toThrow();
   });
 
   it("throws on invalid transition draft → cleared", () => {
@@ -33,7 +40,8 @@ describe("assertValidTransition", () => {
   });
 
   it("throws on forbidden role: trader cannot clear", () => {
-    expect(() => assertValidTransition("submitted", "cleared", "user")).toThrow("not authorised");
+    // examination_complete → cleared is a VALID transition, but not for traders
+    expect(() => assertValidTransition("examination_complete", "cleared", "user")).toThrow("not authorised");
   });
 
   it("allows payment_pending → payment_confirmed for finance only", () => {

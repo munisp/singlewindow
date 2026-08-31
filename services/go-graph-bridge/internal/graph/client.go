@@ -66,7 +66,7 @@ func DefaultConfig() Config {
 		FalkorDBGraph:  getEnv("FALKORDB_GRAPH", "trade_kg"),
 		Neo4jURI:       getEnv("NEO4J_URI", "bolt://localhost:7687"),
 		Neo4jUser:      getEnv("NEO4J_USER", "neo4j"),
-		Neo4jPassword:  getEnv("NEO4J_PASSWORD", "password"),
+		Neo4jPassword:  mustGetEnv("NEO4J_PASSWORD"), // SW-S2-4: no default secret
 		Neo4jDatabase:  getEnv("NEO4J_DATABASE", "neo4j"),
 		RustEngineURL:  getEnv("RUST_ENGINE_URL", "http://localhost:8001"),
 		PythonAIURL:    getEnv("PYTHON_AI_URL", "http://localhost:8002"),
@@ -74,6 +74,16 @@ func DefaultConfig() Config {
 		MaxConnections: 50,
 		QueryTimeout:   10 * time.Second,
 	}
+}
+
+// mustGetEnv fails closed: a missing secret refuses boot (SW-S2-4).
+func mustGetEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		slog.Error("[graph-bridge] FATAL: required secret env var is not set — no default is provided (fail closed)", "envVar", key)
+		os.Exit(1)
+	}
+	return v
 }
 
 func getEnv(key, fallback string) string {

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import {
   AlertTriangle,
+  Anchor,
   ArrowRight,
   CheckCircle,
   Clock,
@@ -210,6 +211,24 @@ export default function TraderDashboard() {
 
           {/* Right column */}
           <div className="space-y-4">
+            {/* Phase 8 — PCS trader portal entry card */}
+            <Card className="cursor-pointer transition-colors hover:border-primary/40" onClick={() => setLocation("/app/pcs")}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <Anchor className="h-4 w-4 text-primary" />
+                  Port Community System
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Cargo milestones, terminal bookings, gate status and port billing — projected from port authority events.
+                </p>
+                <Button size="sm" variant="outline" className="w-full gap-1">
+                  Open trader portal <ArrowRight className="h-3 w-3" />
+                </Button>
+              </CardContent>
+            </Card>
+
             {/* AEO status */}
             <Card>
               <CardHeader className="pb-3">

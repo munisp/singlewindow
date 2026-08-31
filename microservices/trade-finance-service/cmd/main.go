@@ -20,6 +20,12 @@
 package main
 
 import (
+	"strings"
+	"io"
+	"encoding/hex"
+	"crypto/subtle"
+	"crypto/sha256"
+	"crypto/hmac"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -93,46 +99,10 @@ type CargoTrackingEvent struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-// ─── SWIFT MT700 Generator ────────────────────────────────────────────────────
+// SW-M5: the local SWIFT MT700 generator was removed. An MT700 is bank
+// output — fabricating one locally forged a bank instrument. Only the
+// bank-supplied message from a verified confirmation is stored.
 
-func generateSWIFTMT700(lc *LetterOfCredit) string {
-	// Generate SWIFT MT700 (Issue of a Documentary Credit) message
-	return fmt.Sprintf(`:27: 1/1
-:40A: IRREVOCABLE
-:20: %s
-:31C: %s
-:31D: %s %s
-:50: %s
-:59: %s
-:32B: %s%.2f
-:41D: ANY BANK BY NEGOTIATION
-:43P: ALLOWED
-:43T: ALLOWED
-:44A: %s
-:44B: %s
-:44C: %s
-:45A: %s HS:%s %s
-:46A: COMMERCIAL INVOICE, PACKING LIST, BILL OF LADING, CERTIFICATE OF ORIGIN
-:47A: ALL DOCUMENTS IN ENGLISH
-:71B: ALL BANKING CHARGES OUTSIDE NIGERIA FOR ACCOUNT OF BENEFICIARY
-:48: 21 DAYS AFTER SHIPMENT DATE
-:49: CONFIRM`,
-		lc.LCNumber,
-		lc.CreatedAt.Format("060102"),
-		lc.ExpiryDate.Format("060102"),
-		lc.BeneficiaryCountry,
-		lc.ApplicantName,
-		lc.BeneficiaryName,
-		lc.Currency,
-		lc.Amount,
-		lc.PortOfLoading,
-		lc.PortOfDischarge,
-		lc.ExpiryDate.Format("060102"),
-		lc.GoodsDescription,
-		lc.HSCode,
-		lc.Incoterms,
-	)
-}
 
 // ─── Server ───────────────────────────────────────────────────────────────────
 
@@ -186,12 +156,15 @@ func (s *Server) createLC(w http.ResponseWriter, r *http.Request) {
 		GoodsDescription:   req.GoodsDescription,
 		HSCode:             req.HSCode,
 		Incoterms:          req.Incoterms,
-		Status:             "ISSUED",
+		// SW-M5: instruments enter DRAFT. They transition to ISSUED only via a
+		// verified signed bank confirmation (see confirmBankInstrument).
+		Status:             "DRAFT",
 		Documents:          []string{"COMMERCIAL_INVOICE", "PACKING_LIST", "BILL_OF_LADING", "CERTIFICATE_OF_ORIGIN"},
 		CreatedAt:          time.Now().UTC(),
 		UpdatedAt:          time.Now().UTC(),
 	}
-	lc.SWIFTMessage = generateSWIFTMT700(&lc)
+	// SW-M5: NO locally-fabricated SWIFT MT700. The swift_mt700 column is
+	// populated only from the bank-supplied confirmation.
 
 	docsJSON, _ := json.Marshal(lc.Documents)
 	_, err := s.db.ExecContext(ctx, `
@@ -254,7 +227,8 @@ func (s *Server) createBankGuarantee(w http.ResponseWriter, r *http.Request) {
 		Currency:        req.Currency,
 		ValidFrom:       time.Now().UTC(),
 		ValidTo:         time.Now().UTC().AddDate(0, 0, req.ValidDays),
-		Status:          "ACTIVE",
+		// SW-M5: guarantees enter DRAFT; ACTIVE only via verified bank confirmation.
+		Status:          "DRAFT",
 		DutyAmount:      req.DutyAmount,
 		CreatedAt:       time.Now().UTC(),
 	}
@@ -566,8 +540,120 @@ func (s *Server) ensureSchema() error {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+// ─── SW-M5: verified bank confirmation callback ─────────────────────────────
+
+// confirmBankInstrument transitions a DRAFT LC/BG to ISSUED/ACTIVE only when
+// the bank presents a valid HMAC-SHA256 signature over the raw body
+// (X-Bank-Signature header, BANK_CALLBACK_SECRET). The bank-supplied reference
+// and SWIFT message are stored verbatim — never fabricated locally.
+func (s *Server) confirmBankInstrument(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	secret := os.Getenv("BANK_CALLBACK_SECRET")
+	if secret == "" {
+		if isProduction() {
+			http.Error(w, "bank callback secret not configured", http.StatusInternalServerError)
+			return
+		}
+		secret = "dev-bank-secret"
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	provided, err := hex.DecodeString(strings.TrimPrefix(r.Header.Get("X-Bank-Signature"), "sha256="))
+	if err != nil || subtle.ConstantTimeCompare(provided, mac.Sum(nil)) != 1 {
+		http.Error(w, "invalid bank signature", http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		InstrumentType string `json:"instrument_type"` // "lc" | "bg"
+		InstrumentID   string `json:"instrument_id"`
+		BankReference  string `json:"bank_reference"`
+		SWIFTMessage   string `json:"swift_message,omitempty"`
+		Confirmed      bool   `json:"confirmed"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || body.InstrumentID == "" {
+		http.Error(w, "invalid confirmation payload", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var table, idCol, activeStatus string
+	switch body.InstrumentType {
+	case "lc":
+		table, idCol, activeStatus = "letters_of_credit", "id", "ISSUED"
+	case "bg":
+		table, idCol, activeStatus = "bank_guarantees", "id", "ACTIVE"
+	default:
+		http.Error(w, "instrument_type must be lc or bg", http.StatusBadRequest)
+		return
+	}
+	newStatus := "REJECTED"
+	if body.Confirmed {
+		newStatus = activeStatus
+	}
+	// Idempotent: only DRAFT instruments can transition.
+	res, err := s.db.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET status=$1, bank_reference=$2, swift_mt700=NULLIF($3,''), updated_at=NOW() WHERE %s=$4 AND status='DRAFT'`, table, idCol),
+		newStatus, body.BankReference, body.SWIFTMessage, body.InstrumentID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("confirmation failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "instrument not found or already confirmed (idempotent)", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"instrumentId": body.InstrumentID, "status": newStatus})
+}
+
+// authMiddleware enforces the platform service-auth pattern (SW-M5).
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/health" || r.URL.Path == "/v1/bank-confirmations" {
+			next.ServeHTTP(w, r) // bank confirmations are HMAC-authenticated
+			return
+		}
+		if token := r.Header.Get("X-Service-Token"); token != "" {
+			expected := os.Getenv("TRADE_FINANCE_SERVICE_TOKEN")
+			if expected == "" {
+				if isProduction() {
+					http.Error(w, "service auth not configured", http.StatusInternalServerError)
+					return
+				}
+				expected = "dev-service-token"
+			}
+			if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+				http.Error(w, "invalid service token", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Header.Get("X-User-Id") == "" {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production"
+}
+
 func main() {
-	dbURL := getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
+	// SW-M5: no secret defaults in production.
+	if isProduction() && (os.Getenv("TRADE_FINANCE_SERVICE_TOKEN") == "" || os.Getenv("BANK_CALLBACK_SECRET") == "") {
+		log.Fatal("FATAL: TRADE_FINANCE_SERVICE_TOKEN and BANK_CALLBACK_SECRET must be set in production. Refusing to boot.")
+	}
+	dbURL := getEnv("DATABASE_URL", devOnlyDB())
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
@@ -589,12 +675,21 @@ func main() {
 	r.HandleFunc("/v1/bank-guarantees", srv.createBankGuarantee).Methods("POST")
 	r.HandleFunc("/v1/bank-guarantees", srv.listBG).Methods("GET")
 	r.HandleFunc("/v1/bank-guarantees/{id}", srv.getBG).Methods("GET")
+	r.HandleFunc("/v1/bank-confirmations", srv.confirmBankInstrument).Methods("POST")
 	r.HandleFunc("/v1/tracking/{declaration_id}/events", srv.addTrackingEvent).Methods("POST")
 	r.HandleFunc("/v1/tracking/{declaration_id}", srv.getTrackingHistory).Methods("GET")
 
 	port := getEnv("PORT", "8097")
 	log.Printf("Trade Finance Service listening on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Fatal(http.ListenAndServe(":"+port, authMiddleware(r)))
+}
+
+func devOnlyDB() string {
+	if isProduction() {
+		log.Fatal("FATAL: DATABASE_URL must be set in production. Refusing to boot.")
+	}
+	log.Printf("DEV-ONLY WARNING: DATABASE_URL not set — using development default")
+	return "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway"
 }
 
 func getEnv(key, fallback string) string {

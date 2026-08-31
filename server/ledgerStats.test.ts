@@ -34,9 +34,6 @@ vi.mock("./db", () => ({
 vi.mock("./grpc-clients", () => ({
   getServiceHealthSummary: vi.fn().mockResolvedValue({}),
   checkGRPCHealth: vi.fn().mockResolvedValue(false),
-  getDeclarationGRPCClient: vi.fn().mockReturnValue(null),
-  getPaymentGRPCClient: vi.fn().mockReturnValue(null),
-  getOGAGRPCClient: vi.fn().mockReturnValue(null),
   getTigerBeetleBridgeModes: vi.fn().mockResolvedValue([]),
 }));
 

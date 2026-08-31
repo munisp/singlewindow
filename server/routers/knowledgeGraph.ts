@@ -530,6 +530,8 @@ export const knowledgeGraphRouter = router({
           avgRiskScore: z.number(),
         }),
         fallback: z.boolean().optional(),
+        unavailable: z.boolean().optional(),
+        unavailableReason: z.string().optional(),
       })
     )
     .query(async ({ input }) => {
@@ -557,34 +559,17 @@ export const knowledgeGraphRouter = router({
       }>(`/fraud-network?limit=${input.limit}&minRisk=${input.minRisk}`);
 
       if (!result) {
-        // Return synthetic demo data when bridge is unavailable
+        // SW-MP12: NEVER synthesize fraud-network entities when the graph bridge
+        // is down — fabricated nodes/edges on an investigations console could
+        // trigger real enforcement actions. Fail closed with an explicit
+        // UNAVAILABLE state and no synthetic data.
         return {
-          nodes: [
-            { id: "t1", label: "Acme Trading Ltd", type: "trader" as const, riskScore: 0.82, properties: { declarations: 45, redLane: 12 } },
-            { id: "t2", label: "Global Imports Co", type: "trader" as const, riskScore: 0.71, properties: { declarations: 33, redLane: 8 } },
-            { id: "t3", label: "FastCargo Ltd", type: "trader" as const, riskScore: 0.65, properties: { declarations: 28, redLane: 6 } },
-            { id: "t4", label: "SafeShip Inc", type: "trader" as const, riskScore: 0.21, properties: { declarations: 120, redLane: 2 } },
-            { id: "hs8517", label: "HS 8517 — Phones", type: "hs_code" as const, riskScore: 0.78, properties: { chapter: 85, description: "Telephone sets" } },
-            { id: "hs6403", label: "HS 6403 — Footwear", type: "hs_code" as const, riskScore: 0.55, properties: { chapter: 64, description: "Footwear" } },
-            { id: "p1", label: "Tema Port", type: "port" as const, riskScore: 0.61, properties: { country: "GH", congestion: "high" } },
-            { id: "p2", label: "Mombasa Port", type: "port" as const, riskScore: 0.44, properties: { country: "KE", congestion: "medium" } },
-          ],
-          edges: [
-            { source: "t1", target: "hs8517", type: "TRADES", weight: 0.82, properties: { count: 18 } },
-            { source: "t2", target: "hs8517", type: "TRADES", weight: 0.71, properties: { count: 12 } },
-            { source: "t1", target: "p1", type: "USES_PORT", weight: 0.75, properties: { count: 30 } },
-            { source: "t2", target: "p1", type: "USES_PORT", weight: 0.68, properties: { count: 22 } },
-            { source: "t3", target: "hs6403", type: "TRADES", weight: 0.65, properties: { count: 15 } },
-            { source: "t3", target: "p2", type: "USES_PORT", weight: 0.55, properties: { count: 18 } },
-            { source: "t1", target: "t2", type: "SHARED_AGENT", weight: 0.88, properties: { agent: "Broker X" } },
-          ],
-          stats: {
-            totalNodes: 8,
-            totalEdges: 7,
-            highRiskNodes: 5,
-            avgRiskScore: 0.60,
-          },
-          fallback: true,
+          nodes: [],
+          edges: [],
+          stats: { totalNodes: 0, totalEdges: 0, highRiskNodes: 0, avgRiskScore: 0 },
+          fallback: false,
+          unavailable: true,
+          unavailableReason: "GRAPH_BRIDGE_UNAVAILABLE: fraud-network data is served by the graph bridge; no data is shown rather than synthetic data.",
         };
       }
 

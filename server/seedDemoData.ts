@@ -398,8 +398,8 @@ export async function seedPortCongestionEvents(): Promise<void> {
     for (const p of PORT_EVENTS) {
       await pgQuery(
         `INSERT INTO port_congestion_events
-          (port_code, congestion_status, vessel_count, wait_time_hours, declaration_backlog, inspection_queue_size, recorded_at)
-         VALUES ($1,$2,$3,$4,$5,$6,NOW())`,
+          (port_code, congestion_status, vessel_count, wait_time_hours, declaration_backlog, inspection_queue_size, source, recorded_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'demo',NOW())`,
         [p.code, p.status, p.vessels, p.waitHours, p.backlog, p.queue]
       );
     }

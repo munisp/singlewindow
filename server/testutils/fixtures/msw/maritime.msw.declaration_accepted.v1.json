@@ -1,0 +1,35 @@
+{
+  "envelopeVersion": "1.0",
+  "eventId": "evt-msw-000004",
+  "eventType": "maritime.msw.declaration_accepted.v1",
+  "occurredAt": "2026-09-02T10:05:00Z",
+  "producer": "blueeconomy-singlewindow-msw",
+  "correlationId": "corr-msw-000001",
+  "fhir": {
+    "resourceType": "Bundle",
+    "type": "message",
+    "bundleId": "bdl-msw-000004",
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:ae49de10-b689-42cb-9e20-1e2ffe6dc6c7",
+        "resource": {
+          "@type": "type.googleapis.com/blueeconomy.msw.v1.MswDeclarationAccepted",
+          "declarationId": "mswd-000100",
+          "visitId": "mswv-000001",
+          "formType": "FAL1",
+          "version": 1,
+          "reviewingAgency": "NPA",
+          "reviewNoteDigestSha256": "sha256:b202766911249a7241e72fc9ee424e990a453d0d871145cc5a6c1733510e141d",
+          "decidedAt": "2026-09-02T10:05:00Z"
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "principalId": "e970cd86-4a59-4f94-bf5b-7372d1d22882",
+    "principalRole": "msw-npa",
+    "ledgerCommitHash": "",
+    "signature": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJsdWVlY29ub215LXNpbmdsZXdpbmRvdy1tc3ctMCJ9.eyJjbGFzc2lmaWNhdGlvbiI6IklOVEVSTkFMIiwiY29ycmVsYXRpb25JZCI6ImNvcnItbXN3LTAwMDAwMSIsImVudmVsb3BlVmVyc2lvbiI6IjEuMCIsImV2ZW50SWQiOiJldnQtbXN3LTAwMDAwNCIsImV2ZW50VHlwZSI6Im1hcml0aW1lLm1zdy5kZWNsYXJhdGlvbl9hY2NlcHRlZC52MSIsImZoaXIiOnsiYnVuZGxlSWQiOiJiZGwtbXN3LTAwMDAwNCIsImVudHJ5IjpbeyJmdWxsVXJsIjoidXJuOnV1aWQ6YWU0OWRlMTAtYjY4OS00MmNiLTllMjAtMWUyZmZlNmRjNmM3IiwicmVzb3VyY2UiOnsiQHR5cGUiOiJ0eXBlLmdvb2dsZWFwaXMuY29tL2JsdWVlY29ub215Lm1zdy52MS5Nc3dEZWNsYXJhdGlvbkFjY2VwdGVkIiwiZGVjaWRlZEF0IjoiMjAyNi0wOS0wMlQxMDowNTowMFoiLCJkZWNsYXJhdGlvbklkIjoibXN3ZC0wMDAxMDAiLCJmb3JtVHlwZSI6IkZBTDEiLCJyZXZpZXdOb3RlRGlnZXN0U2hhMjU2Ijoic2hhMjU2OmIyMDI3NjY5MTEyNDlhNzI0MWU3MmZjOWVlNDI0ZTk5MGE0NTNkMGQ4NzExNDVjYzVhNmMxNzMzNTEwZTE0MWQiLCJyZXZpZXdpbmdBZ2VuY3kiOiJOUEEiLCJ2ZXJzaW9uIjoxLCJ2aXNpdElkIjoibXN3di0wMDAwMDEifX1dLCJyZXNvdXJjZVR5cGUiOiJCdW5kbGUiLCJ0eXBlIjoibWVzc2FnZSJ9LCJvY2N1cnJlZEF0IjoiMjAyNi0wOS0wMlQxMDowNTowMFoiLCJwcm9kdWNlciI6ImJsdWVlY29ub215LXNpbmdsZXdpbmRvdy1tc3ciLCJwcm92ZW5hbmNlIjp7ImxlZGdlckNvbW1pdEhhc2giOiIiLCJwcmluY2lwYWxJZCI6ImU5NzBjZDg2LTRhNTktNGY5NC1iZjViLTczNzJkMWQyMjg4MiIsInByaW5jaXBhbFJvbGUiOiJtc3ctbnBhIn19.vNiwa0fGheBWxWMRli_0CWVUUhiL9RpWqH5DrmoC_n0bKlhB8LpI1QQSNz8P7FiVqn1hXbwcuSFi5stFxPenAA"
+  },
+  "classification": "INTERNAL"
+}

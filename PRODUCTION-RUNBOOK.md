@@ -634,3 +634,29 @@ kubectl rollout restart deployment/tradegateway-web-api -n tradegateway
 ---
 
 *This runbook should be reviewed and updated after every major incident and before every major release. Last reviewed: March 2026.*
+
+
+## Phase-6 database migrations (REQUIRED at deploy)
+
+Apply `drizzle/migrations/0051_phase6_compliance.sql` and
+`drizzle/migrations/0052_phase6_rls.sql` during deployment:
+
+- `ALTER TYPE ... ADD VALUE` statements in 0051 must run **outside**
+  transaction blocks (PostgreSQL restriction) — apply the file directly with
+  psql, not inside a wrapping BEGIN/COMMIT.
+- 0052 enables row-level security; the application must connect with a
+  **non-BYPASSRLS** role (create a dedicated app role; do not use the
+  postgres superuser for the runtime connection).
+
+## Phase-6 boot-fatal environment variables
+
+The following are REQUIRED (services refuse to boot when unset or dev-valued)
+and are templated in `.env.compose.example`: RUSTFS_SERVICE_TOKEN,
+RUSTFS_ACCESS_KEY/SECRET_KEY, APISIX_ADMIN_KEY, NEO4J_PASSWORD, MINIO_*,
+OPENSEARCH_PASSWORD, WAZUH_PASSWORD, KEYCLOAK_ADMIN_PASSWORD,
+KEYCLOAK_EXPECTED_AUDIENCE, INTERNAL_CA_BUNDLE_PATH,
+MOJALOOP_WEBHOOK_SECRET, MOJALOOP_CALLBACK_SECRET, PAYMENT_SERVICE_TOKEN,
+DECLARATION_SERVICE_TOKEN, TRADE_FINANCE_SERVICE_TOKEN, BANK_CALLBACK_SECRET,
+DECLARATION_ENGINE_JWT_SECRET, TARIFF_SERVICE_URL,
+DRAWBACK_FOUR_EYES_THRESHOLD_MINOR, SANCTIONS_LIST_DIR (or
+OFAC_LIST_URL/UN_LIST_URL egress), SANCTIONS_MAX_AGE_HOURS.

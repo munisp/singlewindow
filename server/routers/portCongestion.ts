@@ -6,7 +6,7 @@
  *   - Day-of-week and time-of-day seasonality factors
  */
 import { z } from "zod";
-import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
+import { protectedProcedure, router } from "../_core/trpc";
 import { getDb, getPool } from "../db";
 
 async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -242,7 +242,7 @@ function buildPortForecast(portCode: string, profileOverride?: typeof PORT_PROFI
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
 
 export const portCongestionRouter = router({
-  listPorts: publicProcedure.query(async () => {
+  listPorts: protectedProcedure.query(async () => {
     const profiles = await getPortProfiles();
     return Object.entries(profiles).map(([code, p]) => ({
       portCode: code,
@@ -252,7 +252,7 @@ export const portCongestionRouter = router({
     }));
   }),
 
-  getPortForecast: publicProcedure
+  getPortForecast: protectedProcedure
     .input(z.object({ portCode: z.string() }))
     .query(async ({ input }) => {
       const profiles = await getPortProfiles();
@@ -261,7 +261,7 @@ export const portCongestionRouter = router({
       return buildPortForecastFromProfile(input.portCode, profile);
     }),
 
-  getAllForecasts: publicProcedure.query(async () => {
+  getAllForecasts: protectedProcedure.query(async () => {
     const profiles = await getPortProfiles();
     return Object.entries(profiles).map(([code, profile]) => {
       const f = buildPortForecastFromProfile(code, profile);
@@ -279,7 +279,7 @@ export const portCongestionRouter = router({
     });
   }),
 
-  getSlaBreachAlerts: publicProcedure
+  getSlaBreachAlerts: protectedProcedure
     .input(z.object({ portCode: z.string().optional() }))
     .query(async ({ input }) => {
       const profiles = await getPortProfiles();
@@ -294,7 +294,7 @@ export const portCongestionRouter = router({
       return alerts.sort((a, b) => b.predictedScore - a.predictedScore);
     }),
 
-  getNetworkSummary: publicProcedure.query(async () => {
+  getNetworkSummary: protectedProcedure.query(async () => {
     const profiles = await getPortProfiles();
     const forecasts = Object.entries(profiles).map(([code, profile]) => buildPortForecastFromProfile(code, profile));
     const totalAlerts = forecasts.reduce((sum, f) => sum + f.slaBreachAlerts.length, 0);
@@ -312,7 +312,7 @@ export const portCongestionRouter = router({
     };
   }),
 
-  getPortHistory: publicProcedure
+  getPortHistory: protectedProcedure
     .input(z.object({ portCode: z.string(), days: z.number().min(1).max(30).default(7) }))
     .query(async ({ input }) => {
       return pgQuery(
@@ -401,7 +401,7 @@ export const portCongestionRouter = router({
    * v116: getPortCongestionTrend — return hourly average congestion scores for
    * the past N days for a specific port, suitable for a trend line chart.
    */
-  getPortCongestionTrend: publicProcedure
+  getPortCongestionTrend: protectedProcedure
     .input(z.object({
       portCode: z.string().min(2).max(16),
       days: z.number().int().min(1).max(30).default(7),

@@ -39,7 +39,7 @@ _scaler = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the current model on startup."""
+    """Load the current model on startup; optionally start the retrain scheduler."""
     global _model, _scaler
     import joblib
     from pathlib import Path
@@ -60,7 +60,28 @@ async def lifespan(app: FastAPI):
             logger.warning("Could not load model on startup: %s", exc)
     else:
         logger.info("No pre-trained model found — /detect will use heuristics until /train is called")
+
+    # Optional in-process retrain loop (env-gated, OFF by default).
+    # In Kubernetes the platform CronJob (insider-threat-retrain) is the
+    # canonical retrain loop; this flag exists for single-process deployments.
+    scheduler_started = False
+    if os.getenv("RETRAIN_SCHEDULER_ENABLED", "false").lower() == "true":
+        try:
+            from retrain_scheduler import start_scheduler
+            start_scheduler()
+            scheduler_started = True
+            logger.info("In-process retrain scheduler enabled (RETRAIN_SCHEDULER_ENABLED=true)")
+        except Exception as exc:
+            logger.error("Failed to start retrain scheduler: %s", exc)
+
     yield
+
+    if scheduler_started:
+        try:
+            from retrain_scheduler import stop_scheduler
+            stop_scheduler()
+        except Exception as exc:
+            logger.warning("Failed to stop retrain scheduler cleanly: %s", exc)
 
 
 app = FastAPI(

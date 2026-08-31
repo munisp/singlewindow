@@ -6,8 +6,13 @@ apisix:
     ip: 0.0.0.0
     port: 9180
   admin_key:
+    # P0-12 (PRA-107): NO hardcoded admin key. The key is env-required —
+    # render this config from the sealed secret
+    # (infra/k8s/secrets/sealed-secrets-templates.yaml: APISIX_ADMIN_KEY),
+    # e.g. `envsubst < config.yaml`. Deploying with the placeholder
+    # unresolved fails closed: the admin API rejects every call.
     - name: admin
-      key: tradegateway-apisix-admin-key-2026
+      key: ${APISIX_ADMIN_KEY}
       role: admin
   ssl:
     enable: false
@@ -31,9 +36,19 @@ plugin_attr:
   # OpenAppSec WAF — ext-plugin integration
   # The openappsec-agent sidecar listens on port 8119 and receives pre-request
   # hooks from APISIX via the ext-plugin-pre-req mechanism.
+  #
+  # P0-11 (PRA-104) FAIL-POLICY (explicit, fail-closed):
+  #   allow_degradation: false means an unreachable/timing-out WAF agent makes
+  #   APISIX REJECT the request (503) instead of silently passing it
+  #   uninspected. Rationale: this gateway fronts money and admin routes
+  #   (/api/payments/*, /api/ucr/*, /api/manifests/* — see
+  #   routes-gap-services.yaml, mode "prevent"); letting traffic through with
+  #   the WAF down inverts the control. Availability trade-off accepted:
+  #   WAF down == gateway 503, surfaced via the Prometheus export (9091).
   ext-plugin-pre-req:
     addr: openappsec-agent:8119
-    timeout: 2000  # 2s timeout — fail open to avoid blocking legitimate traffic
+    timeout: 2000            # 2s — then REJECT (see allow_degradation)
+    allow_degradation: false # fail-closed: deny when the WAF agent is unreachable/times out
 
 plugins:
   - real-ip

@@ -9,11 +9,17 @@ function validProductionConfig(): typeof ENV {
     apiKeyHashSecret: "api-key-hash-secret-for-production-validation",
     keycloakUrl: "https://keycloak.internal.example",
     keycloakClientSecret: "keycloak-client-secret",
+    keycloakTokenAudience: "tradegateway-api",
+    caddyAskSecret: "caddy-ask-shared-secret",
+    tbBridgeClientId: "svc-tigerbeetle-bridge",
+    tbBridgeClientSecret: "tb-bridge-client-secret-0123456789",
     permifyUrl: "https://permify.internal.example",
     permifyApiKey: "permify-api-key",
     redisUrl: "redis://:strong-password@redis.internal:6379",
     redisPassword: "strong-password",
     mojaloopUrl: "https://sandbox.mojaloop.example",
+    tariffServiceUrl: "https://tariff-engine.internal.example",
+    portInteropUrl: "https://port-interop.internal.example",
     temporalAddress: "temporal.internal:7233",
     tigerBeetleAddresses: ["tigerbeetle.internal:3000"],
   };
@@ -28,6 +34,30 @@ describe("validateProductionConfig", () => {
     const config = validProductionConfig();
     config.mojaloopUrl = "";
     expect(() => validateProductionConfig(config)).toThrow(/MOJALOOP_URL/);
+  });
+
+  it("rejects a missing tariff-engine URL (PRA-100 fail-closed)", () => {
+    const config = validProductionConfig();
+    config.tariffServiceUrl = "";
+    expect(() => validateProductionConfig(config)).toThrow(/TARIFF_SERVICE_URL/);
+  });
+
+  it("rejects a missing port-interop URL (PCS upstream fail-closed)", () => {
+    const config = validProductionConfig();
+    config.portInteropUrl = "";
+    expect(() => validateProductionConfig(config)).toThrow(/PORT_INTEROP_URL/);
+  });
+
+  it("rejects a local port-interop endpoint in production", () => {
+    const config = validProductionConfig();
+    config.portInteropUrl = "http://localhost:18080";
+    expect(() => validateProductionConfig(config)).toThrow(/unsafe local endpoint: PORT_INTEROP_URL/);
+  });
+
+  it("rejects a local tariff-engine endpoint in production", () => {
+    const config = validProductionConfig();
+    config.tariffServiceUrl = "http://localhost:8080";
+    expect(() => validateProductionConfig(config)).toThrow(/unsafe local endpoint: TARIFF_SERVICE_URL/);
   });
 
   it("rejects local-only dependency endpoints in production", () => {

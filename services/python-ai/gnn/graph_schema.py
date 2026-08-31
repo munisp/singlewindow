@@ -63,7 +63,14 @@ FALKORDB_GRAPH = os.getenv("FALKORDB_GRAPH", "trade_kg")
 
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+def _required_env(name):
+    """SW-S2-4: secrets have no defaults — refuse to boot when unset."""
+    _v = os.getenv(name)
+    if not _v:
+        raise RuntimeError(f"{name} must be set — no default is provided (fail closed, SW-S2-4)")
+    return _v
+
+NEO4J_PASSWORD = _required_env("NEO4J_PASSWORD")
 
 # ─── SCHEMA DEFINITIONS ───────────────────────────────────────────────────────
 

@@ -21,6 +21,8 @@ RUN cargo build --release
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
+# SW-O12: non-root runtime
+RUN useradd --create-home --uid 10001 appuser
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -34,6 +36,8 @@ COPY --from=builder /app/target/release/graph-risk-engine .
 
 ENV PORT=8098
 ENV RUST_LOG=info
+
+USER appuser
 
 EXPOSE 8098
 

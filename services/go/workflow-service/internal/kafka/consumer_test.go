@@ -4,6 +4,9 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
+	"os"
 	"testing"
 	"time"
 )
@@ -59,12 +62,6 @@ func newTestConsumer(mock *mockTemporalClient) *Consumer {
 	c.mockClient = mock
 	return c
 }
-
-import (
-	"fmt"
-	"log"
-	"os"
-)
 
 func newTestLogger() *log.Logger {
 	return log.New(os.Stdout, "[test] ", 0)

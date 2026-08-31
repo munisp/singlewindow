@@ -345,3 +345,17 @@ func TestPostTransfer_ConcurrentSafe(t *testing.T) {
 		}
 	}
 }
+
+// SW-O3 fail-closed: SimBackend refuses to boot in production without the
+// explicit dev opt-in TB_ALLOW_SIM_BACKEND=1.
+func TestSimBackendRefusesProduction(t *testing.T) {
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("TB_ALLOW_SIM_BACKEND", "")
+	if _, err := backend.NewBackend("tigerbeetle:3000", 0); err == nil {
+		t.Fatal("SimBackend must refuse to boot when ENVIRONMENT=production without TB_ALLOW_SIM_BACKEND=1")
+	}
+	t.Setenv("TB_ALLOW_SIM_BACKEND", "1")
+	if _, err := backend.NewBackend("tigerbeetle:3000", 0); err != nil {
+		t.Fatalf("dev opt-in must permit SimBackend: %v", err)
+	}
+}

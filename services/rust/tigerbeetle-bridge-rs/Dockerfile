@@ -1,3 +1,10 @@
+# ⚠️  PHASE-6 NOTICE (SW-3): this image builds the bridge WITHOUT the
+# tigerbeetle-live feature — the resulting binary is an IN-MEMORY SIMULATION
+# and is DEV/TEST-ONLY. The binary itself fails closed: it refuses to boot
+# when ENVIRONMENT=production and requires TB_ALLOW_SIM_BACKEND=1 otherwise.
+# The CANONICAL production ledger bridge is the Go tigerbeetle-bridge
+# (k8s Service `tigerbeetle-bridge`, HTTP /api/ledger/*, port 8086). Do NOT
+# reference this image from any production manifest (see next-wave SW-C).
 # ─── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM rust:1.78-slim AS builder
 

@@ -9,8 +9,57 @@
  */
 
 import { Client } from "@opensearch-project/opensearch";
+import { SpanKind } from "@opentelemetry/api";
+import { withSpan } from "./telemetry";
 
 let _client: Client | null = null;
+
+/**
+ * Typed failure (PRA-110): the search cluster is down/unreachable or the
+ * query failed. Callers MUST surface this (typed *_SEARCH_UNAVAILABLE error)
+ * rather than returning an empty result set — empty-on-outage is
+ * indistinguishable from "no results" and hides incidents from operators.
+ */
+export class OpenSearchUnavailableError extends Error {
+  readonly index: string;
+  constructor(index: string, cause: unknown) {
+    super(
+      `OpenSearch unavailable for index "${index}": ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`
+    );
+    this.name = "OpenSearchUnavailableError";
+    this.index = index;
+  }
+}
+
+// Phase-7 OTel: wrap the OpenSearch client so every index/search call emits a
+// CLIENT span. No-op (non-recording) when telemetry is disabled.
+const TRACED_METHODS = new Set(["index", "search", "bulk", "delete", "update", "count"]);
+
+function traceClient(client: Client): Client {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof prop === "string" && TRACED_METHODS.has(prop) && typeof value === "function") {
+        return (...args: any[]) =>
+          withSpan(
+            `opensearch.${prop}`,
+            {
+              kind: SpanKind.CLIENT,
+              attributes: {
+                "db.system": "opensearch",
+                "db.operation": prop,
+                "db.opensearch.index": (args[0] as any)?.index,
+              },
+            },
+            () => value.apply(target, args)
+          );
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 export function getOpenSearchClient(): Client | null {
   if (_client) return _client;
@@ -19,7 +68,7 @@ export function getOpenSearchClient(): Client | null {
     // Graceful degradation — OpenSearch is optional in dev
     return null;
   }
-  _client = new Client({
+  _client = traceClient(new Client({
     node: url,
     auth: process.env.OPENSEARCH_USERNAME
       ? {
@@ -30,7 +79,7 @@ export function getOpenSearchClient(): Client | null {
     ssl: {
       rejectUnauthorized: process.env.NODE_ENV === "production",
     },
-  });
+  }));
   return _client;
 }
 
@@ -86,7 +135,7 @@ export async function indexDeclaration(doc: DeclarationDocument): Promise<void> 
 
 export async function searchDeclarations(query: string, traderId?: number, limit = 20) {
   const client = getOpenSearchClient();
-  if (!client) return { hits: [], total: 0 };
+  if (!client) throw new OpenSearchUnavailableError(INDICES.DECLARATIONS, "client not configured (OPENSEARCH_URL unset or unreachable)");
   try {
     const must: object[] = [
       {
@@ -133,8 +182,9 @@ export async function searchDeclarations(query: string, traderId?: number, limit
       const totalCount = typeof total === 'number' ? total : (total as any)?.value ?? 0;
       return { hits, total: totalCount };
   } catch (err) {
+    if (err instanceof OpenSearchUnavailableError) throw err;
     console.error("[OpenSearch] Search failed:", err);
-    return { hits: [], total: 0 };
+    throw new OpenSearchUnavailableError(INDICES.DECLARATIONS, err);
   }
 }
 
@@ -149,7 +199,7 @@ export async function searchDocuments(
   body: Record<string, unknown>
 ): Promise<{ hits: unknown[]; total: number }> {
   const client = getOpenSearchClient();
-  if (!client) return { hits: [], total: 0 };
+  if (!client) throw new OpenSearchUnavailableError(index, "client not configured (OPENSEARCH_URL unset or unreachable)");
   try {
     const response = await client.search({ index, body });
     const hits = (response.body.hits?.hits ?? []).map((h: any) => ({
@@ -162,8 +212,9 @@ export async function searchDocuments(
       typeof total === "number" ? total : (total as any)?.value ?? 0;
     return { hits, total: totalCount };
   } catch (err) {
+    if (err instanceof OpenSearchUnavailableError) throw err;
     console.error(`[OpenSearch] searchDocuments(${index}) failed:`, err);
-    return { hits: [], total: 0 };
+    throw new OpenSearchUnavailableError(index, err);
   }
 }
 
@@ -309,7 +360,10 @@ export async function ensureOpenSearchIndices(): Promise<void> {
 // ─── INDEX LIFECYCLE MANAGEMENT ──────────────────────────────────────────────
 /**
  * Creates an ISM (Index State Management) policy on OpenSearch for the
- * audit-trail-* index pattern:
+ * tradegateway-audit-* index pattern (matches the actual
+ * tradegateway-audit-events and tradegateway-audit-log indices; the
+ * previous audit-trail-* pattern matched no index, so retention never
+ * applied):
  *   hot (7 days) → warm (30 days) → delete (90 days)
  */
 export async function setupIndexLifecycle(): Promise<{ success: boolean; message: string }> {
@@ -335,7 +389,7 @@ export async function setupIndexLifecycle(): Promise<{ success: boolean; message
           transitions: [],
         },
       ],
-      ism_template: [{ index_patterns: ["audit-trail-*"], priority: 100 }],
+      ism_template: [{ index_patterns: ["tradegateway-audit-*"], priority: 100 }],
     },
   };
   try {

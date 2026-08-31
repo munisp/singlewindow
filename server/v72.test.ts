@@ -149,11 +149,14 @@ describe("tRPC insiderThreat: AB procedures", () => {
     expect(typeof caller.insiderThreat.promoteModel).toBe("function");
   });
 
-  it("promoteModel returns a defined result", async () => {
+  it("promoteModel fails closed when the four-eyes store is unavailable", async () => {
+    // SW-G4: model promotion is dual-control ENFORCED (Postgres-backed
+    // four_eyes_requests). With no store reachable the mutation must refuse —
+    // it can never fabricate a promotion outcome.
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
-    const result = await caller.insiderThreat.promoteModel({ reason: "test_promotion", operator: "test_admin" });
-    expect(result).toBeDefined();
-    expect(typeof result).toBe("object");
+    await expect(
+      caller.insiderThreat.promoteModel({ reason: "test_promotion", operator: "test_admin" })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("getABStats is restricted to admin/customs_officer", async () => {

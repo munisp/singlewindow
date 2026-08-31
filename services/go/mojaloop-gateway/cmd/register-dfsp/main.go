@@ -1,17 +1,18 @@
 // cmd/register-dfsp/main.go — Mojaloop DFSP registration bootstrap binary.
 //
 // Usage:
-//   go run ./cmd/register-dfsp
-//   # or with env overrides:
-//   MOJALOOP_HUB_URL=http://hub:3001 MOJALOOP_DFSP_ID=tradegateway go run ./cmd/register-dfsp
+//
+//	go run ./cmd/register-dfsp
+//	# or with env overrides:
+//	MOJALOOP_HUB_URL=http://hub:3001 MOJALOOP_DFSP_ID=tradegateway go run ./cmd/register-dfsp
 //
 // This binary:
-//   1. Registers TradeGateway as a DFSP with the Mojaloop Hub
-//   2. Sets the net debit cap (1 billion NGN by default)
-//   3. Creates settlement and position accounts
-//   4. Registers the customs authority party in the Account Lookup Service (ALS)
-//   5. Registers all 7 FSPIOP callback endpoints
-//   6. Advertises quote and transfer capabilities
+//  1. Registers TradeGateway as a DFSP with the Mojaloop Hub
+//  2. Sets the net debit cap (1 billion NGN by default)
+//  3. Creates settlement and position accounts
+//  4. Registers the customs authority party in the Account Lookup Service (ALS)
+//  5. Registers all 7 FSPIOP callback endpoints
+//  6. Advertises quote and transfer capabilities
 //
 // All steps are idempotent — safe to re-run after restarts or data resets.
 // Exit code 0 = all steps succeeded or were already done.
@@ -68,7 +69,7 @@ func main() {
 	var signer *dfsp.Signer
 	keyPath := os.Getenv("MOJALOOP_JWS_KEY_PATH")
 	if keyPath != "" {
-		signer, err = dfsp.NewSignerFromFile(keyPath, cfg.DFSP_ID)
+		signer, err = dfsp.NewSignerFromFile(cfg.DFSP_ID, keyPath)
 		if err != nil {
 			logger.Warn("Failed to load JWS key from file — falling back to ephemeral key",
 				zap.String("path", keyPath), zap.Error(err))
@@ -111,7 +112,7 @@ func main() {
 func printReport(report *dfsp.RegistrationReport) {
 	fmt.Println()
 	fmt.Println("╔══════════════════════════════════════════════════════════════════╗")
-	fmt.Printf( "║   Mojaloop DFSP Registration Report — %s%s║\n",
+	fmt.Printf("║   Mojaloop DFSP Registration Report — %s%s║\n",
 		report.DFSP_ID, padding(report.DFSP_ID, 26))
 	fmt.Println("╠══════════════════════════════════════════════════════════════════╣")
 

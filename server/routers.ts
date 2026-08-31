@@ -55,6 +55,7 @@ import { bondedWarehouseRouter } from "./routers/bondedWarehouse";
 import { portCongestionRouter } from "./routers/portCongestion";
 import { traderScorecardRouter } from "./routers/traderScorecard";
 import { cargoTrackingRouter } from "./routers/cargoTracking";
+import { mswRouter } from "./routers/msw";
 import { onboardingRouter } from "./routers/onboarding";
 import { geofencesRouter } from "./routers/geofences";
 import { webhooksRouter } from "./routers/webhooks";
@@ -115,7 +116,9 @@ import { wtoValuationRouter } from "./routers/wtoValuation";
 import { advanceRulingRouter } from "./routers/advanceRuling";
 import { tradeFinanceRouter } from "./routers/tradeFinance";
 import { tradeAnalyticsRouter } from "./routers/tradeAnalytics";
+import { openDataRouter } from "./routers/openData";
 import { ncsNrsRouter } from "./routers/ncsNrs";
+import { pcsRouter } from "./routers/pcs";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
 
@@ -306,6 +309,7 @@ export const appRouter = router({
   portCongestion: portCongestionRouter,
   traderScorecard: traderScorecardRouter,
   cargoTracking: cargoTrackingRouter,
+  msw: mswRouter,
   onboarding: onboardingRouter,
   geofences: geofencesRouter,
   webhooks: webhooksRouter,
@@ -364,7 +368,10 @@ export const appRouter = router({
   advanceRuling: advanceRulingRouter,
   tradeFinance: tradeFinanceRouter,
   tradeAnalytics: tradeAnalyticsRouter,
+  // PRA-014: the ONLY unauthenticated business endpoint (rate-limited open data)
+  openData: openDataRouter,
   ncsNrs: ncsNrsRouter,
+  pcs: pcsRouter,
 });
 
 export type AppRouter = typeof appRouter;

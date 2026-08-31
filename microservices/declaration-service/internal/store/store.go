@@ -206,9 +206,35 @@ func (s *Store) AllOGAPermitsResolved(ctx context.Context, declarationId int64) 
 		}
 	}
 	if total == 0 {
-		return true, false, nil // No permits required
+		// SW-M4: zero permits is NOT auto-approval. Clearance with no permits
+		// on record requires an explicit permit-exemption (see HasPermitExemption).
+		return false, false, nil
 	}
 	return approved == total, rejected > 0, rows.Err()
+}
+
+// DeclarationPaymentConfirmed reports whether the declaration has reached a
+// payment-confirmed state. That state is only ever written by the verified
+// payment.confirmed event consumer — never self-asserted by the caller (SW-M4).
+func (s *Store) DeclarationPaymentConfirmed(ctx context.Context, id int64) (bool, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM declarations WHERE id = $1`, id).Scan(&status)
+	if err != nil {
+		return false, err
+	}
+	return status == "payment_confirmed" || status == "examination_complete", nil
+}
+
+// HasPermitExemption reports whether an explicit permit-exemption record
+// exists for the declaration (SW-M4). Fails closed when the table is absent.
+func (s *Store) HasPermitExemption(ctx context.Context, id int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM permit_exemptions WHERE declaration_id = $1 AND revoked_at IS NULL`, id).Scan(&n)
+	if err != nil {
+		return false, nil // fail closed: no exemption
+	}
+	return n > 0, nil
 }
 
 // ListDeclarations retrieves declarations with optional filters

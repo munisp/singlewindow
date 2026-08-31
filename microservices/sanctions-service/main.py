@@ -1,14 +1,14 @@
 """
-sanctions-service — TradeGateway NGSWTP
-Screens traders, consignees, and goods descriptions against:
-  - UN Security Council Consolidated List
-  - OFAC SDN List
-  - EU Consolidated Sanctions List
-  - INTERPOL Notices (via OpenCTI integration)
-  - WCO CEN (Customs Enforcement Network)
+sanctions-service — TradeGateway NGSWTP (SW-8/SW-M6 remediated)
+Screens traders and consignees against the REAL public sanctions lists
+loaded at boot (see list_loader.py):
+  - OFAC SDN List (CSV)            — when loaded
+  - UN Security Council Consolidated List (XML) — when loaded
+Only lists that ACTUALLY loaded are claimed (see /health listsLoaded).
+Screening REFUSES (503) when no list is available or lists are stale —
+a screening service without lists must never answer "clear".
 
-Uses fuzzy matching (Jaro-Winkler + Levenshtein) with configurable
-match threshold. Publishes results to Kafka via Dapr.
+Uses fuzzy matching (Jaro-Winkler) with configurable match threshold.
 """
 from __future__ import annotations
 
@@ -27,27 +27,21 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from list_loader import SanctionsListRegistry, build_registry_from_env
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [sanctions-service] %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway",
-)
+DATABASE_URL = os.getenv("DATABASE_URL", "")  # no default with credentials (SW-S2-4)
 PORT = int(os.getenv("PORT", "8087"))
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.85"))
+MAX_LIST_AGE_HOURS = float(os.getenv("SANCTIONS_MAX_AGE_HOURS", "24"))
 
-# ── Simplified sanctions list (in production: loaded from OpenCTI/OFAC API) ───
-SANCTIONS_ENTRIES = [
-    {"id": "UN-001", "name": "ACME ARMS LTD", "list": "UN-SC", "type": "entity"},
-    {"id": "UN-002", "name": "GLOBAL CHEMICAL CORP", "list": "UN-SC", "type": "entity"},
-    {"id": "OFAC-001", "name": "SHADOW TRADE LLC", "list": "OFAC-SDN", "type": "entity"},
-    {"id": "OFAC-002", "name": "DARK HARBOR SHIPPING", "list": "OFAC-SDN", "type": "entity"},
-    {"id": "EU-001", "name": "RESTRICTED EXPORTS GMBH", "list": "EU-CONS", "type": "entity"},
-]
+# ── Real sanctions lists (SW-8) — the 5-name hardcoded stub was REMOVED. ──────
+LIST_REGISTRY = SanctionsListRegistry()
 
 # ── Database ──────────────────────────────────────────────────────────────────
 _db_conn: Optional[psycopg2.extensions.connection] = None
@@ -55,6 +49,8 @@ _db_conn: Optional[psycopg2.extensions.connection] = None
 
 def get_db():
     global _db_conn
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured")
     if _db_conn is None or _db_conn.closed:
         _db_conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return _db_conn
@@ -124,11 +120,11 @@ def jaro_winkler(s1: str, s2: str) -> float:
 
 
 def screen_name(name: str) -> list[dict]:
-    """Screen a name against all sanctions lists."""
+    """Screen a name against every REAL loaded sanctions list."""
     normalized = normalize(name)
     hits = []
 
-    for entry in SANCTIONS_ENTRIES:
+    for entry in LIST_REGISTRY.all_entries():
         entry_normalized = normalize(entry["name"])
         score = jaro_winkler(normalized, entry_normalized)
         if score >= MATCH_THRESHOLD:
@@ -167,15 +163,23 @@ class ScreeningResult(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"[sanctions-service] Starting on port {PORT}")
-    logger.info(f"[sanctions-service] Loaded {len(SANCTIONS_ENTRIES)} sanctions entries")
+    loaded = build_registry_from_env()
+    LIST_REGISTRY._lists = loaded._lists
+    LIST_REGISTRY._errors = loaded._errors
+    status = LIST_REGISTRY.status()
+    logger.info(f"[sanctions-service] Lists loaded: {status['listsLoaded']} version={status['listVersion']}")
+    if status["loadErrors"]:
+        logger.error(f"[sanctions-service] List load errors (fail closed for missing lists): {status['loadErrors']}")
+    if not LIST_REGISTRY.is_available():
+        logger.error("[sanctions-service] NO sanctions lists available — screening endpoints will return 503")
     logger.info(f"[sanctions-service] Match threshold: {MATCH_THRESHOLD}")
     yield
 
 
 app = FastAPI(
     title="TradeGateway Sanctions Screening",
-    description="Real-time sanctions screening against UN/OFAC/EU lists",
-    version="1.0.0",
+    description="Sanctions screening against the real OFAC SDN and UN SC consolidated lists actually loaded at boot (see /health)",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -184,19 +188,46 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/health")
 async def health():
+    available = LIST_REGISTRY.is_available()
     return {
-        "status": "ok",
+        "status": "ok" if available else "degraded",
         "service": "sanctions-service",
-        "version": "1.0.0",
-        "entriesLoaded": len(SANCTIONS_ENTRIES),
+        "version": "2.0.0",
+        "screeningAvailable": available,
         "matchThreshold": MATCH_THRESHOLD,
+        **LIST_REGISTRY.status(),
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
 
+def _require_screening_available():
+    """Fail closed: no screening without real, fresh lists (SW-8)."""
+    if not LIST_REGISTRY.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "SCREENING_UNAVAILABLE",
+                "reason": "no_sanctions_lists_loaded",
+                "loadErrors": LIST_REGISTRY.errors,
+                "action": "route to manual review — do NOT treat as clear",
+            },
+        )
+    if LIST_REGISTRY.is_stale(MAX_LIST_AGE_HOURS):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "SCREENING_UNAVAILABLE",
+                "reason": f"sanctions_lists_stale (older than {MAX_LIST_AGE_HOURS}h)",
+                "listVersion": LIST_REGISTRY.list_version(),
+                "action": "route to manual review — do NOT treat as clear",
+            },
+        )
+
+
 @app.post("/api/sanctions/screen", response_model=ScreeningResult)
 async def screen_declaration(request: ScreeningRequest):
-    """Screen a declaration against all sanctions lists."""
+    """Screen a declaration against the real loaded sanctions lists."""
+    _require_screening_available()
     start = time.perf_counter()
     all_matches = []
 
@@ -226,7 +257,14 @@ async def screen_declaration(request: ScreeningRequest):
                     if row["consignee_name"]:
                         all_matches.extend(screen_name(row["consignee_name"]))
         except Exception as e:
-            logger.warning(f"DB lookup failed: {e}")
+            # SW-8: a failed DB lookup must NEVER silently become hit:false —
+            # that is how sanctioned entities get cleared. Fail the request.
+            logger.error(f"DB lookup failed — refusing to screen without entity names: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail={"error": "ENTITY_LOOKUP_FAILED", "reason": str(e),
+                        "action": "route to manual review — do NOT treat as clear"},
+            )
 
     # Deduplicate by entry ID
     seen = set()
@@ -245,7 +283,7 @@ async def screen_declaration(request: ScreeningRequest):
         f"hit={hit} matches={len(unique_matches)} elapsed={elapsed_ms}ms"
     )
 
-    # Record screening result
+    # Record screening result WITH the exact list version screened against.
     try:
         conn = get_db()
         with conn.cursor() as cur:
@@ -264,13 +302,15 @@ async def screen_declaration(request: ScreeningRequest):
             conn.commit()
     except Exception as e:
         logger.warning(f"[sanctions-service] Failed to record screening: {e}")
+    list_version = LIST_REGISTRY.list_version()
+    logger.info(f"[sanctions-service] list_version={list_version} declaration={request.declarationId}")
 
     return ScreeningResult(
         declarationId=request.declarationId,
         hit=hit,
         listName=top_match["list"] if top_match else None,
         matchScore=top_match["matchScore"] if top_match else None,
-        matches=unique_matches,
+        matches=[{**m, "listVersion": list_version} for m in unique_matches],
         screenedAt=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -293,7 +333,8 @@ async def get_stats():
                 "totalScreened": row["total_screened"] or 0,
                 "totalHits": row["total_hits"] or 0,
                 "avgMatchScore": float(row["avg_match_score"] or 0),
-                "entriesLoaded": len(SANCTIONS_ENTRIES),
+                "entriesLoaded": sum(LIST_REGISTRY.status()["entryCounts"].values()),
+                "listVersion": LIST_REGISTRY.list_version(),
                 "generatedAt": datetime.now(timezone.utc).isoformat(),
             }
     except Exception as e:

@@ -307,12 +307,17 @@ describe("aseanSw.getConnectivityStatus", () => {
     expect(result._offline).toBe(true);
   });
 
-  it("each member has score and tier fields", async () => {
+  it("offline members honestly report NOT_ASSESSED (no fabricated metrics)", async () => {
     const caller = appRouter.createCaller(makeCtx({ role: "admin" }));
     const result = await caller.aseanSw.getConnectivityStatus() as any;
+    // Offline (test env): score/uptime/latency are null and tier is
+    // NOT_ASSESSED — the previous static ASEAN_MEMBERS uptime/latency figures
+    // were illustrative and must not be served as measured data.
     for (const member of result.members) {
-      expect(typeof member.score).toBe("number");
-      expect(typeof member.tier).toBe("string");
+      expect(member.score).toBeNull();
+      expect(member.tier).toBe("NOT_ASSESSED");
+      expect(member.uptime).toBeNull();
+      expect(member.latency_ms).toBeNull();
     }
   });
 

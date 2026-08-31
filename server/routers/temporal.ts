@@ -62,7 +62,7 @@ const WORKFLOW_TYPES = {
 
 // ─── DB-backed workflow persistence helpers ────────────────────────────────────
 
-interface WorkflowRecord {
+export interface WorkflowRecord {
   workflowId: string;
   runId?: string;
   workflowType?: string;
@@ -75,7 +75,9 @@ interface WorkflowRecord {
   memo?: Record<string, unknown>;
 }
 
-async function saveWorkflowToDb(wf: WorkflowRecord) {
+// Exported for the DB-gated integration suite (PRA-004, server/temporal.db.test.ts)
+// which exercises these helpers against a real migrated PostgreSQL database.
+export async function saveWorkflowToDb(wf: WorkflowRecord) {
   if (!wf.runId) {
     console.warn(`[temporal] Skipping database save for ${wf.workflowId}: missing runId`);
     return;
@@ -112,7 +114,7 @@ async function saveWorkflowToDb(wf: WorkflowRecord) {
   }
 }
 
-async function getWorkflowFromDb(workflowId: string) {
+export async function getWorkflowFromDb(workflowId: string) {
   const db = await getDb();
   if (!db) return null;
   try {
@@ -124,7 +126,7 @@ async function getWorkflowFromDb(workflowId: string) {
   }
 }
 
-async function getWorkflowsFromDb(declarationId?: number, status?: string, limit = 10) {
+export async function getWorkflowsFromDb(declarationId?: number, status?: string, limit = 10) {
   const db = await getDb();
   if (!db) return [];
   try {

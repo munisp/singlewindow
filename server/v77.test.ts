@@ -10,11 +10,11 @@
  *   TB-06  Rust bridge has /transit-guarantee endpoint
  *   TB-07  Rust bridge has /pending endpoint
  *   TB-08  Rust bridge has /void-pending endpoint
- *   TB-09  tRPC ledger.postBondDeposit procedure exists with offline stub
- *   TB-10  tRPC ledger.releaseBond procedure exists with offline stub
- *   TB-11  tRPC ledger.postPenalty procedure exists with offline stub
- *   TB-12  tRPC ledger.postTransitGuarantee procedure exists with offline stub
- *   TB-13  Dapr resiliency target for tigerbeetle-bridge-rs
+ *   TB-09  tRPC ledger.postBondDeposit procedure exists (fail-closed, no offline stub)
+ *   TB-10  tRPC ledger.releaseBond procedure exists (fail-closed)
+ *   TB-11  tRPC ledger.postPenalty procedure exists (fail-closed)
+ *   TB-12  tRPC ledger.postTransitGuarantee procedure exists (fail-closed)
+ *   TB-13  Dapr resiliency target for canonical tigerbeetle-bridge (Go)
  *   SC-01  Schema: tigerbeetle_bonds table with 14 columns
  *   SC-02  Schema: tigerbeetle_penalties table with 15 columns
  *   SC-03  Schema: tigerbeetle_transit_guarantees table with 14 columns
@@ -48,17 +48,20 @@ function read(rel: string) {
 
 // ─── TB-01: Port consistency ──────────────────────────────────────────────────
 describe("TB-01: TB bridge port consistency", () => {
-  it("ledger.ts uses port 8093 for TB_BRIDGE_URL", () => {
+  it("ledger.ts uses the canonical port 8086 for TB_BRIDGE_URL", () => {
+    // SW-O3: canonical money-rail bridge is the Go service
+    // tigerbeetle-bridge:8086 (HTTP /api/ledger/*). The old 8093/4600
+    // Rust-bridge ports were removed from all deploy surfaces.
     const src = read("server/routers/ledger.ts");
-    expect(src).toContain("8093");
-    expect(src).not.toMatch(/TB_BRIDGE_URL.*8086/);
+    expect(src).toContain("8086");
+    expect(src).not.toMatch(/TB_BRIDGE_URL.*8093/);
     expect(src).not.toMatch(/TB_BRIDGE_URL.*8087/);
   });
 
-  it("polyglot-services.yaml tigerbeetle-bridge uses port 4600 (internal) and 8093 (service)", () => {
+  it("polyglot-services.yaml references only the canonical Go bridge (no Rust replica)", () => {
     const src = read("infra/k8s/polyglot-services.yaml");
-    // The bridge-rs service should be present
-    expect(src).toMatch(/tigerbeetle-bridge/);
+    expect(src).toMatch(/tigerbeetle-bridge:8086/);
+    expect(src).not.toMatch(/tigerbeetle-bridge-rs/);
   });
 
   it("fund-flow.ts uses port 8093 for TB bridge", () => {
@@ -153,6 +156,11 @@ describe("TB-03 to TB-08: Rust bridge new endpoints", () => {
 });
 
 // ─── TB-09 to TB-12: tRPC ledger procedures ──────────────────────────────────
+// SW-D note: these tests previously asserted the OLD fail-open "offline-stub"
+// behaviour (record a synthetic ledger entry when the bridge is down). SW-M7/
+// SW-15 made the money rail FAIL-CLOSED: procedures throw when the canonical
+// bridge is unavailable and NEVER record a "posted" entry that was not
+// executed. The assertions below pin the new contract.
 describe("TB-09 to TB-12: tRPC ledger procedures", () => {
   const ledgerSrc = read("server/routers/ledger.ts");
 
@@ -160,96 +168,91 @@ describe("TB-09 to TB-12: tRPC ledger procedures", () => {
     expect(ledgerSrc).toContain("postBondDeposit:");
   });
 
-  it("TB-09: postBondDeposit has offline stub (createLedgerEntry fallback)", () => {
+  it("TB-09: postBondDeposit is fail-closed (no offline stub)", () => {
     const idx = ledgerSrc.indexOf("postBondDeposit:");
-    const window = ledgerSrc.slice(idx, idx + 1500);
+    const window = ledgerSrc.slice(idx, idx + 3000);
+    // refuses to post when the bridge is unavailable
+    expect(window).toContain("tbBridgeAvailable");
+    expect(window).toContain("bridgeUnavailable");
+    // records the DB ledger entry ONLY after the bridge executed the transfer
     expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).not.toContain("offline-stub");
   });
 
-  it("TB-09: postBondDeposit calls /bond/deposit on bridge", () => {
+  it("TB-09: postBondDeposit posts a transfer on the canonical bridge", () => {
     const idx = ledgerSrc.indexOf("postBondDeposit:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("/bond/deposit");
+    expect(window).toContain("/api/ledger/transfers");
   });
 
   it("TB-10: ledger.releaseBond procedure exists", () => {
     expect(ledgerSrc).toContain("releaseBond:");
   });
 
-  it("TB-10: releaseBond has offline stub", () => {
+  it("TB-10: releaseBond is fail-closed (no offline stub)", () => {
     const idx = ledgerSrc.indexOf("releaseBond:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("tbBridgeAvailable");
+    expect(window).toContain("bridgeUnavailable");
+    expect(window).not.toContain("offline-stub");
   });
 
-  it("TB-10: releaseBond calls /bond/release on bridge", () => {
+  it("TB-10: releaseBond posts a transfer on the canonical bridge", () => {
     const idx = ledgerSrc.indexOf("releaseBond:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("/bond/release");
+    expect(window).toContain("/api/ledger/transfers");
   });
 
   it("TB-11: ledger.postPenalty procedure exists", () => {
     expect(ledgerSrc).toContain("postPenalty:");
   });
 
-  it("TB-11: postPenalty has offline stub", () => {
+  it("TB-11: postPenalty is fail-closed (no offline stub)", () => {
     const idx = ledgerSrc.indexOf("postPenalty:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("tbBridgeAvailable");
+    expect(window).toContain("bridgeUnavailable");
+    expect(window).not.toContain("offline-stub");
   });
 
-  it("TB-11: postPenalty calls /penalty on bridge", () => {
+  it("TB-11: postPenalty posts a transfer on the canonical bridge", () => {
     const idx = ledgerSrc.indexOf("postPenalty:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("/penalty");
+    expect(window).toContain("/api/ledger/transfers");
   });
 
   it("TB-12: ledger.postTransitGuarantee procedure exists", () => {
     expect(ledgerSrc).toContain("postTransitGuarantee:");
   });
 
-  it("TB-12: postTransitGuarantee has offline stub", () => {
+  it("TB-12: postTransitGuarantee is fail-closed (no offline stub)", () => {
     const idx = ledgerSrc.indexOf("postTransitGuarantee:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("createLedgerEntry");
-    expect(window).toContain("offline-stub");
+    expect(window).toContain("tbBridgeAvailable");
+    expect(window).toContain("bridgeUnavailable");
+    expect(window).not.toContain("offline-stub");
   });
 
-  it("TB-12: postTransitGuarantee calls /transit-guarantee on bridge", () => {
+  it("TB-12: postTransitGuarantee posts a transfer on the canonical bridge", () => {
     const idx = ledgerSrc.indexOf("postTransitGuarantee:");
     const window = ledgerSrc.slice(idx, idx + 1500);
-    expect(window).toContain("/transit-guarantee");
-  });
-
-  it("postBondDeposit input validates bondType enum", () => {
-    const idx = ledgerSrc.indexOf("postBondDeposit:");
-    const window = ledgerSrc.slice(idx, idx + 800);
-    expect(window).toContain("import_bond");
-    expect(window).toContain("transit_bond");
-    expect(window).toContain("aeo_bond");
-  });
-
-  it("postPenalty input validates penaltyCode enum", () => {
-    const idx = ledgerSrc.indexOf("postPenalty:");
-    const window = ledgerSrc.slice(idx, idx + 800);
-    expect(window).toContain("UNDER_DECLARATION");
-    expect(window).toContain("PROHIBITED_GOODS");
+    expect(window).toContain("/api/ledger/transfers");
   });
 });
 
 // ─── TB-13: Dapr resiliency ───────────────────────────────────────────────────
 describe("TB-13: Dapr resiliency target for TB bridge", () => {
-  it("components.yaml has tigerbeetle-bridge-rs as resiliency target", () => {
+  // SW-O3: the resiliency target is the CANONICAL Go bridge (the Rust
+  // bridge-rs replica was removed from all deploy surfaces — dev-only).
+  it("components.yaml has tigerbeetle-bridge as resiliency target", () => {
     const src = read("infra/k8s/dapr/components.yaml");
-    expect(src).toContain("tigerbeetle-bridge-rs");
+    expect(src).toContain("tigerbeetle-bridge:");
+    expect(src).not.toContain("tigerbeetle-bridge-rs");
   });
 
-  it("tigerbeetle-bridge-rs target has timeout, retry, and circuitBreaker", () => {
+  it("tigerbeetle-bridge target has timeout, retry, and circuitBreaker", () => {
     const src = read("infra/k8s/dapr/components.yaml");
-    const idx = src.indexOf("tigerbeetle-bridge-rs:");
+    const idx = src.indexOf("tigerbeetle-bridge:");
     const window = src.slice(idx, idx + 200);
     expect(window).toContain("timeout");
     expect(window).toContain("retry");

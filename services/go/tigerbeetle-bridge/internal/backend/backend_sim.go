@@ -8,9 +8,20 @@ package backend
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // SimBackend implements Backend using an in-memory map store.
 type SimBackend struct {
@@ -22,7 +33,25 @@ type SimBackend struct {
 // NewBackend returns a SimBackend seeded with the standard customs accounts.
 // This function is the entry point used by main.go — its signature is the same
 // as the live backend's NewBackend so main.go never needs a build tag.
+//
+// FAIL-CLOSED: the in-memory simulation backend is DEV/CI ONLY. When
+// ENVIRONMENT, APP_ENV, or NODE_ENV is "production", boot is refused unless
+// the explicit dev opt-in TB_ALLOW_SIM_BACKEND=1 is set. Production must run
+// the LiveBackend (build tag `tigerbeetle`, see Dockerfile.production).
 func NewBackend(tbAddr string, clusterID uint64) (Backend, error) {
+	env := strings.ToLower(firstNonEmpty(
+		os.Getenv("ENVIRONMENT"), os.Getenv("APP_ENV"), os.Getenv("NODE_ENV"),
+	))
+	simOK := os.Getenv("TB_ALLOW_SIM_BACKEND")
+	if env == "production" && simOK != "1" {
+		return nil, fmt.Errorf(
+			"tigerbeetle-bridge: SIM backend is dev-only and refuses to boot in production " +
+				"(ENVIRONMENT/APP_ENV/NODE_ENV=production). Build with -tags tigerbeetle for the " +
+				"live TigerBeetle backend, or set TB_ALLOW_SIM_BACKEND=1 for local development only")
+	}
+	if simOK == "1" {
+		fmt.Fprintln(os.Stderr, "[TB] WARNING: DEV-ONLY in-memory SimBackend in use (TB_ALLOW_SIM_BACKEND=1) — NOT for production")
+	}
 	s := &SimBackend{
 		accounts:  make(map[string]*Account),
 		transfers: make(map[string]*Transfer),

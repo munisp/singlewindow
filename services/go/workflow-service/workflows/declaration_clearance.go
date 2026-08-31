@@ -10,41 +10,43 @@ import (
 
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
+
+	"github.com/tradegateway/ngswtp/workflow-service/activities"
 )
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
 // DeclarationInput is the workflow input passed when starting a clearance workflow.
 type DeclarationInput struct {
-	DeclarationID   int64  `json:"declaration_id"`
-	UCR             string `json:"ucr"`
-	TraderID        string `json:"trader_id"`
-	IsAEO           bool   `json:"is_aeo"`
-	HSCode          string `json:"hs_code"`
-	CountryOfOrigin string `json:"country_of_origin"`
-	InvoiceValue    float64 `json:"invoice_value"`
-	GoodsDescription string `json:"goods_description"`
-	DeclarationType string `json:"declaration_type"`
+	DeclarationID    int64   `json:"declaration_id"`
+	UCR              string  `json:"ucr"`
+	TraderID         string  `json:"trader_id"`
+	IsAEO            bool    `json:"is_aeo"`
+	HSCode           string  `json:"hs_code"`
+	CountryOfOrigin  string  `json:"country_of_origin"`
+	InvoiceValue     float64 `json:"invoice_value"`
+	GoodsDescription string  `json:"goods_description"`
+	DeclarationType  string  `json:"declaration_type"`
 }
 
 // ClearanceResult is the final output of the workflow.
 type ClearanceResult struct {
-	DeclarationID   int64     `json:"declaration_id"`
-	UCR             string    `json:"ucr"`
-	FinalStatus     string    `json:"final_status"`
-	Lane            string    `json:"lane"`
-	RiskScore       int       `json:"risk_score"`
-	DutyAmount      float64   `json:"duty_amount"`
-	PaymentRef      string    `json:"payment_ref"`
-	ClearedAt       time.Time `json:"cleared_at"`
-	OGAApprovals    []string  `json:"oga_approvals"`
-	SanctionsClear  bool      `json:"sanctions_clear"`
-	PermitNumber    string    `json:"permit_number"`
+	DeclarationID  int64     `json:"declaration_id"`
+	UCR            string    `json:"ucr"`
+	FinalStatus    string    `json:"final_status"`
+	Lane           string    `json:"lane"`
+	RiskScore      int       `json:"risk_score"`
+	DutyAmount     float64   `json:"duty_amount"`
+	PaymentRef     string    `json:"payment_ref"`
+	ClearedAt      time.Time `json:"cleared_at"`
+	OGAApprovals   []string  `json:"oga_approvals"`
+	SanctionsClear bool      `json:"sanctions_clear"`
+	PermitNumber   string    `json:"permit_number"`
 }
 
 // ─── WORKFLOW TASK QUEUE ──────────────────────────────────────────────────────
-
-const TaskQueue = "ngswtp-clearance"
+// The task queue constant lives in registry.go (ClearanceTaskQueue) — the
+// duplicate definition here was removed (PRA-129).
 
 // ─── RETRY POLICIES ───────────────────────────────────────────────────────────
 
@@ -94,7 +96,7 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy:         defaultRetryPolicy,
 	})
-	if err := workflow.ExecuteActivity(sanctionsCtx, ScreenSanctionsActivity, SanctionsInput{
+	if err := workflow.ExecuteActivity(sanctionsCtx, activities.ScreenSanctionsActivity, SanctionsInput{
 		TraderID:    input.TraderID,
 		CountryCode: input.CountryOfOrigin,
 		UCR:         input.UCR,
@@ -122,7 +124,7 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 		StartToCloseTimeout: 60 * time.Second,
 		RetryPolicy:         defaultRetryPolicy,
 	})
-	if err := workflow.ExecuteActivity(riskCtx, ComputeRiskScoreActivity, RiskInput{
+	if err := workflow.ExecuteActivity(riskCtx, activities.ComputeRiskScoreActivity, RiskInput{
 		DeclarationID:    input.DeclarationID,
 		HSCode:           input.HSCode,
 		CountryOfOrigin:  input.CountryOfOrigin,
@@ -160,7 +162,7 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy:         defaultRetryPolicy,
 	})
-	if err := workflow.ExecuteActivity(ogaCtx, RouteToOGAsActivity, OGARoutingInput{
+	if err := workflow.ExecuteActivity(ogaCtx, activities.RouteToOGAsActivity, OGARoutingInput{
 		DeclarationID:    input.DeclarationID,
 		HSCode:           input.HSCode,
 		GoodsDescription: input.GoodsDescription,
@@ -192,7 +194,7 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 				StartToCloseTimeout: ogaTimeout,
 				RetryPolicy:         defaultRetryPolicy,
 			})
-			ogaApprovals[i] = workflow.ExecuteActivity(ogaApprovalCtx, WaitForOGAApprovalActivity, OGAApprovalInput{
+			ogaApprovals[i] = workflow.ExecuteActivity(ogaApprovalCtx, activities.WaitForOGAApprovalActivity, OGAApprovalInput{
 				DeclarationID: input.DeclarationID,
 				OGACode:       oga,
 				Lane:          result.Lane,
@@ -225,7 +227,7 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 			StartToCloseTimeout: 7 * 24 * time.Hour,
 			RetryPolicy:         nil, // No retry for human-in-the-loop
 		})
-		if err := workflow.ExecuteActivity(inspCtx, WaitForPhysicalInspectionActivity, InspectionInput{
+		if err := workflow.ExecuteActivity(inspCtx, activities.WaitForPhysicalInspectionActivity, InspectionInput{
 			DeclarationID: input.DeclarationID,
 			UCR:           input.UCR,
 		}).Get(ctx, &inspectionResult); err != nil {
@@ -247,10 +249,10 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy:         defaultRetryPolicy,
 	})
-	if err := workflow.ExecuteActivity(dutyCtx, CalculateDutiesActivity, DutyInput{
-		DeclarationID: input.DeclarationID,
-		HSCode:        input.HSCode,
-		InvoiceValue:  input.InvoiceValue,
+	if err := workflow.ExecuteActivity(dutyCtx, activities.CalculateDutiesActivity, DutyInput{
+		DeclarationID:   input.DeclarationID,
+		HSCode:          input.HSCode,
+		InvoiceValue:    input.InvoiceValue,
 		CountryOfOrigin: input.CountryOfOrigin,
 	}).Get(ctx, &dutyResult); err != nil {
 		return nil, fmt.Errorf("duty calculation failed: %w", err)
@@ -293,7 +295,7 @@ func DeclarationClearanceWorkflow(ctx workflow.Context, input DeclarationInput) 
 		StartToCloseTimeout: 30 * time.Second,
 		RetryPolicy:         criticalRetryPolicy,
 	})
-	if err := workflow.ExecuteActivity(permitCtx, IssueClearancePermitActivity, PermitInput{
+	if err := workflow.ExecuteActivity(permitCtx, activities.IssueClearancePermitActivity, PermitInput{
 		DeclarationID: input.DeclarationID,
 		UCR:           input.UCR,
 		TraderID:      input.TraderID,
@@ -324,7 +326,7 @@ func updateDeclarationStatus(ctx workflow.Context, declarationID int64, status, 
 		StartToCloseTimeout: 15 * time.Second,
 		RetryPolicy:         criticalRetryPolicy,
 	})
-	return workflow.ExecuteActivity(updateCtx, UpdateDeclarationStatusActivity, StatusUpdateInput{
+	return workflow.ExecuteActivity(updateCtx, activities.UpdateDeclarationStatusActivity, StatusUpdateInput{
 		DeclarationID: declarationID,
 		Status:        status,
 		Message:       message,

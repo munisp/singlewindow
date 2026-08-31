@@ -96,7 +96,9 @@ async function checkOptionalService(
 }
 
 // ─── Full health report ───────────────────────────────────────────────────────
-async function buildHealthReport(): Promise<HealthReport> {
+// Exported so the tRPC health router (server/routers/health.ts) can serve the
+// same REAL probe results instead of fabricated scores (P0 remediation).
+export async function buildHealthReport(): Promise<HealthReport> {
   const isDemoMode = process.env.DEMO_MODE === "true";
 
   const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =
@@ -121,12 +123,14 @@ async function buildHealthReport(): Promise<HealthReport> {
         `http://${process.env.KAFKA_HOST ?? "localhost"}:${process.env.KAFKA_REST_PORT ?? "8082"}/topics`,
         "Kafka"
       ),
+      // asean-sw-service bind default is 8096 (was wrongly 8098 = freezone)
       checkOptionalService(
-        process.env.ASEAN_SW_URL ?? "http://localhost:8098/health",
+        process.env.ASEAN_SW_URL ?? "http://localhost:8096/health",
         "ASEAN Single Window"
       ),
+      // cen-service renumbered off 8097 (profile-service collision, P0-7)
       checkOptionalService(
-        process.env.CEN_SERVICE_URL ?? "http://localhost:8097/health",
+        process.env.CEN_SERVICE_URL ?? "http://localhost:8093/health",
         "WCO CEN Service"
       ),
       checkOptionalService(
@@ -135,15 +139,33 @@ async function buildHealthReport(): Promise<HealthReport> {
       ),
     ]);
 
-  // Only database is critical — everything else is optional
+  // SW-O8: criticality is per-environment. In PRODUCTION the money rail and
+  // authz pipeline are critical — a down TigerBeetle/Temporal/Kafka/Permify
+  // must degrade overall status honestly instead of reporting "ok".
+  // In dev/demo only the database gates overall status (prevents false alarms).
+  const isProduction = process.env.NODE_ENV === "production";
+  const productionCritical: Array<[string, ComponentHealth]> = [
+    ["tigerbeetle", tigerbeetle],
+    ["temporal", temporal],
+    ["kafka", kafka],
+    ["permify", permify],
+  ];
+  if (isProduction) {
+    for (const [, c] of productionCritical) c.optional = false;
+  }
+
   let overallStatus: HealthStatus = "ok";
+  const anyDown = (c: ComponentHealth) => c.status === "down";
+  const anyDegraded = (c: ComponentHealth) => c.status === "degraded" || c.status === "down";
   if (database.status === "down") {
     overallStatus = "down";
-  } else if (database.status === "degraded") {
+  } else if (isProduction && productionCritical.some(([, c]) => anyDown(c))) {
+    overallStatus = "down";
+  } else if (anyDegraded(database)) {
+    overallStatus = "degraded";
+  } else if (isProduction && productionCritical.some(([, c]) => anyDegraded(c))) {
     overallStatus = "degraded";
   }
-  // Optional services being degraded does NOT make overall status worse
-  // This prevents false alarms in demo/dev environments
 
   return {
     status: overallStatus,

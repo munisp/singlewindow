@@ -1,14 +1,18 @@
-// Package middleware provides Kafka, Dapr, Fluvio, and OpenTelemetry integration for workflow-service.
+// Package middleware provides Kafka, Dapr, and OpenTelemetry integration for workflow-service.
 // Kafka topics published:  workflow.started        (Temporal workflow initiated)
-//                          workflow.completed      (workflow reached terminal state)
-//                          workflow.failed         (workflow failed after retries)
-//                          workflow.oga.dispatched (OGA permit request dispatched)
+//
+//	workflow.completed      (workflow reached terminal state)
+//	workflow.failed         (workflow failed after retries)
+//	workflow.oga.dispatched (OGA permit request dispatched)
+//
 // Kafka topics consumed:   declarations.submitted  (trigger clearance workflow)
-//                          risk.scored             (risk lane determined — route workflow)
-//                          payments.confirmed      (payment received — advance workflow)
-//                          oga.approved            (OGA permit received — advance workflow)
+//
+//	risk.scored             (risk lane determined — route workflow)
+//	payments.confirmed      (payment received — advance workflow)
+//	oga.approved            (OGA permit received — advance workflow)
+//
 // Dapr pub/sub:            publishes workflow state changes to pubsub
-// Fluvio:                  streams real-time workflow step progress to operations dashboard
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
 // OpenTelemetry:           distributed tracing for every workflow activity
 package middleware
 
@@ -27,6 +31,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
@@ -34,9 +39,9 @@ import (
 )
 
 const (
-	TopicWorkflowStarted      = "workflow.started"
-	TopicWorkflowCompleted    = "workflow.completed"
-	TopicWorkflowFailed       = "workflow.failed"
+	TopicWorkflowStarted       = "workflow.started"
+	TopicWorkflowCompleted     = "workflow.completed"
+	TopicWorkflowFailed        = "workflow.failed"
 	TopicWorkflowOGADispatched = "workflow.oga.dispatched"
 
 	TopicDeclarationSubmitted = "declarations.submitted"
@@ -63,13 +68,6 @@ func daprPort() string {
 	return "3500"
 }
 
-func fluvioEndpoint() string {
-	if e := os.Getenv("FLUVIO_ENDPOINT"); e != "" {
-		return e
-	}
-	return "http://fluvio-sc:9003"
-}
-
 // ─── Event Schemas ────────────────────────────────────────────────────────────
 
 type WorkflowEvent struct {
@@ -89,33 +87,33 @@ type WorkflowEvent struct {
 }
 
 type DeclarationSubmittedEvent struct {
-	DeclarationID   int64   `json:"declaration_id"`
-	UCR             string  `json:"ucr"`
-	TraderID        int64   `json:"trader_id"`
-	HSCode          string  `json:"hs_code"`
-	InvoiceValueUSD float64 `json:"invoice_value_usd"`
-	PortOfEntry     string  `json:"port_of_entry"`
+	DeclarationID   int64     `json:"declaration_id"`
+	UCR             string    `json:"ucr"`
+	TraderID        int64     `json:"trader_id"`
+	HSCode          string    `json:"hs_code"`
+	InvoiceValueUSD float64   `json:"invoice_value_usd"`
+	PortOfEntry     string    `json:"port_of_entry"`
 	Timestamp       time.Time `json:"timestamp"`
 }
 
 type RiskScoredEvent struct {
-	DeclarationID int64   `json:"declaration_id"`
-	RiskScore     float64 `json:"risk_score"`
-	RiskLane      string  `json:"risk_lane"`
+	DeclarationID int64     `json:"declaration_id"`
+	RiskScore     float64   `json:"risk_score"`
+	RiskLane      string    `json:"risk_lane"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
 type PaymentConfirmedEvent struct {
-	DeclarationID int64   `json:"declaration_id"`
-	PaymentRef    string  `json:"payment_ref"`
-	AmountPaid    float64 `json:"amount_paid"`
+	DeclarationID int64     `json:"declaration_id"`
+	PaymentRef    string    `json:"payment_ref"`
+	AmountPaid    float64   `json:"amount_paid"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
 type OGAApprovedEvent struct {
-	DeclarationID int64  `json:"declaration_id"`
-	AgencyCode    string `json:"agency_code"`
-	PermitNumber  string `json:"permit_number"`
+	DeclarationID int64     `json:"declaration_id"`
+	AgencyCode    string    `json:"agency_code"`
+	PermitNumber  string    `json:"permit_number"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
@@ -151,11 +149,14 @@ func (k *KafkaPublisher) PublishWorkflowEvent(ctx context.Context, evt WorkflowE
 	}
 	topic := topicForEventType(evt.EventType)
 	data, _ := json.Marshal(evt)
-	_, _, err := k.producer.SendMessage(&sarama.ProducerMessage{
+	msg := &sarama.ProducerMessage{
 		Topic: topic,
 		Key:   sarama.StringEncoder(evt.WorkflowID),
 		Value: sarama.ByteEncoder(data),
-	})
+	}
+	// Phase-7 OTel: inject W3C traceparent so consumers join this trace.
+	InjectTraceContext(ctx, msg)
+	_, _, err := k.producer.SendMessage(msg)
 	if err != nil {
 		k.logger.ErrorContext(ctx, "kafka publish failed", "topic", topic, "error", err)
 		return fmt.Errorf("publish %s: %w", topic, err)
@@ -242,7 +243,9 @@ func (c *KafkaConsumer) Cleanup(_ sarama.ConsumerGroupSession) error { return ni
 func (c *KafkaConsumer) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	tracer := otel.Tracer(ServiceName)
 	for msg := range claim.Messages() {
-		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("consume.%s", msg.Topic),
+		// Phase-7 OTel: continue the producer's trace via the header carrier.
+		parentCtx := ExtractTraceContext(context.Background(), msg)
+		ctx, span := tracer.Start(parentCtx, fmt.Sprintf("consume.%s", msg.Topic),
 			trace.WithAttributes(
 				attribute.String("messaging.system", "kafka"),
 				attribute.String("messaging.destination", msg.Topic),
@@ -307,64 +310,27 @@ func (d *DaprPublisher) PublishWorkflowEvent(ctx context.Context, evt WorkflowEv
 	return nil
 }
 
-// ─── Fluvio Publisher ─────────────────────────────────────────────────────────
-
-type FluvioPublisher struct {
-	endpoint   string
-	httpClient *http.Client
-	logger     *slog.Logger
-}
-
-func NewFluvioPublisher() *FluvioPublisher {
-	return &FluvioPublisher{
-		endpoint:   fluvioEndpoint(),
-		httpClient: &http.Client{Timeout: 3 * time.Second},
-		logger:     slog.Default().With("component", "fluvio-publisher", "service", ServiceName),
-	}
-}
-
-type FluvioWorkflowUpdate struct {
-	WorkflowID    string    `json:"workflow_id"`
-	DeclarationID int64     `json:"declaration_id"`
-	UCR           string    `json:"ucr"`
-	CurrentStep   string    `json:"current_step"`
-	Status        string    `json:"status"`
-	RiskLane      string    `json:"risk_lane,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-func (f *FluvioPublisher) PublishWorkflowUpdate(ctx context.Context, update FluvioWorkflowUpdate) error {
-	if update.UpdatedAt.IsZero() {
-		update.UpdatedAt = time.Now().UTC()
-	}
-	payload, _ := json.Marshal(update)
-	url := fmt.Sprintf("%s/api/v1/produce/workflow.progress.stream", f.endpoint)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := f.httpClient.Do(req)
-	if err != nil {
-		f.logger.WarnContext(ctx, "fluvio publish failed (non-fatal)", "error", err)
-		return nil
-	}
-	defer resp.Body.Close()
-	f.logger.InfoContext(ctx, "fluvio workflow update published", "workflow_id", update.WorkflowID)
-	return nil
-}
+// ─── Fluvio Publisher — REMOVED (P0 remediation) ────────────────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio-sc:9003/...) and swallowed the errors. Fluvio is NOT deployed
+// on this platform; Kafka (above) is the real event bus. Real-time status
+// updates must flow through the Kafka publisher in this file.
 
 // ─── OpenTelemetry Setup ──────────────────────────────────────────────────────
 
+// Phase-7 contract (OTEL_DESIGN.md §1): OTEL_EXPORTER_OTLP_ENDPOINT unset ⇒
+// telemetry DISABLED — returns (nil, nil); a nil provider means "off" and the
+// business path never depends on telemetry (the one sanctioned fail-open).
 func InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "http://otel-collector:4318"
+		return nil, nil
 	}
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	opts := []otlptracehttp.Option{}
+	if strings.HasPrefix(endpoint, "http://") || !strings.Contains(endpoint, "://") {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	exporter, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("OTLP exporter: %w", err)
 	}
@@ -381,16 +347,19 @@ func InitTracer(ctx context.Context) (*sdktrace.TracerProvider, error) {
 		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))),
 	)
 	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 	return tp, nil
 }
 
 // ─── Combined Middleware Clients ──────────────────────────────────────────────
 
 type MiddlewareClients struct {
-	KafkaPublisher  *KafkaPublisher
-	KafkaConsumer   *KafkaConsumer
-	DaprPublisher   *DaprPublisher
-	FluvioPublisher *FluvioPublisher
+	KafkaPublisher *KafkaPublisher
+	KafkaConsumer  *KafkaConsumer
+	DaprPublisher  *DaprPublisher
 }
 
 func NewMiddlewareClients(
@@ -409,10 +378,9 @@ func NewMiddlewareClients(
 		return nil, err
 	}
 	return &MiddlewareClients{
-		KafkaPublisher:  kp,
-		KafkaConsumer:   kc,
-		DaprPublisher:   NewDaprPublisher(),
-		FluvioPublisher: NewFluvioPublisher(),
+		KafkaPublisher: kp,
+		KafkaConsumer:  kc,
+		DaprPublisher:  NewDaprPublisher(),
 	}, nil
 }
 
@@ -423,4 +391,64 @@ func (m *MiddlewareClients) Close() {
 	if m.KafkaConsumer != nil {
 		m.KafkaConsumer.Close()
 	}
+}
+
+// ─── W3C carriers over sarama message headers (Phase-7 OTel) ─────────────────
+
+type producerCarrier struct{ msg *sarama.ProducerMessage }
+
+func (c producerCarrier) Get(key string) string {
+	for _, h := range c.msg.Headers {
+		if strings.EqualFold(string(h.Key), key) {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+func (c producerCarrier) Set(key, value string) {
+	for i, h := range c.msg.Headers {
+		if strings.EqualFold(string(h.Key), key) {
+			c.msg.Headers[i].Value = []byte(value)
+			return
+		}
+	}
+	c.msg.Headers = append(c.msg.Headers, sarama.RecordHeader{Key: []byte(key), Value: []byte(value)})
+}
+func (c producerCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.msg.Headers))
+	for _, h := range c.msg.Headers {
+		keys = append(keys, string(h.Key))
+	}
+	return keys
+}
+
+type consumerCarrier struct{ msg *sarama.ConsumerMessage }
+
+func (c consumerCarrier) Get(key string) string {
+	for _, h := range c.msg.Headers {
+		if h != nil && strings.EqualFold(string(h.Key), key) {
+			return string(h.Value)
+		}
+	}
+	return ""
+}
+func (c consumerCarrier) Set(_, _ string) {}
+func (c consumerCarrier) Keys() []string {
+	keys := make([]string, 0, len(c.msg.Headers))
+	for _, h := range c.msg.Headers {
+		if h != nil {
+			keys = append(keys, string(h.Key))
+		}
+	}
+	return keys
+}
+
+// InjectTraceContext injects traceparent/tracestate/baggage into a producer message.
+func InjectTraceContext(ctx context.Context, msg *sarama.ProducerMessage) {
+	otel.GetTextMapPropagator().Inject(ctx, producerCarrier{msg: msg})
+}
+
+// ExtractTraceContext extracts a remote trace context from a consumed message.
+func ExtractTraceContext(ctx context.Context, msg *sarama.ConsumerMessage) context.Context {
+	return otel.GetTextMapPropagator().Extract(ctx, consumerCarrier{msg: msg})
 }

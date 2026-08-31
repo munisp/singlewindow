@@ -344,32 +344,39 @@ describe("SecurityMonitor: owner notification on divergence", () => {
 
 // ─── 10. tRPC promoteModel: offline fallback ──────────────────────────────────
 
-describe("tRPC insiderThreat.promoteModel offline fallback", () => {
+// SW-G4: the offline promotion stub was REMOVED — promoteModel now enforces
+// dual control (four_eyes_requests) and never fabricates a promotion outcome.
+describe("tRPC insiderThreat.promoteModel fail-closed contract", () => {
   const insiderTs = readText("server/routers/insiderThreat.ts");
 
-  it("wraps fetch in try/catch for offline resilience", () => {
-    expect(insiderTs).toContain("try {");
+  it("enforces dual control via consumeFourEyesApproval", () => {
+    expect(insiderTs).toContain("consumeFourEyesApproval");
   });
 
-  it("returns promotedAt or promoted_at field in offline stub", () => {
-    expect(insiderTs).toMatch(/promotedAt|promoted_at/);
+  it("fails closed when the promotion service is unavailable", () => {
+    expect(insiderTs).toContain("PROMOTION_SERVICE_UNAVAILABLE");
   });
 
-  it("returns offline mode message in stub response", () => {
-    expect(insiderTs).toContain("offline mode");
+  it("has no offline promotion stub", () => {
+    // scope to the promoteModel procedure (rollback proxies have their own
+    // honest success:false unavailable responses)
+    const idx = insiderTs.indexOf("promoteModel: adminProcedure");
+    const window = insiderTs.slice(idx, idx + 2500);
+    expect(window).not.toContain("offline mode");
+    expect(window).not.toMatch(/promotedAt/);
   });
 });
 
-describe("tRPC insiderThreat.promoteModel caller (offline mode)", () => {
+describe("tRPC insiderThreat.promoteModel caller (fail-closed)", () => {
   const caller = appRouter.createCaller(makeCtx("admin"));
 
-  it("returns promotedAt when service is unavailable", async () => {
-    const result = await caller.insiderThreat.promoteModel({
-      reason: "test",
-      operator: "test-admin",
-    });
-    // offline stub uses camelCase promotedAt
-    expect(result).toHaveProperty("promotedAt");
+  it("rejects with SERVICE_UNAVAILABLE when the four-eyes store is unavailable", async () => {
+    await expect(
+      caller.insiderThreat.promoteModel({
+        reason: "test",
+        operator: "test-admin",
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 
   it("throws FORBIDDEN for non-admin", async () => {

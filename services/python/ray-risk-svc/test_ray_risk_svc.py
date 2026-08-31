@@ -85,8 +85,9 @@ def test_get_models(client):
         response = client.get("/models")
     else:
         response = client.post("/models", json={"test": "data"})
-    # Accept 200 (success), 422 (validation), 401 (auth required), 404 (not found)
-    assert response.status_code in [200, 201, 422, 401, 404, 500]
+    # Accept 200 (success), 422 (validation), 401 (auth required), 404 (not found),
+    # 503 (fail-closed REGISTRY_UNAVAILABLE when no MLflow registry is configured)
+    assert response.status_code in [200, 201, 422, 401, 404, 500, 503]
 
 def test_get_health(client):
     """Test GET /health endpoint."""

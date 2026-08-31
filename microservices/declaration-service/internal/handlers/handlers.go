@@ -143,13 +143,20 @@ func (h *Handler) UpdateDeclarationStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// SW-M4: status updates require an officer role.
+	if role, _ := r.Context().Value("role").(string); role != "admin" && role != "customs_officer" && role != "inspector" && role != "service" {
+		writeError(w, http.StatusForbidden, "status updates require an officer role")
+		return
+	}
+
 	validStatuses := map[string]bool{
 		"submitted": true, "under_review": true, "inspection_required": true,
-		"payment_pending": true, "payment_confirmed": true, "cleared": true,
-		"rejected": true, "cancelled": true,
+		"payment_pending": true, "rejected": true, "cancelled": true,
 	}
 	if !validStatuses[body.Status] {
-		writeError(w, http.StatusBadRequest, "invalid status value")
+		// SW-M4: payment_confirmed flows only from the verified payment event;
+		// cleared flows only from POST /clear with payment+permit verification.
+		writeError(w, http.StatusBadRequest, "invalid or restricted status value (payment_confirmed and cleared are system-controlled)")
 		return
 	}
 
@@ -309,6 +316,12 @@ func (h *Handler) IssueClearance(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
+	// SW-M4: clearance requires an officer role.
+	if role, _ := r.Context().Value("role").(string); role != "admin" && role != "customs_officer" && role != "service" {
+		writeError(w, http.StatusForbidden, "clearance requires a customs officer role")
+		return
+	}
+
 	// Check all OGA permits are resolved
 	allApproved, anyRejected, err := h.store.AllOGAPermitsResolved(ctx, id)
 	if err != nil {
@@ -320,7 +333,23 @@ func (h *Handler) IssueClearance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allApproved {
-		writeError(w, http.StatusConflict, "cannot clear: awaiting OGA permit approvals")
+		// SW-M4: zero-permit auto-clear removed — an explicit exemption is required.
+		exempt, _ := h.store.HasPermitExemption(ctx, id)
+		if !exempt {
+			writeError(w, http.StatusConflict, "cannot clear: awaiting OGA permit approvals or an explicit permit exemption")
+			return
+		}
+	}
+
+	// SW-M4: clearance REQUIRES verified payment — set only by the
+	// payment.confirmed event consumer, never by the caller.
+	paid, err := h.store.DeclarationPaymentConfirmed(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !paid {
+		writeError(w, http.StatusConflict, "cannot clear: payment is not confirmed")
 		return
 	}
 

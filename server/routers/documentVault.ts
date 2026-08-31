@@ -23,9 +23,93 @@ const DOCUMENT_CATEGORIES = [
   "export_permit", "insurance_cert", "customs_bond",
   "kyc_identity", "kyc_business", "aeo_supporting",
   "post_clearance", "correspondence", "other",
+  // Phase 8 PCS trader portal (spec §1.2/R5): port-community document exchange.
+  "delivery_order", "gate_pass", "terminal_notice", "pcs_correspondence",
 ] as const;
 
 const ACCESS_LEVELS = ["private", "shared_with_customs", "shared_with_oga", "public"] as const;
+
+export interface VaultUploadInput {
+  filename: string;
+  contentType: string;
+  /** Base64-encoded file content. */
+  fileData: string;
+  sizeBytes: number;
+  category: (typeof DOCUMENT_CATEGORIES)[number];
+  accessLevel: (typeof ACCESS_LEVELS)[number];
+  description?: string;
+  declarationId?: number;
+}
+
+/**
+ * Shared vault write path (Phase 8): the documentVault.upload procedure and the
+ * PCS pcs.documents.share procedure both route through here so the AV scan,
+ * quarantine semantics and RustFS storage behaviour are identical. Never
+ * bypassed — there is no PCS-specific upload path.
+ */
+export async function uploadVaultDocument(ownerId: number, input: VaultUploadInput) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+  const healthy = await rustfsHealthCheck();
+  if (!healthy) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Document storage service is unavailable. Please try again shortly.",
+    });
+  }
+
+  const buffer = Buffer.from(input.fileData, "base64");
+
+  // ── ClamAV virus scan (pre-upload) ────────────────────────────────────
+  // Runs before any S3 write. Gracefully skips when ClamAV DB is absent.
+  const scanResult = await rustfsScan(buffer, input.filename);
+  if (!scanResult.clean && !scanResult.skipped) {
+    const { logAuditEvent } = await import("../db");
+    await logAuditEvent({
+      actorId: ownerId,
+      actorType: "user",
+      action: "malware_detected",
+      entityType: "document_vault" as any,
+      entityId: ownerId,
+      metadata: { filename: input.filename, threat: scanResult.threat, sizeBytes: input.sizeBytes },
+    });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `File rejected: malware detected (${scanResult.threat}). Upload blocked for security.`,
+    });
+  }
+  if (scanResult.skipped) {
+    // SW-S2-8: an unscanned file is NEVER silently activated — it is stored
+    // in 'quarantined' status (invisible to normal 'active' listings) until
+    // a successful AV scan clears it.
+    console.warn(`[DocumentVault] ClamAV scan unavailable for ${input.filename} — storing as QUARANTINED`);
+  }
+  // ─────────────────────────────────────────────────────────────────────
+
+  const suffix = nanoid(10);
+  const safeFilename = input.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const fileKey = `vault/${ownerId}/${input.category}/${suffix}-${safeFilename}`;
+
+  const { key, url } = await rustfsUpload(buffer, fileKey, input.contentType);
+
+  const [record] = await db.insert(documentVault).values({
+    ownerId,
+    declarationId: input.declarationId ?? null,
+    fileKey: key,
+    url,
+    filename: input.filename,
+    mimeType: input.contentType,
+    sizeBytes: input.sizeBytes,
+    category: input.category,
+    accessLevel: input.accessLevel,
+    // Quarantined until a successful AV scan when the scanner was unavailable.
+    status: scanResult.skipped ? "quarantined" : "active",
+    description: input.description ?? null,
+  }).returning();
+
+  return record;
+}
 
 export const documentVaultRouter = router({
 
@@ -40,65 +124,7 @@ export const documentVaultRouter = router({
       description: z.string().max(1000).optional(),
       declarationId: z.number().int().positive().optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
-      const db = await getDb();
-      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-
-      const healthy = await rustfsHealthCheck();
-      if (!healthy) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Document storage service is unavailable. Please try again shortly.",
-        });
-      }
-
-      const buffer = Buffer.from(input.fileData, "base64");
-
-      // ── ClamAV virus scan (pre-upload) ────────────────────────────────────
-      // Runs before any S3 write. Gracefully skips when ClamAV DB is absent.
-      const scanResult = await rustfsScan(buffer, input.filename);
-      if (!scanResult.clean && !scanResult.skipped) {
-        const { logAuditEvent } = await import("../db");
-        await logAuditEvent({
-          actorId: ctx.user.id,
-          actorType: "user",
-          action: "malware_detected",
-          entityType: "document_vault" as any,
-          entityId: ctx.user.id,
-          metadata: { filename: input.filename, threat: scanResult.threat, sizeBytes: input.sizeBytes },
-        });
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `File rejected: malware detected (${scanResult.threat}). Upload blocked for security.`,
-        });
-      }
-      if (scanResult.skipped) {
-        console.warn(`[DocumentVault] ClamAV scan skipped for ${input.filename} — virus DB unavailable`);
-      }
-      // ─────────────────────────────────────────────────────────────────────
-
-      const suffix = nanoid(10);
-      const safeFilename = input.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const fileKey = `vault/${ctx.user.id}/${input.category}/${suffix}-${safeFilename}`;
-
-      const { key, url } = await rustfsUpload(buffer, fileKey, input.contentType);
-
-      const [record] = await db.insert(documentVault).values({
-        ownerId: ctx.user.id,
-        declarationId: input.declarationId ?? null,
-        fileKey: key,
-        url,
-        filename: input.filename,
-        mimeType: input.contentType,
-        sizeBytes: input.sizeBytes,
-        category: input.category,
-        accessLevel: input.accessLevel,
-        status: "active",
-        description: input.description ?? null,
-      }).returning();
-
-      return record;
-    }),
+    .mutation(async ({ ctx, input }) => uploadVaultDocument(ctx.user.id, input)),
 
   list: protectedProcedure
     .input(z.object({

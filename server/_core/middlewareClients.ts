@@ -28,7 +28,7 @@ import { TRPCError } from "@trpc/server";
 
 type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
 
-interface CircuitBreakerOptions {
+export interface CircuitBreakerOptions {
   name: string;
   failureThreshold?: number;   // Failures before opening (default: 5)
   successThreshold?: number;   // Successes to close from half-open (default: 2)
@@ -36,7 +36,10 @@ interface CircuitBreakerOptions {
   windowMs?: number;           // Failure counting window (default: 60_000)
 }
 
-class CircuitBreaker {
+// Exported so dedicated service clients (e.g. the PRA-100 tariff-engine
+// client) can hold their own isolated breaker instance instead of sharing
+// the global registry — the state semantics stay identical.
+export class CircuitBreaker {
   private state: CircuitState = "CLOSED";
   private failures = 0;
   private successes = 0;
@@ -146,7 +149,11 @@ export async function withRetry<T>(
       if (attempt === maxAttempts || !retryOn(err)) {
         throw err;
       }
-      await new Promise(resolve => setTimeout(resolve, delay));
+      // PRA-024/025: exponential backoff WITH full jitter — without jitter,
+      // N callers retrying a recovering dependency fire in lock-step
+      // (thundering herd) and re-collapse it.
+      const jittered = Math.floor(delay * (0.5 + Math.random()));
+      await new Promise(resolve => setTimeout(resolve, jittered));
       delay = Math.min(delay * backoffFactor, maxDelayMs);
     }
   }
@@ -213,7 +220,15 @@ export async function getOpenSearchClient() {
 
   const OPENSEARCH_URL = process.env.OPENSEARCH_URL ?? "http://localhost:9200";
   const OPENSEARCH_USER = process.env.OPENSEARCH_USERNAME ?? "admin";
-  const OPENSEARCH_PASS = process.env.OPENSEARCH_PASSWORD ?? "admin";
+  // SW-S2-4: no default password. Unset → fail closed (no client), never "admin/admin".
+  const OPENSEARCH_PASS = process.env.OPENSEARCH_PASSWORD ?? "";
+  if (!OPENSEARCH_PASS) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("[middlewareClients] OPENSEARCH_PASSWORD must be set in production (no default).");
+    }
+    console.warn("[middlewareClients] OPENSEARCH_PASSWORD not set — OpenSearch client unavailable (fail closed).");
+    return null;
+  }
 
   try {
     const { Client } = await import("@opensearch-project/opensearch");
@@ -360,36 +375,12 @@ export async function getKeycloakJWKS(): Promise<unknown[]> {
   }
 }
 
-// ─── Fluvio Client ────────────────────────────────────────────────────────────
-
-export async function publishToFluvio(
-  topic: string,
-  message: string,
-  key?: string
-): Promise<boolean> {
-  const FLUVIO_URL = process.env.FLUVIO_HTTP_PROXY ?? "http://localhost:9090";
-  const cb = getCircuitBreaker("fluvio");
-
-  if (cb.isOpen) return false;
-
-  try {
-    const res = await fetch(`${FLUVIO_URL}/api/topics/${topic}/produce`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, key }),
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (res.ok) {
-      cb.onSuccess();
-      return true;
-    }
-    cb.onFailure();
-    return false;
-  } catch (err) {
-    cb.onFailure();
-    return false;
-  }
-}
+// ─── Fluvio Client — REMOVED (PRA-101 residual, Phase 9) ────────────────────
+// Fluvio is NOT deployed on this platform (P0-9). The publishToFluvio helper
+// posted to a phantom HTTP proxy and returned boolean success/failure that no
+// caller acted on. Deleted along with the Python fluvio_middleware.py phantom
+// in the six AI microservices and services/python-ai. Kafka is the real event
+// bus (server/_core/kafka.ts).
 
 // ─── Graceful Shutdown ────────────────────────────────────────────────────────
 

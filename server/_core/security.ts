@@ -117,6 +117,80 @@ export function fileUploadGuard(
   next();
 }
 
+// ─── Magic-byte content sniffing (SW-S2-8) ───────────────────────────────────
+// Client-supplied MIME types and file extensions are attacker-controlled and
+// MUST NOT be trusted. The detected type below is derived from the file's
+// actual bytes and is the only basis for the extension allowlist.
+
+export type SniffedFileType =
+  | "pdf"
+  | "png"
+  | "jpeg"
+  | "webp"
+  | "zip" // also docx/xlsx (OOXML containers) — distinguished by caller policy
+  | "text" // UTF-8 text without control bytes (csv/txt)
+  | "unknown";
+
+/**
+ * Detects the real file type from leading magic bytes.
+ * Returns "unknown" when no recognised signature matches — callers must
+ * fail closed (reject) on "unknown".
+ */
+export function sniffFileType(buffer: Buffer): SniffedFileType {
+  if (buffer.length >= 5 && buffer.subarray(0, 5).toString("latin1") === "%PDF-") return "pdf";
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 &&
+    buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a
+  ) return "png";
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "jpeg";
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("latin1") === "RIFF" &&
+    buffer.subarray(8, 12).toString("latin1") === "WEBP"
+  ) return "webp";
+  // ZIP (PK\x03\x04 / PK\x05\x05 empty archive / PK\x07\x08 spanned) — docx/xlsx included
+  if (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b &&
+      (buffer[2] === 0x03 || buffer[2] === 0x05 || buffer[2] === 0x07)) return "zip";
+  // Plain text heuristic: valid printable UTF-8/ASCII without NUL or C0 controls
+  if (buffer.length > 0) {
+    let textOk = true;
+    const sample = buffer.subarray(0, Math.min(buffer.length, 8192));
+    for (const byte of sample) {
+      const isAllowed = byte === 0x09 || byte === 0x0a || byte === 0x0d || (byte >= 0x20 && byte !== 0x7f) || byte >= 0x80;
+      if (!isAllowed) { textOk = false; break; }
+    }
+    if (textOk) return "text";
+  }
+  return "unknown";
+}
+
+/** Canonical extension for a detected type — never derived from the client filename. */
+export const EXTENSION_FOR_SNIFFED_TYPE: Record<Exclude<SniffedFileType, "unknown">, string> = {
+  pdf: "pdf",
+  png: "png",
+  jpeg: "jpg",
+  webp: "webp",
+  zip: "zip",
+  text: "txt",
+};
+
+/** MIME types acceptable per detected type (client claim must agree with content). */
+export const MIME_FOR_SNIFFED_TYPE: Record<Exclude<SniffedFileType, "unknown">, string[]> = {
+  pdf: ["application/pdf"],
+  png: ["image/png"],
+  jpeg: ["image/jpeg"],
+  webp: ["image/webp"],
+  zip: [
+    "application/zip",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ],
+  text: ["text/csv", "text/plain", "application/csv"],
+};
+
 /**
  * Validates a file before S3 upload.
  * Returns an error message if the file is rejected, null if accepted.
@@ -153,39 +227,79 @@ export function validateUploadedFile(opts: {
  * Idempotency key validator for financial mutations.
  * Prevents replay attacks on payment endpoints.
  *
+ * P0-6 remediation: DURABLE, DB-backed idempotency. The previous process-local
+ * Map reopened a replay window on every restart/replica. Keys are now stored
+ * in the existing `payment_idempotency_keys` table (migration 0028) whose
+ * UNIQUE(key_hash) constraint is enforced by the database — the same
+ * durability pattern as webhook_receipts (migration 0051). The key hash binds
+ * (userId, idempotencyKey) so keys are per-user. Replays return the originally
+ * recorded response snapshot. When the database is unavailable these functions
+ * THROW (fail-closed): a financial mutation whose idempotency cannot be
+ * verified must not proceed.
+ *
  * Usage in tRPC procedure:
  *   const { idempotencyKey } = input;
- *   await assertIdempotency(ctx.user.id, idempotencyKey);
+ *   const { isDuplicate, cachedResult } = await checkIdempotency(ctx.user.id, idempotencyKey);
+ *   if (isDuplicate) return cachedResult;
+ *   ... execute mutation ...
+ *   await recordIdempotency(ctx.user.id, idempotencyKey, result);
  */
-const idempotencyStore = new Map<string, { usedAt: number; result: unknown }>();
+function idempotencyKeyHash(userId: number, idempotencyKey: string): string {
+  return crypto.createHash("sha256").update(`${userId}:${idempotencyKey}`).digest("hex");
+}
 
-// Clean up expired keys every 10 minutes
-setInterval(() => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000; // 24 hours
-  for (const [key, val] of Array.from(idempotencyStore.entries())) {
-    if (val.usedAt < cutoff) idempotencyStore.delete(key);
-  }
-}, 10 * 60 * 1000);
-
-export function checkIdempotency(
+export async function checkIdempotency(
   userId: number,
   idempotencyKey: string
-): { isDuplicate: boolean; cachedResult?: unknown } {
-  const storeKey = `${userId}:${idempotencyKey}`;
-  const existing = idempotencyStore.get(storeKey);
+): Promise<{ isDuplicate: boolean; cachedResult?: unknown }> {
+  const { getDb } = await import("../db");
+  const db = await getDb();
+  if (!db) {
+    throw new Error(
+      "[security] Idempotency store unavailable — refusing to proceed (fail-closed, replay protection cannot be verified)"
+    );
+  }
+  const { paymentIdempotencyKeys } = await import("../../drizzle/schema");
+  const { eq, gt, and } = await import("drizzle-orm");
+  const [existing] = await db
+    .select({ responseSnapshot: paymentIdempotencyKeys.responseSnapshot })
+    .from(paymentIdempotencyKeys)
+    .where(and(
+      eq(paymentIdempotencyKeys.keyHash, idempotencyKeyHash(userId, idempotencyKey)),
+      gt(paymentIdempotencyKeys.expiresAt, new Date()),
+    ))
+    .limit(1);
   if (existing) {
-    return { isDuplicate: true, cachedResult: existing.result };
+    return { isDuplicate: true, cachedResult: existing.responseSnapshot };
   }
   return { isDuplicate: false };
 }
 
-export function recordIdempotency(
+export async function recordIdempotency(
   userId: number,
   idempotencyKey: string,
   result: unknown
-): void {
-  const storeKey = `${userId}:${idempotencyKey}`;
-  idempotencyStore.set(storeKey, { usedAt: Date.now(), result });
+): Promise<void> {
+  const { getDb } = await import("../db");
+  const db = await getDb();
+  if (!db) {
+    throw new Error(
+      "[security] Idempotency store unavailable — response NOT recorded (fail-closed)"
+    );
+  }
+  const { paymentIdempotencyKeys } = await import("../../drizzle/schema");
+  // UNIQUE(key_hash) enforced by the database; a concurrent replay inserts
+  // nothing and the first recorded response wins. Keys expire after 24h,
+  // matching the previous in-memory TTL.
+  await db
+    .insert(paymentIdempotencyKeys)
+    .values({
+      keyHash: idempotencyKeyHash(userId, idempotencyKey),
+      transferId: `idem:${idempotencyKey.slice(0, 120)}`,
+      responseSnapshot: result as unknown,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    })
+    .onConflictDoNothing();
 }
 
 /**

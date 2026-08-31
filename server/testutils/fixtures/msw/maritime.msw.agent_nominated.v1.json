@@ -1,0 +1,32 @@
+{
+  "envelopeVersion": "1.0",
+  "eventId": "evt-msw-000002",
+  "eventType": "maritime.msw.agent_nominated.v1",
+  "occurredAt": "2026-09-01T07:30:00Z",
+  "producer": "blueeconomy-singlewindow-msw",
+  "correlationId": "corr-msw-000001",
+  "fhir": {
+    "resourceType": "Bundle",
+    "type": "message",
+    "bundleId": "bdl-msw-000002",
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:dd3b4025-0eb5-4154-ac53-ba4947e9035b",
+        "resource": {
+          "@type": "type.googleapis.com/blueeconomy.msw.v1.MswAgentNominated",
+          "visitId": "mswv-000001",
+          "agentReference": "agt-org-000042",
+          "nominationDocumentDigestSha256": "sha256:49326194562a972e71f536abacdfa75b8aeed19c4e1b2de014b41e9ced618a45",
+          "nominatedAt": "2026-09-01T07:30:00Z"
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "principalId": "79253d2a-1684-404e-b040-19f155534670",
+    "principalRole": "msw-agent",
+    "ledgerCommitHash": "",
+    "signature": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJsdWVlY29ub215LXNpbmdsZXdpbmRvdy1tc3ctMCJ9.eyJjbGFzc2lmaWNhdGlvbiI6IklOVEVSTkFMIiwiY29ycmVsYXRpb25JZCI6ImNvcnItbXN3LTAwMDAwMSIsImVudmVsb3BlVmVyc2lvbiI6IjEuMCIsImV2ZW50SWQiOiJldnQtbXN3LTAwMDAwMiIsImV2ZW50VHlwZSI6Im1hcml0aW1lLm1zdy5hZ2VudF9ub21pbmF0ZWQudjEiLCJmaGlyIjp7ImJ1bmRsZUlkIjoiYmRsLW1zdy0wMDAwMDIiLCJlbnRyeSI6W3siZnVsbFVybCI6InVybjp1dWlkOmRkM2I0MDI1LTBlYjUtNDE1NC1hYzUzLWJhNDk0N2U5MDM1YiIsInJlc291cmNlIjp7IkB0eXBlIjoidHlwZS5nb29nbGVhcGlzLmNvbS9ibHVlZWNvbm9teS5tc3cudjEuTXN3QWdlbnROb21pbmF0ZWQiLCJhZ2VudFJlZmVyZW5jZSI6ImFndC1vcmctMDAwMDQyIiwibm9taW5hdGVkQXQiOiIyMDI2LTA5LTAxVDA3OjMwOjAwWiIsIm5vbWluYXRpb25Eb2N1bWVudERpZ2VzdFNoYTI1NiI6InNoYTI1Njo0OTMyNjE5NDU2MmE5NzJlNzFmNTM2YWJhY2RmYTc1YjhhZWVkMTljNGUxYjJkZTAxNGI0MWU5Y2VkNjE4YTQ1IiwidmlzaXRJZCI6Im1zd3YtMDAwMDAxIn19XSwicmVzb3VyY2VUeXBlIjoiQnVuZGxlIiwidHlwZSI6Im1lc3NhZ2UifSwib2NjdXJyZWRBdCI6IjIwMjYtMDktMDFUMDc6MzA6MDBaIiwicHJvZHVjZXIiOiJibHVlZWNvbm9teS1zaW5nbGV3aW5kb3ctbXN3IiwicHJvdmVuYW5jZSI6eyJsZWRnZXJDb21taXRIYXNoIjoiIiwicHJpbmNpcGFsSWQiOiI3OTI1M2QyYS0xNjg0LTQwNGUtYjA0MC0xOWYxNTU1MzQ2NzAiLCJwcmluY2lwYWxSb2xlIjoibXN3LWFnZW50In19.Htx4Mj9jsLvzs5vOTlOXxEb_9px8HWYVmqRR-vONZLXxVRJI1N6vfZZhSMEn6qReucVqAnCiYppsZoFPa1hcBQ"
+  },
+  "classification": "INTERNAL"
+}

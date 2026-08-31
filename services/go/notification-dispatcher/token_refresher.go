@@ -1,11 +1,11 @@
 // token_refresher.go — Periodic FCM/APNs token validation and stale-token purge.
 //
 // The TokenRefresher runs as a background goroutine.  Every RefreshInterval it:
-//   1. Calls the FCM v1 "dry-run" send API to validate each stored token.
-//   2. Marks tokens that return UNREGISTERED or INVALID_ARGUMENT as stale.
-//   3. Publishes a purge event to the insider.push.purge Kafka topic so every
-//      service that caches tokens can evict them.
-//   4. Writes a structured log entry with the refresh summary.
+//  1. Calls the FCM v1 "dry-run" send API to validate each stored token.
+//  2. Marks tokens that return UNREGISTERED or INVALID_ARGUMENT as stale.
+//  3. Publishes a purge event to the insider.push.purge Kafka topic so every
+//     service that caches tokens can evict them.
+//  4. Writes a structured log entry with the refresh summary.
 //
 // The refresher is intentionally lightweight: it does NOT talk to a database
 // directly — it relies on the upstream push-tokens service to consume the Kafka
@@ -56,11 +56,11 @@ type PurgePublisher interface {
 
 // PurgeEvent is the Kafka message payload for stale-token purge events.
 type PurgeEvent struct {
-	Tokens    []string `json:"tokens"`
-	Reason    string   `json:"reason"`
-	Platform  string   `json:"platform"`
-	PurgedAt  int64    `json:"purged_at"` // Unix milliseconds
-	CycleID   string   `json:"cycle_id"`
+	Tokens   []string `json:"tokens"`
+	Reason   string   `json:"reason"`
+	Platform string   `json:"platform"`
+	PurgedAt int64    `json:"purged_at"` // Unix milliseconds
+	CycleID  string   `json:"cycle_id"`
 }
 
 // TokenRefresher validates push tokens and purges stale ones.
@@ -131,11 +131,26 @@ func (r *TokenRefresher) runCycle(ctx context.Context) {
 	cycleID := fmt.Sprintf("cycle-%d", time.Now().UnixMilli())
 	slog.Info("TokenRefresher cycle started", "cycle_id", cycleID)
 
+	// Fail-closed: a refresher without its dependencies cannot validate or
+	// purge anything. Log loudly and skip the cycle instead of panicking or
+	// fabricating a successful refresh.
+	if r.provider == nil || r.publisher == nil {
+		slog.Error("TokenRefresher: missing TokenProvider/PurgePublisher — cycle skipped", "cycle_id", cycleID)
+		return
+	}
+
 	tokens, err := r.provider.ListTokens(ctx, "fcm", r.batchSize)
 	if err != nil {
 		slog.Error("TokenRefresher: failed to list tokens", "error", err)
 		return
 	}
+
+	// A completed cycle counts even when there was nothing to validate —
+	// otherwise the stats lie about the refresher having run.
+	r.mu.Lock()
+	r.stats.TotalCycles++
+	r.stats.LastCycleAt = time.Now().UnixMilli()
+	r.mu.Unlock()
 
 	if len(tokens) == 0 {
 		slog.Info("TokenRefresher: no tokens to validate", "cycle_id", cycleID)
@@ -145,10 +160,8 @@ func (r *TokenRefresher) runCycle(ctx context.Context) {
 	stale := r.validateTokens(ctx, tokens)
 
 	r.mu.Lock()
-	r.stats.TotalCycles++
 	r.stats.TotalValidated += int64(len(tokens))
 	r.stats.TotalStale += int64(len(stale))
-	r.stats.LastCycleAt = time.Now().UnixMilli()
 	r.mu.Unlock()
 
 	if len(stale) == 0 {
@@ -189,7 +202,7 @@ func (r *TokenRefresher) validateTokens(ctx context.Context, tokens []string) []
 	stale := make([]string, 0, len(tokens)/10)
 
 	for _, token := range tokens {
-		if isStaleToken(ctx, r.fcm.projectID, r.fcm.bearerToken, token) {
+		if isStaleToken(ctx, r.fcm.ProjectID, r.fcm.BearerToken, token) {
 			stale = append(stale, token)
 		}
 	}
@@ -347,5 +360,8 @@ func writeKafkaMessage(ctx context.Context, broker, topic string, value []byte) 
 		Balancer: &kafka.LeastBytes{},
 	}
 	defer w.Close()
-	return w.WriteMessages(ctx, kafka.Message{Value: value})
+	msg := kafka.Message{Value: value}
+	// Phase-7 OTel: propagate the trace context into the purge event.
+	injectKafkaHeaders(ctx, &msg)
+	return w.WriteMessages(ctx, msg)
 }

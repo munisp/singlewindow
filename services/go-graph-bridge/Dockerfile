@@ -18,6 +18,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM alpine:3.19 AS runtime
+# SW-O12: non-root runtime
+RUN addgroup -S app && adduser -S app -G app
 
 RUN apk add --no-cache ca-certificates wget
 
@@ -27,6 +29,8 @@ COPY --from=builder /app/graph-bridge .
 
 ENV PORT=8100
 ENV GIN_MODE=release
+
+USER app
 
 EXPOSE 8100
 

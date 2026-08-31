@@ -427,3 +427,78 @@ export const webhookDeliveryDurationSeconds = new Histogram({
   buckets: [0.1, 0.5, 1, 2, 5, 10, 30],
   registers: [metricsRegistry],
 });
+
+/** SW-O2: privileged-action audit append failures — must never be silent. */
+export const auditAppendFailuresTotal = new Counter({
+  name: "tradegateway_audit_append_failures_total",
+  help: "Privileged-action audit append failures (insiderThreat). Any increment is an incident.",
+  labelNames: ["event_type"] as const,
+  registers: [metricsRegistry],
+});
+
+// ─── PCS Trader Portal (Phase 8; spec §7) ─────────────────────────────────────
+export const pcsProjectionEventsTotal = new Counter({
+  name: "tradegateway_pcs_projection_events_total",
+  help: "ports.*.v1 envelope events handled by the PCS projection",
+  labelNames: ["topic", "outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsProjectionLagSeconds = new Histogram({
+  name: "tradegateway_pcs_projection_lag_seconds",
+  help: "Outbox-event → read-model projection lag",
+  labelNames: ["topic"] as const,
+  buckets: [0.1, 0.5, 1, 2, 5, 15, 60, 300],
+  registers: [metricsRegistry],
+});
+
+export const pcsSignatureRejectsTotal = new Counter({
+  name: "tradegateway_pcs_signature_rejects_total",
+  help: "Envelope v1.0 provenance JWS rejections (fail-closed projection)",
+  labelNames: ["reason"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsUpstreamCallsTotal = new Counter({
+  name: "tradegateway_pcs_upstream_calls_total",
+  help: "PCS → port-interop upstream call outcomes",
+  labelNames: ["verb", "code"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsGapRenderedTotal = new Counter({
+  name: "tradegateway_pcs_gap_rendered_total",
+  help: "INTEGRATION_GAPS disclosures returned by the pcs.* router",
+  labelNames: ["gap_id"] as const,
+  registers: [metricsRegistry],
+});
+
+export const pcsBookingRequestsTotal = new Counter({
+  name: "tradegateway_pcs_booking_requests_total",
+  help: "PCS booking-initiation mutation outcomes (incl. disabled-gate disclosures)",
+  labelNames: ["outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+// ─── Phase 9 (WP-A robustness tail) ──────────────────────────────────────────
+
+export const pushDispatchFailuresTotal = new Counter({
+  name: "tradegateway_push_dispatch_failures_total",
+  help: "Push-dispatch Kafka publish failures (PRA-027) — token commit succeeds, dispatch is queued to the durable outbox and surfaced here",
+  labelNames: ["reason"] as const,
+  registers: [metricsRegistry],
+});
+
+export const geoVesselEventsTotal = new Counter({
+  name: "tradegateway_geo_vessel_events_total",
+  help: "vessels.events envelope events handled by the geo vessel projection (PRA-096)",
+  labelNames: ["topic", "outcome"] as const,
+  registers: [metricsRegistry],
+});
+
+export const geoVesselSignatureRejectsTotal = new Counter({
+  name: "tradegateway_geo_vessel_signature_rejects_total",
+  help: "vessels.events envelope v1.0 provenance JWS rejections (fail-closed projection, PRA-096)",
+  labelNames: ["reason"] as const,
+  registers: [metricsRegistry],
+});

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,8 +28,13 @@ type FCMNotification struct {
 
 // FCMClient sends push notifications via FCM v1 HTTP API.
 type FCMClient struct {
-	ProjectID  string
-	HTTPClient HTTPDoer
+	ProjectID string
+	// BearerToken authorises FCM v1 API calls. Sourced from the FCM_BEARER_TOKEN
+	// environment variable only (never hardcoded); empty means dry-run token
+	// validation in the TokenRefresher will simply be refused by FCM (401) and
+	// no token is purged — fail-closed, no fabricated validation.
+	BearerToken string
+	HTTPClient  HTTPDoer
 }
 
 // HTTPDoer is an interface for making HTTP requests (injectable for testing).
@@ -38,8 +44,9 @@ type HTTPDoer interface {
 
 func NewFCMClient(projectID string) *FCMClient {
 	return &FCMClient{
-		ProjectID:  projectID,
-		HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		ProjectID:   projectID,
+		BearerToken: os.Getenv("FCM_BEARER_TOKEN"),
+		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 

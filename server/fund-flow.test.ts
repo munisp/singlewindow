@@ -87,13 +87,93 @@ function mockRedisDuplicate() {
   mockRedisSet.mockResolvedValueOnce(null); // SET NX returned null → duplicate
 }
 
+// SW-15 mock hygiene: vi.clearAllMocks() (mockClear) does NOT remove queued
+// mockResolvedValueOnce implementations — after the SW-15 rework added
+// server-authoritative DB lookups and stricter gates, tests that threw early
+// leaked stale Temporal/Redis/DB responses into later tests. mockReset()
+// drops the once-queue so every test starts from a clean slate.
+function resetMocks() {
+  vi.clearAllMocks();
+  mockFetch.mockReset();
+  mockRedisSet.mockReset();
+  mockDbSelect.mockReset();
+  mockDbInsert.mockReset();
+  mockDbUpdate.mockReset();
+}
+
+// SW-15: the collectible state is "payment_pending" (the old seed "approved"
+// is not in the declaration_status pgEnum — a declaration in that state can
+// never exist in the real DB). levyAmount is included for export-levy calls
+// whose amount is now server-authoritative (declarations.levyAmount).
 function mockDeclarationApproved(id = 1) {
   mockDbSelect.mockReturnValueOnce({
     from: vi.fn().mockReturnValue({
       where: vi.fn().mockReturnValue({
         limit: vi.fn().mockReturnValue({
           then: vi.fn().mockImplementation((cb: (r: unknown[]) => unknown) =>
-            Promise.resolve(cb([{ id, status: "approved", traderId: 2, dutyAmount: "1500.00" }]))
+            Promise.resolve(cb([{ id, status: "payment_pending", traderId: 2, dutyAmount: "1500.00", levyAmount: "500.00" }]))
+          ),
+        }),
+      }),
+    }),
+  });
+}
+
+// SW-15: approveDrawbackClaim now loads the real claim and validates
+// approved <= claimed against it.
+function mockDrawbackClaimSelect(claimedAmount = "1500.00", id = 1) {
+  mockDbSelect.mockReturnValueOnce({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({
+          then: vi.fn().mockImplementation((cb: (r: unknown[]) => unknown) =>
+            Promise.resolve(cb([{ id, claimNumber: "DBC-TEST-001", traderId: 2, claimedAmount }]))
+          ),
+        }),
+      }),
+    }),
+  });
+}
+
+// SW-15: payAeoFee now loads the AEO application (ownership check).
+function mockAeoApplicationSelect(id = 5, traderId = 2) {
+  mockDbSelect.mockReturnValueOnce({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({
+          then: vi.fn().mockImplementation((cb: (r: unknown[]) => unknown) =>
+            Promise.resolve(cb([{ id, traderId, status: "submitted" }]))
+          ),
+        }),
+      }),
+    }),
+  });
+}
+
+// SW-15: payWarehouseStorageFee now loads the bonded inventory item
+// (depositedAt drives the months calculation).
+function mockBondedInventorySelect(id = 7, depositedAt = new Date("2026-01-15")) {
+  mockDbSelect.mockReturnValueOnce({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({
+          then: vi.fn().mockImplementation((cb: (r: unknown[]) => unknown) =>
+            Promise.resolve(cb([{ id, depositedAt, dutyLiabilityUsd: "2500.00" }]))
+          ),
+        }),
+      }),
+    }),
+  });
+}
+
+// SW-15: payExBondDuty loads the permit, then the inventory duty liability.
+function mockExBondPermitSelect(id = 15, inventoryId = 9) {
+  mockDbSelect.mockReturnValueOnce({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockReturnValue({
+          then: vi.fn().mockImplementation((cb: (r: unknown[]) => unknown) =>
+            Promise.resolve(cb([{ id, inventoryId, status: "approved" }]))
           ),
         }),
       }),
@@ -155,9 +235,9 @@ function mockPaymentQueueSelect(items: Array<{ id: number }> = [{ id: 1 }, { id:
 // ─── SCENARIO 1: Import Duty Collection ───────────────────────────────────────
 
 describe("Scenario 1: Import Duty Collection", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
-  it("triggers DutyClearanceWorkflow for an approved declaration", async () => {
+  it("triggers DutyClearanceWorkflow for a payment_pending declaration", async () => {
     mockDeclarationApproved(42);
     mockRedisNotDuplicate();
     mockTemporalSuccess("wf-duty-001");
@@ -195,7 +275,7 @@ describe("Scenario 1: Import Duty Collection", () => {
       .rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("throws PRECONDITION_FAILED for non-approved declaration", async () => {
+  it("throws PRECONDITION_FAILED for a declaration not pending payment", async () => {
     mockDeclarationDraft(42);
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -219,9 +299,10 @@ describe("Scenario 1: Import Duty Collection", () => {
 // ─── SCENARIO 2: Export Levy Collection ───────────────────────────────────────
 
 describe("Scenario 2: Export Levy Collection", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers ExportLevyWorkflow", async () => {
+    mockDeclarationApproved(10);
     mockRedisNotDuplicate();
     mockTemporalSuccess("wf-levy-001");
 
@@ -234,6 +315,7 @@ describe("Scenario 2: Export Levy Collection", () => {
   });
 
   it("is idempotent on duplicate", async () => {
+    mockDeclarationApproved(10);
     mockRedisDuplicate();
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -253,7 +335,7 @@ describe("Scenario 2: Export Levy Collection", () => {
 // ─── SCENARIO 3: Duty Drawback Claim ──────────────────────────────────────────
 
 describe("Scenario 3: Duty Drawback Claim", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("creates a drawback claim record in DB", async () => {
     mockDrawbackInsert(101);
@@ -289,6 +371,7 @@ describe("Scenario 3: Duty Drawback Claim", () => {
   });
 
   it("approveDrawbackClaim triggers DutyDrawbackWorkflow for admin", async () => {
+    mockDrawbackClaimSelect("1500.00", 1);
     mockRedisNotDuplicate();
     mockTemporalSuccess("wf-drawback-001");
 
@@ -304,7 +387,7 @@ describe("Scenario 3: Duty Drawback Claim", () => {
 // ─── SCENARIO 4: Penalty Levy ──────────────────────────────────────────────────
 
 describe("Scenario 4: Penalty Levy", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -339,7 +422,7 @@ describe("Scenario 4: Penalty Levy", () => {
 // ─── SCENARIO 5: Bond Guarantee Lodgement ─────────────────────────────────────
 
 describe("Scenario 5: Bond Guarantee Lodgement", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers BondManagementWorkflow with lodge action", async () => {
     mockRedisNotDuplicate();
@@ -379,7 +462,7 @@ describe("Scenario 5: Bond Guarantee Lodgement", () => {
 // ─── SCENARIO 6: Bond Release ─────────────────────────────────────────────────
 
 describe("Scenario 6: Bond Release", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -402,7 +485,7 @@ describe("Scenario 6: Bond Release", () => {
 // ─── SCENARIO 7: Bond Forfeiture ──────────────────────────────────────────────
 
 describe("Scenario 7: Bond Forfeiture", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -425,7 +508,7 @@ describe("Scenario 7: Bond Forfeiture", () => {
 // ─── SCENARIO 8: Transit Guarantee Lodgement ──────────────────────────────────
 
 describe("Scenario 8: Transit Guarantee Lodgement", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers TransitLodgementWorkflow", async () => {
     mockRedisNotDuplicate();
@@ -464,7 +547,7 @@ describe("Scenario 8: Transit Guarantee Lodgement", () => {
 // ─── SCENARIO 9: Transit Guarantee Release ────────────────────────────────────
 
 describe("Scenario 9: Transit Guarantee Release", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -487,9 +570,10 @@ describe("Scenario 9: Transit Guarantee Release", () => {
 // ─── SCENARIO 10: AEO Application Fee ────────────────────────────────────────
 
 describe("Scenario 10: AEO Application Fee", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers AEOFeeWorkflow", async () => {
+    mockAeoApplicationSelect(5, 2);
     mockRedisNotDuplicate();
     mockTemporalSuccess("wf-aeo-fee-001");
 
@@ -500,6 +584,7 @@ describe("Scenario 10: AEO Application Fee", () => {
   });
 
   it("is idempotent on duplicate", async () => {
+    mockAeoApplicationSelect(5, 2);
     mockRedisDuplicate();
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -512,7 +597,7 @@ describe("Scenario 10: AEO Application Fee", () => {
 // ─── SCENARIO 11: Free Zone Entry Fee ────────────────────────────────────────
 
 describe("Scenario 11: Free Zone Entry Fee", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers FreeZoneEntryFeeWorkflow", async () => {
     mockRedisNotDuplicate();
@@ -528,9 +613,10 @@ describe("Scenario 11: Free Zone Entry Fee", () => {
 // ─── SCENARIO 12: Warehouse Storage Fee ──────────────────────────────────────
 
 describe("Scenario 12: Warehouse Storage Fee", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers WarehouseStorageFeeWorkflow", async () => {
+    mockBondedInventorySelect(7);
     mockRedisNotDuplicate();
     mockTemporalSuccess("wf-wh-001");
 
@@ -548,6 +634,7 @@ describe("Scenario 12: Warehouse Storage Fee", () => {
   });
 
   it("is idempotent — same inventory + period combination", async () => {
+    mockBondedInventorySelect(7);
     mockRedisDuplicate();
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -560,9 +647,11 @@ describe("Scenario 12: Warehouse Storage Fee", () => {
 // ─── SCENARIO 13: Ex-Bond Duty Payment ───────────────────────────────────────
 
 describe("Scenario 13: Ex-Bond Duty Payment", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers ExBondDutyWorkflow", async () => {
+    mockExBondPermitSelect(15, 9);
+    mockBondedInventorySelect(9);
     mockRedisNotDuplicate();
     mockTemporalSuccess("wf-exbond-001");
 
@@ -576,7 +665,7 @@ describe("Scenario 13: Ex-Bond Duty Payment", () => {
 // ─── SCENARIO 14: Post-Clearance Audit Recovery ───────────────────────────────
 
 describe("Scenario 14: Post-Clearance Audit Recovery", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -616,7 +705,7 @@ describe("Scenario 14: Post-Clearance Audit Recovery", () => {
 // ─── SCENARIO 15: Overpayment Refund ──────────────────────────────────────────
 
 describe("Scenario 15: Overpayment Refund", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -639,7 +728,7 @@ describe("Scenario 15: Overpayment Refund", () => {
 // ─── SCENARIO 16: OGA Permit Fee ──────────────────────────────────────────────
 
 describe("Scenario 16: OGA Permit Fee", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers OGAPermitFeeWorkflow", async () => {
     mockRedisNotDuplicate();
@@ -664,7 +753,7 @@ describe("Scenario 16: OGA Permit Fee", () => {
 // ─── SCENARIO 17: Sanctions-Blocked Payment Reversal ──────────────────────────
 
 describe("Scenario 17: Sanctions-Blocked Payment Reversal", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -701,7 +790,7 @@ describe("Scenario 17: Sanctions-Blocked Payment Reversal", () => {
 // ─── SCENARIO 18: Batch Payment Settlement ────────────────────────────────────
 
 describe("Scenario 18: Batch Payment Settlement", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -744,7 +833,7 @@ describe("Scenario 18: Batch Payment Settlement", () => {
 // ─── SCENARIO 19: Revenue Reconciliation ──────────────────────────────────────
 
 describe("Scenario 19: Revenue Reconciliation", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("requires admin role", async () => {
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -783,7 +872,7 @@ describe("Scenario 19: Revenue Reconciliation", () => {
 // ─── SCENARIO 20: Trader Account Provisioning ─────────────────────────────────
 
 describe("Scenario 20: Trader Account Provisioning", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("triggers TraderAccountProvisioningWorkflow", async () => {
     mockRedisNotDuplicate();
@@ -820,7 +909,7 @@ describe("Scenario 20: Trader Account Provisioning", () => {
 // ─── CROSS-CUTTING: Workflow Status Query ─────────────────────────────────────
 
 describe("Cross-cutting: getWorkflowStatus", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("returns workflow status from Temporal service", async () => {
     mockFetch.mockResolvedValueOnce({
@@ -851,9 +940,10 @@ describe("Cross-cutting: getWorkflowStatus", () => {
 // ─── ATOMICITY GUARANTEE TESTS ────────────────────────────────────────────────
 
 describe("Atomicity Guarantees", () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(resetMocks);
 
   it("does NOT call Temporal if Redis idempotency key already exists", async () => {
+    mockDeclarationApproved(1);
     mockRedisDuplicate();
 
     const { fundFlowRouter } = await import("./routers/fund-flow");
@@ -864,7 +954,8 @@ describe("Atomicity Guarantees", () => {
   });
 
   it("does NOT write to DB if Temporal workflow trigger fails", async () => {
-    // For drawback approval: Redis OK, Temporal fails
+    // For drawback approval: claim exists, Redis OK, Temporal fails
+    mockDrawbackClaimSelect("1500.00", 1);
     mockRedisNotDuplicate();
     mockTemporalFailure();
 
@@ -878,6 +969,7 @@ describe("Atomicity Guarantees", () => {
   });
 
   it("Redis SET NX is called with correct key prefix for each scenario", async () => {
+    mockDeclarationApproved(77);
     mockRedisNotDuplicate();
     mockTemporalSuccess();
 

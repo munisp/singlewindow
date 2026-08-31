@@ -54,15 +54,18 @@ func registerFundFlowWorkflows(w worker.Worker) {
 	w.RegisterWorkflow(DutyDrawbackWorkflow)
 
 	// Scenarios 5–7: Bond management (lodge, forfeit, release)
-	w.RegisterWorkflow(BondManagementWorkflow)
+	// PRA-129: registrations now use the IMPLEMENTED function names
+	// (BondLodgementWorkflow etc.); BondReleaseWorkflow is a fail-closed
+	// NOT_IMPLEMENTED stub — see bond_management.go.
+	w.RegisterWorkflow(BondLodgementWorkflow)
 	w.RegisterWorkflow(BondForfeitureWorkflow)
 	w.RegisterWorkflow(BondReleaseWorkflow)
 
 	// Scenarios 8–9: Transit guarantee (lodge, discharge)
-	w.RegisterWorkflow(TransitGuaranteeWorkflow)
-	w.RegisterWorkflow(TransitGuaranteeDischargeWorkflow)
+	w.RegisterWorkflow(TransitLodgementWorkflow)
+	w.RegisterWorkflow(TransitReleaseWorkflow)
 
-	// Scenario 10: Ex-bond duty payment
+	// Scenario 10: Ex-bond duty payment (fail-closed NOT_IMPLEMENTED stub)
 	w.RegisterWorkflow(ExBondDutyPaymentWorkflow)
 
 	// Scenario 14: Post-clearance audit recovery

@@ -306,19 +306,18 @@ describe("declarations lifecycle — KYC gate and risk assessment", () => {
     }));
   });
 
-  it("falls back to deterministic risk scoring when both upstream scoring strategies fail", async () => {
+  it("fails closed (no pseudo-score) when both upstream scoring strategies fail", async () => {
     vi.mocked(scoreDeclarationRisk).mockRejectedValueOnce(new Error("ML unavailable"));
     vi.mocked(invokeLLM).mockResolvedValueOnce({ choices: [{ message: { content: "not-json" } }] } as any);
-    vi.mocked(updateDeclaration).mockResolvedValueOnce(declaration({ status: "under_assessment", riskLane: "green", riskScore: "20" }) as any);
 
-    await declarationsRouter.createCaller(createContext()).submit({ id: 77 });
-
-    // The character-code sum of "847130" is 311; (311 % 40) + 10 = 41, a yellow lane.
-    expect(updateDeclaration).toHaveBeenCalledWith(77, expect.objectContaining({
-      riskScore: "41",
-      riskLane: "yellow",
-      aiExplanation: expect.objectContaining({ summary: "Automated assessment" }),
-    }));
+    // SW-18: the deterministic HS-charcode pseudo-score was REMOVED — when
+    // neither the ML scorer nor the LLM is available, scoring is UNAVAILABLE
+    // and the declaration stays in draft for manual review. No risk lane is
+    // ever fabricated, and the declaration is NOT transitioned.
+    await expect(
+      declarationsRouter.createCaller(createContext()).submit({ id: 77 })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(updateDeclaration).not.toHaveBeenCalled();
   });
 });
 

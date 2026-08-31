@@ -2,6 +2,8 @@
 # Includes: GNN trainer (PyTorch Geometric), FalkorDB/Neo4j seeder,
 #           CocoIndex pipeline, EPR-KGQA, ART reasoning, Ollama bridge
 FROM python:3.11-slim
+# SW-O12: non-root runtime
+RUN useradd --create-home --uid 10001 appuser
 
 WORKDIR /app
 
@@ -51,6 +53,8 @@ RUN mkdir -p /app/models
 
 ENV PORT=8099
 ENV PYTHONUNBUFFERED=1
+
+USER appuser
 
 EXPOSE 8099
 

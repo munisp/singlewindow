@@ -129,10 +129,17 @@ func main() {
 		})
 	})
 
-	// Publish synthetic event (POST /events/publish)
+	// Publish synthetic event (POST /events/publish) — DEV/TEST ONLY.
+	// Fail-closed: refused unless FLUVIO_ALLOW_SYNTHETIC=1 AND not running in
+	// production, so no fabricated cargo event can ever enter the live stream.
 	mux.HandleFunc("/events/publish", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		env := strings.ToLower(os.Getenv("ENVIRONMENT") + os.Getenv("APP_ENV") + os.Getenv("NODE_ENV"))
+		if os.Getenv("FLUVIO_ALLOW_SYNTHETIC") != "1" || strings.Contains(env, "production") {
+			http.Error(w, "synthetic event injection is dev-only (set FLUVIO_ALLOW_SYNTHETIC=1 outside production)", http.StatusForbidden)
 			return
 		}
 		var evt hub.CargoEvent

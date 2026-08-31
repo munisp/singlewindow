@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
@@ -15,8 +16,17 @@ import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } 
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
 import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
-import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
+import { indexDeclaration, searchDeclarations, OpenSearchUnavailableError } from "../_core/opensearch";
 import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
+import {
+  getTariffClient,
+  TARIFF_VESSEL_CLASSES,
+  TariffConfigError,
+  TariffRejectedError,
+  TariffUnavailableError,
+  type TariffAssessRequest,
+  type TariffAssessment,
+} from "../_core/tariffClient";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -142,23 +152,30 @@ Green: 0-30 (auto-clear), Yellow: 31-60 (doc review), Red: 61-100 (physical insp
     const content = response.choices[0]?.message?.content;
     if (content && typeof content === 'string') {
       const parsed = JSON.parse(content);
+      // SW-18: LLM output is NOT a model score — label it, and never let an
+      // LLM-assigned lane auto-clear (green is clamped to yellow/manual review).
+      const llmLane = parsed.lane === "green" ? "yellow" : parsed.lane;
       return {
         score: parsed.score,
-        lane: parsed.lane,
-        explanation: parsed
+        lane: llmLane,
+        explanation: {
+          ...parsed,
+          source: "llm-fallback",
+          modelScore: false,
+          warning: "LLM heuristic assessment — NOT an authoritative model score. Manual review required; auto-clearance prohibited.",
+        }
       };
     }
   } catch (e) {
     console.error("[RiskScore] LLM error:", e);
   }
-  // Fallback: deterministic score based on HS code hash (no randomness)
-  const hsHash = data.hsCode ? data.hsCode.split("").reduce((a, c) => a + c.charCodeAt(0), 0) : 50;
-  const score = (hsHash % 40) + 10;
-  return {
-    score,
-    lane: score < 30 ? "green" : score < 60 ? "yellow" : "red",
-    explanation: { summary: "Automated assessment", factors: [] }
-  };
+  // SW-18: fail CLOSED. No HS-code charcode pseudo-scores, no synthesized lanes.
+  // When neither the ML scorer nor the LLM is available, scoring is UNAVAILABLE
+  // and the declaration must go to manual review — never a fabricated lane.
+  throw new TRPCError({
+    code: "SERVICE_UNAVAILABLE",
+    message: "SCORING_UNAVAILABLE: neither the ML risk scorer nor the LLM fallback is available. Declaration remains in draft for manual review — no risk lane was assigned.",
+  });
 }
 
 export const declarationsRouter = router({
@@ -252,11 +269,36 @@ export const declarationsRouter = router({
         }
       );
 
-      // Compute duties (simplified: 10% duty + 15% VAT on CIF value)
-      const cif = parseFloat(decl.invoiceValue ?? "0");
-      const duty = cif * 0.10;
-      const vat = (cif + duty) * 0.15;
-      const total = duty + vat;
+      // Compute duties (flat-rate ESTIMATE: 10% duty + 15% VAT on CIF value).
+      // SW-17: exact integer minor-unit arithmetic — no float money math.
+      // This is NOT an authoritative tariff assessment: it is labelled
+      // ESTIMATE_UNVERIFIED and payment initiation against it is blocked in
+      // production (see payments.initiate / mojaloop.initiatePayment).
+      // PRA-100: the authoritative path is declarations.assessDuty below,
+      // which calls the financial-controls tariff engine and replaces this
+      // estimate with a TARIFF_ENGINE_VERIFIED assessment. The declaration
+      // record does not carry vessel/voyage particulars, so the engine call
+      // cannot be made implicitly here without fabricating vesselGrt —
+      // assessDuty takes those particulars as explicit input instead.
+      const cifMinor = (() => {
+        const s = String(decl.invoiceValue ?? "").trim();
+        if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid invoice value '${s}' — cannot compute duties` });
+        }
+        const [maj, frac = ""] = s.split(".");
+        return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
+      })();
+      const dutyMinor = Math.round(cifMinor * 0.10);
+      const vatMinor = Math.round((cifMinor + dutyMinor) * 0.15);
+      const totalMinor = dutyMinor + vatMinor;
+      const duty = dutyMinor / 100;
+      const vat = vatMinor / 100;
+      const total = totalMinor / 100;
+      const dutyEstimateExplanation = {
+        ...risk.explanation,
+        dutyAssessment: "ESTIMATE_UNVERIFIED",
+        dutyBasis: "Flat-rate estimate (10% duty + 15% VAT on CIF) — NOT from the tariff engine. Obtain an authoritative assessment via declarations.assessDuty; payment against this estimate is blocked in production.",
+      };
 
       // Permify: setOwner is called on create; submit is gated by traderId check above.
       // assertCan is reserved for cross-role operations (approve, release, assess).
@@ -265,7 +307,7 @@ export const declarationsRouter = router({
         status: "under_assessment",
         riskScore: String(risk.score),
         riskLane: risk.lane as any,
-        aiExplanation: risk.explanation,
+        aiExplanation: dutyEstimateExplanation,
         dutyAmount: String(duty.toFixed(2)),
         vatAmount: String(vat.toFixed(2)),
         totalDue: String(total.toFixed(2)),
@@ -340,6 +382,185 @@ export const declarationsRouter = router({
       }).catch(() => {});
       return updated;
     }),
+
+  /**
+   * PRA-100: authoritative statutory duty assessment via the financial-controls
+   * tariff engine (W-FEAT-4). Replaces the flat-rate ESTIMATE_UNVERIFIED with a
+   * TARIFF_ENGINE_VERIFIED assessment, opening the production payment gates
+   * (payments.initiate / mojaloop.initiatePayment) for real, replay-safe amounts.
+   *
+   * The declaration record carries no vessel/voyage particulars, so they are
+   * explicit input here — never fabricated from cargo fields. Money moves in
+   * integer minor units end-to-end. Fail-closed:
+   *   - TARIFF_SERVICE_URL unset        → PRECONDITION_FAILED (configuration error),
+   *   - engine unreachable/breaker open → SERVICE_UNAVAILABLE (classified),
+   *   - engine 4xx rejection            → BAD_REQUEST with the upstream reason.
+   * No path in this procedure fabricates a rate.
+   */
+  assessDuty: protectedProcedure
+    .input(z.object({
+      declarationId: z.number().int().positive(),
+      vesselGrt: z.number().int().positive(),
+      vesselClass: z.enum(TARIFF_VESSEL_CLASSES),
+      voyageType: z.enum(["INTERNATIONAL", "CABOTAGE"]),
+      routeKind: z.enum(["SEA", "INLAND_WATERWAY"]).default("SEA"),
+      // This platform is the Nigerian single window: the declaration's port of
+      // entry is a Nigerian port. Callers may override for honest edge cases
+      // (e.g. transit declarations with no Nigerian port call).
+      nigeriaPortCall: z.boolean().default(true),
+      grossFreightUsdMinor: z.number().int().nonnegative(),
+      cargoCategory: z.string().min(1).max(128).optional(),
+      voyageFlags: z.array(z.string().min(1).max(128)).max(16).optional(),
+      asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "asOf must be YYYY-MM-DD").optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.declarationId);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+      const officerRoles = ["admin", "customs_officer", "finance"];
+      if (decl.traderId !== ctx.user.id && !officerRoles.includes(ctx.user.role)) {
+        throw new TRPCError({ code: "FORBIDDEN" });
+      }
+      if (!["under_assessment", "payment_pending"].includes(decl.status)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Declaration status '${decl.status}' is not assessable — submit the declaration first (and do not re-assess after clearance).`,
+        });
+      }
+
+      // The engine aggregates statutory totals in USD and NGN minor units only.
+      // Anything else would require a fabricated FX conversion — refuse.
+      const currency = (decl.invoiceCurrency ?? "USD").toUpperCase();
+      if (currency !== "USD" && currency !== "NGN") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Declaration currency ${currency} is not assessable by the tariff engine (USD/NGN totals only) — no FX conversion is fabricated.`,
+        });
+      }
+
+      const assessRequest: TariffAssessRequest = {
+        vesselGrt: input.vesselGrt,
+        vesselClass: input.vesselClass,
+        entityRef: `trader:${decl.traderId}`,
+        cargoCategory: input.cargoCategory ?? decl.hsCode ?? "UNSPECIFIED",
+        voyageType: input.voyageType,
+        routeKind: input.routeKind,
+        nigeriaPortCall: input.nigeriaPortCall,
+        grossFreightUsdMinor: input.grossFreightUsdMinor,
+        ...(input.voyageFlags?.length ? { voyageFlags: input.voyageFlags } : {}),
+        ...(input.asOf ? { asOf: input.asOf } : {}),
+      };
+
+      // Replay-safe idempotency: the same declaration + identical request
+      // replays the SAME assessment server-side; a changed request gets a new
+      // key instead of an idempotency conflict.
+      const requestFingerprint = createHash("sha256").update(JSON.stringify(assessRequest)).digest("hex").slice(0, 24);
+      const idempotencyKey = `tg-decl-${decl.id}-${requestFingerprint}`;
+
+      let assessment: TariffAssessment;
+      try {
+        assessment = await getTariffClient().assess(assessRequest, {
+          idempotencyKey,
+          correlationId: `decl-${decl.id}`,
+        });
+      } catch (err) {
+        if (err instanceof TariffConfigError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Tariff engine is not configured: ${err.message}` });
+        }
+        if (err instanceof TariffUnavailableError) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Tariff engine unavailable (${err.reason}): ${err.message}` });
+        }
+        if (err instanceof TariffRejectedError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+
+      // Map engine lines onto the declaration money columns, all integer minor
+      // units in the declaration currency. Ship dues are the "duty" head; all
+      // other charged statutory instruments are levies; the engine does not
+      // assess VAT, so vatAmount is honestly zeroed — the full itemized
+      // breakdown is preserved in aiExplanation.tariffAssessment.
+      const charged = assessment.lines.filter((l) => l.applicability === "CHARGED" && l.currency === currency);
+      const dutyMinor = charged
+        .filter((l) => l.instrument === "NPA_SHIP_DUES")
+        .reduce((sum, l) => sum + l.amountMinor, 0);
+      const levyMinor = charged
+        .filter((l) => l.instrument !== "NPA_SHIP_DUES")
+        .reduce((sum, l) => sum + l.amountMinor, 0);
+      const totalMinor = currency === "NGN" ? assessment.totalNgnMinor : assessment.totalUsdMinor;
+
+      const previousExplanation =
+        decl.aiExplanation && typeof decl.aiExplanation === "object"
+          ? (decl.aiExplanation as Record<string, unknown>)
+          : {};
+      const aiExplanation = {
+        ...previousExplanation,
+        dutyAssessment: "TARIFF_ENGINE_VERIFIED",
+        dutyBasis:
+          `Authoritative assessment ${assessment.assessmentId} from the tariff engine ` +
+          `(asOf ${assessment.asOf}, requester ${assessment.requester}). Statutory line items ` +
+          `are versioned, effective-dated rates with encoded exemptions — no flat-rate estimation.`,
+        tariffAssessment: {
+          assessmentId: assessment.assessmentId,
+          asOf: assessment.asOf,
+          correlationId: assessment.correlationId,
+          idempotencyKey,
+          currency,
+          dutyMinor,
+          levyMinor,
+          vatMinor: 0,
+          totalMinor,
+          lines: assessment.lines,
+          provisional: assessment.lines.some((l) => l.provisional),
+        },
+      };
+
+      const updated = await updateDeclaration(decl.id, {
+        dutyAmount: (dutyMinor / 100).toFixed(2),
+        vatAmount: "0.00",
+        levyAmount: (levyMinor / 100).toFixed(2),
+        totalDue: (totalMinor / 100).toFixed(2),
+        aiExplanation,
+      });
+
+      await logAuditEvent({
+        entityType: "declaration",
+        entityId: decl.id,
+        action: "tariff_assessed",
+        actorId: ctx.user.id,
+        actorType: officerRoles.includes(ctx.user.role) ? "officer" : "trader",
+        previousState: { dutyAssessment: previousExplanation.dutyAssessment ?? null, totalDue: decl.totalDue },
+        newState: {
+          dutyAssessment: "TARIFF_ENGINE_VERIFIED",
+          tariffAssessmentId: assessment.assessmentId,
+          totalDue: (totalMinor / 100).toFixed(2),
+          currency,
+        },
+      });
+
+      await createUserNotification({
+        userId: decl.traderId,
+        type: "tariff_assessed",
+        title: "Duty Assessment Complete",
+        body: `Declaration ${decl.declarationNumber} assessed by the tariff engine: ${(totalMinor / 100).toFixed(2)} ${currency} due (assessment ${assessment.assessmentId}).`,
+        declarationId: decl.id,
+      }).catch(() => { /* non-blocking */ });
+
+      return {
+        declaration: updated,
+        assessment: {
+          assessmentId: assessment.assessmentId,
+          asOf: assessment.asOf,
+          currency,
+          dutyMinor,
+          levyMinor,
+          vatMinor: 0,
+          totalMinor,
+          lines: assessment.lines,
+        },
+      };
+    }),
+
   // R5 FIX: Full-text search across declarations using OpenSearch
   fullTextSearch: protectedProcedure
     .input(z.object({
@@ -348,7 +569,18 @@ export const declarationsRouter = router({
     }))
     .query(async ({ ctx, input }) => {
       const traderId = ctx.user.role === 'admin' || ctx.user.role === 'customs_officer' ? undefined : ctx.user.id;
-      return searchDeclarations(input.query, traderId, input.limit);
+      try {
+        return await searchDeclarations(input.query, traderId, input.limit);
+      } catch (err) {
+        if (err instanceof OpenSearchUnavailableError) {
+          // PRA-110: distinguish cluster-down from zero-results.
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: `DECLARATION_SEARCH_UNAVAILABLE: ${err.message}`,
+          });
+        }
+        throw err;
+      }
     }),
   // Get trader's own declarations — RLS-enforced at the database level
   myDeclarations: protectedProcedure
@@ -534,6 +766,28 @@ export const declarationsRouter = router({
         input.status as DeclarationStatus,
         ctx.user.role
       );
+
+      // SW-M13: clearance additionally requires that no active hold exists.
+      // A red/yellow risk lane is an inspection hold: it must have been
+      // discharged through examination_complete before clearance.
+      if (input.status === "cleared") {
+        const lane = (decl as { riskLane?: string | null }).riskLane;
+        if ((lane === "red" || lane === "yellow") && decl.status !== "examination_complete") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `Active ${lane}-lane inspection hold — declaration must complete examination before clearance`,
+          });
+        }
+        // SW-18: a declaration whose risk output is a non-model estimate (LLM
+        // fallback) may not be cleared without a manual-review annotation.
+        const explanation = (decl as { aiExplanation?: Record<string, unknown> | null }).aiExplanation;
+        if (explanation && (explanation as any).modelScore === false && !(explanation as any).manualReviewCompleted) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Risk assessment is a non-model (LLM heuristic) output — manual review must be recorded before clearance",
+          });
+        }
+      }
 
       // Permify: assert officer can assess this declaration
       const permifyAction = input.status === "cleared" ? "release" :

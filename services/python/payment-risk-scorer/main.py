@@ -1,13 +1,28 @@
 """
-Payment Risk Scorer — TradeGateway NGSWTP (Sprint 31)
+Payment Risk Scorer — TradeGateway NGSWTP
 Language: Python 3.11 | Framework: FastAPI
-Role: ML-powered payment risk scoring before Mojaloop transfer initiation.
+Role: payment risk scoring before Mojaloop transfer initiation.
 
-Scoring model:
-  - Rule-based pre-filters (velocity checks, amount thresholds, blacklisted accounts)
-  - Feature engineering: amount, FSP type, trader history, time-of-day, declaration value
-  - Ensemble: Random Forest + gradient boosting (scikit-learn)
-  - Output: risk score (0.0–1.0), risk tier (LOW/MEDIUM/HIGH/CRITICAL), recommended action
+Scoring design (fail-closed, two layers):
+  1. Deterministic rule layer (FIRST LINE OF DEFENCE, always runs):
+     velocity checks, amount thresholds, FSP channel risk, time-of-day,
+     duty-to-value ratio, trader compliance history, first-payment flag.
+  2. Optional REAL ML augmentation layer (never fabricated):
+     when the environment variable ML_SCORING_URL is set, the rule-layer
+     feature vector is posted to that external inference endpoint (the
+     future blueeconomy-ml-stack inference service) and its score is
+     blended with the rule score. When ML_SCORING_URL is unset, the
+     endpoint is unreachable, or the response is invalid, the response
+     reports ml_augmentation="UNAVAILABLE" and the decision proceeds
+     rules-only. This service NEVER invents an ML signal: a previous
+     version derived an "ml_signal" by SHA-256-hashing the payer account,
+     which was deterministic noise masquerading as ML and has been removed.
+
+  Fail-closed guarantee: a rule-layer CRITICAL score (>= 0.85) is never
+  softened by the ML layer — the ML layer can only augment, not unblock.
+
+  Output: risk score (0.0–1.0), risk tier (LOW/MEDIUM/HIGH/CRITICAL),
+  recommended action.
 
 Risk tiers:
   LOW      (0.00–0.29) → auto-approve payment
@@ -20,16 +35,25 @@ Endpoints:
   POST /api/payment-risk/score
   POST /api/payment-risk/batch-score
   GET  /api/payment-risk/stats
+
+Environment:
+  PAYMENT_RISK_PORT       — listen port (default 8092)
+  ML_SCORING_URL          — full URL of the external ML scoring endpoint
+                            (POST JSON {"features": {...}} ->
+                             200 JSON {"risk_score": 0..1, "model_version": "..."}).
+                            Unset => ML augmentation disabled (rules-only).
+  ML_SCORING_TIMEOUT_MS   — HTTP timeout for the ML call (default 800)
 """
 
 from contextlib import asynccontextmanager
-import hashlib
 import json
 import logging
 import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
+
+import httpx
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -45,6 +69,15 @@ logging.basicConfig(
 logger = logging.getLogger("payment-risk-scorer")
 
 HTTP_PORT = int(os.getenv("PAYMENT_RISK_PORT", "8092"))
+
+# External ML augmentation endpoint (blueeconomy-ml-stack inference service).
+# Unset => ML layer disabled; every response reports ml_augmentation="UNAVAILABLE".
+ML_SCORING_URL = os.getenv("ML_SCORING_URL", "").strip() or None
+ML_SCORING_TIMEOUT_MS = int(os.getenv("ML_SCORING_TIMEOUT_MS", "800"))
+
+# Blend weights when the ML layer is available. Rules remain the dominant layer.
+RULES_BLEND_WEIGHT = 0.65
+ML_BLEND_WEIGHT = 0.35
 
 # ─── Risk tables ──────────────────────────────────────────────────────────────
 
@@ -130,6 +163,14 @@ class PaymentScoreResponse(BaseModel):
     flags: list[str]
     features: dict
     model_version: str
+    ml_augmentation: str = Field(
+        ...,
+        description="APPLIED if a real external ML model augmented the rule score; "
+                    "UNAVAILABLE if no ML endpoint is configured/reachable (rules-only)"
+    )
+    ml_model_version: Optional[str] = Field(
+        None, description="Model version reported by the external ML endpoint, when APPLIED"
+    )
     scored_at: str
 
 
@@ -137,18 +178,64 @@ class BatchScoreRequest(BaseModel):
     payments: list[PaymentScoreRequest]
 
 
+# ─── External ML augmentation client ─────────────────────────────────────────
+
+def query_ml_scorer(features: dict) -> Optional[dict]:
+    """
+    Call the external ML scoring endpoint (blueeconomy-ml-stack).
+
+    Returns {"risk_score": float, "model_version": str} on success, or None
+    when the ML layer is unconfigured, unreachable, times out, or returns an
+    invalid payload. Never raises — the caller fails closed to rules-only.
+    """
+    if not ML_SCORING_URL:
+        return None
+    try:
+        resp = httpx.post(
+            ML_SCORING_URL,
+            json={"features": features},
+            timeout=ML_SCORING_TIMEOUT_MS / 1000.0,
+        )
+        if resp.status_code != 200:
+            logger.warning("ML scorer returned HTTP %s — rules-only", resp.status_code)
+            return None
+        payload = resp.json()
+        score = float(payload["risk_score"])
+        if not (0.0 <= score <= 1.0):
+            logger.warning("ML scorer returned out-of-range score %s — ignored", score)
+            return None
+        return {
+            "risk_score": score,
+            "model_version": str(payload.get("model_version", "unknown")),
+        }
+    except Exception as exc:
+        logger.warning("ML scorer unavailable (%s) — rules-only", exc)
+        return None
+
+
+def blend_scores(rules_score: float, ml_score: float) -> float:
+    """
+    Blend the deterministic rule score with a real external ML score.
+
+    Fail-closed: a rule-layer CRITICAL (>= 0.85) is returned unchanged — the
+    ML layer can augment but can never unblock what the rules blocked.
+    """
+    if rules_score >= 0.85:
+        return rules_score
+    blended = RULES_BLEND_WEIGHT * rules_score + ML_BLEND_WEIGHT * ml_score
+    return min(1.0, max(0.0, blended))
+
+
 # ─── Scoring engine ───────────────────────────────────────────────────────────
 
 class PaymentRiskScorer:
     """
-    Ensemble payment risk scorer combining rule-based filters with
-    a simulated ML model (Random Forest + gradient boosting).
-
-    In production, load a pre-trained scikit-learn pipeline from a model
-    registry (MLflow, W&B, or a local .pkl file).
+    Deterministic rule-based payment risk scorer with an optional, genuinely
+    external ML augmentation layer (see query_ml_scorer). No simulated or
+    hash-derived "ML" signals exist in this service.
     """
 
-    MODEL_VERSION = "1.3.0-sprint31"
+    MODEL_VERSION = "rules-2.0.0"
 
     def score(self, req: PaymentScoreRequest) -> PaymentScoreResponse:
         flags: list[str] = []
@@ -209,13 +296,7 @@ class PaymentRiskScorer:
         if req.is_first_payment:
             flags.append("FIRST_PAYMENT: no prior payment history")
 
-        # ── Feature 8: Account hash anomaly (simulated ML signal) ───────────
-        # In production: feed features into trained RF model
-        account_hash = int(hashlib.sha256(req.payer_account.encode()).hexdigest(), 16)
-        ml_signal = (account_hash % 100) / 100.0 * 0.15  # max 0.15 contribution
-        feature_scores["ml_signal"] = ml_signal
-
-        # ── Ensemble: weighted average ──────────────────────────────────────
+        # ── Rule layer: weighted average (renormalised over present weights) ─
         weights = {
             "amount_risk": 0.25,
             "fsp_channel_risk": 0.10,
@@ -224,10 +305,21 @@ class PaymentRiskScorer:
             "duty_value_ratio_risk": 0.12,
             "compliance_risk": 0.12,
             "first_payment_risk": 0.04,
-            "ml_signal": 0.04,
         }
-        risk_score = sum(feature_scores[k] * weights[k] for k in weights)
-        risk_score = min(1.0, max(0.0, risk_score))
+        weight_total = sum(weights.values())
+        rules_score = sum(feature_scores[k] * weights[k] for k in weights) / weight_total
+        rules_score = min(1.0, max(0.0, rules_score))
+
+        # ── Optional ML augmentation (real external endpoint only) ──────────
+        ml_augmentation = "UNAVAILABLE"
+        ml_model_version: Optional[str] = None
+        risk_score = rules_score
+        ml_result = query_ml_scorer(feature_scores)
+        if ml_result is not None:
+            risk_score = blend_scores(rules_score, ml_result["risk_score"])
+            ml_augmentation = "APPLIED"
+            ml_model_version = ml_result["model_version"]
+            feature_scores["ml_external_score"] = ml_result["risk_score"]
 
         # ── Tier and action ─────────────────────────────────────────────────
         if risk_score < 0.30:
@@ -267,6 +359,8 @@ class PaymentRiskScorer:
             flags=flags,
             features=feature_scores,
             model_version=self.MODEL_VERSION,
+            ml_augmentation=ml_augmentation,
+            ml_model_version=ml_model_version,
             scored_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -306,8 +400,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Payment Risk Scorer",
-    description="ML-powered payment risk scoring for TradeGateway NGSWTP",
-    version="1.3.0",
+    description="Deterministic rule-based payment risk scoring for TradeGateway NGSWTP "
+                "with optional external ML augmentation (fail-closed)",
+    version="2.0.0",
     lifespan=lifespan,
 )
 

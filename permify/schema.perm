@@ -194,3 +194,179 @@ entity site_settings {
   permission read         = admin or org.admin
   permission write        = admin or org.admin
 }
+
+// ─── FUND FLOW OPERATION (PRA-109, Phase 9) ──────────────────────────────────
+// All 20 fund-flow scenarios (duty collection, drawback, bonds, transit
+// guarantees, penalties, refunds, batch settlement) authorize through this
+// entity before any Temporal workflow is triggered.
+entity fund_flow_operation {
+  relation trader           @user
+  relation finance_officer  @user
+  relation customs_officer  @user
+  relation org              @organisation
+
+  permission initiate       = trader or finance_officer or org.admin
+  permission approve        = finance_officer or customs_officer or org.admin
+  permission view           = trader or finance_officer or customs_officer or org.admin or org.finance
+  permission reverse        = finance_officer or org.admin
+  permission settle_batch   = finance_officer or org.admin or org.finance
+  permission reconcile      = finance_officer or org.admin or org.finance
+}
+
+// ─── DOCUMENT VAULT DOCUMENT ─────────────────────────────────────────────────
+entity document {
+  relation uploader         @user
+  relation verifier         @user
+  relation customs_officer  @user
+  relation org              @organisation
+
+  permission upload         = uploader
+  permission view           = uploader or verifier or customs_officer or org.admin or org.oga
+  permission verify         = verifier or customs_officer or org.admin
+  permission reject         = verifier or customs_officer or org.admin
+  permission download       = uploader or verifier or customs_officer or org.admin
+  permission delete         = org.admin
+}
+
+// ─── SANCTIONS CHECK ─────────────────────────────────────────────────────────
+entity sanctions_check {
+  relation subject_trader   @user
+  relation screener         @user
+  relation org              @organisation
+
+  permission initiate       = screener or org.admin
+  permission view           = subject_trader or screener or org.admin
+  permission resolve        = screener or org.admin
+  permission batch_run      = org.admin
+}
+
+// ─── FREE ZONE OPERATION ─────────────────────────────────────────────────────
+entity free_zone_operation {
+  relation operator         @user
+  relation zone_officer     @user
+  relation org              @organisation
+
+  permission lodge          = operator
+  permission view           = operator or zone_officer or org.admin
+  permission approve        = zone_officer or org.admin
+  permission reject         = zone_officer or org.admin
+  permission ex_bond        = zone_officer or org.admin
+}
+
+// ─── WAREHOUSE BOND ──────────────────────────────────────────────────────────
+entity warehouse_bond {
+  relation depositor        @user
+  relation warehouse_officer @user
+  relation customs_officer  @user
+  relation org              @organisation
+
+  permission deposit        = depositor
+  permission view           = depositor or warehouse_officer or customs_officer or org.admin
+  permission release        = warehouse_officer or customs_officer or org.admin
+  permission forfeit        = customs_officer or org.admin
+}
+
+// ─── SECURITY ALERT ──────────────────────────────────────────────────────────
+entity security_alert {
+  relation soc_analyst      @user
+  relation org              @organisation
+
+  permission view           = soc_analyst or org.admin
+  permission acknowledge    = soc_analyst or org.admin
+  permission escalate       = soc_analyst or org.admin
+  permission suppress       = org.admin
+}
+
+// ─── WORKFLOW (Temporal orchestration visibility/control) ────────────────────
+entity workflow {
+  relation initiator        @user
+  relation operator         @user
+  relation org              @organisation
+
+  permission view           = initiator or operator or org.admin or org.finance
+  permission trigger        = operator or org.admin
+  permission signal         = operator or org.admin
+  permission cancel         = org.admin
+}
+
+// ─── NOTIFICATION ────────────────────────────────────────────────────────────
+entity notification {
+  relation recipient        @user
+  relation dispatcher       @user
+  relation org              @organisation
+
+  permission view           = recipient
+  permission mark_read      = recipient
+  permission dispatch       = dispatcher or org.admin
+  permission manage_preferences = recipient
+}
+
+// ─── ADVANCE RULING ──────────────────────────────────────────────────────────
+entity advance_ruling {
+  relation applicant        @user
+  relation customs_officer  @user
+  relation org              @organisation
+
+  permission apply          = applicant
+  permission view           = applicant or customs_officer or org.admin
+  permission issue          = customs_officer or org.admin
+  permission revoke         = org.admin
+}
+
+// ─── FRAUD CASE ──────────────────────────────────────────────────────────────
+entity fraud_case {
+  relation investigator     @user
+  relation org              @organisation
+
+  permission open           = investigator or org.admin
+  permission view           = investigator or org.admin
+  permission update         = investigator or org.admin
+  permission close          = org.admin
+}
+
+// ─── STAKEHOLDER PROFILE (PII) ───────────────────────────────────────────────
+entity stakeholder_profile {
+  relation subject          @user
+  relation reviewer         @user
+  relation org              @organisation
+
+  permission view           = subject or reviewer or org.admin
+  permission update         = subject or org.admin
+  permission approve        = reviewer or org.admin
+  permission suspend        = org.admin
+}
+
+// ─── TRADE FINANCE FACILITY ──────────────────────────────────────────────────
+entity trade_finance_facility {
+  relation applicant        @user
+  relation bank_officer     @user
+  relation org              @organisation
+
+  permission apply          = applicant
+  permission view           = applicant or bank_officer or org.admin or org.finance
+  permission approve        = bank_officer or org.admin
+  permission disburse       = bank_officer or org.admin or org.finance
+}
+
+// ─── MSW VISIT (Maritime Single Window / IMO FAL; Phase 9 WP-C) ─────────────
+entity msw_visit {
+  // Relations — PBAC roles msw-agent / msw-port-health / msw-nis /
+  // msw-customs / msw-ndlea / msw-nimasa / msw-npa (docs/msw.md).
+  relation agent               @user   // Shipping agent (declares visit, submits FAL forms)
+  relation port_health_officer @user   // Port Health: boards first, decides pratique (NPPM 2021)
+  relation nis_officer         @user   // Nigeria Immigration Service
+  relation customs_officer     @user   // Nigeria Customs Service
+  relation ndlea_officer       @user   // National Drug Law Enforcement Agency
+  relation nimasa_officer      @user   // NIMASA
+  relation npa_officer         @user   // Nigerian Ports Authority
+  relation org                 @organisation
+
+  // Permissions
+  permission create             = agent or org.admin
+  permission view               = agent or port_health_officer or nis_officer or customs_officer or ndlea_officer or nimasa_officer or npa_officer or org.admin
+  permission submit_declaration = agent
+  permission review_declaration = port_health_officer or nis_officer or customs_officer or ndlea_officer or nimasa_officer or npa_officer
+  permission decide_pratique    = port_health_officer
+  permission board              = port_health_officer or nis_officer or customs_officer or ndlea_officer or nimasa_officer
+  permission decide_clearance   = nis_officer or customs_officer or ndlea_officer or nimasa_officer or npa_officer
+}

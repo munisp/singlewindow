@@ -48,7 +48,10 @@ def _dapr_port() -> str:
 
 
 def _fluvio_endpoint() -> str:
-    return os.getenv("FLUVIO_ENDPOINT", "http://fluvio-sc:9003")
+    # P0 remediation: Fluvio is NOT deployed on this platform — Kafka is the
+    # real event bus. There is no default endpoint; unless FLUVIO_ENDPOINT is
+    # explicitly set the publisher is honestly disabled (loud error, no I/O).
+    return os.getenv("FLUVIO_ENDPOINT", "")
 
 
 def _otel_endpoint() -> str:
@@ -217,16 +220,29 @@ class DaprPublisher:
 # ─── Fluvio Publisher ──────────────────────────────────────────────────────────
 
 class FluvioPublisher:
-    """HTTP-based Fluvio stream publisher (non-fatal — degrades gracefully)."""
+    """HTTP-based Fluvio stream publisher.
+
+    P0 remediation: Fluvio is NOT deployed — Kafka is the real event bus.
+    Unless FLUVIO_ENDPOINT is explicitly configured this publisher is honestly
+    DISABLED: it logs a loud error and refuses to produce (no phantom HTTP
+    calls to a non-existent endpoint, no silent swallowing)."""
 
     def __init__(self, service_name: str) -> None:
         self._service = service_name
         self._endpoint = _fluvio_endpoint()
-        self._client = httpx.Client(timeout=3.0)
-        logger.info(f"[Fluvio] Publisher initialised for {service_name}")
+        self._enabled = bool(self._endpoint)
+        self._client = httpx.Client(timeout=3.0) if self._enabled else None
+        if not self._enabled:
+            logger.error(
+                "[Fluvio] FLUVIO_ENDPOINT is not set — Fluvio publisher DISABLED "
+                f"for {service_name}. Fluvio is not deployed; use the Kafka publisher instead."
+            )
 
     def produce(self, stream_topic: str, payload: dict[str, Any]) -> bool:
         """Produce a record to a Fluvio stream topic. Returns True on success."""
+        if not self._enabled:
+            logger.error(f"[Fluvio] produce to {stream_topic} refused: publisher disabled (Fluvio not deployed)")
+            return False
         url = f"{self._endpoint}/api/v1/produce/{stream_topic}"
         try:
             resp = self._client.post(url, json=payload)
@@ -262,13 +278,25 @@ class AsyncDaprPublisher:
 
 
 class AsyncFluvioPublisher:
-    """Async HTTP-based Fluvio stream publisher."""
+    """Async HTTP-based Fluvio stream publisher.
+
+    P0 remediation: honestly disabled unless FLUVIO_ENDPOINT is explicitly
+    configured (Fluvio is not deployed; Kafka is the real event bus)."""
 
     def __init__(self, service_name: str) -> None:
         self._service = service_name
         self._endpoint = _fluvio_endpoint()
+        self._enabled = bool(self._endpoint)
+        if not self._enabled:
+            logger.error(
+                "[Fluvio] FLUVIO_ENDPOINT is not set — async Fluvio publisher "
+                f"DISABLED for {service_name}. Use the Kafka publisher instead."
+            )
 
     async def produce(self, stream_topic: str, payload: dict[str, Any]) -> bool:
+        if not self._enabled:
+            logger.error(f"[Fluvio] async produce to {stream_topic} refused: publisher disabled (Fluvio not deployed)")
+            return False
         url = f"{self._endpoint}/api/v1/produce/{stream_topic}"
         async with httpx.AsyncClient(timeout=3.0) as client:
             try:
@@ -325,7 +353,7 @@ class MiddlewareBundle:
             self._consumer.stop()
         self.kafka_publisher.close()
         self.dapr.close()
-        if self.fluvio:
+        if self.fluvio and self.fluvio._client:
             self.fluvio.close()
 
     def publish_event(

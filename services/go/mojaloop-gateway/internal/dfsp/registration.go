@@ -2,11 +2,11 @@
 // registration for TradeGateway NGSWTP.
 //
 // The DFSP registration process involves:
-//   1. POST /participants — register the DFSP with the Mojaloop Hub
-//   2. POST /participants/{dfspId}/initialPositionAndLimits — set net debit cap
-//   3. POST /participants/{dfspId}/accounts — create settlement and position accounts
-//   4. PUT  /parties/MSISDN/{msisdn} — register the customs authority party in ALS
-//   5. POST /participants/{dfspId}/endpoints — register FSPIOP callback URLs
+//  1. POST /participants — register the DFSP with the Mojaloop Hub
+//  2. POST /participants/{dfspId}/initialPositionAndLimits — set net debit cap
+//  3. POST /participants/{dfspId}/accounts — create settlement and position accounts
+//  4. PUT  /parties/MSISDN/{msisdn} — register the customs authority party in ALS
+//  5. POST /participants/{dfspId}/endpoints — register FSPIOP callback URLs
 //
 // All operations are idempotent — safe to re-run on restart.
 package dfsp
@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/tradegateway/mojaloop-gateway/internal/telemetry"
 )
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -100,8 +102,9 @@ type Registrar struct {
 // without FSPIOP-Signature headers (suitable for unit tests and local dev).
 func NewRegistrar(cfg Config, logger *zap.Logger, signer *Signer) *Registrar {
 	return &Registrar{
-		cfg:    cfg,
-		client: &http.Client{Timeout: 30 * time.Second},
+		cfg: cfg,
+		// Phase-7 OTel: traced transport → client spans + traceparent injection.
+		client: &http.Client{Timeout: 30 * time.Second, Transport: telemetry.Transport(nil)},
 		logger: logger,
 		signer: signer,
 	}
@@ -253,9 +256,9 @@ func (r *Registrar) createSettlementAccounts(ctx context.Context) RegistrationRe
 func (r *Registrar) registerPartyInALS(ctx context.Context) RegistrationResult {
 	step := "register_party_als"
 	body, _ := json.Marshal(map[string]interface{}{
-		"fspId":      r.cfg.DFSP_ID,
-		"currency":   r.cfg.Currency,
-		"partyIdType": "MSISDN",
+		"fspId":           r.cfg.DFSP_ID,
+		"currency":        r.cfg.Currency,
+		"partyIdType":     "MSISDN",
 		"partyIdentifier": r.cfg.CustomsPartyMSISDN,
 	})
 	url := fmt.Sprintf("%s/participants/MSISDN/%s", r.cfg.FSPIOP_URL, r.cfg.CustomsPartyMSISDN)

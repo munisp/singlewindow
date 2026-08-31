@@ -21,9 +21,13 @@ RUN mkdir -p proto && \
 RUN CGO_ENABLED=1 GOOS=linux go build -o tigerbeetle-bridge ./cmd/main.go
 
 FROM alpine:3.19
+# SW-O12: non-root runtime
+RUN addgroup -S app && adduser -S app -G app
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/tigerbeetle-bridge .
+
+USER app
 
 EXPOSE 50055 9094
 

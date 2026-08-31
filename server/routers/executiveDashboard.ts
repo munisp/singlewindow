@@ -2,7 +2,7 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { declarations, payments, users, aeoApplications, sanctionsChecks } from "../../drizzle/schema";
-import { eq, desc, gte, count, sql, and } from "drizzle-orm";
+import { eq, desc, gte, count, sql, and , lte} from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 
 // Allowed roles for the executive dashboard
@@ -131,9 +131,10 @@ export const executiveDashboardRouter = router({
         })
         .from(declarations)
         .leftJoin(payments, eq(payments.declarationId, declarations.id))
+        // SW-O11: apply the STATED date window (endDate was ignored)
         .where(and(
           gte(declarations.createdAt, startDate),
-          gte(declarations.createdAt, startDate)
+          lte(declarations.createdAt, endDate)
         ))
         .groupBy(sql`SUBSTRING(${declarations.hsCode}, 1, 2)`)
         .orderBy(desc(sql`SUM(CAST(${payments.amount} AS NUMERIC))`))
@@ -183,10 +184,14 @@ export const executiveDashboardRouter = router({
         .select({ count: count() })
         .from(aeoApplications)
         .where(eq(aeoApplications.status, "approved"));
+      // SW-O11: "this month" must actually be this month (was all-time)
       const [sanctionsHits] = await db
         .select({ count: count() })
         .from(sanctionsChecks)
-        .where(eq(sanctionsChecks.checkResult, "confirmed_match"));
+        .where(and(
+          eq(sanctionsChecks.checkResult, "confirmed_match"),
+          gte(sanctionsChecks.createdAt, thisMonth)
+        ));
       const [monthRevenue] = await db
         .select({ total: sql<string>`COALESCE(SUM(CAST(amount AS NUMERIC)), 0)` })
         .from(payments)
@@ -307,7 +312,8 @@ export const executiveDashboardRouter = router({
           count: count(),
         })
           .from(payments)
-          .where(gte(payments.createdAt, since))
+          // SW-O11: revenue counts CONFIRMED payments only (was all statuses)
+          .where(and(gte(payments.createdAt, since), eq(payments.status, "confirmed")))
           .groupBy(sql`DATE(${payments.createdAt})`)
           .orderBy(sql`DATE(${payments.createdAt})`);
         return { metric: input.metric, data: rows, summary: { totalRevenue: rows.reduce((s, r) => s + Number(r.total), 0) } };

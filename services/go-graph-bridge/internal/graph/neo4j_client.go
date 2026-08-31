@@ -18,7 +18,6 @@ package graph
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -35,7 +34,7 @@ type Neo4jClient struct {
 func NewNeo4jClient() (*Neo4jClient, error) {
 	uri := getEnv("NEO4J_URI", "bolt://localhost:7687")
 	user := getEnv("NEO4J_USER", "neo4j")
-	password := getEnv("NEO4J_PASSWORD", "tradegateway_neo4j_2026")
+	password := mustGetEnv("NEO4J_PASSWORD") // SW-S2-4: no default secret
 	database := getEnv("NEO4J_DATABASE", "neo4j")
 
 	driver, err := neo4j.NewDriverWithContext(
@@ -307,9 +306,4 @@ func (c *Neo4jClient) GetHSCodeRiskProfile(ctx context.Context, hsCode string) (
 	return map[string]interface{}{"hsCode": hsCode, "totalDeclarations": 0}, nil
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
+// getEnv is defined in client.go (same package).

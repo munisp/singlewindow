@@ -16,8 +16,8 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -53,17 +53,27 @@ type Config struct {
 
 func loadConfig() Config {
 	return Config{
-		DatabaseURL:      getEnv("DATABASE_URL", "postgres://postgres:postgres@postgres:5432/tradegateway?sslmode=disable"),
+		// SW-S2-4: secrets have no defaults — refuse to boot when unset.
+		DatabaseURL:      mustGetEnv("DATABASE_URL"),
 		APISIXAdminURL:   getEnv("APISIX_ADMIN_URL", "http://apisix:9180"),
-		APISIXAdminKey:   getEnv("APISIX_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"),
+		APISIXAdminKey:   mustGetEnv("APISIX_ADMIN_KEY"),
 		KeycloakURL:      getEnv("KEYCLOAK_URL", "http://keycloak:8080"),
 		KeycloakRealm:    getEnv("KEYCLOAK_REALM", "tradegateway"),
-		KeycloakAdminPwd: getEnv("KEYCLOAK_ADMIN_PASSWORD", "admin"),
+		KeycloakAdminPwd: mustGetEnv("KEYCLOAK_ADMIN_PASSWORD"),
 		PermifyURL:       getEnv("PERMIFY_URL", "http://permify:3476"),
 		OpenAppSecURL:    getEnv("OPENAPPSEC_URL", "http://openappsec:8080"),
 		KafkaBrokers:     getEnv("KAFKA_BROKERS", "kafka:9092"),
 		Port:             getEnv("PORT", "8110"),
 	}
+}
+
+// mustGetEnv fails closed: a missing secret refuses boot (SW-S2-4).
+func mustGetEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("[security-scanner] FATAL: %s must be set — no default is provided (fail closed)", key)
+	}
+	return v
 }
 
 func getEnv(key, fallback string) string {
@@ -134,14 +144,29 @@ func NewServer(cfg Config) (*Server, error) {
 	db.SetMaxOpenConns(10)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
+	// SW-S2-7: TLS verification is never skipped. When INTERNAL_CA_BUNDLE_PATH is
+	// set, the internal CA is pinned as the only trust root; an unreadable or
+	// certificate-less bundle fails closed (no server start). Otherwise the
+	// system trust store is used with full verification.
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if caPath := os.Getenv("INTERNAL_CA_BUNDLE_PATH"); caPath != "" {
+		pemBytes, readErr := os.ReadFile(caPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("INTERNAL_CA_BUNDLE_PATH unreadable: %w", readErr)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pemBytes) {
+			return nil, fmt.Errorf("INTERNAL_CA_BUNDLE_PATH contains no valid CA certificates (fail closed)")
+		}
+		tlsConfig.RootCAs = pool
+	}
+
 	s := &Server{
 		cfg: cfg,
 		db:  db,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // internal only
-			},
+			Timeout:   30 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: tlsConfig},
 		},
 	}
 	if err := s.ensureSchema(); err != nil {
@@ -611,16 +636,16 @@ func (s *Server) testKeycloakRevocation(w http.ResponseWriter, r *http.Request) 
 // ─── Permify Multi-Tenant Isolation Verification ─────────────────────────────
 // Item 6: Permify authorization model inspection + tenant isolation
 
-func (s *Server) verifyPermifyIsolation(w http.ResponseWriter, r *http.Request) {
-	type PermifyCheck struct {
-		Resource    string `json:"resource"`
-		TenantA     string `json:"tenant_a"`
-		TenantB     string `json:"tenant_b"`
-		TenantAHas  bool   `json:"tenant_a_has_access"`
-		TenantBDenied bool `json:"tenant_b_denied"`
-		Isolated    bool   `json:"isolated"`
-	}
+type PermifyCheck struct {
+	Resource    string `json:"resource"`
+	TenantA     string `json:"tenant_a"`
+	TenantB     string `json:"tenant_b"`
+	TenantAHas  bool   `json:"tenant_a_has_access"`
+	TenantBDenied bool `json:"tenant_b_denied"`
+	Isolated    bool   `json:"isolated"`
+}
 
+func (s *Server) verifyPermifyIsolation(w http.ResponseWriter, r *http.Request) {
 	tenants := []struct{ A, B string }{
 		{"trader-org-001", "trader-org-002"},
 		{"customs-officer-001", "customs-officer-002"},
@@ -666,14 +691,7 @@ func (s *Server) verifyPermifyIsolation(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func countIsolated(checks []struct {
-	Resource    string `json:"resource"`
-	TenantA     string `json:"tenant_a"`
-	TenantB     string `json:"tenant_b"`
-	TenantAHas  bool   `json:"tenant_a_has_access"`
-	TenantBDenied bool `json:"tenant_b_denied"`
-	Isolated    bool   `json:"isolated"`
-}) int {
+func countIsolated(checks []PermifyCheck) int {
 	count := 0
 	for _, c := range checks {
 		if c.Isolated {

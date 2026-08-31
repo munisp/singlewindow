@@ -7,15 +7,10 @@ import (
 	"os"
 )
 
-// NewSigner creates a Signer by loading the PEM key from the path given in the
-// MOJALOOP_JWS_PRIVATE_KEY_PATH environment variable, falling back to an
-// ephemeral key when the variable is unset (development / CI mode).
-func NewSigner(dfspID string) (*Signer, error) {
-	if path := os.Getenv("MOJALOOP_JWS_PRIVATE_KEY_PATH"); path != "" {
-		return NewSignerFromFile(dfspID, path)
-	}
-	return NewEphemeralSigner(dfspID)
-}
+// NOTE: NewSigner lives in jws.go (constructor used by cmd/main.go with the
+// logger parameter). It was previously ALSO declared here with a different
+// signature — a duplicate declaration that broke the package build. Only the
+// file/ephemeral helpers below remain in this file.
 
 // NewSignerFromFile loads a PEM-encoded private key from disk and returns a
 // Signer configured for the given DFSP ID.

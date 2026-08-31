@@ -42,6 +42,12 @@ const AdminAEO = lazy(() => import("./pages/app/AdminAEO"));
 const AdminAnalytics = lazy(() => import("./pages/app/AdminAnalytics"));
 const CustomsRisk = lazy(() => import("./pages/app/CustomsRisk"));
 const TraderDeclarations = lazy(() => import("./pages/app/TraderDeclarations"));
+// Phase 8 — PCS Trader Portal
+const PcsConsignments = lazy(() => import("./pages/app/PcsConsignments"));
+const PcsConsignmentTimeline = lazy(() => import("./pages/app/PcsConsignmentTimeline"));
+const PcsBookings = lazy(() => import("./pages/app/PcsBookings"));
+const PcsBilling = lazy(() => import("./pages/app/PcsBilling"));
+const PcsDocuments = lazy(() => import("./pages/app/PcsDocuments"));
 const Notifications = lazy(() => import("./pages/app/Notifications"));
 const Finance = lazy(() => import("./pages/app/Finance"));
 const PostClearanceAudit = lazy(() => import("./pages/app/PostClearanceAudit"));
@@ -276,22 +282,22 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
       </Route>
       <Route path="/app/finance/drawback">
-        <Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><DutyDrawback /></Suspense></FinanceGuard>
       </Route>
       {/* Sprint 60 — Drawback Automation */}
       <Route path="/app/finance/drawback-automation">
-        <Suspense fallback={<LazyFallback />}><DrawbackAutomation /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><DrawbackAutomation /></Suspense></FinanceGuard>
       </Route>
       {/* 1B Payments/Day — Async Payment Queue */}
       <Route path="/app/trader/payment-queue">
         <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
       </Route>
       <Route path="/app/finance/payment-queue">
-        <Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><PaymentQueue /></Suspense></FinanceGuard>
       </Route>
       {/* Balance Accounts — Payment Mirror */}
       <Route path="/app/finance/balance-accounts">
-        <Suspense fallback={<LazyFallback />}><BalanceAccounts /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><BalanceAccounts /></Suspense></FinanceGuard>
       </Route>
       {/* Sprint 61 — Trader Performance Scorecard */}
       <Route path="/app/trader/scorecard">
@@ -348,7 +354,7 @@ function Router() {
 
       {/* Sprint 31 — Finance Ledger (TigerBeetle) */}
       <Route path="/app/finance/ledger">
-        <Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense>
+        <FinanceGuard><Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense></FinanceGuard>
       </Route>
 
       {/* Sprint 32 — Identity Provider (Keycloak) */}
@@ -394,6 +400,25 @@ function Router() {
       </Route>
       <Route path="/app/admin/tenants">
         <Suspense fallback={<LazyFallback />}><TenantPortal /></Suspense>
+      </Route>
+
+      {/* Phase 8 — PCS Trader Portal */}
+      <Route path="/app/pcs">
+        <Suspense fallback={<LazyFallback />}><PcsConsignments /></Suspense>
+      </Route>
+      <Route path="/app/pcs/consignments/:id">
+        {(params) => (
+          <Suspense fallback={<LazyFallback />}><PcsConsignmentTimeline id={Number(params.id)} /></Suspense>
+        )}
+      </Route>
+      <Route path="/app/pcs/bookings">
+        <Suspense fallback={<LazyFallback />}><PcsBookings /></Suspense>
+      </Route>
+      <Route path="/app/pcs/billing">
+        <Suspense fallback={<LazyFallback />}><PcsBilling /></Suspense>
+      </Route>
+      <Route path="/app/pcs/documents">
+        <Suspense fallback={<LazyFallback />}><PcsDocuments /></Suspense>
       </Route>
 
       {/* Sprint 48 — Flink CEP Trade Pattern Alerts */}

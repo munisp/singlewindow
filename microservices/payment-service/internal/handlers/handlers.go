@@ -5,10 +5,17 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -98,7 +105,7 @@ func (h *Handler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Publish invoice created event
-	go h.pubsub.Publish(context.Background(), "payment.invoice.created", pubsub.DutyInvoiceCreatedEvent{
+	if err := h.pubsub.Publish(r.Context(), "payment.invoice.created", pubsub.DutyInvoiceCreatedEvent{
 		InvoiceId:     id,
 		DeclarationId: body.DeclarationId,
 		TraderId:      body.TraderId,
@@ -106,7 +113,9 @@ func (h *Handler) CreateInvoice(w http.ResponseWriter, r *http.Request) {
 		Currency:      body.Currency,
 		DueDate:       dueDate,
 		CreatedAt:     time.Now().UTC(),
-	})
+	}); err != nil {
+		log.Printf("[payment-service] payment.invoice.created publish failed invoice=%d: %v", id, err)
+	}
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"invoiceId":     id,
@@ -195,16 +204,22 @@ func (h *Handler) InitiatePayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Initiate Mojaloop transfer
+	// Initiate Mojaloop transfer.
+	// SW-M3: FAIL CLOSED — a failed initiation returns 503; no simulated ids.
 	mojaloopTxID, err := h.initiateMojaloopTransfer(ctx, inv, body.PayerFSP, body.PayerMSISDN)
 	if err != nil {
-		log.Printf("[payment-service] Mojaloop initiation failed: %v — using simulated ID", err)
-		mojaloopTxID = fmt.Sprintf("sim-%d-%d", inv.ID, time.Now().Unix())
+		log.Printf("[payment-service] Mojaloop initiation failed: %v", err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("payment switch unavailable — payment NOT initiated: %v", err))
+		return
 	}
 
 	// Record pending transfer in TigerBeetle
-	tbTxID := fmt.Sprintf("tb-%d-%d", inv.ID, time.Now().Unix())
-	amountInMinorUnits := uint64(inv.TotalAmount * 100) // Convert to minor currency units
+	tbTxID := fmt.Sprintf("tb-%d-%d", inv.ID, time.Now().UnixNano())
+	amountInMinorUnits, err := minorUnits(inv.TotalAmount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	tbErr := h.tb.CreateTransfers(ctx, []tigerbeetle.Transfer{
 		{
@@ -218,10 +233,18 @@ func (h *Handler) InitiatePayment(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if tbErr != nil {
+		// SW-M3: the invoice is NOT moved to processing without a ledger reserve.
 		log.Printf("[payment-service] TigerBeetle pending transfer failed: %v", tbErr)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("ledger unavailable — payment NOT initiated: %v", tbErr))
+		return
 	}
 
-	// Update invoice with Mojaloop TX ID
+	// SW-M3: persist the switch transfer id so the real callback can resolve.
+	if err := h.store.SetInvoiceMojaloopTxID(ctx, id, mojaloopTxID, tbTxID); err != nil {
+		log.Printf("[payment-service] failed to persist mojaloop tx id for invoice %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to persist transfer id")
+		return
+	}
 	h.store.UpdateInvoiceStatus(ctx, id, "processing")
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -260,6 +283,25 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "invoice not found")
 		return
 	}
+	if inv.Status == "paid" {
+		// Idempotent replay — never double-post.
+		writeJSON(w, http.StatusOK, map[string]interface{}{"invoiceId": id, "status": "paid", "idempotent": true})
+		return
+	}
+
+	// SW-M3: verify the transfer state with the switch BEFORE touching the
+	// ledger or the invoice. A caller-supplied mojaloopTxId is not evidence.
+	if err := h.verifyTransferWithSwitch(ctx, body.MojaloopTxID, inv); err != nil {
+		log.Printf("[payment-service] ConfirmPayment switch verification failed invoice=%d: %v", id, err)
+		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("transfer verification failed: %v", err))
+		return
+	}
+
+	postAmount, err := minorUnits(inv.TotalAmount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// ── Step 1: Post TigerBeetle transfer (confirm the pending reserve) ──────────
 	// TigerBeetle is the gate: if this fails we do NOT update Postgres.
@@ -274,7 +316,7 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 			ID:              tbPostID,
 			DebitAccountID:  fmt.Sprintf("trader-%d", inv.TraderId),
 			CreditAccountID: "customs-duty-revenue",
-			Amount:          uint64(inv.TotalAmount * 100),
+			Amount:          postAmount,
 			PendingID:       body.TBTxID,
 			Ledger:          tigerbeetle.LedgerGHS,
 			Code:            uint16(tigerbeetle.CodeDutyRevenue),
@@ -304,8 +346,9 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Publish payment.confirmed event (declaration-service listens)
-	go h.pubsub.Publish(context.Background(), "payment.confirmed", pubsub.PaymentConfirmedEvent{
+	// SW-M17: synchronous publish with error propagation on money-state
+	// transitions — no fire-and-forget.
+	if err := h.pubsub.Publish(r.Context(), "payment.confirmed", pubsub.PaymentConfirmedEvent{
 		InvoiceId:     id,
 		DeclarationId: inv.DeclarationId,
 		TraderId:      inv.TraderId,
@@ -314,7 +357,11 @@ func (h *Handler) ConfirmPayment(w http.ResponseWriter, r *http.Request) {
 		MojaloopTxID:  body.MojaloopTxID,
 		TBTransferId:  body.TBTxID,
 		PaidAt:        time.Now().UTC(),
-	})
+	}); err != nil {
+		log.Printf("[payment-service] payment.confirmed publish FAILED invoice=%d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("payment confirmed but event publish failed (safe to retry): %v", err))
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"invoiceId":     id,
@@ -355,34 +402,68 @@ func (h *Handler) InitiateRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SW-M14: refunds are a finance operation.
+	if role, _ := r.Context().Value("role").(string); role != "admin" && role != "finance" && role != "service" {
+		writeError(w, http.StatusForbidden, "refunds require a finance/admin role")
+		return
+	}
+
+	// SW-M14: refund amount may never exceed the paid amount.
 	refundAmount := body.Amount
 	if refundAmount == 0 {
 		refundAmount = inv.TotalAmount
 	}
+	refundMinor, err := minorUnits(refundAmount)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	paidMinor, err := minorUnits(inv.TotalAmount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invoice amount is corrupt")
+		return
+	}
+	if refundMinor > paidMinor {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("refund amount %.2f exceeds paid amount %.2f", refundAmount, inv.TotalAmount))
+		return
+	}
 
-	// Record refund transfer in TigerBeetle (reverse direction)
-	tbRefundID := fmt.Sprintf("refund-%d-%d", id, time.Now().Unix())
-	h.tb.CreateTransfers(ctx, []tigerbeetle.Transfer{
+	// Record refund transfer in TigerBeetle (reverse direction).
+	// SW-M14: ledger errors propagate — the invoice is NOT flipped on failure.
+	tbRefundID := fmt.Sprintf("refund-%d-%d", id, time.Now().UnixNano())
+	if err := h.tb.CreateTransfers(ctx, []tigerbeetle.Transfer{
 		{
 			ID:              tbRefundID,
 			DebitAccountID:  "customs-duty-revenue",
 			CreditAccountID: fmt.Sprintf("trader-%d", inv.TraderId),
-			Amount:          uint64(refundAmount * 100),
+			Amount:          refundMinor,
 			Ledger:          tigerbeetle.LedgerGHS,
 			Code:            uint16(tigerbeetle.CodeRefundLiability),
 		},
-	})
+	}); err != nil && !strings.Contains(err.Error(), "already exists") {
+		log.Printf("[payment-service] refund ledger post FAILED invoice=%d: %v", id, err)
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("ledger unavailable — refund NOT recorded: %v", err))
+		return
+	}
 
-	h.store.UpdateInvoiceStatus(ctx, id, "refunded")
+	if err := h.store.UpdateInvoiceStatus(ctx, id, "refunded"); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
-	go h.pubsub.Publish(context.Background(), "payment.refunded", map[string]interface{}{
+	// SW-M17: synchronous publish with error propagation.
+	if err := h.pubsub.Publish(r.Context(), "payment.refunded", map[string]interface{}{
 		"invoiceId":     id,
 		"declarationId": inv.DeclarationId,
 		"refundAmount":  refundAmount,
 		"reason":        body.Reason,
 		"tbRefundId":    tbRefundID,
 		"refundedAt":    time.Now().UTC(),
-	})
+	}); err != nil {
+		log.Printf("[payment-service] payment.refunded publish FAILED invoice=%d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("refund recorded but event publish failed (safe to retry): %v", err))
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"invoiceId":    id,
@@ -395,6 +476,18 @@ func (h *Handler) InitiateRefund(w http.ResponseWriter, r *http.Request) {
 // MojaloopCallback handles POST /api/payments/mojaloop/callback
 // Receives webhook callbacks from Mojaloop switch
 func (h *Handler) MojaloopCallback(w http.ResponseWriter, r *http.Request) {
+	// SW-M3: authenticate the callback with an HMAC signature over the raw body.
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid mojaloop callback")
+		return
+	}
+	if !verifySwitchSignature(rawBody, r.Header.Get("X-Mojaloop-Signature")) {
+		writeError(w, http.StatusUnauthorized, "invalid callback signature")
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(rawBody))
+
 	var callback struct {
 		TransferID string `json:"transferId"`
 		State      string `json:"transferState"` // "COMMITTED", "ABORTED"
@@ -417,7 +510,12 @@ func (h *Handler) MojaloopCallback(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.store.GetInvoiceByMojaloopTxID(ctx, callback.TransferID)
 	if err != nil || inv == nil {
 		log.Printf("[payment-service] Mojaloop callback: unknown transfer %s", callback.TransferID)
-		w.WriteHeader(http.StatusOK) // Acknowledge to prevent retries
+		writeError(w, http.StatusNotFound, "unknown transfer")
+		return
+	}
+	// SW-M3: idempotent — a second COMMITTED on a paid invoice is a no-op.
+	if inv.Status == "paid" && callback.State == "COMMITTED" {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
@@ -440,29 +538,25 @@ func (h *Handler) MojaloopCallback(w http.ResponseWriter, r *http.Request) {
 			} else {
 				h.temporal.RecordFallback("dispatch_error")
 			}
-			log.Printf("[payment-service] Temporal unavailable (%v) — falling back to direct ConfirmPayment for invoice %d", wfErr, inv.ID)
-			h.store.UpdateInvoicePayment(ctx, inv.ID, callback.TransferID, tbTxID, "mojaloop")
-			go h.pubsub.Publish(context.Background(), "payment.confirmed", pubsub.PaymentConfirmedEvent{
-				InvoiceId:     inv.ID,
-				DeclarationId: inv.DeclarationId,
-				TraderId:      inv.TraderId,
-				Amount:        inv.TotalAmount,
-				Currency:      inv.Currency,
-				MojaloopTxID:  callback.TransferID,
-				TBTransferId:  tbTxID,
-				PaidAt:        time.Now().UTC(),
-			})
+			// SW-M3: NEVER mark an invoice paid without a ledger commit.
+			// Temporal is unavailable, so the confirmation cannot be executed
+			// safely — return 503 and let the switch retry the callback.
+			log.Printf("[payment-service] Temporal unavailable (%v) — cannot confirm invoice %d safely; switch must retry", wfErr, inv.ID)
+			writeError(w, http.StatusServiceUnavailable, "confirmation workflow unavailable — invoice NOT marked paid; retry the callback")
+			return
 		}
 		log.Printf("[payment-service] Mojaloop COMMITTED: invoice %d processing", inv.ID)
 
 	case "ABORTED":
 		h.store.UpdateInvoiceStatus(ctx, inv.ID, "failed")
-		go h.pubsub.Publish(context.Background(), "payment.failed", pubsub.PaymentFailedEvent{
+		if err := h.pubsub.Publish(r.Context(), "payment.failed", pubsub.PaymentFailedEvent{
 			InvoiceId:     inv.ID,
 			DeclarationId: inv.DeclarationId,
 			Reason:        "Mojaloop transfer aborted",
 			FailedAt:      time.Now().UTC(),
-		})
+		}); err != nil {
+			log.Printf("[payment-service] payment.failed publish FAILED invoice=%d: %v", inv.ID, err)
+		}
 		log.Printf("[payment-service] Mojaloop ABORTED: invoice %d failed", inv.ID)
 	}
 
@@ -526,6 +620,12 @@ func (h *Handler) OnDeclarationSubmitted(w http.ResponseWriter, r *http.Request)
 			TraderId      int64   `json:"traderId"`
 			DeclaredValue float64 `json:"declaredValue"`
 			HSCode        string  `json:"hsCode"`
+			Assessment    *struct {
+				Source     string  `json:"source"`
+				DutyAmount float64 `json:"dutyAmount"`
+				VATAmount  float64 `json:"vatAmount"`
+				LevyAmount float64 `json:"levyAmount"`
+			} `json:"assessment"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
@@ -533,14 +633,24 @@ func (h *Handler) OnDeclarationSubmitted(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Calculate duties (simplified — in production this would use tariff tables)
-	dutyRate := 0.20  // 20% import duty
-	vatRate := 0.125  // 12.5% VAT
-	levyRate := 0.025 // 2.5% ECOWAS levy
-
-	dutyAmount := event.Data.DeclaredValue * dutyRate
-	vatAmount := (event.Data.DeclaredValue + dutyAmount) * vatRate
-	levyAmount := event.Data.DeclaredValue * levyRate
+	// SW-M12: NEVER auto-invoice from heuristic flat rates. An invoice is only
+	// created when the event carries an authoritative assessment (from the
+	// tariff/valuation service). Otherwise no invoice exists and payment cannot
+	// be initiated against fabricated tax amounts.
+	if event.Data.Assessment == nil || event.Data.Assessment.Source != "tariff-service" {
+		log.Printf("[payment-service] declaration %d submitted without an authoritative assessment — no invoice created (fail-closed)",
+			event.Data.DeclarationId)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"invoiceCreated": false,
+			"reason":         "no authoritative tariff assessment — invoice creation refused",
+		})
+		return
+	}
+	dutyAmount := event.Data.Assessment.DutyAmount
+	vatAmount := event.Data.Assessment.VATAmount
+	levyAmount := event.Data.Assessment.LevyAmount
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -583,6 +693,86 @@ func (h *Handler) OnDeclarationCleared(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[payment-service] Declaration %d cleared — no payment action needed", event.Data.DeclarationId)
 	w.WriteHeader(http.StatusOK)
+}
+
+// ── Phase-6 helpers (SW-M3/M14) ─────────────────────────────────────────────
+
+// minorUnits converts a major-unit amount to integer minor units with an
+// explicit overflow/validity guard (no silent float truncation).
+func minorUnits(amount float64) (uint64, error) {
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 || amount > 9e13 {
+		return 0, fmt.Errorf("invalid amount %v", amount)
+	}
+	return uint64(math.Round(amount * 100)), nil
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production"
+}
+
+// verifySwitchSignature authenticates a Mojaloop callback via HMAC-SHA256 over
+// the raw body, compared timing-safe (SW-M3).
+func verifySwitchSignature(rawBody []byte, signatureHeader string) bool {
+	secret := os.Getenv("MOJALOOP_CALLBACK_SECRET")
+	if secret == "" {
+		if isProduction() {
+			return false
+		}
+		secret = "dev-callback-secret"
+	}
+	sig := strings.TrimPrefix(signatureHeader, "sha256=")
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(rawBody)
+	expected := mac.Sum(nil)
+	provided, err := hex.DecodeString(sig)
+	if err != nil || len(provided) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(provided, expected) == 1
+}
+
+// verifyTransferWithSwitch asks the Mojaloop switch for the authoritative
+// state of a transfer (SW-M3): it must be COMMITTED and its amount must equal
+// the invoice total. Fails closed when the switch is unreachable.
+func (h *Handler) verifyTransferWithSwitch(ctx context.Context, txID string, inv *store.PaymentInvoice) error {
+	if txID == "" {
+		return fmt.Errorf("mojaloop transaction id is required")
+	}
+	if inv.MojaloopTxID != nil && *inv.MojaloopTxID != "" && *inv.MojaloopTxID != txID {
+		return fmt.Errorf("transfer id does not match the invoice's initiated transfer")
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", h.mojaloopURL+"/transfers/"+txID, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("FSPIOP-Source", "gh-customs-authority")
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("switch unreachable — transfer state unknown: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("switch returned %d for transfer %s", resp.StatusCode, txID)
+	}
+	var body struct {
+		TransferState string `json:"transferState"`
+		Amount        struct {
+			Amount   string `json:"amount"`
+			Currency string `json:"currency"`
+		} `json:"amount"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return fmt.Errorf("invalid switch response: %w", err)
+	}
+	if body.TransferState != "COMMITTED" {
+		return fmt.Errorf("transfer is in state %s, not COMMITTED", body.TransferState)
+	}
+	expected := fmt.Sprintf("%.2f", inv.TotalAmount)
+	if body.Amount.Amount != "" && body.Amount.Amount != expected {
+		return fmt.Errorf("switch amount %s does not match invoice total %s", body.Amount.Amount, expected)
+	}
+	return nil
 }
 
 // ── Mojaloop helper ───────────────────────────────────────────────────────────

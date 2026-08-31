@@ -17,7 +17,7 @@
  *   getPublicTradeData    — Public trade statistics (for open data API)
  */
 import { z } from "zod";
-import { router, protectedProcedure, publicProcedure } from "../_core/trpc";
+import { router, protectedProcedure } from "../_core/trpc";
 import { requireDb } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -98,7 +98,7 @@ export const tradeAnalyticsRouter = router({
           COUNT(*) AS declaration_count
         FROM declarations
         WHERE created_at > NOW() - INTERVAL '12 months'
-          AND status IN ('cleared', 'released')
+          AND status = 'cleared'
         GROUP BY DATE_TRUNC('month', created_at)
         ORDER BY month ASC
       `);
@@ -180,7 +180,7 @@ export const tradeAnalyticsRouter = router({
           COUNT(*) AS count
         FROM declarations
         WHERE created_at BETWEEN ${from} AND ${to}
-          AND status IN ('cleared', 'released')
+          AND status = 'cleared'
           AND updated_at > created_at
         GROUP BY risk_lane, port_of_entry
         ORDER BY risk_lane, port_of_entry
@@ -297,7 +297,7 @@ export const tradeAnalyticsRouter = router({
           COUNT(*) FILTER (WHERE status = 'cleared') AS cleared,
           COALESCE(SUM(CAST(total_duty AS NUMERIC)), 0) AS duty_collected_ngn,
           AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600)
-            FILTER (WHERE status IN ('cleared', 'released')) AS avg_clearance_hours
+            FILTER (WHERE status = 'cleared') AS avg_clearance_hours
         FROM declarations
         WHERE created_at BETWEEN ${from} AND ${to}
           AND port_of_entry IS NOT NULL
@@ -317,43 +317,4 @@ export const tradeAnalyticsRouter = router({
       }));
     }),
 
-  // ── Public Trade Data API (Open Data) ─────────────────────────────────────
-  getPublicTradeData: publicProcedure
-    .input(z.object({
-      year:  z.number().int().min(2020).max(2030).optional(),
-      month: z.number().int().min(1).max(12).optional(),
-    }))
-    .query(async ({ input }) => {
-      const db = await requireDb();
-      const year  = input.year  ?? new Date().getFullYear();
-      const month = input.month ?? new Date().getMonth() + 1;
-
-      // Aggregated, anonymized public trade statistics
-      const { rows: [stats] } = await db.execute(sql`
-        SELECT
-          COUNT(*) AS total_declarations,
-          COALESCE(SUM(CAST(declared_value AS NUMERIC)), 0) AS total_trade_value_usd,
-          COALESCE(SUM(CAST(total_duty AS NUMERIC)), 0) AS total_duty_ngn,
-          COUNT(DISTINCT country_of_origin) AS origin_countries,
-          COUNT(DISTINCT port_of_entry) AS ports_active
-        FROM declarations
-        WHERE EXTRACT(YEAR FROM created_at) = ${year}
-          AND EXTRACT(MONTH FROM created_at) = ${month}
-          AND status IN ('cleared', 'released')
-      `);
-
-      return {
-        period: { year, month },
-        statistics: {
-          totalDeclarations:   Number(stats?.total_declarations ?? 0),
-          totalTradeValueUsd:  Number(stats?.total_trade_value_usd ?? 0),
-          totalDutyNgn:        Number(stats?.total_duty_ngn ?? 0),
-          originCountries:     Number(stats?.origin_countries ?? 0),
-          portsActive:         Number(stats?.ports_active ?? 0),
-        },
-        source: "Nigeria Customs Service — National Single Window Trade Platform",
-        license: "CC BY 4.0",
-        disclaimer: "Aggregated statistics. Individual transaction data is confidential.",
-      };
-    }),
 });

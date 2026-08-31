@@ -3,9 +3,17 @@
 // Role: Production-grade double-entry bookkeeping service for customs duty
 //       collection, penalty levies, duty drawback payments, and bond management.
 //
+// ⚠️  PHASE-6 NOTICE (SW-3): the DEFAULT build (without
+//     `--features tigerbeetle-live`) is an IN-MEMORY SIMULATION and is
+//     DEV/TEST-ONLY. It must NEVER serve a production path:
+//       - it REFUSES TO BOOT when ENVIRONMENT/APP_ENV/NODE_ENV=production;
+//       - it requires the explicit opt-in TB_ALLOW_SIM_BACKEND=1 otherwise.
+//     The CANONICAL production ledger bridge is the Go tigerbeetle-bridge
+//     (HTTP /api/ledger/*, k8s Service `tigerbeetle-bridge`, port 8086).
+//
 // Architecture:
 //   - Axum HTTP server (port 4600)
-//   - Feature-gated backend: SimBackend (default/CI) or LiveBackend (production)
+//   - Feature-gated backend: SimBackend (default/CI, DEV-ONLY) or LiveBackend (production)
 //   - All transfers are idempotent via SHA-256(declaration_ref + entry_type)
 //   - Accounts use WCO GL codes as ledger identifiers
 //
@@ -395,7 +403,29 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(not(feature = "tigerbeetle-live"))]
     let backend: Arc<dyn Backend + Send + Sync> = {
-        info!("[TB] Starting with IN-MEMORY simulation backend (use --features tigerbeetle-live for production)");
+        // SW-3: the in-memory SimBackend is DEV/TEST-ONLY.
+        let env = std::env::var("ENVIRONMENT")
+            .or_else(|_| std::env::var("APP_ENV"))
+            .or_else(|_| std::env::var("NODE_ENV"))
+            .unwrap_or_default()
+            .to_lowercase();
+        if env == "production" || env == "prod" {
+            panic!(
+                "[TB] FATAL: built WITHOUT the tigerbeetle-live feature — the in-memory \
+                 SimBackend must never serve production. Build with \
+                 --features tigerbeetle-live against a real TigerBeetle cluster, or use the \
+                 canonical Go tigerbeetle-bridge (port 8086)."
+            );
+        }
+        let sim_ok = std::env::var("TB_ALLOW_SIM_BACKEND").unwrap_or_default();
+        if sim_ok != "1" && sim_ok != "true" {
+            panic!(
+                "[TB] FATAL: the in-memory SimBackend requires explicit dev opt-in \
+                 (TB_ALLOW_SIM_BACKEND=1). For production build with \
+                 --features tigerbeetle-live or use the canonical Go bridge."
+            );
+        }
+        warn!("[TB] DEV-ONLY in-memory SimBackend in use (TB_ALLOW_SIM_BACKEND=1) — NOT for production");
         Arc::new(backend::simulation::SimBackend::new())
     };
 

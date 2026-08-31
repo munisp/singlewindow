@@ -378,10 +378,12 @@ describe("Permify client helper — writeTuple", () => {
     );
   });
 
-  it("does not throw when Permify is unavailable during writeTuple", async () => {
+  it("throws (fail-closed) when Permify is unavailable during writeTuple", async () => {
+    // SW-MP15: never swallow a failed grant — a silently dropped writeTuple
+    // leaves authorization stale, so the helper now surfaces the failure.
     mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
     const { writeTuple } = await import("./_core/permify");
-    await expect(writeTuple("declaration", "decl-1", "owner", "user", "user-42")).resolves.not.toThrow();
+    await expect(writeTuple("declaration", "decl-1", "owner", "user", "user-1")).rejects.toThrow(/writeTuple unavailable/);
   });
 });
 

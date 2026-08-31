@@ -7,7 +7,7 @@
  * 3. Playwright e2e spec files exist and are syntactically valid
  * 4. All 8 services are represented in both docker-compose and Helm chart
  * 5. Health check endpoint responds correctly
- * 6. .env.compose has all required keys
+ * 6. .env.compose.example has all required keys
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
@@ -83,32 +83,33 @@ describe("v60 — Docker Compose bootstrap", () => {
     expect(content).toMatch(/zookeeper/i);
   });
 
-  it(".env.compose exists", () => {
-    expect(fileExists(".env.compose")).toBe(true);
+  it(".env.compose.example exists (the old committed .env.compose was removed — secrets must not be committed)", () => {
+    expect(fileExists(".env.compose.example")).toBe(true);
+    expect(fileExists(".env.compose")).toBe(false);
   });
 
-  it(".env.compose has POSTGRES_USER key", () => {
-    const content = readFile(".env.compose");
+  it(".env.compose.example has POSTGRES_USER key", () => {
+    const content = readFile(".env.compose.example");
     expect(content).toContain("POSTGRES_USER");
   });
 
-  it(".env.compose has REDIS_PASSWORD key", () => {
-    const content = readFile(".env.compose");
+  it(".env.compose.example has REDIS_PASSWORD key", () => {
+    const content = readFile(".env.compose.example");
     expect(content).toContain("REDIS_PASSWORD");
   });
 
-  it(".env.compose has KEYCLOAK_ADMIN key", () => {
-    const content = readFile(".env.compose");
+  it(".env.compose.example has KEYCLOAK_ADMIN key", () => {
+    const content = readFile(".env.compose.example");
     expect(content).toContain("KEYCLOAK_ADMIN");
   });
 
-  it(".env.compose has JWT_SECRET key", () => {
-    const content = readFile(".env.compose");
+  it(".env.compose.example has JWT_SECRET key", () => {
+    const content = readFile(".env.compose.example");
     expect(content).toContain("JWT_SECRET");
   });
 
-  it(".env.compose has NODE_ENV key", () => {
-    const content = readFile(".env.compose");
+  it(".env.compose.example has NODE_ENV key", () => {
+    const content = readFile(".env.compose.example");
     expect(content).toContain("NODE_ENV");
   });
 });

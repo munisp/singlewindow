@@ -115,8 +115,14 @@ describe("tRPC insiderThreat.rollbackToVersion", () => {
     expect(routerTs).toContain("target_version: input.target_version");
   });
 
-  it("returns offline stub with restored_version when service unavailable", () => {
-    expect(routerTs).toContain("restored_version: input.target_version");
+  it("fails closed (no fabricated restored_version) when service unavailable", () => {
+    // SW-E: the offline stub with fabricated restored_version/rolledBackAt
+    // was removed — an unavailable rollback surfaces as SERVICE_UNAVAILABLE.
+    const idx = routerTs.indexOf("rollbackToVersion:");
+    const window = routerTs.slice(idx, idx + 2500);
+    expect(window).toContain("ROLLBACK_SERVICE_UNAVAILABLE");
+    expect(window).not.toMatch(/restored_version:/);
+    expect(window).not.toMatch(/rolledBackAt:/);
   });
 
   it("uses adminProcedure (admin-only)", () => {
@@ -132,15 +138,15 @@ describe("tRPC insiderThreat.rollbackToVersion", () => {
     expect(snippet).toContain("AbortSignal.timeout(15_000)");
   });
 
-  it("returns offline stub on network error", async () => {
+  it("rejects with SERVICE_UNAVAILABLE on network error (no fabricated outcome)", async () => {
     const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.insiderThreat.rollbackToVersion({
-      target_version: 3,
-      reason: "test_rollback",
-      operator: "test-admin",
-    });
-    expect(result).toHaveProperty("success");
-    expect(result).toHaveProperty("target_version", 3);
+    await expect(
+      caller.insiderThreat.rollbackToVersion({
+        target_version: 3,
+        reason: "test_rollback",
+        operator: "test-admin",
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
   });
 });
 

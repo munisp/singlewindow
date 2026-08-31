@@ -112,7 +112,24 @@ export async function startInsiderThreatKafkaConsumer(): Promise<void> {
           return;
         }
 
-        await handleInsiderThreatMessage(topic, parsed);
+        // Phase-7 OTel: extract the W3C traceparent carrier injected by the
+        // producer and continue the trace with a consumer span.
+        const { SpanKind, context: otelContext } = await import("@opentelemetry/api");
+        const { withSpan, extractKafkaContext } = await import("./_core/telemetry");
+        const parentCtx = extractKafkaContext(message.headers as Record<string, unknown> | undefined);
+        await otelContext.with(parentCtx, () =>
+          withSpan(
+            `kafka.consume ${topic}`,
+            {
+              kind: SpanKind.CONSUMER,
+              attributes: {
+                "messaging.system": "kafka",
+                "messaging.destination.name": topic,
+              },
+            },
+            () => handleInsiderThreatMessage(topic, parsed)
+          )
+        );
       },
     });
 

@@ -1,18 +1,45 @@
 """
-ray-risk-scorer — Ray Distributed ML Risk Scoring Service
-FastAPI + Ray Serve application providing gradient-boosted (XGBoost-style)
-risk scoring for trade declarations with AEO-aware feature engineering,
-batch processing, and SHAP-based explainability.
+ray-risk-scorer — Declaration Risk Scoring Service (honest two-layer design)
+
+Layer 1 (first line of defence, always runs): a deterministic, transparent
+rule engine over AEO-aware features (HS-code risk, origin risk, route risk,
+value anomalies, trader compliance, express flag, description keywords).
+
+Layer 2 (optional, real ML only): when RISK_MODEL_PATH points at a readable
+ONNX model, the model is served via onnxruntime on CPU and its score is
+blended with the rule score. The ONNX model contract is:
+  input:  single float32 tensor [1, 7] with the rule feature vector in
+          FEATURE_ORDER (hs_risk, origin_risk, route_risk, value_risk,
+          compliance_risk, express_risk, desc_risk)
+  output: first output tensor, scalar probability-like value in [0, 1]
+          (1 = highest risk); scaled to the 0-100 score range.
+
+Fail-closed doctrine:
+  * No model configured/unloadable -> every score reports
+    ml_augmentation="UNAVAILABLE" and /model-stats returns
+    {"status": "NO_MODEL_DEPLOYED"} with an honest message.
+  * A rule-layer RED score (>= 65) is never softened by the ML layer.
+  * This service NEVER fabricates scores or metrics. A previous version
+    added MD5-hash "noise" to scores and returned invented /model-stats
+    (auc_roc=0.9312 etc. for a model that did not exist); both were removed.
+
+Environment:
+  PORT                     — listen port (default 8101)
+  RISK_MODEL_PATH          — path to an ONNX model file; unset => rules-only
+  RISK_MODEL_VERSION       — version label reported for the loaded model
+  RISK_MODEL_METRICS_PATH  — optional JSON file of evaluation metrics
+                             produced by the offline training pipeline;
+                             surfaced verbatim by /model-stats. Never
+                             invented here.
 """
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
-import math
+import json
+import os
 import time
-import random
-import hashlib
 from datetime import datetime
 
 
@@ -78,6 +105,11 @@ class RiskScore(BaseModel):
     feature_contributions: dict[str, float]
     shap_explanation: list[dict]
     recommendation: str
+    ml_augmentation: str = Field(
+        ..., description="APPLIED if a real ONNX model augmented the rule score; "
+                         "UNAVAILABLE when scoring is rules-only"
+    )
+    ml_model_version: Optional[str] = None
     scored_at: str
 
 
@@ -92,17 +124,89 @@ class BatchResponse(BaseModel):
     model_version: str
 
 
-class ModelStats(BaseModel):
-    model_version: str
-    algorithm: str
-    feature_count: int
-    training_samples: int
-    auc_roc: float
-    precision: float
-    recall: float
-    f1_score: float
-    last_trained: str
-    aeo_accuracy_improvement: float
+# ─── Real ONNX model layer (optional, fail-closed) ────────────────────────────
+
+FEATURE_ORDER = [
+    "hs_risk", "origin_risk", "route_risk", "value_risk",
+    "compliance_risk", "express_risk", "desc_risk",
+]
+
+RISK_MODEL_PATH = os.getenv("RISK_MODEL_PATH", "").strip() or None
+RISK_MODEL_VERSION = os.getenv("RISK_MODEL_VERSION", "").strip() or None
+RISK_MODEL_METRICS_PATH = os.getenv("RISK_MODEL_METRICS_PATH", "").strip() or None
+
+# Blend weights when a real model is loaded. Rules remain the dominant layer.
+RULES_BLEND_WEIGHT = 0.6
+ML_BLEND_WEIGHT = 0.4
+# A rule-layer score at/above this threshold (RED lane) is never softened by ML.
+RULES_RED_THRESHOLD = 65.0
+
+
+class OnnxModelLayer:
+    """
+    Thin onnxruntime (CPU) wrapper around a real exported model.
+    Loaded lazily at startup; if anything fails the layer stays disabled
+    and the service reports UNAVAILABLE rather than faking a signal.
+    """
+
+    def __init__(self, model_path: Optional[str]):
+        self.session = None
+        self.input_name: Optional[str] = None
+        self.loaded_at: Optional[str] = None
+        self.error: Optional[str] = None
+        if not model_path:
+            self.error = "RISK_MODEL_PATH not set"
+            return
+        try:
+            import onnxruntime as ort  # lazy: optional dependency
+            self.session = ort.InferenceSession(
+                model_path, providers=["CPUExecutionProvider"]
+            )
+            self.input_name = self.session.get_inputs()[0].name
+            self.loaded_at = datetime.utcnow().isoformat() + "Z"
+        except Exception as exc:  # missing file, invalid model, missing ort
+            self.error = f"{type(exc).__name__}: {exc}"
+            self.session = None
+
+    @property
+    def available(self) -> bool:
+        return self.session is not None
+
+    def score(self, features: dict[str, float]) -> Optional[float]:
+        """Run real inference. Returns a 0-100 score, or None on any failure."""
+        if not self.available:
+            return None
+        try:
+            import numpy as np
+            vector = np.array(
+                [[float(features.get(k, 0.0)) for k in FEATURE_ORDER]],
+                dtype=np.float32,
+            )
+            outputs = self.session.run(None, {self.input_name: vector})
+            raw = float(np.ravel(outputs[0])[0])
+            # Contract: probability-like output in [0, 1] -> 0-100 scale.
+            raw = min(1.0, max(0.0, raw))
+            return raw * 100.0
+        except Exception:
+            return None
+
+
+def _load_model_layer() -> OnnxModelLayer:
+    return OnnxModelLayer(RISK_MODEL_PATH)
+
+
+MODEL_LAYER = _load_model_layer()
+
+
+def blend_scores(rules_score: float, ml_score: float) -> float:
+    """
+    Blend deterministic rule score (0-100) with a real ML score (0-100).
+    Fail-closed: a rule-layer RED score is returned unchanged.
+    """
+    if rules_score >= RULES_RED_THRESHOLD:
+        return rules_score
+    blended = RULES_BLEND_WEIGHT * rules_score + ML_BLEND_WEIGHT * ml_score
+    return min(100.0, max(0.0, blended))
 
 
 # ─── Scoring Engine ───────────────────────────────────────────────────────────
@@ -188,16 +292,14 @@ FEATURE_WEIGHTS = {
 
 
 def score_declaration(decl: DeclarationFeatures) -> RiskScore:
-    """Score a single declaration using the gradient-boosted model."""
+    """
+    Score a single declaration: deterministic rule layer first, then optional
+    real ONNX-model augmentation. No hash-derived noise, no simulated models.
+    """
     features = extract_features(decl)
 
-    # Weighted sum (gradient boosting approximation)
+    # Rule layer: transparent weighted sum
     raw_score = sum(features[k] * FEATURE_WEIGHTS[k] for k in features)
-
-    # Add deterministic noise based on UCR hash (simulates model variance)
-    ucr_hash = int(hashlib.md5(decl.ucr.encode()).hexdigest()[:4], 16)
-    noise = (ucr_hash % 10) - 5  # ±5 points noise
-    raw_score = max(0, min(100, raw_score + noise))
 
     # AEO adjustment
     aeo_adjusted = False
@@ -206,7 +308,19 @@ def score_declaration(decl: DeclarationFeatures) -> RiskScore:
         raw_score = raw_score * (1.0 - aeo_discount)
         aeo_adjusted = True
 
-    score = round(raw_score, 2)
+    rules_score = max(0.0, min(100.0, raw_score))
+
+    # Optional real ML augmentation
+    ml_augmentation = "UNAVAILABLE"
+    ml_model_version: Optional[str] = None
+    score_value = rules_score
+    ml_score = MODEL_LAYER.score(features) if MODEL_LAYER.available else None
+    if ml_score is not None:
+        score_value = blend_scores(rules_score, ml_score)
+        ml_augmentation = "APPLIED"
+        ml_model_version = RISK_MODEL_VERSION or "onnx-model"
+
+    score = round(score_value, 2)
 
     # Risk tier assignment
     if score < 30:
@@ -246,15 +360,31 @@ def score_declaration(decl: DeclarationFeatures) -> RiskScore:
         feature_contributions={k: round(v * FEATURE_WEIGHTS[k], 2) for k, v in features.items()},
         shap_explanation=shap_explanation,
         recommendation=recommendation,
+        ml_augmentation=ml_augmentation,
+        ml_model_version=ml_model_version,
         scored_at=datetime.utcnow().isoformat() + "Z",
     )
 
 
 # ─── API Endpoints ────────────────────────────────────────────────────────────
 
+def current_model_version() -> str:
+    """Honest model identity: the real loaded model, or rules-only."""
+    if MODEL_LAYER.available:
+        return RISK_MODEL_VERSION or "onnx-model"
+    return "rules-only-2.0.0"
+
+
 @app.get("/health")
 def health():
-    return {"status": "healthy", "service": "ray-risk-scorer", "version": "1.0.0", "timestamp": datetime.utcnow().isoformat()}
+    return {
+        "status": "healthy",
+        "service": "ray-risk-scorer",
+        "version": "2.0.0",
+        "model_version": current_model_version(),
+        "ml_model_loaded": MODEL_LAYER.available,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 @app.post("/score", response_model=RiskScore)
@@ -277,36 +407,90 @@ def batch_score(req: BatchRequest):
         results=results,
         batch_size=len(results),
         processing_time_ms=round(elapsed_ms, 2),
-        model_version="xgb-v2.3.1-aeo",
+        model_version=current_model_version(),
     )
 
 
-@app.get("/model-stats", response_model=ModelStats)
+@app.get("/model-stats")
 def get_model_stats():
-    """Return model performance statistics."""
-    return ModelStats(
-        model_version="xgb-v2.3.1-aeo",
-        algorithm="XGBoost GBM (n_estimators=500, max_depth=6, learning_rate=0.05)",
-        feature_count=7,
-        training_samples=2_450_000,
-        auc_roc=0.9312,
-        precision=0.8847,
-        recall=0.9103,
-        f1_score=0.8973,
-        last_trained="2026-01-15T00:00:00Z",
-        aeo_accuracy_improvement=0.127,  # 12.7% improvement for AEO traders
-    )
+    """
+    Return the REAL state of the ML model layer. Never fabricated:
+    - No model deployed  -> {"status": "NO_MODEL_DEPLOYED", ...}
+    - Model deployed     -> real artefact metadata plus evaluation metrics
+      ONLY if the training pipeline published them via
+      RISK_MODEL_METRICS_PATH; otherwise metrics is null.
+    """
+    if not MODEL_LAYER.available:
+        return {
+            "status": "NO_MODEL_DEPLOYED",
+            "message": (
+                "No ML model is deployed in this service. Scoring is performed "
+                "by the deterministic rule layer only. Deploy an ONNX model via "
+                "RISK_MODEL_PATH to enable ML augmentation."
+            ),
+            "model_load_error": MODEL_LAYER.error,
+            "rule_layer": {
+                "model_version": "rules-only-2.0.0",
+                "algorithm": "Deterministic weighted rule engine (transparent, no ML)",
+                "feature_count": len(FEATURE_ORDER),
+                "features": FEATURE_ORDER,
+            },
+        }
+
+    metrics = None
+    metrics_source = None
+    if RISK_MODEL_METRICS_PATH:
+        try:
+            with open(RISK_MODEL_METRICS_PATH, "r", encoding="utf-8") as fh:
+                metrics = json.load(fh)
+            metrics_source = RISK_MODEL_METRICS_PATH
+        except Exception as exc:
+            metrics = None
+            metrics_source = f"unreadable: {type(exc).__name__}: {exc}"
+
+    return {
+        "status": "MODEL_DEPLOYED",
+        "model_version": current_model_version(),
+        "model_path": RISK_MODEL_PATH,
+        "runtime": "onnxruntime (CPUExecutionProvider)",
+        "input_features": FEATURE_ORDER,
+        "loaded_at": MODEL_LAYER.loaded_at,
+        "metrics": metrics,
+        "metrics_source": metrics_source,
+        "metrics_note": (
+            None if metrics is not None
+            else "No evaluation metrics have been published by the training "
+                 "pipeline for this artefact. Metrics are never invented by "
+                 "the serving layer."
+        ),
+    }
 
 
 @app.get("/feature-importance")
 def get_feature_importance():
-    """Return feature importance scores from the trained model."""
+    """
+    Return the rule-layer feature weights (transparent and deterministic).
+    When an ONNX model is deployed, note honestly that opaque ONNX graphs do
+    not expose feature importances through this service.
+    """
     total = sum(FEATURE_WEIGHTS.values())
     importance = [
         {"feature": k, "importance": round(v / total, 4), "weight": v}
         for k, v in sorted(FEATURE_WEIGHTS.items(), key=lambda x: x[1], reverse=True)
     ]
-    return {"feature_importance": importance, "model_version": "xgb-v2.3.1-aeo"}
+    return {
+        "feature_importance": importance,
+        "source": "rule_layer_weights",
+        "model_version": current_model_version(),
+        "note": (
+            "These are the deterministic rule-layer weights, not learned "
+            "importances. The deployed ONNX model does not expose feature "
+            "importances at serving time."
+            if MODEL_LAYER.available else
+            "These are the deterministic rule-layer weights; no ML model is "
+            "deployed."
+        ),
+    }
 
 
 

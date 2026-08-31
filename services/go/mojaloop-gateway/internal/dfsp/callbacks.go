@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -250,9 +251,15 @@ func parseOKPPublicKey(jwk JWK) (ed25519.PublicKey, error) {
 // It extracts the kid from the JWS protected header, fetches the Hub's public key,
 // and verifies the signature over the canonical payload.
 func verifyInboundJWS(ctx context.Context, r *http.Request, body []byte, cache *hubJWKSCache) error {
+	// Phase-7 OTel: JWS verification on the money path is auth-critical — span it.
+	_, span := otel.Tracer("mojaloop-gateway").Start(ctx, "fspiop.jws.verify")
+	defer span.End()
+
 	sig := r.Header.Get("FSPIOP-Signature")
 	if sig == "" {
-		return fmt.Errorf("missing FSPIOP-Signature header")
+		err := fmt.Errorf("missing FSPIOP-Signature header")
+		span.RecordError(err)
+		return err
 	}
 
 	// JWS compact serialization: header.payload.signature
@@ -352,25 +359,125 @@ func verifySignature(alg string, pubKey crypto.PublicKey, signingInput, sig []by
 
 // CallbackHandler holds dependencies for the FSPIOP callback endpoints.
 type CallbackHandler struct {
-	logger          *zap.Logger
-	jwksCache       *hubJWKSCache
-	tigerbeetleURL  string
-	kafkaRestURL    string
+	logger         *zap.Logger
+	jwksCache      *hubJWKSCache
+	tigerbeetleURL string
+	kafkaRestURL   string
 	// In-memory store for pending ILP conditions (transferID → ILP condition)
 	// In production this is backed by Redis.
 	pendingMu  sync.RWMutex
 	pendingILP map[string]string // transferID → base64url ILP condition
+
+	// Awaiters let the synchronous payment pipeline block on the REAL
+	// asynchronous FSPIOP callbacks (no simulated responses). A waiter is
+	// registered before the outbound request is sent; the callback handler
+	// resolves it after JWS verification. Buffers are 1 so resolution never
+	// blocks the Hub-facing HTTP handler.
+	awaitMu         sync.Mutex
+	quoteWaiters    map[string]chan quoteAwaitResult
+	transferWaiters map[string]chan transferAwaitResult
+}
+
+type quoteAwaitResult struct {
+	body *QuoteCallbackBody
+	err  error
+}
+
+type transferAwaitResult struct {
+	body *TransferCallbackBody
+	err  error
 }
 
 // NewCallbackHandler creates a new CallbackHandler.
 func NewCallbackHandler(logger *zap.Logger) *CallbackHandler {
 	hubJWKSURL := getEnvOrDefault("MOJALOOP_HUB_JWKS_URL", "http://mojaloop-hub:3001/.well-known/jwks.json")
 	return &CallbackHandler{
-		logger:         logger,
-		jwksCache:      newHubJWKSCache(hubJWKSURL, logger),
-		tigerbeetleURL: getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:4600"),
-		kafkaRestURL:   getEnvOrDefault("KAFKA_REST_URL", "http://kafka-rest-proxy:8082"),
-		pendingILP:     make(map[string]string),
+		logger:    logger,
+		jwksCache: newHubJWKSCache(hubJWKSURL, logger),
+		// SW-MP2: canonical Go bridge (k8s Service tigerbeetle-bridge, /api/ledger/*, port 8086).
+		tigerbeetleURL:  getEnvOrDefault("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
+		kafkaRestURL:    getEnvOrDefault("KAFKA_REST_URL", "http://kafka-rest-proxy:8082"),
+		pendingILP:      make(map[string]string),
+		quoteWaiters:    make(map[string]chan quoteAwaitResult),
+		transferWaiters: make(map[string]chan transferAwaitResult),
+	}
+}
+
+// AwaitQuote blocks until the Hub delivers the quote callback for quoteID
+// (or its error callback), or ctx expires. The waiter is registered
+// atomically here, so callers MUST invoke AwaitQuote BEFORE sending the
+// outbound POST /quotes to avoid a callback/registration race.
+func (h *CallbackHandler) AwaitQuote(ctx context.Context, quoteID string) (*QuoteCallbackBody, error) {
+	ch := make(chan quoteAwaitResult, 1)
+	h.awaitMu.Lock()
+	if _, exists := h.quoteWaiters[quoteID]; exists {
+		h.awaitMu.Unlock()
+		return nil, fmt.Errorf("a waiter for quote %s is already registered", quoteID)
+	}
+	h.quoteWaiters[quoteID] = ch
+	h.awaitMu.Unlock()
+	defer func() {
+		h.awaitMu.Lock()
+		delete(h.quoteWaiters, quoteID)
+		h.awaitMu.Unlock()
+	}()
+	select {
+	case res := <-ch:
+		return res.body, res.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("quote callback for %s not received before deadline: %w", quoteID, ctx.Err())
+	}
+}
+
+// AwaitTransfer blocks until the Hub delivers the transfer callback for
+// transferID (or its error callback), or ctx expires.
+func (h *CallbackHandler) AwaitTransfer(ctx context.Context, transferID string) (*TransferCallbackBody, error) {
+	ch := make(chan transferAwaitResult, 1)
+	h.awaitMu.Lock()
+	if _, exists := h.transferWaiters[transferID]; exists {
+		h.awaitMu.Unlock()
+		return nil, fmt.Errorf("a waiter for transfer %s is already registered", transferID)
+	}
+	h.transferWaiters[transferID] = ch
+	h.awaitMu.Unlock()
+	defer func() {
+		h.awaitMu.Lock()
+		delete(h.transferWaiters, transferID)
+		h.awaitMu.Unlock()
+	}()
+	select {
+	case res := <-ch:
+		return res.body, res.err
+	case <-ctx.Done():
+		return nil, fmt.Errorf("transfer callback for %s not received before deadline: %w", transferID, ctx.Err())
+	}
+}
+
+// resolveQuoteWaiter delivers a callback outcome to a registered waiter, if any.
+// Non-blocking: a duplicate/late resolution is dropped, never wedging the
+// Hub-facing HTTP handler.
+func (h *CallbackHandler) resolveQuoteWaiter(quoteID string, body *QuoteCallbackBody, err error) {
+	h.awaitMu.Lock()
+	ch, ok := h.quoteWaiters[quoteID]
+	h.awaitMu.Unlock()
+	if ok {
+		select {
+		case ch <- quoteAwaitResult{body: body, err: err}:
+		default:
+		}
+	}
+}
+
+// resolveTransferWaiter delivers a callback outcome to a registered waiter, if any.
+func (h *CallbackHandler) resolveTransferWaiter(transferID string, body *TransferCallbackBody, err error) {
+	h.awaitMu.Lock()
+	ch, ok := h.transferWaiters[transferID]
+	h.awaitMu.Unlock()
+	if ok {
+		select {
+		case ch <- transferAwaitResult{body: body, err: err}:
+		default:
+		}
 	}
 }
 
@@ -443,16 +550,16 @@ func (h *CallbackHandler) HandlePartyCallback(w http.ResponseWriter, r *http.Req
 
 // QuoteCallbackBody is the body of the PUT /quotes/{id} callback.
 type QuoteCallbackBody struct {
-	QuoteID         string `json:"quoteId"`
-	TransactionID   string `json:"transactionId"`
-	TransferAmount  struct {
+	QuoteID        string `json:"quoteId"`
+	TransactionID  string `json:"transactionId"`
+	TransferAmount struct {
 		Amount   string `json:"amount"`
 		Currency string `json:"currency"`
 	} `json:"transferAmount"`
-	ILPPacket    string `json:"ilpPacket"`
-	Condition    string `json:"condition"` // base64url SHA-256 of fulfilment
-	Expiration   string `json:"expiration"`
-	PayeeFSPFee  *struct {
+	ILPPacket   string `json:"ilpPacket"`
+	Condition   string `json:"condition"` // base64url SHA-256 of fulfilment
+	Expiration  string `json:"expiration"`
+	PayeeFSPFee *struct {
 		Amount   string `json:"amount"`
 		Currency string `json:"currency"`
 	} `json:"payeeFspFee,omitempty"`
@@ -497,6 +604,10 @@ func (h *CallbackHandler) HandleQuoteCallback(w http.ResponseWriter, r *http.Req
 		h.StorePendingILP(cb.TransactionID, cb.Condition)
 	}
 
+	// Resolve any pipeline waiter blocked on this REAL callback.
+	cbCopy := cb
+	h.resolveQuoteWaiter(cb.QuoteID, &cbCopy, nil)
+
 	// Publish quote.received event to Kafka so the payment worker can proceed to transfer
 	h.publishKafkaEvent(r.Context(), "quote.received", map[string]interface{}{
 		"quoteId":       cb.QuoteID,
@@ -516,7 +627,7 @@ func (h *CallbackHandler) HandleQuoteCallback(w http.ResponseWriter, r *http.Req
 // TransferCallbackBody is the body of the PUT /transfers/{id} callback.
 type TransferCallbackBody struct {
 	TransferID    string `json:"transferId"`
-	TransferState string `json:"transferState"` // "COMMITTED" or "ABORTED"
+	TransferState string `json:"transferState"`        // "COMMITTED" or "ABORTED"
 	Fulfilment    string `json:"fulfilment,omitempty"` // base64url pre-image (only on COMMITTED)
 	CompletedAt   string `json:"completedTimestamp,omitempty"`
 	ErrorInfo     *struct {
@@ -576,6 +687,7 @@ func (h *CallbackHandler) handleTransferCommitted(ctx context.Context, w http.Re
 			zap.String("transferId", cb.TransferID),
 			zap.Error(err),
 		)
+		h.resolveTransferWaiter(cb.TransferID, nil, fmt.Errorf("ILP fulfilment verification failed: %w", err))
 		h.writeError(w, http.StatusUnprocessableEntity, "ERR_ILP_INVALID", err.Error())
 		return
 	}
@@ -601,6 +713,8 @@ func (h *CallbackHandler) handleTransferCommitted(ctx context.Context, w http.Re
 	h.logger.Info("transfer committed successfully",
 		zap.String("transferId", cb.TransferID),
 	)
+	cbCopy := cb
+	h.resolveTransferWaiter(cb.TransferID, &cbCopy, nil)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -632,6 +746,7 @@ func (h *CallbackHandler) handleTransferAborted(ctx context.Context, w http.Resp
 		zap.String("transferId", cb.TransferID),
 		zap.String("errorCode", errCode),
 	)
+	h.resolveTransferWaiter(cb.TransferID, nil, fmt.Errorf("transfer aborted by switch: %s %s", errCode, errDesc))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -681,14 +796,14 @@ func (h *CallbackHandler) verifyILPFulfilment(transferID, fulfilment string) err
 // ─── TigerBeetle bridge calls ─────────────────────────────────────────────────
 
 // tigerbeetlePost finalizes a two-phase pending transfer in TigerBeetle.
+// SW-MP2: converged to the CANONICAL Go-bridge dialect
+// POST /api/ledger/transfers/post/{pendingId} (path param, no body).
 func (h *CallbackHandler) tigerbeetlePost(ctx context.Context, transferID string) error {
-	payload, _ := json.Marshal(map[string]string{"transfer_id": transferID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		h.tigerbeetleURL+"/transfers/post", bytes.NewReader(payload))
+		h.tigerbeetleURL+"/api/ledger/transfers/post/"+transferID, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("tigerbeetle post: %w", err)
@@ -702,14 +817,14 @@ func (h *CallbackHandler) tigerbeetlePost(ctx context.Context, transferID string
 }
 
 // tigerbeetleVoid voids a two-phase pending transfer in TigerBeetle.
+// SW-MP2: converged to the CANONICAL Go-bridge dialect
+// POST /api/ledger/transfers/void/{pendingId} (path param, no body).
 func (h *CallbackHandler) tigerbeetleVoid(ctx context.Context, transferID string) error {
-	payload, _ := json.Marshal(map[string]string{"transfer_id": transferID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		h.tigerbeetleURL+"/transfers/void", bytes.NewReader(payload))
+		h.tigerbeetleURL+"/api/ledger/transfers/void/"+transferID, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("tigerbeetle void: %w", err)
@@ -864,6 +979,10 @@ func (h *CallbackHandler) HandleQuoteErrorCallback(w http.ResponseWriter, r *htt
 		zap.String("errorDescription", cb.ErrorInformation.ErrorDescription),
 	)
 
+	// Resolve any pipeline waiter: the quote failed at the switch.
+	h.resolveQuoteWaiter(quoteID, nil, fmt.Errorf("quote rejected by switch: %s %s",
+		cb.ErrorInformation.ErrorCode, cb.ErrorInformation.ErrorDescription))
+
 	// Publish compensation event so Temporal workflow can rollback duty reservation.
 	h.publishKafkaEvent(r.Context(), "mojaloop.quote.failed", map[string]interface{}{
 		"quoteID":          quoteID,
@@ -917,6 +1036,10 @@ func (h *CallbackHandler) HandleTransferErrorCallback(w http.ResponseWriter, r *
 	h.pendingMu.Lock()
 	delete(h.pendingILP, transferID)
 	h.pendingMu.Unlock()
+
+	// Resolve any pipeline waiter: the transfer failed at the switch.
+	h.resolveTransferWaiter(transferID, nil, fmt.Errorf("transfer rejected by switch: %s %s",
+		cb.ErrorInformation.ErrorCode, cb.ErrorInformation.ErrorDescription))
 
 	// Publish mojaloop.transfer.failed so Temporal DeclarationClearanceWorkflow compensates.
 	h.publishKafkaEvent(r.Context(), "mojaloop.transfer.failed", map[string]interface{}{

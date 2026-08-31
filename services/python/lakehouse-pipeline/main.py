@@ -62,8 +62,15 @@ logger = logging.getLogger("lakehouse-pipeline")
 # ─── Configuration ─────────────────────────────────────────────────────────────
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway")
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "tradegateway")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "tradegateway_minio_2026")
+def _required_env(name):
+    """SW-S2-4: secrets have no defaults — refuse to boot when unset."""
+    _v = os.getenv(name)
+    if not _v:
+        raise RuntimeError(f"{name} must be set — no default is provided (fail closed, SW-S2-4)")
+    return _v
+
+MINIO_ACCESS_KEY = _required_env("MINIO_ACCESS_KEY")
+MINIO_SECRET_KEY = _required_env("MINIO_SECRET_KEY")
 LAKEHOUSE_BUCKET = os.getenv("LAKEHOUSE_BUCKET", "tradegateway-lakehouse")
 SPARK_MASTER = os.getenv("SPARK_MASTER", "local[*]")
 PORT = int(os.getenv("PORT", "8103"))

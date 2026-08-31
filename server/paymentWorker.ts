@@ -23,6 +23,8 @@ import {
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import crypto from "crypto";
+import { SpanKind } from "@opentelemetry/api";
+import { withSpan, injectKafkaHeaders } from "./_core/telemetry";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -62,25 +64,65 @@ async function mojaloopAvailable(): Promise<boolean> {
 //   FSPIOP-Destination: the receiving DFSP (NCS Revenue Account FSP)
 //   Content-Type:       application/vnd.interoperability.transfers+json;version=1.1
 //
-// ILP condition/fulfilment: derived from transferId via SHA-256 (simplified; production
-// implementations use the full ILP packet with amount + expiry + destination account).
+// ILP condition/fulfilment (SW-M15): the condition is SHA-256 of a CSPRNG
+// 32-byte preimage that is generated per transfer, stored SERVER-SIDE ONLY
+// (payment_queue.metadata.ilpPreimage), and revealed to the switch only at
+// execution time (Phase 2 fulfil call). Anyone who knows only the transferId
+// can NOT compute a valid fulfilment.
 
-function deriveIlpCondition(transferId: string): string {
-  // SHA-256 of the transferId, base64url-encoded (ILP condition format)
-  return crypto.createHash("sha256").update(transferId).digest("base64url");
+function generateIlpPreimage(): Buffer {
+  return crypto.randomBytes(32);
 }
 
-function deriveIlpFulfilment(transferId: string): string {
-  // In production: the pre-image of the condition (shared secret between DFSPs)
-  // Here we use the transferId itself as the pre-image (acceptable for internal transfers)
-  return Buffer.from(transferId).toString("base64url");
+function ilpConditionFromPreimage(preimage: Buffer): string {
+  return crypto.createHash("sha256").update(preimage).digest("base64url");
+}
+
+/** Verifies a fulfilment against the transfer condition (timing-safe). */
+function verifyIlpFulfilment(fulfilmentB64: string, conditionB64: string): boolean {
+  try {
+    const preimage = Buffer.from(fulfilmentB64, "base64url");
+    if (preimage.length !== 32) return false;
+    const computed = crypto.createHash("sha256").update(preimage).digest();
+    const expected = Buffer.from(conditionB64, "base64url");
+    return computed.length === expected.length && crypto.timingSafeEqual(computed, expected);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns the stored preimage for this transfer, generating and persisting a
+ * new CSPRNG one on first use (so retries reuse the same condition).
+ */
+async function ensureIlpPreimage(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  item: typeof paymentQueue.$inferSelect,
+): Promise<Buffer> {
+  const meta = ((item.metadata ?? {}) as Record<string, unknown>);
+  const existing = meta.ilpPreimage;
+  if (typeof existing === "string" && existing.length > 0) {
+    return Buffer.from(existing, "base64url");
+  }
+  const preimage = generateIlpPreimage();
+  await db
+    .update(paymentQueue)
+    .set({
+      metadata: { ...meta, ilpPreimage: preimage.toString("base64url") },
+      updatedAt: new Date(),
+    })
+    .where(eq(paymentQueue.id, item.id));
+  return preimage;
 }
 
 const FSPIOP_SOURCE = process.env.MOJALOOP_FSPIOP_SOURCE ?? "CUSTOMS_AUTHORITY_DFSP";
 const FSPIOP_DESTINATION = process.env.MOJALOOP_FSPIOP_DESTINATION ?? "NCS_REVENUE_DFSP";
 const MOJALOOP_CONTENT_TYPE = "application/vnd.interoperability.transfers+json;version=1.1";
 
-async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Promise<{
+async function callMojaloopTransfer(
+  item: typeof paymentQueue.$inferSelect,
+  preimage: Buffer,
+): Promise<{
   success: boolean;
   fulfilment?: string;
   error?: string;
@@ -93,22 +135,39 @@ async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Pro
     return { success: false, error: "Mojaloop unavailable; settlement outcome is not confirmed" };
   }
 
-  const condition = deriveIlpCondition(item.transferId);
-  const fulfilment = deriveIlpFulfilment(item.transferId);
+  const condition = ilpConditionFromPreimage(preimage);
+  // The fulfilment (the preimage itself) is revealed to the switch ONLY in the
+  // Phase-2 execution call below.
+  const fulfilment = preimage.toString("base64url");
   const expiration = new Date(Date.now() + 30_000).toISOString(); // 30 s ILP expiry
 
   // ── Phase 1: POST /transfers — RESERVED ────────────────────────────────────
   try {
-    const prepareRes = await fetch(`${MOJALOOP_URL}/transfers`, {
-      method: "POST",
-      headers: {
-        "Content-Type": MOJALOOP_CONTENT_TYPE,
-        "Accept": MOJALOOP_CONTENT_TYPE,
-        "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-        "FSPIOP-Source": FSPIOP_SOURCE,
-        "FSPIOP-Destination": FSPIOP_DESTINATION,
-        "Date": new Date().toUTCString(),
+    // Phase-7 OTel: FSPIOP span per transfer call + traceparent propagation.
+    const prepareHeaders: Record<string, string> = {
+      "Content-Type": MOJALOOP_CONTENT_TYPE,
+      "Accept": MOJALOOP_CONTENT_TYPE,
+      "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+      "FSPIOP-Source": FSPIOP_SOURCE,
+      "FSPIOP-Destination": FSPIOP_DESTINATION,
+      "Date": new Date().toUTCString(),
+    };
+    injectKafkaHeaders(prepareHeaders);
+    const prepareRes = await withSpan(
+      "mojaloop.transfers.prepare",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "mojaloop.correlation_id": item.transferId,
+          "fspiop.source": FSPIOP_SOURCE,
+          "fspiop.destination": FSPIOP_DESTINATION,
+          "payment.amount_minor_units": Number(item.amountMinorUnits),
+          "payment.currency": item.currency,
+        },
       },
+      () => fetch(`${MOJALOOP_URL}/transfers`, {
+      method: "POST",
+      headers: prepareHeaders,
       body: JSON.stringify({
         transferId: item.transferId,
         payerFsp: FSPIOP_SOURCE,
@@ -126,7 +185,8 @@ async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Pro
         expiration,
       }),
       signal: AbortSignal.timeout(15_000),
-    });
+      })
+    );
 
     // Mojaloop returns 202 Accepted for async processing; 200 for sync
     if (!prepareRes.ok && prepareRes.status !== 202) {
@@ -139,26 +199,44 @@ async function callMojaloopTransfer(item: typeof paymentQueue.$inferSelect): Pro
 
   // ── Phase 2: PUT /transfers/{id} — COMMITTED ────────────────────────────────
   try {
-    const fulfillRes = await fetch(`${MOJALOOP_URL}/transfers/${item.transferId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": MOJALOOP_CONTENT_TYPE,
-        "Accept": MOJALOOP_CONTENT_TYPE,
-        "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
-        "FSPIOP-Source": FSPIOP_SOURCE,
-        "FSPIOP-Destination": FSPIOP_DESTINATION,
-        "Date": new Date().toUTCString(),
+    const fulfillHeaders: Record<string, string> = {
+      "Content-Type": MOJALOOP_CONTENT_TYPE,
+      "Accept": MOJALOOP_CONTENT_TYPE,
+      "Authorization": `Bearer ${MOJALOOP_API_KEY}`,
+      "FSPIOP-Source": FSPIOP_SOURCE,
+      "FSPIOP-Destination": FSPIOP_DESTINATION,
+      "Date": new Date().toUTCString(),
+    };
+    injectKafkaHeaders(fulfillHeaders);
+    const fulfillRes = await withSpan(
+      "mojaloop.transfers.fulfil",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "mojaloop.correlation_id": item.transferId,
+          "fspiop.source": FSPIOP_SOURCE,
+          "fspiop.destination": FSPIOP_DESTINATION,
+        },
       },
+      () => fetch(`${MOJALOOP_URL}/transfers/${item.transferId}`, {
+      method: "PUT",
+      headers: fulfillHeaders,
       body: JSON.stringify({
         fulfilment,
         completedTimestamp: new Date().toISOString(),
         transferState: "COMMITTED",
       }),
       signal: AbortSignal.timeout(15_000),
-    });
+      })
+    );
 
     if (fulfillRes.ok || fulfillRes.status === 202) {
       const body = await fulfillRes.json().catch(() => ({}));
+      // If the switch echoes a fulfilment, it MUST satisfy the condition.
+      if (typeof (body as any).fulfilment === "string" &&
+          !verifyIlpFulfilment((body as any).fulfilment, condition)) {
+        return { success: false, error: "Switch returned a fulfilment that does not satisfy the transfer condition" };
+      }
       return { success: true, fulfilment: (body as any).fulfilment ?? fulfilment };
     }
 
@@ -204,7 +282,8 @@ async function processItem(
   db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
   item: typeof paymentQueue.$inferSelect,
 ): Promise<void> {
-  const { success, fulfilment, error } = await callMojaloopTransfer(item);
+  const preimage = await ensureIlpPreimage(db, item);
+  const { success, fulfilment, error } = await callMojaloopTransfer(item, preimage);
 
   if (success) {
     const now = new Date();

@@ -1,4 +1,8 @@
 import "dotenv/config";
+// Phase-7 OTel: start the SDK BEFORE any instrumented module (express, pg,
+// ioredis, kafkajs, undici) is loaded. No-op unless OTEL_EXPORTER_OTLP_ENDPOINT
+// is set — telemetry is fail-open and must never break boot (OTEL_DESIGN.md §1).
+import "./telemetryBootstrap";
 // Override DATABASE_URL: use LOCAL_DATABASE_URL if set, otherwise keep injected URL only
 // if it is a PostgreSQL URL; otherwise fall back to the default local postgres connection.
 const _injectedDbUrl = process.env.DATABASE_URL ?? "";
@@ -25,6 +29,7 @@ import { sanitizeMiddleware } from "./sanitize";
 import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 import { sdk } from "./sdk";
+import { PAYMENT_STATUS } from "./statuses";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 // General tRPC API: 200 requests per minute per IP
@@ -144,7 +149,7 @@ async function runPermitExpiryCheck() {
       const { notifyOwner } = await import("./notification");
       const lines = expiringPermits.slice(0, 10).map((p) => {
         const daysLeft = Math.ceil((new Date(p.expiresAt!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        return `  \u2022 Permit ${p.permitNumber ?? p.id} (${p.permitType ?? "general"}) \u2014 expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} (Declaration ID: ${p.declarationId})`;
+        return `  • Permit ${p.permitNumber ?? p.id} (${p.permitType ?? "general"}) — expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} (Declaration ID: ${p.declarationId})`;
       }).join("\n");
       await notifyOwner({
         title: `Permit Expiry Alert: ${expiringPermits.length} permit${expiringPermits.length !== 1 ? "s" : ""} expiring within 30 days`,
@@ -267,14 +272,14 @@ async function runAmendmentSLACheck() {
       return;
     }
     const lines = rows.map((r: any) =>
-      `  \u2022 Amendment #${r.id} on Declaration #${r.declaration_id} \u2014 field: ${r.field}, ` +
+      `  • Amendment #${r.id} on Declaration #${r.declaration_id} — field: ${r.field}, ` +
       `requested by ${r.requester_name ?? 'unknown'}, ` +
       `${parseFloat(r.age_days).toFixed(1)} days old`
     ).join("\n");
     try {
       const { notifyOwner } = await import("./notification");
       await notifyOwner({
-        title: `\u26a0\ufe0f ${rows.length} Amendment Request(s) Overdue (>5 business days)`,
+        title: `⚠️ ${rows.length} Amendment Request(s) Overdue (>5 business days)`,
         content: `The following amendment requests have exceeded the 5-business-day SLA and require immediate review:\n\n${lines}\n\nPlease log in to AdminDeclarations > Pending Amendments to action these.`,
       });
     } catch { /* non-fatal */ }
@@ -521,9 +526,10 @@ async function runPortCongestionAlertScan() {
       .orderBy(desc(portCongestionEvents.recordedAt))
       .limit(activePorts.length * 3); // fetch recent events, we'll pick latest per port
 
-    // Build map: portCode -> latest event
+    // Build map: portCode -> latest event (SW-O4: demo-seeded rows NEVER alert)
     const latestByPort = new Map<string, typeof latestEvents[0]>();
     for (const ev of latestEvents) {
+      if ((ev as { source?: string }).source === "demo") continue;
       if (!latestByPort.has(ev.portCode)) latestByPort.set(ev.portCode, ev);
     }
 
@@ -777,7 +783,7 @@ async function runWeeklyAnalyticsReport() {
       .from(payments)
       .where(
         and(
-          sql`${payments.status} = 'completed'`,
+          sql`${payments.status} = ${PAYMENT_STATUS.CONFIRMED}`,
           gte(payments.createdAt, since7d)
         )
       );
@@ -1062,7 +1068,9 @@ async function runSLABreachAlertBroadcast() {
   }
 }
 // SLA breach alert broadcast — every 15 minutes (offset by 7 minutes from port congestion scan)
-cron.schedule("0 7/15 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
+// NOTE: "7/15" is rejected by node-cron >= 4.6 (boot-fatal at module load).
+// The explicit list 7,22,37,52 is the semantically identical classic-cron form.
+cron.schedule("0 7,22,37,52 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
 console.log("[Cron] SLA breach alert broadcast scheduled every 15 minutes");
 
 // ─── Nightly Bulk Export Expiry Cleanup ──────────────────────────────────────
@@ -1171,6 +1179,15 @@ async function runPermifySeedOnStartup() {
 }
 
 async function startServer() {
+  // ── Phase-6 startup gates (fail fast, before any listener or route) ─────────
+  // 1. Refuse to boot in production when demo/test/mock surfaces are enabled.
+  // 2. Refuse to boot in production with missing or known-dev webhook secrets.
+  {
+    const { assertNoDemoSurfacesInProduction } = await import("./productionGates");
+    assertNoDemoSurfacesInProduction();
+    const { validateWebhookSecrets } = await import("./webhookSecretsValidator");
+    validateWebhookSecrets();
+  }
   const app = express();
   // Trust the reverse proxy (Manus/nginx) so express-rate-limit reads the correct client IP
   app.set('trust proxy', 1);
@@ -1187,6 +1204,14 @@ async function startServer() {
   }).catch(() => {});
   // Sprint 63: WebSocket server for real-time notifications
   setupWebSocketServer(server);
+
+  // ── OTel tenant attribution — JWT claim / edge header → baggage (Phase-7) ────
+  // Must run before any handler so downstream server spans inherit the baggage.
+  // No-op when telemetry is disabled; never blocks a request.
+  {
+    const { tenantBaggageMiddleware } = await import("./telemetry");
+    app.use(tenantBaggageMiddleware);
+  }
 
   // ── Request correlation ID middleware ───────────────────────────────────────────────
   // Injects X-Request-ID header for distributed tracing. Uses incoming header if
@@ -1435,6 +1460,23 @@ async function startServer() {
     );
   }
 
+  // Phase 8: PCS projection consumer for ports.*.v1 outbox topics → pcs_* read model
+  {
+    const { startPcsProjectionConsumer } = await import("../pcsProjection");
+    startPcsProjectionConsumer().catch((err: Error) =>
+      console.warn("[PcsProjection] Failed to start PCS projection consumer:", err.message)
+    );
+  }
+
+  // PRA-096 (Phase 9): geo vessel projection consumer for vessels.events →
+  // vessel_tracking_events read model (envelope v1.0 verified, fail-closed DLQ)
+  {
+    const { startGeoVesselProjectionConsumer } = await import("../geoVesselProjection");
+    startGeoVesselProjectionConsumer().catch((err: Error) =>
+      console.warn("[GeoVesselProjection] Failed to start geo vessel consumer (GAP-AIS-FEED stays open):", err.message)
+    );
+  }
+
   // Scheduled Heartbeat handlers — must be before Vite/static fallthrough
   {
     const { bondExpiryDigestHandler } = await import("../scheduled/bondExpiryDigest");
@@ -1512,7 +1554,18 @@ async function startServer() {
     // Seed default KPI targets on startup (idempotent)
     import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
     // Seed demo data (bonded warehouses, CEP patterns, cost records) — idempotent
-    import("../seedDemoData").then(({ seedAllDemoData }) => seedAllDemoData()).catch(() => {});
+    // SW-O4: demo seeding ONLY in explicit demo mode (never in production —
+    // productionGates already boot-refuses DEMO_MODE there). Seeded rows are
+    // marked source='demo' so dashboards/alerts can exclude them.
+    import("./productionGates").then(({ isDemoModeEnabled }) => {
+      if (!isDemoModeEnabled()) return;
+      import("../seedDemoData")
+        .then(({ seedAllDemoData }) => seedAllDemoData())
+        .catch((err) => {
+          // Fail loudly in dev — a half-seeded demo env is worse than none.
+          console.error("[Seed] FATAL: demo data seeding failed:", err);
+        });
+    });
 
     // v52: Check CEP pattern threshold breaches every 30 minutes and notify owner
     const checkThresholdBreaches = async () => {

@@ -229,24 +229,26 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── Rust TigerBeetle Bridge ───────────────────────────────────────────────────
+  # ── TigerBeetle Bridge (canonical Go ledger service, HTTP /api/ledger/*) ──────
+  # SW-O3: replaces the dev-only Rust bridge. Canonical port 8086.
   tigerbeetle-bridge:
     build:
-      context: ./rust/tigerbeetle-bridge
+      context: ./go/tigerbeetle-bridge
       dockerfile: Dockerfile
     container_name: ngswtp-tigerbeetle-bridge
     restart: unless-stopped
     ports:
-      - "8093:8093"
+      - "8086:8086"
     environment:
-      TIGERBEETLE_BRIDGE_PORT: "8093"
-      RUST_LOG: "tigerbeetle_bridge=info"
+      TB_BRIDGE_HTTP_PORT: "8086"
+      TIGERBEETLE_ADDR: ${TIGERBEETLE_ADDR:-tigerbeetle:3000}
+      TB_ALLOW_SIM_BACKEND: ${TB_ALLOW_SIM_BACKEND:-}
     networks:
       - ngswtp-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8093/health"]
+      test: ["CMD", "/tigerbeetle-bridge", "-healthcheck"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
 
   # ── Main Node.js/tRPC API Server ──────────────────────────────────────────────
@@ -273,7 +275,7 @@ services:
       RISK_ENGINE_URL: http://risk-engine:8090
       SANCTIONS_SCREENER_URL: http://sanctions-screener:8091
       RULE_ENGINE_URL: http://rule-engine:8092
-      TIGERBEETLE_BRIDGE_URL: http://tigerbeetle-bridge:8093
+      TIGERBEETLE_BRIDGE_URL: http://tigerbeetle-bridge:8086
       TEMPORAL_ADDRESS: temporal:7233
     networks:
       - ngswtp-net
@@ -376,7 +378,7 @@ services:
     environment:
       DATABASE_URL: postgresql://tradegateway:tradegateway_secure_2026@postgres:5432/tradegateway
       KAFKA_BROKERS: kafka:9092
-      TIGERBEETLE_URL: http://tigerbeetle-bridge:8093
+      TIGERBEETLE_URL: http://tigerbeetle-bridge:8086
       GRPC_PORT: "9082"
       HTTP_PORT: "8082"
     networks:

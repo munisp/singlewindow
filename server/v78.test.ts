@@ -524,17 +524,21 @@ describe("Go oga-service: Kafka middleware wired in main.go", () => {
 
 // ─── 40. Dapr components.yaml: tigerbeetle-bridge-rs resiliency target ───────
 
-describe("Dapr components.yaml: tigerbeetle-bridge-rs resiliency target", () => {
+// SW-O3/SW-E: the dapr resiliency target is the CANONICAL Go bridge
+// tigerbeetle-bridge (the Rust bridge-rs replica was removed from all deploy
+// surfaces — dev-only). Assertions updated accordingly.
+describe("Dapr components.yaml: tigerbeetle-bridge (canonical Go) resiliency target", () => {
   const daprYaml = readText("infra/k8s/dapr/components.yaml");
 
-  it("includes tigerbeetle-bridge-rs as a resiliency target", () => {
-    expect(daprYaml).toContain("tigerbeetle-bridge-rs");
+  it("includes the canonical tigerbeetle-bridge as a resiliency target (no Rust replica)", () => {
+    expect(daprYaml).toContain("tigerbeetle-bridge:");
+    expect(daprYaml).not.toContain("tigerbeetle-bridge-rs");
   });
 
-  it("tigerbeetle-bridge-rs target is in the resiliency section", () => {
+  it("tigerbeetle-bridge target is in the resiliency section", () => {
     // The second occurrence (line 253) is inside the resiliency targets block
     // Find the last occurrence which is the resiliency target entry
-    const lastIdx = daprYaml.lastIndexOf("tigerbeetle-bridge-rs");
+    const lastIdx = daprYaml.lastIndexOf("tigerbeetle-bridge:");
     // Check 1000 chars before and after for resiliency context
     const window = daprYaml.slice(Math.max(0, lastIdx - 1000), lastIdx + 500);
     const nearResiliency = window.includes("circuitBreaker") || window.includes("retry") || window.includes("timeout");

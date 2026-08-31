@@ -15,6 +15,8 @@
  * Falls back gracefully when KAFKA_BROKERS is not reachable.
  */
 import { Kafka, Producer, Partitioners, logLevel } from "kafkajs";
+import { SpanKind } from "@opentelemetry/api";
+import { withSpan, injectKafkaHeaders } from "./telemetry";
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 const BROKERS   = (process.env.KAFKA_BROKERS ?? "localhost:9092").split(",");
@@ -60,6 +62,8 @@ export const TOPICS = {
   BOND_DEPOSITED:          "tradegateway.ledger.bond_deposited",
   BOND_RELEASED:           "tradegateway.ledger.bond_released",
   PENALTY_ASSESSED:        "tradegateway.ledger.penalty_assessed",
+  // Maritime Single Window (IMO FAL; Phase 9 WP-C) — raw envelope v1.0 values
+  MSW_EVENTS:              "maritime.msw.v1",
   // Bonded warehouse
   WAREHOUSE_DEPOSIT:       "tradegateway.warehouse.deposit",
   WAREHOUSE_RELEASE:       "tradegateway.warehouse.release",
@@ -156,21 +160,38 @@ export async function publishEvent<T = Record<string, unknown>>(
   };
 
   try {
-    await producer.send({
-      topic,
-      messages: [
-        {
-          key:   fullEvent.aggregateId,
-          value: JSON.stringify(fullEvent),
-          headers: {
-            "event-type":   fullEvent.eventType,
-            "content-type": "application/json",
-            "source":       CLIENT_ID,
-            "correlation-id": fullEvent.metadata?.correlationId ?? fullEvent.eventId,
-          },
+    // Phase-7 OTel: producer span + W3C traceparent injected into message
+    // headers so downstream consumers join the same trace (manual carrier —
+    // kafkajs auto-instrumentation does not cover header propagation here).
+    const headers: Record<string, string> = {
+      "event-type":   fullEvent.eventType,
+      "content-type": "application/json",
+      "source":       CLIENT_ID,
+      "correlation-id": fullEvent.metadata?.correlationId ?? fullEvent.eventId,
+    };
+    injectKafkaHeaders(headers);
+    await withSpan(
+      `kafka.produce ${topic}`,
+      {
+        kind: SpanKind.PRODUCER,
+        attributes: {
+          "messaging.system": "kafka",
+          "messaging.destination.name": topic,
+          "messaging.kafka.message.key": fullEvent.aggregateId,
         },
-      ],
-    });
+      },
+      () =>
+        producer.send({
+          topic,
+          messages: [
+            {
+              key:   fullEvent.aggregateId,
+              value: JSON.stringify(fullEvent),
+              headers,
+            },
+          ],
+        })
+    );
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

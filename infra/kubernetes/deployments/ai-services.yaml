@@ -403,7 +403,13 @@ spec:
     matchLabels:
       app: rule-engine
 ---
-# ─── TigerBeetle Bridge (Rust) ────────────────────────────────────────────────
+# ─── TigerBeetle Bridge (canonical Go ledger service) ─────────────────────────
+# SW-O3: THE canonical money-rail bridge — HTTP /api/ledger/* on 8086.
+# The Rust bridge replicas are dev-only (TB_ALLOW_SIM_BACKEND=1) and were
+# removed from all deploy surfaces. Production image is built from
+# services/go/tigerbeetle-bridge/Dockerfile.production (-tags tigerbeetle,
+# live TigerBeetle backend; the default build is a dev-only sim that refuses
+# to boot when ENVIRONMENT=production).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -412,7 +418,7 @@ metadata:
   labels:
     app: tigerbeetle-bridge
     tier: backend
-    language: rust
+    language: go
 spec:
   replicas: 2
   selector:
@@ -424,10 +430,10 @@ spec:
         app: tigerbeetle-bridge
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
+        prometheus.io/port: "8086"
         dapr.io/enabled: "true"
         dapr.io/app-id: "tigerbeetle-bridge"
-        dapr.io/app-port: "8080"
+        dapr.io/app-port: "8086"
     spec:
       serviceAccountName: tradegateway-sa
       securityContext:
@@ -435,21 +441,20 @@ spec:
         runAsUser: 1000
       containers:
         - name: tigerbeetle-bridge
-          image: tradegateway/tigerbeetle-bridge:latest
+          image: tradegateway/tigerbeetle-bridge:1.0.0
           ports:
-            - containerPort: 8080
-            - containerPort: 9090
-          envFrom:
-            - configMapRef:
-                name: tradegateway-config
-            - secretRef:
-                name: tradegateway-secrets
+            - containerPort: 8086
+            - containerPort: 9086
           env:
             - name: SERVICE_NAME
               value: "tigerbeetle-bridge"
-            - name: RUST_LOG
-              value: "info"
-            - name: TIGERBEETLE_ADDRESS
+            - name: ENVIRONMENT
+              value: "production"
+            - name: TB_BRIDGE_HTTP_PORT
+              value: "8086"
+            - name: TB_BRIDGE_GRPC_PORT
+              value: "9086"
+            - name: TIGERBEETLE_ADDR
               valueFrom:
                 configMapKeyRef:
                   name: tradegateway-config
@@ -463,14 +468,14 @@ spec:
               memory: "1Gi"
           livenessProbe:
             httpGet:
-              path: /healthz
-              port: 8080
+              path: /health
+              port: 8086
             initialDelaySeconds: 5
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /readyz
-              port: 8080
+              path: /health
+              port: 8086
             initialDelaySeconds: 10
             periodSeconds: 10
           securityContext:
@@ -489,8 +494,11 @@ spec:
     app: tigerbeetle-bridge
   ports:
     - name: http
-      port: 80
-      targetPort: 8080
+      port: 8086
+      targetPort: 8086
+    - name: grpc
+      port: 9086
+      targetPort: 9086
 ---
 # ─── Vision Preprocessor (Rust) ───────────────────────────────────────────────
 apiVersion: apps/v1

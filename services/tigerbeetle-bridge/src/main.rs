@@ -4,6 +4,13 @@
 // Provides per-trader account provisioning, two-phase transfer execution,
 // balance queries, and tamper-evident audit trail.
 //
+// ⚠️  PHASE-6 NOTICE (SW-3): this service keeps ALL ledger state IN MEMORY.
+//     It is DEV/TEST-ONLY and must NEVER serve a production path:
+//       - it REFUSES TO BOOT when ENVIRONMENT/APP_ENV/NODE_ENV=production;
+//       - it requires the explicit opt-in TB_ALLOW_SIM_BACKEND=1 otherwise.
+//     The CANONICAL production ledger bridge is the Go tigerbeetle-bridge
+//     (HTTP /api/ledger/*, k8s Service `tigerbeetle-bridge`, port 8086).
+//
 // Why Rust:
 //   - TigerBeetle's official client is Rust-native
 //   - Memory safety guarantees for financial operations
@@ -121,6 +128,22 @@ pub struct TigerBeetleBridgeService {
 }
 
 #[derive(Clone, Debug)]
+/// SW-3: balance/overdraft guard. Escrow/bond/revenue-style accounts may not
+/// be debited below zero (TigerBeetle debits_must_not_exceed_credits semantics).
+fn enforce_overdraft_guard(acct: &AccountState, amount: u64) -> std::result::Result<(), Status> {
+    let guarded = matches!(
+        acct.account_type.as_str(),
+        "escrow" | "bond" | "revenue" | "gl" | "treasury"
+    );
+    if guarded && acct.debits_posted.saturating_add(amount) > acct.credits_posted {
+        return Err(Status::failed_precondition(format!(
+            "insufficient balance on {} account {}: debits {} + {} exceed credits {}",
+            acct.account_type, acct.account_id_str, acct.debits_posted, amount, acct.credits_posted
+        )));
+    }
+    Ok(())
+}
+
 struct AccountState {
     account_id_str: String,
     owner_id: String,
@@ -361,7 +384,10 @@ impl LedgerService for TigerBeetleBridgeService {
                     return Err(Status::failed_precondition("pending transfer already voided"));
                 }
                 pending.is_pending = false;
-                // Move from pending to posted
+                // Move from pending to posted (with overdraft guard, SW-3)
+                if let Some(debit_acct) = accounts.get(&debit_tb_id) {
+                    enforce_overdraft_guard(debit_acct, amount)?;
+                }
                 if let Some(debit_acct) = accounts.get_mut(&debit_tb_id) {
                     debit_acct.debits_pending = debit_acct.debits_pending.saturating_sub(amount);
                     debit_acct.debits_posted += amount;
@@ -372,7 +398,10 @@ impl LedgerService for TigerBeetleBridgeService {
                 }
             }
         } else {
-            // Direct transfer
+            // Direct transfer (with overdraft guard, SW-3)
+            if let Some(debit_acct) = accounts.get(&debit_tb_id) {
+                enforce_overdraft_guard(debit_acct, amount)?;
+            }
             if let Some(debit_acct) = accounts.get_mut(&debit_tb_id) {
                 debit_acct.debits_posted += amount;
             }
@@ -558,6 +587,26 @@ impl LedgerService for TigerBeetleBridgeService {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // SW-3 (option b): in-memory ledger — refuse to serve production.
+    let env = std::env::var("ENVIRONMENT")
+        .or_else(|_| std::env::var("APP_ENV"))
+        .or_else(|_| std::env::var("NODE_ENV"))
+        .unwrap_or_default()
+        .to_lowercase();
+    if env == "production" || env == "prod" {
+        panic!(
+            "FATAL: tigerbeetle-bridge is an IN-MEMORY ledger and must never serve \
+             production. Use the canonical Go tigerbeetle-bridge (port 8086)."
+        );
+    }
+    let sim_ok = std::env::var("TB_ALLOW_SIM_BACKEND").unwrap_or_default();
+    if sim_ok != "1" && sim_ok != "true" {
+        panic!(
+            "FATAL: this in-memory ledger requires explicit dev opt-in \
+             (TB_ALLOW_SIM_BACKEND=1). Use the canonical Go tigerbeetle-bridge in production."
+        );
+    }
+
     // Structured JSON logging
     tracing_subscriber::fmt()
         .json()

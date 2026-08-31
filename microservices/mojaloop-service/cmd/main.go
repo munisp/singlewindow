@@ -27,16 +27,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -56,7 +61,62 @@ import (
 //
 // The fulfillment is stored securely and only revealed to the Mojaloop switch
 // upon transfer completion to unlock funds.
-func generateILPComponents(amount float64, currency, destinationAccount string) (ilpPacket, condition, fulfillment string, err error) {
+// minorUnits converts a major-unit amount to integer minor units with an
+// explicit isFinite/>0/overflow guard (SW-12). Money is handled as integer
+// minor units from this point — no float money math downstream.
+func minorUnits(amount float64) (uint64, error) {
+	if math.IsNaN(amount) || math.IsInf(amount, 0) || amount <= 0 || amount > 9e13 {
+		return 0, fmt.Errorf("invalid amount %v", amount)
+	}
+	return uint64(math.Round(amount * 100)), nil
+}
+
+// minorToDecimal renders minor units as an exact decimal string (no float).
+func minorToDecimal(minor uint64) string {
+	return fmt.Sprintf("%d.%02d", minor/100, minor%100)
+}
+
+// verifyFulfilment checks that a presented fulfilment satisfies the stored
+// condition: base64url-decode and compare SHA-256(preimage) — timing-safe.
+func verifyFulfilment(fulfilmentB64, conditionB64 string) bool {
+	preimage, err := base64.RawURLEncoding.DecodeString(fulfilmentB64)
+	if err != nil || len(preimage) != 32 {
+		return false
+	}
+	expected, err := base64.RawURLEncoding.DecodeString(conditionB64)
+	if err != nil || len(expected) != 32 {
+		return false
+	}
+	hash := sha256.Sum256(preimage)
+	return subtle.ConstantTimeCompare(hash[:], expected) == 1
+}
+
+// verifyCallbackSignature authenticates a Mojaloop switch callback via
+// HMAC-SHA256 over the raw body (FSPIOP-Signature header), timing-safe (SW-M9).
+// In production the secret MUST be configured — main() refuses to boot without it.
+func verifyCallbackSignature(rawBody []byte, signatureHeader string) bool {
+	secret := os.Getenv("MOJALOOP_CALLBACK_SECRET")
+	if secret == "" {
+		if isProduction() {
+			return false
+		}
+		secret = "dev-callback-secret"
+	}
+	sig := strings.TrimPrefix(signatureHeader, "sha256=")
+	provided, err := hex.DecodeString(sig)
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(rawBody)
+	return subtle.ConstantTimeCompare(provided, mac.Sum(nil)) == 1
+}
+
+func isProduction() bool {
+	return os.Getenv("APP_ENV") == "production" || os.Getenv("NODE_ENV") == "production"
+}
+
+func generateILPComponents(amountMinor uint64, currency, destinationAccount string) (ilpPacket, condition, fulfillment string, err error) {
 	// 1. Generate cryptographically secure 32-byte fulfillment preimage
 	preimage := make([]byte, 32)
 	if _, err = rand.Read(preimage); err != nil {
@@ -70,9 +130,9 @@ func generateILPComponents(amount float64, currency, destinationAccount string) 
 	hash := sha256.Sum256(preimage)
 	condition = base64.RawURLEncoding.EncodeToString(hash[:])
 
-	// 4. Build ILP Prepare packet (OER encoding per ILP RFC 0027)
-	// Convert amount to minor units (kobo for NGN, cents for USD)
-	amountUnits := uint64(amount * 100)
+	// 4. Build ILP Prepare packet (OER encoding per ILP RFC 0027).
+	// The amount arrives as exact integer minor units (SW-12).
+	amountUnits := amountMinor
 	expiry := time.Now().UTC().Add(5 * time.Minute)
 	expiryStr := expiry.Format("20060102150405") + "000"
 	dest := fmt.Sprintf("g.ng.customs.%s", destinationAccount)
@@ -123,7 +183,7 @@ func loadConfig() Config {
 		DatabaseURL:     getEnv("DATABASE_URL", "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway"),
 		MojaloopBaseURL: getEnv("MOJALOOP_URL", "http://mojaloop-ml-api-adapter:3000"),
 		MojaloopFSPID:   getEnv("MOJALOOP_FSP_ID", "tradegateway-ng"),
-		TigerBeetleURL:  getEnv("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:50055"),
+		TigerBeetleURL:  getEnv("TIGERBEETLE_BRIDGE_URL", "http://tigerbeetle-bridge:8086"),
 		KafkaBrokers:    getEnv("KAFKA_BROKERS", "localhost:9092"),
 		DaprPort:        getEnv("DAPR_HTTP_PORT", "3500"),
 	}
@@ -246,6 +306,10 @@ func (s *PaymentStore) EnsureSchema(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_mojaloop_payments_declaration ON mojaloop_payments(declaration_id);
 		CREATE INDEX IF NOT EXISTS idx_mojaloop_payments_status ON mojaloop_payments(status);
 		CREATE INDEX IF NOT EXISTS idx_mojaloop_payments_ref ON mojaloop_payments(payment_ref);
+		ALTER TABLE mojaloop_payments ADD COLUMN IF NOT EXISTS ilp_packet TEXT;
+		ALTER TABLE mojaloop_payments ADD COLUMN IF NOT EXISTS condition_hash TEXT;
+		ALTER TABLE mojaloop_payments ADD COLUMN IF NOT EXISTS fulfillment TEXT;
+		ALTER TABLE mojaloop_payments ADD COLUMN IF NOT EXISTS amount_minor BIGINT;
 	`)
 	return err
 }
@@ -323,7 +387,7 @@ type MojaloopQuoteRequest struct {
 	Note        string `json:"note"`
 }
 
-func (m *MojaloopClient) CreateQuote(ctx context.Context, paymentRef string, amount float64, currency, payerFSP string) (string, error) {
+func (m *MojaloopClient) CreateQuote(ctx context.Context, paymentRef string, amountMinor uint64, currency, payerFSP string) (string, error) {
 	quoteID := uuid.New().String()
 	txID := uuid.New().String()
 
@@ -346,7 +410,7 @@ func (m *MojaloopClient) CreateQuote(ctx context.Context, paymentRef string, amo
 		},
 		AmountType: "RECEIVE",
 		Amount: map[string]interface{}{
-			"amount":   fmt.Sprintf("%.2f", amount),
+			"amount":   minorToDecimal(amountMinor),
 			"currency": currency,
 		},
 		TransactionType: map[string]interface{}{
@@ -370,9 +434,9 @@ func (m *MojaloopClient) CreateQuote(ctx context.Context, paymentRef string, amo
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		// Mojaloop uses async callbacks, so a 202 Accepted is the success response
-		log.Printf("[mojaloop] Quote request sent (async): %v", err)
-		return quoteID, nil
+		// SW-M9: a failed send is an ERROR, not a success — the caller marks
+		// the payment failed and returns a retryable 503.
+		return quoteID, fmt.Errorf("mojaloop quote send failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -384,7 +448,7 @@ func (m *MojaloopClient) CreateQuote(ctx context.Context, paymentRef string, amo
 	return quoteID, nil
 }
 
-func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentRef string, amount float64, currency, payerFSP, ilpPacket, condition string) (string, error) {
+func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentRef string, amountMinor uint64, currency, payerFSP, ilpPacket, condition string) (string, error) {
 	txID := uuid.New().String()
 
 	body := map[string]interface{}{
@@ -393,7 +457,7 @@ func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentR
 		"payerFsp":   payerFSP,
 		"payeeFsp":   m.fspID,
 		"amount": map[string]interface{}{
-			"amount":   fmt.Sprintf("%.2f", amount),
+			"amount":   minorToDecimal(amountMinor),
 			"currency": currency,
 		},
 		// ilpPacket and condition are sourced from the DB (set during createQuote via generateILPComponents
@@ -415,8 +479,9 @@ func (m *MojaloopClient) InitiateTransfer(ctx context.Context, quoteID, paymentR
 
 	resp, err := m.client.Do(req)
 	if err != nil {
-		log.Printf("[mojaloop] Transfer request sent (async): %v", err)
-		return txID, nil
+		// SW-M9: honest failure — the payment is marked FAILED with the real
+		// reason and the caller returns a retryable error status.
+		return txID, fmt.Errorf("mojaloop transfer send failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -446,12 +511,19 @@ func (s *Server) createQuote(c *gin.Context) {
 	paymentRef := fmt.Sprintf("TG-%d-%s", time.Now().UnixNano(), uuid.New().String()[:8])
 	ctx := c.Request.Context()
 
+	// SW-12: exact integer minor units with an explicit guard.
+	amountMinor, err := minorUnits(req.Amount)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Generate ILP components locally as fallback (Mojaloop switch may provide these via callback)
 	destAccount := fmt.Sprintf("ncs-duty")
 	if req.DeclarationID != nil {
 		destAccount = fmt.Sprintf("ncs-duty-%d", *req.DeclarationID)
 	}
-	ilpPacket, condition, fulfillment, err := generateILPComponents(req.Amount, req.Currency, destAccount)
+	ilpPacket, condition, fulfillment, err := generateILPComponents(amountMinor, req.Currency, destAccount)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "ILP generation failed: " + err.Error()})
 		return
@@ -477,10 +549,21 @@ func (s *Server) createQuote(c *gin.Context) {
 		return
 	}
 
-	// Send quote request to Mojaloop switch (async — callback updates ILP in DB)
-	quoteID, err := s.mojaloop.CreateQuote(ctx, paymentRef, req.Amount, req.Currency, req.PayerFSP)
+	// Send quote request to the Mojaloop switch.
+	// SW-M9: a failed quote send is an honest, retryable error — the payment is
+	// marked FAILED with the real reason; nothing is logged-as-success.
+	quoteID, err := s.mojaloop.CreateQuote(ctx, paymentRef, amountMinor, req.Currency, req.PayerFSP)
 	if err != nil {
-		log.Printf("[mojaloop] Quote request failed (using local ILP): %v", err)
+		errMsg := err.Error()
+		_ = s.store.UpdateStatus(ctx, paymentRef, PaymentStatusFailed, nil, &errMsg)
+		paymentsFailed.Inc()
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":      "payment switch unavailable — quote NOT created; retry later",
+			"detail":     errMsg,
+			"paymentRef": paymentRef,
+			"status":     PaymentStatusFailed,
+		})
+		return
 	}
 	s.pool_UpdateQuote(ctx, paymentRef, quoteID)
 
@@ -488,13 +571,14 @@ func (s *Server) createQuote(c *gin.Context) {
 	paymentAmountTotal.WithLabelValues(req.Currency).Add(req.Amount)
 
 	c.JSON(http.StatusCreated, gin.H{
-		"paymentRef": paymentRef,
-		"quoteId":    quoteID,
-		"ilpPacket":  ilpPacket,
-		"condition":  condition,
-		"amount":     req.Amount,
-		"currency":   req.Currency,
-		"status":     PaymentStatusQuoted,
+		"paymentRef":       paymentRef,
+		"quoteId":          quoteID,
+		"ilpPacket":        ilpPacket,
+		"condition":        condition,
+		"amount":           req.Amount,
+		"amountMinorUnits": amountMinor,
+		"currency":         req.Currency,
+		"status":           PaymentStatusQuoted,
 	})
 }
 
@@ -532,8 +616,13 @@ func (s *Server) initiateTransfer(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "ILP packet or condition not available — quote must be created first"})
 		return
 	}
+	amountMinor, err := minorUnits(payment.Amount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "stored payment amount is invalid: " + err.Error()})
+		return
+	}
 	txID, err := s.mojaloop.InitiateTransfer(ctx, req.QuoteID, req.PaymentRef,
-		payment.Amount, payment.Currency, payment.PayerFSP, ilpPacket, condition)
+		amountMinor, payment.Currency, payment.PayerFSP, ilpPacket, condition)
 	if err != nil {
 		errMsg := err.Error()
 		_ = s.store.UpdateStatus(ctx, req.PaymentRef, PaymentStatusFailed, nil, &errMsg)
@@ -553,60 +642,122 @@ func (s *Server) initiateTransfer(c *gin.Context) {
 }
 
 func (s *Server) handleCallback(c *gin.Context) {
-	// Mojaloop sends PUT /transfers/{transferId} as the completion callback
+	// Mojaloop sends PUT /transfers/{transferId} as the completion callback.
+	//
+	// SW-M9: the callback is AUTHENTICATED (HMAC-SHA256 FSPIOP-Signature over
+	// the raw body, timing-safe), the fulfilment is VERIFIED against the stored
+	// condition, and transitions are IDEMPOTENT — a replayed COMMITTED never
+	// completes twice or republishes the event.
+	rawBody, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid callback body"})
+		return
+	}
+	if !verifyCallbackSignature(rawBody, c.GetHeader("FSPIOP-Signature")) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid callback signature"})
+		return
+	}
+
 	var body map[string]interface{}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := json.Unmarshal(rawBody, &body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	transferState, _ := body["transferState"].(string)
 	transferID, _ := body["transferId"].(string)
+	if transferID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "transferId is required"})
+		return
+	}
 
-	// Find payment by mojaloop_tx_id
+	// Find payment by mojaloop_tx_id (persisted at initiation)
 	ctx := c.Request.Context()
-	var paymentRef string
-	s.store.pool.QueryRow(ctx, `
-		SELECT payment_ref FROM mojaloop_payments WHERE mojaloop_tx_id = $1
-	`, transferID).Scan(&paymentRef)
+	var paymentRef, currentStatus string
+	var conditionHash *string
+	err = s.store.pool.QueryRow(ctx, `
+		SELECT payment_ref, status, condition_hash FROM mojaloop_payments WHERE mojaloop_tx_id = $1
+	`, transferID).Scan(&paymentRef, &currentStatus, &conditionHash)
+	if err != nil || paymentRef == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "unknown transfer"})
+		return
+	}
 
-	if paymentRef == "" {
-		c.JSON(http.StatusOK, gin.H{"status": "ignored"})
+	// Idempotent replay: already in a terminal state.
+	if currentStatus == string(PaymentStatusCompleted) {
+		c.JSON(http.StatusOK, gin.H{"status": "already_completed", "idempotent": true})
+		return
+	}
+	if currentStatus == string(PaymentStatusFailed) {
+		c.JSON(http.StatusConflict, gin.H{"error": "transfer is already in terminal state FAILED"})
 		return
 	}
 
 	if transferState == "COMMITTED" {
-		_ = s.store.UpdateStatus(ctx, paymentRef, PaymentStatusCompleted, &transferID, nil)
-		paymentsCompleted.Inc()
+		// Verify the fulfilment against the condition stored at initiation.
+		fulfilment, _ := body["fulfilment"].(string)
+		if conditionHash == nil || *conditionHash == "" || fulfilment == "" || !verifyFulfilment(fulfilment, *conditionHash) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "fulfilment does not satisfy the transfer condition"})
+			return
+		}
 
-		// Publish completion event via Dapr
-		s.publishPaymentEvent(ctx, "PAYMENT_COMPLETED", paymentRef, transferID)
+		// SW-M17: publish the money-state event SYNCHRONOUSLY before the status
+		// flip; on failure return 503 so the switch retries (status unchanged).
+		if err := s.publishPaymentEvent(ctx, "PAYMENT_COMPLETED", paymentRef, transferID); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "event publish failed — transfer NOT completed; retry the callback"})
+			return
+		}
+		if err := s.store.UpdateStatus(ctx, paymentRef, PaymentStatusCompleted, &transferID, nil); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		paymentsCompleted.Inc()
 	} else if transferState == "ABORTED" {
 		errMsg := "Transfer aborted by Mojaloop"
+		if e, _ := body["errorInformation"].(map[string]interface{}); e != nil {
+			if d, _ := e["errorDescription"].(string); d != "" {
+				errMsg = d
+			}
+		}
 		_ = s.store.UpdateStatus(ctx, paymentRef, PaymentStatusFailed, &transferID, &errMsg)
 		paymentsFailed.Inc()
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported transferState"})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "processed"})
 }
 
-func (s *Server) publishPaymentEvent(ctx context.Context, eventType, paymentRef, txID string) {
-	data, _ := json.Marshal(map[string]interface{}{
+// publishPaymentEvent publishes a payment event via Dapr.
+// SW-M17: synchronous with error propagation — no fire-and-forget on
+// money-state transitions.
+func (s *Server) publishPaymentEvent(ctx context.Context, eventType, paymentRef, txID string) error {
+	data, err := json.Marshal(map[string]interface{}{
 		"eventType":  eventType,
 		"paymentRef": paymentRef,
 		"txId":       txID,
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 	})
-	url := fmt.Sprintf("http://localhost:%s/v1.0/publish/kafka-pubsub/payment.events", s.config.DaprPort)
-	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if req != nil {
-		req.Header.Set("Content-Type", "application/json")
-		client := &http.Client{Timeout: 3 * time.Second}
-		resp, _ := client.Do(req)
-		if resp != nil {
-			resp.Body.Close()
-		}
+	if err != nil {
+		return err
 	}
+	url := fmt.Sprintf("http://localhost:%s/v1.0/publish/kafka-pubsub/payment.events", s.config.DaprPort)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("publish failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("publish returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func (s *Server) getPayment(c *gin.Context) {
@@ -620,6 +771,10 @@ func (s *Server) getPayment(c *gin.Context) {
 }
 
 func main() {
+	// SW-M9: the callback verification secret is mandatory in production.
+	if isProduction() && os.Getenv("MOJALOOP_CALLBACK_SECRET") == "" {
+		log.Fatal("[mojaloop-service] FATAL: MOJALOOP_CALLBACK_SECRET must be set in production (callback authentication). Refusing to boot.")
+	}
 	cfg := loadConfig()
 	ctx := context.Background()
 

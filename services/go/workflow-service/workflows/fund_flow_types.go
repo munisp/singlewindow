@@ -45,10 +45,10 @@ type TigerBeetleVoidInput struct {
 }
 
 type TigerBeetleBatchInput struct {
-	BatchID   string            `json:"batch_id"`
+	BatchID   string             `json:"batch_id"`
 	Items     []BatchPaymentItem `json:"items"`
-	Ledger    uint32            `json:"ledger"`
-	EntryType string            `json:"entry_type"`
+	Ledger    uint32             `json:"ledger"`
+	EntryType string             `json:"entry_type"`
 }
 
 type TigerBeetleBatchResult struct {
@@ -82,11 +82,11 @@ type MojaloopTransferInput struct {
 }
 
 type MojaloopTransferResult struct {
-	TransferID  string `json:"transfer_id"`
-	Success     bool   `json:"success"`
-	Fulfilment  string `json:"fulfilment,omitempty"`
-	ErrorCode   string `json:"error_code,omitempty"`
-	ErrorDesc   string `json:"error_desc,omitempty"`
+	TransferID string `json:"transfer_id"`
+	Success    bool   `json:"success"`
+	Fulfilment string `json:"fulfilment,omitempty"`
+	ErrorCode  string `json:"error_code,omitempty"`
+	ErrorDesc  string `json:"error_desc,omitempty"`
 }
 
 // ─── KAFKA TYPES ──────────────────────────────────────────────────────────────
@@ -340,7 +340,6 @@ type UpdateDeclarationStatusActivityInput struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-func updateDeclarationStatus(ctx interface{}, declarationID int64, status, reason string) error {
-	// This is a helper used in declaration_clearance.go — implemented there
-	return nil
-}
+// NOTE (PRA-129): the bogus updateDeclarationStatus stub that shadowed the
+// real helper in declaration_clearance.go was removed. The real helper lives
+// in declaration_clearance.go and executes UpdateDeclarationStatusActivity.

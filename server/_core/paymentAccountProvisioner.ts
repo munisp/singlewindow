@@ -20,6 +20,8 @@ import { getDb } from "../db";
 import { paymentAccounts } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { fetchWithResilience } from "./middlewareClients";
+import { getServiceAuthHeaders } from "./serviceAuth";
 
 // ─── Account type constants ───────────────────────────────────────────────────
 
@@ -65,13 +67,17 @@ export async function provisionTraderAccount(
 ): Promise<ProvisionResult> {
   const db = await getDb();
   if (!db) {
-    // Fallback: return the deterministic account ID even if DB is unavailable
-    return { accountId: `trader-${traderId}`, isNew: false, ledger: 1 };
+    // P0 remediation: FAIL-CLOSED. Without the DB mirror we cannot verify or
+    // record provisioning — payment setup must not proceed unprovisioned.
+    throw new Error(
+      "[AccountProvisioner] Database unavailable — cannot provision payment account; payment setup aborted"
+    );
   }
 
   const accountId = `trader-${traderId}`;
 
-  // Check if already provisioned
+  // Check if already provisioned (DB mirror is the record of completed
+  // provisioning — a row exists only after the ledger account was created).
   const [existing] = await db
     .select({ accountId: paymentAccounts.accountId })
     .from(paymentAccounts)
@@ -82,8 +88,15 @@ export async function provisionTraderAccount(
     return { accountId, isNew: false, ledger: 1 };
   }
 
-  // Create the account row — wrapped in try/catch so FK violations in test
-  // environments (where the user row may not exist) are non-fatal.
+  // P0 remediation: provision the TigerBeetle ledger account FIRST via the
+  // canonical bridge, and FAIL the payment setup if it cannot be created.
+  // (Previously this imported a non-existent gRPC `tigerBeetleClient` export
+  // and silently no-op'd while payments proceeded unprovisioned.)
+  await provisionTigerBeetleAccount(accountId, traderId, currency);
+
+  // Ledger account exists — record the DB mirror row.
+  // Wrapped in try/catch so FK violations in test environments (where the
+  // user row may not exist) are non-fatal.
   try {
     await db.insert(paymentAccounts).values({
       accountId,
@@ -103,19 +116,13 @@ export async function provisionTraderAccount(
     const isFkViolation = err?.code === '23503' ||
       (typeof err?.message === 'string' && err.message.includes('foreign key'));
     if (isFkViolation) {
-      console.warn(`[AccountProvisioner] FK violation for trader ${traderId} — skipping DB provisioning`);
+      console.warn(`[AccountProvisioner] FK violation for trader ${traderId} — skipping DB mirror write (ledger account was provisioned)`);
       return { accountId, isNew: false, ledger: 1 };
     }
     throw err;
   }
 
   console.log(`[AccountProvisioner] Provisioned payment account for trader ${traderId}: ${accountId}`);
-
-  // Optionally provision in TigerBeetle via gRPC (non-blocking)
-  provisionTigerBeetleAccount(accountId, traderId, currency).catch((err) => {
-    console.warn(`[AccountProvisioner] TigerBeetle provisioning failed for ${accountId}:`, err.message);
-  });
-
   return { accountId, isNew: true, ledger: 1 };
 }
 
@@ -159,54 +166,53 @@ export async function provisionSystemAccounts(): Promise<void> {
   }
 }
 
+// Canonical Go bridge: k8s Service `tigerbeetle-bridge`, /api/ledger/* dialect
+// (same dialect as server/routers/ledger.ts). Env-configured via TB_BRIDGE_URL.
+const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8086";
+
 /**
- * Provisions a TigerBeetle account via the gRPC client.
- * Non-blocking — failures are logged but do not prevent payment processing.
+ * Provisions a TigerBeetle account via the canonical bridge
+ * (POST /api/ledger/accounts). FAIL-CLOSED (P0 remediation): any failure
+ * throws, which aborts the payment setup — the platform never proceeds with
+ * an unprovisioned ledger account. Account creation is idempotent on the
+ * bridge (existing account is not an error).
  */
 async function provisionTigerBeetleAccount(
   accountId: string,
   userId: number,
   currency: string
 ): Promise<void> {
+  let res: Response;
   try {
-    const grpcClients = await import("../grpc-clients");
-    const tigerBeetleClient = (grpcClients as any).tigerBeetleClient ?? null;
-    if (!tigerBeetleClient) return;
-
-    // TigerBeetle account ID: derive a stable uint128 from the string ID
-    // We use the first 16 bytes of SHA-256(accountId) as the account ID
-    const { createHash } = await import("crypto");
-    const hash = createHash("sha256").update(accountId).digest();
-    const accountIdHigh = hash.readBigUInt64BE(0);
-    const accountIdLow = hash.readBigUInt64BE(8);
-
-    await new Promise<void>((resolve, reject) => {
-      (tigerBeetleClient as any).createAccounts(
-        {
-          accounts: [{
-            id_high: accountIdHigh.toString(),
-            id_low: accountIdLow.toString(),
-            user_data_128: userId.toString(),
-            user_data_64: "0",
-            user_data_32: 0,
-            reserved: 0,
-            ledger: 1,
-            code: 1, // trader debit account
-            flags: 0,
-            debits_pending: "0",
-            debits_posted: "0",
-            credits_pending: "0",
-            credits_posted: "0",
-          }],
-        },
-        (err: Error | null) => {
-          if (err) reject(err);
-          else resolve();
-        }
-      );
-    });
-  } catch {
-    // TigerBeetle unavailable — DB mirror is the source of truth in dev/staging
+    // PRA-012: authenticated money-rail hop; PRA-024/025: resilience wrapper.
+    const authHeaders = await getServiceAuthHeaders();
+    res = await fetchWithResilience(
+      `${TB_BRIDGE_URL}/api/ledger/accounts`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify({
+          id: accountId,
+          ledger: 1,
+          code: 1, // trader debit account
+          accountType: "TRADER_LIABILITY",
+          description: `Trader ${userId} payment account (${accountId})`,
+          currency,
+        }),
+        timeoutMs: 5_000,
+      },
+      "tigerbeetle-bridge"
+    );
+  } catch (err) {
+    throw new Error(
+      `[AccountProvisioner] TigerBeetle bridge unreachable at ${TB_BRIDGE_URL} — account ${accountId} NOT provisioned; payment setup aborted: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `[AccountProvisioner] TigerBeetle bridge rejected account ${accountId}: HTTP ${res.status} ${body} — payment setup aborted`
+    );
   }
 }
 

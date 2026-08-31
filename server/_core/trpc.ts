@@ -3,7 +3,10 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { redisRateLimit } from './redis';
+import { RateLimiterUnavailableError, rateLimiterInMemoryFallbackAllowed } from './redisRateLimiter';
 import crypto from 'crypto';
+import { SpanKind, SpanStatusCode } from "@opentelemetry/api";
+import { withSpan } from "./telemetry";
 
 // ─── CSRF Token Utilities (B3 FIX) ────────────────────────────────────────────
 // Implements the Double Submit Cookie pattern:
@@ -80,7 +83,37 @@ const t = initTRPC.context<TrpcContext>().create({
 });
 
 export const router = t.router;
-export const publicProcedure = t.procedure;
+
+// ─── OTel tracing middleware (Phase-7) ────────────────────────────────────────
+// One span per tRPC procedure invocation; span name = procedure path.
+// No-op (non-recording span) when telemetry is disabled; tenant.id/agency are
+// copied from request baggage onto the span.
+const otelProcedureSpan = t.middleware(async opts => {
+  const { path, type, next } = opts;
+  return withSpan(
+    path,
+    {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        "rpc.system": "trpc",
+        "rpc.procedure": path,
+        "rpc.trpc.method": type,
+      },
+    },
+    async span => {
+      const result = await next(opts);
+      if (!result.ok) {
+        span.recordException(result.error);
+        span.setStatus({ code: SpanStatusCode.ERROR, message: result.error.message });
+      }
+      return result;
+    }
+  );
+});
+
+// All procedures derive from this base so every procedure gets a span.
+const baseProcedure = t.procedure.use(otelProcedureSpan);
+export const publicProcedure = baseProcedure;
 
 const requireUser = t.middleware(async opts => {
   const { ctx, next } = opts;
@@ -103,9 +136,31 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+export const protectedProcedure = baseProcedure.use(requireUser);
 
-export const adminProcedure = t.procedure.use(
+/**
+ * SW-G7: finance-console procedures — restricted to the finance and admin
+ * roles. Finance dashboards expose platform-wide money data (payment queues,
+ * balances, ledger mirrors) and must never be reachable by ordinary traders.
+ */
+export const financeProcedure = baseProcedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+
+    if (!ctx.user || !['admin', 'finance'].includes(ctx.user.role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Finance or admin role required" });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  }),
+);
+
+export const adminProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
@@ -145,7 +200,7 @@ export const adminProcedure = t.procedure.use(
  *   export const customsOfficerProcedure = keycloakRoleProcedure("tradegateway-customs-officer");
  */
 export function keycloakRoleProcedure(requiredRole: string) {
-  return t.procedure.use(
+  return baseProcedure.use(
     t.middleware(async opts => {
       const { ctx, next } = opts;
       if (!ctx.user) {
@@ -196,7 +251,7 @@ export const keycloakAdminProcedure = keycloakRoleProcedure("tradegateway-admin"
 /**
  * keycloakCustomsOfficerProcedure — requires customs_officer or higher.
  */
-export const keycloakCustomsOfficerProcedure = t.procedure.use(
+export const keycloakCustomsOfficerProcedure = baseProcedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
     if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -240,7 +295,11 @@ function _inMemoryRateLimit(key: string, windowMs: number, max: number): boolean
 
 /**
  * Checks rate limit using Redis INCR+EXPIRE sliding window.
- * Falls back to in-memory Map when Redis is unavailable.
+ * Posture (PRA-026, Phase 9): Redis is the ONLY production path. The
+ * in-memory Map fallback applies solely when the explicit dev-only opt-in
+ * RATE_LIMIT_ALLOW_INMEMORY_FALLBACK=true is set (never in production);
+ * otherwise RateLimiterUnavailableError propagates and the caller answers
+ * with a typed SERVICE_UNAVAILABLE (RATE_LIMITER_UNAVAILABLE) error.
  */
 async function _checkRateLimit(
   namespace: string,
@@ -250,8 +309,11 @@ async function _checkRateLimit(
 ): Promise<boolean> {
   try {
     return await redisRateLimit(namespace, identifier, windowMs, max);
-  } catch {
-    return _inMemoryRateLimit(`${namespace}:${identifier}`, windowMs, max);
+  } catch (err) {
+    if (err instanceof RateLimiterUnavailableError && rateLimiterInMemoryFallbackAllowed()) {
+      return _inMemoryRateLimit(`${namespace}:${identifier}`, windowMs, max);
+    }
+    throw err;
   }
 }
 
@@ -261,7 +323,19 @@ export const rateLimitedProcedure = protectedProcedure.use(
     const ip = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
       ?? (ctx.req.socket as any)?.remoteAddress ?? "unknown";
     const identifier = ctx.user ? `user:${ctx.user.id}` : `ip:${ip}`;
-    const allowed = await _checkRateLimit("std", identifier, 60_000, 300);
+    let allowed: boolean;
+    try {
+      allowed = await _checkRateLimit("std", identifier, 60_000, 300);
+    } catch (err) {
+      if (err instanceof RateLimiterUnavailableError) {
+        // PRA-026: typed fail-closed 503 — never silent allow, never a 500.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "RATE_LIMITER_UNAVAILABLE: distributed rate limiter is unavailable — request refused (fail-closed)",
+        });
+      }
+      throw err;
+    }
     if (!allowed) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded. Try again in 60 seconds." });
     }

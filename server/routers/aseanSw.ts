@@ -8,14 +8,17 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+import { fetchWithResilience } from "../_core/middlewareClients";
 
 const ASEAN_SVC = process.env.ASEAN_SW_SERVICE_URL ?? "http://localhost:8096";
 
 async function aseanFetch(path: string, opts?: RequestInit) {
-  const res = await fetch(`${ASEAN_SVC}${path}`, {
+  // P0-7: timeout + retry + circuit breaker via the resilience wrapper.
+  const res = await fetchWithResilience(`${ASEAN_SVC}${path}`, {
     ...opts,
+    timeoutMs: 5_000,
     headers: { "Content-Type": "application/json", ...(opts?.headers ?? {}) },
-  });
+  }, "asean-sw-service");
   if (!res.ok) {
     const body = await res.text();
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `asean-sw-service error: ${body}` });
@@ -195,14 +198,22 @@ export const aseanSwRouter = router({
     try {
       return await aseanFetch("/api/asean/connectivity");
     } catch {
+      // Honest offline state (P0 hardening): the static ASEAN_MEMBERS table
+      // contains ILLUSTRATIVE uptime/latency figures that must not be served
+      // as measured data. When the service is unreachable, metrics are null.
       return {
         members: ASEAN_MEMBERS.map((m) => ({
-          ...m,
-          score: computeConnectivityScore(m.uptime, m.latency_ms),
-          tier: classifyConnectivity(computeConnectivityScore(m.uptime, m.latency_ms)),
+          code: m.code,
+          name: m.name,
+          uptime: null as number | null,
+          latency_ms: null as number | null,
+          status: "unknown" as string,
+          score: null as number | null,
+          tier: "NOT_ASSESSED" as string,
         })),
         checkedAt: new Date().toISOString(),
         _offline: true,
+        message: "asean-sw-service unavailable — connectivity metrics NOT_ASSESSED (no measured data)",
       };
     }
   }),

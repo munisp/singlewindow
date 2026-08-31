@@ -41,12 +41,15 @@ export const VALID_TRANSITIONS: Record<DeclarationStatus, DeclarationStatus[]> =
   // Submission writes under_assessment after risk scoring. submitted remains supported
   // for imports and workflows that preserve a distinct hand-off state.
   draft: ["submitted", "under_assessment", "cancelled"],
-  submitted: ["under_assessment", "docs_required", "payment_pending", "under_examination", "cleared", "rejected"],
-  under_assessment: ["docs_required", "payment_pending", "under_examination", "cleared", "rejected"],
+  // SW-M13: "cleared" is NOT reachable from submitted/under_assessment —
+  // clearance requires payment_confirmed (or examination_complete after a hold).
+  submitted: ["under_assessment", "docs_required", "payment_pending", "under_examination", "rejected"],
+  under_assessment: ["docs_required", "payment_pending", "under_examination", "rejected"],
   docs_required: ["submitted", "under_assessment", "rejected", "cancelled"],
   // payment_confirmed is written by the payment confirmation workflow; retain the
   // legacy direct paths from payment_pending while permitting the normal path.
-  payment_pending: ["payment_confirmed", "under_examination", "cleared", "rejected"],
+  // SW-M13: payment_pending must pass through payment_confirmed before clearance.
+  payment_pending: ["payment_confirmed", "under_examination", "rejected"],
   payment_confirmed: ["under_examination", "cleared", "rejected"],
   under_examination: ["examination_complete", "docs_required", "rejected"],
   examination_complete: ["cleared", "rejected", "payment_pending"],
@@ -68,12 +71,10 @@ export const TRANSITION_ROLES: Record<string, string[]> = {
   "submitted→docs_required": ["customs_officer", "admin"],
   "submitted→payment_pending": ["customs_officer", "admin"],
   "submitted→under_examination": ["customs_officer", "inspector", "admin"],
-  "submitted→cleared": ["customs_officer", "admin"],
   "submitted→rejected": ["customs_officer", "admin"],
   "under_assessment→docs_required": ["customs_officer", "admin"],
   "under_assessment→payment_pending": ["customs_officer", "admin"],
   "under_assessment→under_examination": ["customs_officer", "inspector", "admin"],
-  "under_assessment→cleared": ["customs_officer", "admin"],
   "under_assessment→rejected": ["customs_officer", "admin"],
   "docs_required→submitted": ["user", "admin"],
   "docs_required→under_assessment": ["user", "admin"],
@@ -81,7 +82,6 @@ export const TRANSITION_ROLES: Record<string, string[]> = {
   "docs_required→cancelled": ["user", "admin"],
   "payment_pending→payment_confirmed": ["finance", "customs_officer", "admin"],
   "payment_pending→under_examination": ["customs_officer", "admin"],
-  "payment_pending→cleared": ["customs_officer", "admin"],
   "payment_pending→rejected": ["customs_officer", "admin"],
   "payment_confirmed→under_examination": ["customs_officer", "admin"],
   "payment_confirmed→cleared": ["customs_officer", "admin"],

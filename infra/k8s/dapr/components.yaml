@@ -51,7 +51,7 @@ auth:
 ---
 # ─── TigerBeetle Binding ─────────────────────────────────────────────────────
 # Used by payment-service and post-clearance-audit to write immutable ledger
-# entries via the Rust tigerbeetle-bridge-rs HTTP façade (port 8099).
+# entries via the canonical Go tigerbeetle-bridge HTTP API (port 8086, /api/ledger/*).
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
@@ -67,7 +67,7 @@ spec:
     - name: url
       secretKeyRef:
         name: tradegateway-secrets
-        key: tigerbeetle-bridge-url  # e.g. http://tigerbeetle-bridge.tradegateway.svc:8099
+        key: tigerbeetle-bridge-url  # e.g. http://tigerbeetle-bridge.tradegateway.svc:8086
     - name: method
       value: "POST"
     - name: direction
@@ -250,7 +250,7 @@ spec:
         timeout: defaultTimeout
         retry: defaultRetry
         circuitBreaker: defaultCircuitBreaker
-      tigerbeetle-bridge-rs:
+      tigerbeetle-bridge:
         timeout: defaultTimeout
         retry: defaultRetry
         circuitBreaker: defaultCircuitBreaker

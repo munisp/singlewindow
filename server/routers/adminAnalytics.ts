@@ -3,6 +3,7 @@
  * Provides platform-wide metrics for the Admin Analytics Dashboard.
  * All procedures are admin-only.
  */
+import { PAYMENT_STATUS } from "../_core/statuses";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
@@ -87,7 +88,7 @@ export const adminAnalyticsRouter = router({
         .where(
           and(
             gte(payments.createdAt, since),
-            sql`${payments.status} = 'completed'`
+            sql`${payments.status} = ${PAYMENT_STATUS.CONFIRMED}`
           )
         )
         .groupBy(sql`DATE(${payments.createdAt})`)
@@ -160,7 +161,7 @@ export const adminAnalyticsRouter = router({
         totalRevenue: sql<number>`COALESCE(SUM(${payments.amount}), 0)::numeric(18,2)`.as("total_revenue"),
       })
       .from(payments)
-      .where(sql`${payments.status} = 'completed'`);
+      .where(sql`${payments.status} = ${PAYMENT_STATUS.CONFIRMED}`);
 
     const total = declStats?.total ?? 0;
     const cleared = declStats?.cleared ?? 0;

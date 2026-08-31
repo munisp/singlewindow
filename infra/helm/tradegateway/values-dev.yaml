@@ -34,7 +34,6 @@ replicaCount:
   anomalyDetection: 1
   kycService: 1
   tigerbeetleBridgeGo: 1
-  tigerbeetleBridgeRs: 1
 
 # Dev: autoscaling disabled
 autoscaling:

@@ -13,6 +13,7 @@
  */
 
 import type { Express, Request, Response } from "express";
+import crypto from "crypto";
 import {
   createSecurityAlert,
   updateDeclaration,
@@ -21,8 +22,24 @@ import {
 } from "../db";
 import type { users } from "../../drizzle/schema";
 import { notifyOwner } from "../_core/notification";
+import { getWebhookSecret } from "../_core/webhookSecretsValidator";
+import { isDuplicateDelivery } from "./dedupe";
 
-const WEBHOOK_SECRET = process.env.SANCTIONS_WEBHOOK_SECRET || "";
+// Boot-fatal in production when unset or a known dev value (getWebhookSecret
+// throws); in development the dev default is used with a loud warning.
+const WEBHOOK_SECRET = getWebhookSecret("SANCTIONS_WEBHOOK_SECRET", "tradegateway-sanctions-webhook-secret-dev");
+
+/** Timing-safe shared-secret comparison (never early-exit on mismatch). */
+function secretsEqual(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) {
+    // Compare against self to keep timing roughly constant, then fail.
+    crypto.timingSafeEqual(b, b);
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
 
 interface SanctionsHitPayload {
   declarationId?: number;
@@ -40,11 +57,11 @@ export function registerSanctionsWebhookRoute(app: Express): void {
   app.post(
     "/api/webhooks/sanctions-hit",
     async (req: Request, res: Response) => {
-      // ── 1. Validate shared secret ──────────────────────────────────────────
-      const providedSecret = req.headers["x-sanctions-secret"] as string;
-      if (WEBHOOK_SECRET && providedSecret !== WEBHOOK_SECRET) {
+      // ── 1. Validate shared secret (always required, timing-safe) ──────────
+      const providedSecret = (req.headers["x-sanctions-secret"] as string) ?? "";
+      if (!providedSecret || !secretsEqual(providedSecret, WEBHOOK_SECRET)) {
         console.warn(
-          "[SanctionsWebhook] Rejected: invalid secret from",
+          "[SanctionsWebhook] Rejected: invalid or missing secret from",
           req.ip
         );
         res.status(401).json({ error: "Unauthorized" });
@@ -55,6 +72,18 @@ export function registerSanctionsWebhookRoute(app: Express): void {
 
       if (!payload.entityName || !payload.matchedList || !payload.screeningId) {
         res.status(400).json({ error: "Missing required fields" });
+        return;
+      }
+
+      // ── 1b. Replay dedupe by screeningId ──────────────────────────────────
+      try {
+        if (await isDuplicateDelivery("sanctions", payload.screeningId)) {
+          res.status(200).json({ received: true, duplicate: true, message: "Screening result already processed" });
+          return;
+        }
+      } catch (dedupeErr) {
+        console.error("[SanctionsWebhook] Dedupe store unavailable:", dedupeErr);
+        res.status(503).json({ error: "Delivery verification unavailable — retry later" });
         return;
       }
 
@@ -82,9 +111,11 @@ export function registerSanctionsWebhookRoute(app: Express): void {
         });
 
         // ── 3. Hold the declaration if one is referenced ───────────────────
+        // A sanctions hit is NOT a rejection: the declaration is placed in the
+        // real 'held_sanctions' status pending compliance officer adjudication.
         if (payload.declarationId) {
           await updateDeclaration(payload.declarationId, {
-            status: "rejected",
+            status: "held_sanctions",
           }).catch((e) =>
             console.warn("[SanctionsWebhook] Could not update declaration:", e)
           );

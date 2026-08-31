@@ -8,6 +8,11 @@ import multer from "multer";
 import { storagePut } from "../storage";
 import { nanoid } from "nanoid";
 import { sdk } from "../_core/sdk";
+import {
+  sniffFileType,
+  EXTENSION_FOR_SNIFFED_TYPE,
+  MIME_FOR_SNIFFED_TYPE,
+} from "../_core/security";
 
 const router = Router();
 
@@ -53,7 +58,23 @@ router.post("/", upload.single("file"), async (req, res) => {
     }
 
     const { originalname, mimetype, buffer, size } = req.file;
-    const ext = originalname.split(".").pop() ?? "bin";
+
+    // SW-S2-8: enforce the type allowlist from the file's ACTUAL bytes, not the
+    // client-supplied MIME type or filename extension (both attacker-controlled).
+    const detected = sniffFileType(buffer);
+    if (detected === "unknown") {
+      res.status(400).json({ error: "File content is not a recognised allowed type (pdf/png/jpeg/webp/zip/text)" });
+      return;
+    }
+    const allowedMimes = MIME_FOR_SNIFFED_TYPE[detected];
+    if (!allowedMimes.includes(mimetype)) {
+      res.status(400).json({
+        error: `Declared type '${mimetype}' does not match detected file content (${detected})`,
+      });
+      return;
+    }
+    // Extension comes from the detected content type, never from the client filename.
+    const ext = EXTENSION_FOR_SNIFFED_TYPE[detected];
     const fileKey = `declaration-documents/${user.id}/${nanoid(12)}.${ext}`;
 
     const { url } = await storagePut(fileKey, buffer, mimetype);

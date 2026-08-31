@@ -13,8 +13,12 @@ import { getDb } from "../db";
 import { ogaPermits, declarations } from "../../drizzle/schema";
 import { eq, and } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
+import { getWebhookSecret } from "../_core/webhookSecretsValidator";
+import { deriveDeliveryKey, isDuplicateDelivery } from "./dedupe";
 
-const OGA_WEBHOOK_SECRET = process.env.OGA_WEBHOOK_SECRET ?? "tradegateway-oga-webhook-secret-dev";
+// Boot-fatal in production when OGA_WEBHOOK_SECRET is unset or a known dev value
+// (getWebhookSecret throws); in development the dev default is used with a warning.
+const OGA_WEBHOOK_SECRET = getWebhookSecret("OGA_WEBHOOK_SECRET", "tradegateway-oga-webhook-secret-dev");
 
 // Verify HMAC-SHA256 signature from OGA system
 function verifySignature(payload: string, signature: string): boolean {
@@ -61,10 +65,10 @@ export function registerOgaWebhookRoute(app: express.Application) {
       const rawBody = req.body instanceof Buffer ? req.body.toString("utf8") : JSON.stringify(req.body);
       const signature = (req.headers["x-oga-signature"] as string) ?? "";
 
-      // In production: enforce signature verification
-      // In dev: skip if no signature provided (allows testing without HMAC)
-      if (signature && !verifySignature(rawBody, signature)) {
-        return res.status(401).json({ error: "Invalid signature" });
+      // A valid HMAC signature is ALWAYS required — an unsigned or badly-signed
+      // callback must never update permit or declaration state (fail closed).
+      if (!signature || !verifySignature(rawBody, signature)) {
+        return res.status(401).json({ error: "Invalid or missing X-OGA-Signature" });
       }
 
       let payload: OGACallbackPayload;
@@ -85,6 +89,20 @@ export function registerOgaWebhookRoute(app: express.Application) {
       if (!db) return res.status(503).json({ error: "Database unavailable" });
 
       try {
+        // Replay dedupe: keyed by the provider delivery id (or a body hash) so a
+        // redelivered decision is acknowledged without re-applying side effects.
+        const deliveryKey = deriveDeliveryKey(req.headers["x-oga-delivery-id"], rawBody);
+        let duplicate: boolean;
+        try {
+          duplicate = await isDuplicateDelivery("oga", deliveryKey);
+        } catch (dedupeErr) {
+          console.error("[OGA Webhook] Dedupe store unavailable:", dedupeErr);
+          return res.status(503).json({ error: "Delivery verification unavailable — retry later" });
+        }
+        if (duplicate) {
+          return res.status(200).json({ ok: true, duplicate: true, message: "Delivery already processed" });
+        }
+
         // Find the matching OGA permit
         const [permit] = await db
           .select()

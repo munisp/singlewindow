@@ -139,10 +139,6 @@ services:
   tigerbeetle-bridge-go:
     replicas: 3
     hpa: { minReplicas: 3, maxReplicas: 8 }
-  tigerbeetle-bridge-rs:
-    enabled: true
-    replicas: 2
-    hpa: { enabled: true, minReplicas: 2, maxReplicas: 6 }
   fluvio-consumer:
     replicas: 3
     hpa: { minReplicas: 3, maxReplicas: 8 }

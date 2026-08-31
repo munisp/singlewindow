@@ -8,18 +8,84 @@ import crypto from 'crypto';
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
-import { getDb } from "../db";
+import { getDb, logAuditEvent } from "../db";
 import { assertCan } from "../_core/permify";
 import {
-  dutyDrawbackClaims, declarations, payments,
+  dutyDrawbackClaims, declarations, payments, auditEvents,
 } from "../../drizzle/schema";
-import { eq, desc, and, sql, count, or, ilike } from "drizzle-orm";
+import { eq, desc, and, sql, count, or, ilike, ne } from "drizzle-orm";
+import { fetchWithResilience } from "../_core/middlewareClients";
+import { getServiceAuthHeaders } from "../_core/serviceAuth";
+
+// Canonical Go TigerBeetle bridge (disbursement rail receipts).
+const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8086";
+
+/**
+ * SW-M8 four-eyes threshold: paid amounts at or above this many minor units
+ * (default GHS 100,000.00) require a second-officer approval recorded via
+ * drawback.secondApprove before markPaid succeeds.
+ */
+const FOUR_EYES_THRESHOLD_MINOR = Number(process.env.DRAWBACK_FOUR_EYES_THRESHOLD_MINOR ?? 10_000_000);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function generateClaimNumber(): string {
   const year = new Date().getFullYear();
   const seq = parseInt(crypto.randomUUID().replace(/-/g, '').slice(0, 6), 16) % 900000 + 100000;
   return `DDC-${year}-${seq}`;
+}
+
+/** Exact decimal string → integer minor units (no float money math). */
+function toMinorUnits(amount: string | number): number {
+  const s = String(amount).trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Invalid monetary amount: ${s}` });
+  }
+  const [maj, frac = ""] = s.split(".");
+  return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
+}
+
+/**
+ * Verifies a disbursement rail receipt on the canonical ledger bridge:
+ * the transfer must exist and its amount must equal the approved amount.
+ * Fails closed when the bridge is unreachable.
+ */
+async function verifyRailReceipt(railReference: string, expectedMinorUnits: number): Promise<void> {
+  // PRA-012: authenticated money-rail hop; PRA-024/025: resilience wrapper
+  // (4xx verbatim — 404 below is a business outcome, not a retry).
+  const authHeaders = await getServiceAuthHeaders();
+  const res = await fetchWithResilience(
+    `${TB_BRIDGE_URL}/api/ledger/transfers/${encodeURIComponent(railReference)}`,
+    { headers: { ...authHeaders }, timeoutMs: 10_000 },
+    "tigerbeetle-bridge"
+  ).catch(() => null);
+  if (!res) {
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: "Disbursement rail is unreachable — cannot verify the payment receipt; retry later",
+    });
+  }
+  if (res.status === 404) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Rail receipt '${railReference}' does not exist` });
+  }
+  if (!res.ok) {
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Rail receipt verification failed (HTTP ${res.status})` });
+  }
+  const transfer = await res.json().catch(() => null) as Record<string, unknown> | null;
+  const amount = transfer?.amount ?? transfer?.amountMinorUnits;
+  let receiptMinor: number | null = null;
+  if (typeof amount === "string" || typeof amount === "number") {
+    try { receiptMinor = toMinorUnits(amount); } catch { receiptMinor = null; }
+  }
+  if (receiptMinor === null || receiptMinor !== expectedMinorUnits) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Rail receipt amount does not equal the approved amount (expected ${expectedMinorUnits} minor units)`,
+    });
+  }
+  const status = String(transfer?.status ?? "").toLowerCase();
+  if (status && status !== "posted" && status !== "committed" && status !== "completed") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `Rail receipt is in status '${status}', not posted` });
+  }
 }
 
 // ─── ROUTER ──────────────────────────────────────────────────────────────────
@@ -254,6 +320,18 @@ export const drawbackRouter = router({
         .where(eq(dutyDrawbackClaims.id, input.id))
         .returning();
 
+      // SW-M8: audit every transition.
+      await logAuditEvent({
+        entityType: "payment",
+        entityId: input.id,
+        action: "drawback_claim_submitted",
+        actorId: ctx.user.id,
+        actorType: "trader",
+        previousState: { status: claim.status },
+        newState: { status: "submitted" },
+        metadata: { entityKind: "duty_drawback_claim", claimNumber: claim.claimNumber },
+      });
+
       return updated;
     }),
 
@@ -287,6 +365,21 @@ export const drawbackRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Claim must be submitted or under review to be reviewed" });
       }
 
+      // SW-M8: approved amount may never exceed the claimed amount.
+      let approvedAmountMinor: number | null = null;
+      if (input.decision === "approved") {
+        const claimedMinor = toMinorUnits(claim.claimedAmount);
+        approvedAmountMinor = input.approvedAmount !== undefined
+          ? toMinorUnits(input.approvedAmount)
+          : claimedMinor;
+        if (approvedAmountMinor > claimedMinor) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Approved amount cannot exceed the claimed amount (${claim.claimedAmount})`,
+          });
+        }
+      }
+
       const updateData: Record<string, unknown> = {
         status: input.decision,
         reviewedBy: ctx.user.id,
@@ -295,8 +388,8 @@ export const drawbackRouter = router({
       };
       if (input.reviewerNotes) updateData.reviewerNotes = input.reviewerNotes;
       if (input.rejectionReason) updateData.rejectionReason = input.rejectionReason;
-      if (input.decision === "approved") {
-        updateData.approvedAmount = String(input.approvedAmount ?? parseFloat(claim.claimedAmount));
+      if (input.decision === "approved" && approvedAmountMinor !== null) {
+        updateData.approvedAmount = (approvedAmountMinor / 100).toFixed(2);
       }
 
       const [updated] = await db.update(dutyDrawbackClaims)
@@ -304,16 +397,77 @@ export const drawbackRouter = router({
         .where(eq(dutyDrawbackClaims.id, input.id))
         .returning();
 
+      // SW-M8: audit every transition.
+      await logAuditEvent({
+        entityType: "payment",
+        entityId: input.id,
+        action: input.decision === "approved" ? "drawback_claim_approved" : "drawback_claim_rejected",
+        actorId: ctx.user.id,
+        actorType: ctx.user.role,
+        previousState: { status: claim.status },
+        newState: { status: input.decision, approvedAmountMinor },
+        metadata: { entityKind: "duty_drawback_claim", claimNumber: claim.claimNumber },
+      });
+
       return updated;
     }),
 
   /**
+   * Record a second-officer approval for a high-value claim (four-eyes control,
+   * SW-M8). The second officer must differ from the original reviewer.
+   */
+  secondApprove: protectedProcedure
+    .input(z.object({ id: z.number().int().positive(), notes: z.string().max(1000).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const isReviewer = ["customs_officer", "admin", "finance"].includes(ctx.user.role);
+      if (!isReviewer) throw new TRPCError({ code: "FORBIDDEN", message: "Only finance/customs officers can approve claims" });
+
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+
+      const [claim] = await db.select()
+        .from(dutyDrawbackClaims)
+        .where(eq(dutyDrawbackClaims.id, input.id))
+        .limit(1);
+      if (!claim) throw new TRPCError({ code: "NOT_FOUND", message: "Claim not found" });
+      if (claim.status !== "approved") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Only approved claims can receive a second approval" });
+      }
+      if (claim.reviewedBy === ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Second approval must come from a different officer than the reviewer" });
+      }
+
+      await logAuditEvent({
+        entityType: "payment",
+        entityId: input.id,
+        action: "drawback_second_approval",
+        actorId: ctx.user.id,
+        actorType: ctx.user.role,
+        newState: { secondApprovedBy: ctx.user.id, notes: input.notes ?? null },
+        metadata: { entityKind: "duty_drawback_claim", claimNumber: claim.claimNumber },
+      });
+
+      return { success: true, claimId: input.id, secondApprovedBy: ctx.user.id };
+    }),
+
+  /**
    * Mark an approved claim as paid (finance officer).
+   *
+   * SW-M8:
+   *   - paidAmount must EQUAL the approved amount.
+   *   - A verified disbursement rail receipt (railReference) is required: the
+   *     transfer must exist on the canonical ledger bridge with an amount
+   *     equal to the approved amount. Fails closed when the rail is down.
+   *   - Four-eyes: amounts at/above the threshold require a recorded
+     second-officer approval (drawback.secondApprove) from an officer other
+   *     than the original reviewer.
+   *   - The transition is audited.
    */
   markPaid: protectedProcedure
     .input(z.object({
       id: z.number().int().positive(),
       paidAmount: z.number().positive(),
+      railReference: z.string().min(1).max(128),
     }))
     .mutation(async ({ ctx, input }) => {
       const isFinance = ["admin", "finance"].includes(ctx.user.role);
@@ -331,16 +485,62 @@ export const drawbackRouter = router({
       if (claim.status !== "approved") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only approved claims can be marked as paid" });
       }
+      if (!claim.approvedAmount) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Claim has no approved amount" });
+      }
+
+      // SW-M8: paid amount must equal the approved amount.
+      const approvedMinor = toMinorUnits(claim.approvedAmount);
+      const paidMinor = toMinorUnits(input.paidAmount);
+      if (paidMinor !== approvedMinor) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Paid amount (${(paidMinor / 100).toFixed(2)}) must equal the approved amount (${claim.approvedAmount})`,
+        });
+      }
+
+      // SW-M8 four-eyes: high-value payouts need a second officer.
+      if (approvedMinor >= FOUR_EYES_THRESHOLD_MINOR) {
+        const approvals = await db.select({ actorId: auditEvents.actorId })
+          .from(auditEvents)
+          .where(and(
+            eq(auditEvents.entityType, "payment"),
+            eq(auditEvents.entityId, claim.id),
+            eq(auditEvents.action, "drawback_second_approval"),
+            claim.reviewedBy ? ne(auditEvents.actorId, claim.reviewedBy) : undefined,
+          ))
+          .limit(1);
+        if (approvals.length === 0) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Four-eyes control: payouts at or above the threshold require a second-officer approval (drawback.secondApprove) before disbursement",
+          });
+        }
+      }
+
+      // SW-M8: verified rail receipt — no payment without a real disbursement.
+      await verifyRailReceipt(input.railReference, approvedMinor);
 
       const [updated] = await db.update(dutyDrawbackClaims)
         .set({
           status: "paid",
-          paidAmount: String(input.paidAmount),
+          paidAmount: (paidMinor / 100).toFixed(2),
           paidAt: new Date(),
           updatedAt: new Date(),
         })
         .where(eq(dutyDrawbackClaims.id, input.id))
         .returning();
+
+      await logAuditEvent({
+        entityType: "payment",
+        entityId: input.id,
+        action: "drawback_claim_paid",
+        actorId: ctx.user.id,
+        actorType: ctx.user.role,
+        previousState: { status: claim.status },
+        newState: { status: "paid", paidAmountMinor: paidMinor, railReference: input.railReference },
+        metadata: { entityKind: "duty_drawback_claim", claimNumber: claim.claimNumber },
+      });
 
       return updated;
     }),

@@ -1,20 +1,28 @@
-// Package middleware provides Dapr pub/sub and OpenTelemetry integration for mojaloop-gateway.
+// Package middleware provides Kafka and OpenTelemetry integration for mojaloop-gateway.
 // Kafka topics published:  payments.confirmed   (duty payment confirmed, triggers clearance workflow)
-//                          payments.failed      (payment failed, triggers retry/alert)
-//                          payments.initiated   (payment initiated by trader)
+//
+//	payments.failed      (payment failed, triggers retry/alert)
+//	payments.initiated   (payment initiated by trader)
+//
 // Kafka topics consumed:   declarations.cleared (clearance confirmed, payment receipt issued)
-// Dapr pub/sub:            publishes payments.confirmed to pubsub component
-// Fluvio:                  streams real-time payment status to port operators
+// NOTE: Fluvio is NOT deployed; Kafka is the real event bus (P0 remediation).
+// NOTE (PRA-123, Phase 9): the Dapr pub/sub publish path was REMOVED. It was an
+// unreferenced lossy duplicate of the Kafka publish path (Kafka is the
+// authoritative bus; Dapr was never deployed with a pubsub component), and a
+// Dapr failure was non-fatal — a payment event could be durably committed to
+// Kafka while the Dapr copy silently vanished, or vice versa. One bus, one
+// failure posture: PublishPaymentEvent returns the broker error to the caller.
 // OpenTelemetry:           distributed tracing for every payment lifecycle event
 package middleware
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
+	"strings"
+
+	"github.com/tradegateway/mojaloop-gateway/internal/telemetry"
 	"os"
 	"time"
 
@@ -31,13 +39,12 @@ import (
 // ─── Topic & Component Constants ─────────────────────────────────────────────
 
 const (
-	TopicPaymentsConfirmed  = "payments.confirmed"
-	TopicPaymentsFailed     = "payments.failed"
-	TopicPaymentsInitiated  = "payments.initiated"
+	TopicPaymentsConfirmed   = "payments.confirmed"
+	TopicPaymentsFailed      = "payments.failed"
+	TopicPaymentsInitiated   = "payments.initiated"
 	TopicDeclarationsCleared = "declarations.cleared"
 
-	DaprPubsubName = "pubsub"
-	ServiceName    = "mojaloop-gateway"
+	ServiceName = "mojaloop-gateway"
 )
 
 // ─── Kafka Producer ───────────────────────────────────────────────────────────
@@ -111,6 +118,8 @@ func NewKafkaProducer() (sarama.SyncProducer, error) {
 }
 
 // PublishPaymentEvent publishes a payment event to the specified Kafka topic.
+// Phase-7 OTel: the active trace context is injected as a W3C traceparent
+// header carrier so downstream consumers join the same trace.
 func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -121,6 +130,7 @@ func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any
 		Value:     sarama.ByteEncoder(data),
 		Timestamp: time.Now().UTC(),
 	}
+	telemetry.InjectKafka(context.Background(), msg)
 	partition, offset, err := producer.SendMessage(msg)
 	if err != nil {
 		return fmt.Errorf("send to %s: %w", topic, err)
@@ -129,109 +139,38 @@ func PublishPaymentEvent(producer sarama.SyncProducer, topic string, payload any
 	return nil
 }
 
-// ─── Dapr Pub/Sub ─────────────────────────────────────────────────────────────
+// ─── Dapr Pub/Sub — REMOVED (PRA-123, Phase 9) ──────────────────────────────
+// DaprPublishPayment was an unreferenced lossy duplicate of the Kafka publish
+// path whose failures were non-fatal to the caller. Removed: Kafka
+// (PublishPaymentEvent) is the single authoritative publish path and broker
+// errors are fatal to the publish path.
 
-type daprPublishRequest struct {
-	Data        any    `json:"data"`
-	DataContentType string `json:"datacontenttype"`
-}
-
-// DaprPublishPayment publishes a payment event to Dapr pub/sub (pubsub component).
-// This triggers the Temporal clearance workflow via Dapr subscription.
-func DaprPublishPayment(ctx context.Context, topic string, payload any) error {
-	daprPort := os.Getenv("DAPR_HTTP_PORT")
-	if daprPort == "" {
-		daprPort = "3500"
-	}
-	url := fmt.Sprintf("http://localhost:%s/v1.0/publish/%s/%s", daprPort, DaprPubsubName, topic)
-
-	body, err := json.Marshal(daprPublishRequest{
-		Data:            payload,
-		DataContentType: "application/json",
-	})
-	if err != nil {
-		return fmt.Errorf("marshal dapr payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create dapr request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("dapr publish to %s: %w", topic, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("dapr publish %s returned HTTP %d", topic, resp.StatusCode)
-	}
-	slog.Info("Dapr payment event published", "topic", topic, "status", resp.StatusCode)
-	return nil
-}
-
-// ─── Fluvio Real-time Streaming ───────────────────────────────────────────────
-
-// FluvioPaymentUpdate represents a real-time payment status update.
-type FluvioPaymentUpdate struct {
-	PaymentID     string    `json:"payment_id"`
-	DeclarationID string    `json:"declaration_id"`
-	Status        string    `json:"status"` // initiated|processing|confirmed|failed
-	Amount        float64   `json:"amount_naira"`
-	Currency      string    `json:"currency"`
-	Timestamp     time.Time `json:"timestamp"`
-}
-
-// PublishFluvioPaymentUpdate streams a real-time payment update to the Fluvio topic.
-// Fluvio consumers (port operators, trader dashboards) receive these updates in < 100ms.
-func PublishFluvioPaymentUpdate(ctx context.Context, update FluvioPaymentUpdate) error {
-	fluvioEndpoint := os.Getenv("FLUVIO_ENDPOINT")
-	if fluvioEndpoint == "" {
-		fluvioEndpoint = "fluvio.tradegateway.svc.cluster.local:9003"
-	}
-
-	data, err := json.Marshal(update)
-	if err != nil {
-		return fmt.Errorf("marshal fluvio update: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("http://%s/produce/payment-status", fluvioEndpoint),
-		bytes.NewReader(data),
-	)
-	if err != nil {
-		return fmt.Errorf("create fluvio request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		slog.Warn("Fluvio publish failed (non-fatal)", "error", err)
-		return nil // Fluvio is best-effort; don't fail the payment flow
-	}
-	defer resp.Body.Close()
-	slog.Info("Fluvio payment update published", "payment_id", update.PaymentID, "status", update.Status)
-	return nil
-}
+// ─── Fluvio Real-time Streaming — REMOVED (P0 remediation) ──────────────────
+// The Fluvio HTTP producer posted to a non-existent endpoint
+// (http://fluvio:9003/produce/...) and swallowed the resulting errors — Fluvio
+// is NOT deployed on this platform. Kafka is the real event bus; real-time
+// payment status updates flow through PublishPaymentEvent (Kafka topics) and
+// the Dapr pub/sub wrapper above.
 
 // ─── OpenTelemetry Tracing ────────────────────────────────────────────────────
 
 // InitTracer initialises the OTLP trace exporter and sets the global TracerProvider.
 // Call this once at service startup; the returned shutdown function must be deferred.
+// Phase-7 contract (OTEL_DESIGN.md §1): OTEL_EXPORTER_OTLP_ENDPOINT unset ⇒
+// telemetry DISABLED — returns (no-op, nil); the business path never depends on
+// telemetry (the one sanctioned fail-open).
 func InitTracer(serviceName string) (func(context.Context) error, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "otel-collector.monitoring.svc.cluster.local:4317"
+		slog.Info("OTEL_EXPORTER_OTLP_ENDPOINT unset — telemetry disabled (business path unaffected)")
+		return func(context.Context) error { return nil }, nil
 	}
 	ctx := context.Background()
-	exp, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	opts := []otlptracehttp.Option{}
+	if strings.HasPrefix(endpoint, "http://") || !strings.Contains(endpoint, "://") {
+		opts = append(opts, otlptracehttp.WithInsecure())
+	}
+	exp, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 	}

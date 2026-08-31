@@ -57,14 +57,20 @@ describe("v62 — Temporal Worker (Go)", () => {
 
   it("worker main.go registers all 20 fund-flow workflow types", () => {
     const content = readFile(workerMain);
+    // PRA-129: registrations were corrected to the IMPLEMENTED function names
+    // (the old names — BondManagementWorkflow, TransitGuaranteeWorkflow,
+    // TransitGuaranteeDischargeWorkflow — had no implementations and did not
+    // compile). BondReleaseWorkflow/ExBondDutyPaymentWorkflow are registered
+    // fail-closed NOT_IMPLEMENTED stubs.
     const requiredWorkflows = [
       "DutyPaymentWorkflow",
       "DutyDrawbackWorkflow",
-      "BondManagementWorkflow",
+      "BondLodgementWorkflow",
       "BondForfeitureWorkflow",
       "BondReleaseWorkflow",
-      "TransitGuaranteeWorkflow",
-      "TransitGuaranteeDischargeWorkflow",
+      "TransitLodgementWorkflow",
+      "TransitReleaseWorkflow",
+      "ExBondDutyPaymentWorkflow",
       "AuditRecoveryWorkflow",
       "BatchSettlementWorkflow",
       "RevenueReconciliationWorkflow",

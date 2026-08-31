@@ -9,6 +9,9 @@ import (
 	"time"
 
 	kafka "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -42,10 +45,10 @@ type DLQMessage struct {
 
 // Dispatcher consumes insider.push.dispatch and fans out to FCM/APNs.
 type Dispatcher struct {
-	reader     *kafka.Reader
-	dlqWriter  *kafka.Writer
-	fcm        *FCMClient
-	apns       *APNsClient
+	reader    *kafka.Reader
+	dlqWriter *kafka.Writer
+	fcm       *FCMClient
+	apns      *APNsClient
 }
 
 func NewDispatcher(broker string, fcm *FCMClient, apns *APNsClient) *Dispatcher {
@@ -72,7 +75,18 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		d.processWithRetry(ctx, msg)
+		// Phase-7 OTel: continue the producer's trace via the header carrier.
+		msgCtx, span := otel.Tracer(telemetryServiceName).Start(
+			extractKafkaContext(ctx, &msg),
+			"kafka.consume "+msg.Topic,
+			trace.WithSpanKind(trace.SpanKindConsumer),
+			trace.WithAttributes(
+				attribute.String("messaging.system", "kafka"),
+				attribute.String("messaging.destination.name", msg.Topic),
+			),
+		)
+		d.processWithRetry(msgCtx, msg)
+		span.End()
 		if err := d.reader.CommitMessages(ctx, msg); err != nil {
 			log.Printf("[dispatcher] commit error: %v", err)
 		}
@@ -123,7 +137,10 @@ func (d *Dispatcher) writeDLQ(ctx context.Context, orig kafka.Message, platform 
 		Platform:          platform,
 	}
 	data, _ := json.Marshal(dlq)
-	if err := d.dlqWriter.WriteMessages(ctx, kafka.Message{Value: data}); err != nil {
+	dlqMsg := kafka.Message{Value: data}
+	// Phase-7 OTel: propagate the trace context into the DLQ record.
+	injectKafkaHeaders(ctx, &dlqMsg)
+	if err := d.dlqWriter.WriteMessages(ctx, dlqMsg); err != nil {
 		log.Printf("[dispatcher] DLQ write error: %v", err)
 	}
 }

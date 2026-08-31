@@ -3,45 +3,42 @@
 // position aggregation for the platform's cargo tracking map.
 //
 // Endpoints:
-//   GET  /health                          — liveness probe
-//   GET  /api/v1/vessels                  — list active vessels with positions
-//   GET  /api/v1/vessels/:mmsi            — single vessel detail
+//   GET  /health, /healthz                — liveness + honest gaps (GAP-AIS-FEED)
+//   GET  /api/v1/vessels                  — latest position per vessel (persisted, JWS-verified ingest)
+//   GET  /api/v1/vessels/:mmsi            — single vessel detail (persisted)
 //   GET  /api/v1/cargo/:ucr               — cargo lifecycle for a UCR
 //   POST /api/v1/events/gate-in           — record gate-in event
 //   POST /api/v1/events/gate-out          — record gate-out event
 //   GET  /api/v1/ports/:portCode/queue    — inspection queue for a port
 //
-// Publishes events to Kafka topic: cargo.tracking.events
-// Subscribes to Dapr pub/sub: ais.vessel_positions
+// Phase-9 WP-B: the synthetic demo vessels path was DELETED. Vessel positions
+// are ingested from VERIFIED blueeconomy-geo-service geo.vessel-position.v1
+// envelopes (Kafka topic vessels.events; JWS-EdDSA over RFC 8785 JCS; trust
+// keys env-only via GEO_ENVELOPE_TRUST_KEYS) and persisted in PostgreSQL.
+// With no AIS feed configured the API serves an honest empty state.
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+
+	_ "github.com/lib/pq"
+
+	"github.com/blueeconomy/cargo-tracking-service/internal/consumer"
+	"github.com/blueeconomy/cargo-tracking-service/internal/envelope"
+	"github.com/blueeconomy/cargo-tracking-service/internal/store"
 )
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-type VesselPosition struct {
-	MMSI        string    `json:"mmsi"`
-	VesselName  string    `json:"vesselName"`
-	IMONumber   string    `json:"imoNumber,omitempty"`
-	FlagCountry string    `json:"flagCountry"`
-	CargoType   string    `json:"cargoType"`
-	Lat         float64   `json:"lat"`
-	Lng         float64   `json:"lng"`
-	Speed       float64   `json:"speed"`
-	Heading     int       `json:"heading"`
-	Destination string    `json:"destination"`
-	ETA         string    `json:"eta,omitempty"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-}
 
 type GateEvent struct {
 	UCR       string    `json:"ucr"`
@@ -67,42 +64,121 @@ func jsonErr(w http.ResponseWriter, code int, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// generateSyntheticVessels returns synthetic vessel positions for demo/testing.
-func generateSyntheticVessels(count int) []VesselPosition {
-	names := []string{"MV TEMA STAR", "MV ACCRA TRADER", "MV KIGALI EXPRESS", "MV MOMBASA QUEEN", "MV LAGOS PIONEER", "MV ABIDJAN GLORY", "MV DAKAR WIND", "MV NAIROBI SPIRIT"}
-	flags := []string{"GH", "KE", "NG", "RW", "CI", "SN", "TZ", "ET"}
-	cargoTypes := []string{"Container", "Bulk", "Tanker", "General Cargo", "RoRo"}
-	vessels := make([]VesselPosition, count)
-	for i := 0; i < count; i++ {
-		vessels[i] = VesselPosition{
-			MMSI:        fmt.Sprintf("63%07d", rand.Intn(9999999)),
-			VesselName:  names[i%len(names)],
-			FlagCountry: flags[i%len(flags)],
-			CargoType:   cargoTypes[rand.Intn(len(cargoTypes))],
-			Lat:         -5.0 + rand.Float64()*20.0,
-			Lng:         -5.0 + rand.Float64()*45.0,
-			Speed:       rand.Float64() * 18,
-			Heading:     rand.Intn(360),
-			Destination: "GHTMA",
-			UpdatedAt:   time.Now().UTC().Add(-time.Duration(rand.Intn(300)) * time.Second),
-		}
-	}
-	return vessels
+// ── Real gate-event store (SW-FLAG2) ─────────────────────────────────────────
+// Gate events posted to this service are the ONLY data source for the port
+// queue and cargo event history — no random/synthetic entries are ever served.
+type gateEventStore struct {
+	mu     sync.Mutex
+	events []GateEvent
 }
 
+var gateEvents = &gateEventStore{}
+
+func (st *gateEventStore) record(e GateEvent) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.events = append(st.events, e)
+}
+
+func (st *gateEventStore) byUCR(ucr string) []GateEvent {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := []GateEvent{}
+	for _, e := range st.events {
+		if e.UCR == ucr {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// queueForPort: containers with a gate_in at the port and no subsequent gate_out,
+// ordered by arrival. Position and wait time derive from REAL timestamps.
+func (st *gateEventStore) queueForPort(portCode string) []map[string]any {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	gatedOut := map[string]bool{}
+	for _, e := range st.events {
+		if e.EventType == "gate_out" && e.PortCode == portCode {
+			gatedOut[e.Container] = true
+		}
+	}
+	queue := []map[string]any{}
+	pos := 1
+	for _, e := range st.events {
+		if e.EventType == "gate_in" && e.PortCode == portCode && !gatedOut[e.Container] {
+			waitHours := int(time.Since(e.Timestamp).Hours())
+			if waitHours < 0 {
+				waitHours = 0
+			}
+			queue = append(queue, map[string]any{
+				"position":  pos,
+				"ucr":       e.UCR,
+				"container": e.Container,
+				"waitHours": waitHours,
+				"gateInAt":  e.Timestamp.Format(time.RFC3339),
+				// riskLane intentionally absent: gate events carry no risk data
+				// and fabricating lanes would mislead targeting officers.
+			})
+			pos++
+		}
+	}
+	return queue
+}
+
+// The synthetic vessel generator was DELETED in Phase-9 WP-B: /api/v1/vessels
+// serves exclusively from persisted, JWS-verified geo-service events.
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
+// Vessel endpoints serve EXCLUSIVELY from persisted, JWS-verified geo-service
+// events (internal/store). There is no synthetic data path: the generator was
+// deleted in Phase-9 WP-B.
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
-	jsonOK(w, map[string]string{"status": "ok", "service": "cargo-tracking-service"})
+	dbOK := false
+	if vesselStore != nil && vesselStore.Ping(r.Context()) == nil {
+		dbOK = true
+	}
+	gaps := []string{}
+	if geoConsumer == nil {
+		gaps = append(gaps, "GAP-AIS-FEED: "+ingestionGapReason)
+	}
+	var ingested, rejected int64
+	var lastMsg time.Time
+	var lastErr error
+	if geoConsumer != nil {
+		ingested, rejected, lastMsg, lastErr = geoConsumer.Stats()
+	}
+	status := "ok"
+	if !dbOK {
+		status = "unhealthy"
+	}
+	jsonOK(w, map[string]any{
+		"status":   status,
+		"service":  "cargo-tracking-service",
+		"database": map[string]bool{"reachable": dbOK},
+		"ingestion": map[string]any{
+			"configured":  geoConsumer != nil,
+			"ingested":    ingested,
+			"rejected":    rejected,
+			"lastMessage": lastMsg,
+			"lastError":   errString(lastErr),
+		},
+		"gaps": gaps,
+	})
 }
 
 func vesselsHandler(w http.ResponseWriter, r *http.Request) {
-	count := 12
-	vessels := generateSyntheticVessels(count)
+	vessels, err := vesselStore.LatestVessels(r.Context())
+	if err != nil {
+		jsonErr(w, http.StatusServiceUnavailable, "vessel store unavailable: "+err.Error())
+		return
+	}
 	jsonOK(w, map[string]any{
-		"vessels":     vessels,
-		"totalCount":  count,
-		"lastRefresh": time.Now().UTC().Format(time.RFC3339),
+		"vessels":    vessels,
+		"totalCount": len(vessels),
+		// Honest provenance: only verified geo-service envelopes.
+		"dataSource": "blueeconomy-geo-service geo.vessel-position.v1 (JWS-verified)",
 	})
 }
 
@@ -112,21 +188,19 @@ func vesselDetailHandler(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "mmsi required")
 		return
 	}
-	vessel := VesselPosition{
-		MMSI:        mmsi,
-		VesselName:  "MV TEMA STAR",
-		IMONumber:   "9876543",
-		FlagCountry: "GH",
-		CargoType:   "Container",
-		Lat:         5.6037,
-		Lng:         -0.1870,
-		Speed:       12.4,
-		Heading:     180,
-		Destination: "GHTMA",
-		ETA:         time.Now().UTC().Add(6 * time.Hour).Format(time.RFC3339),
-		UpdatedAt:   time.Now().UTC(),
+	vessel, err := vesselStore.LatestByMMSI(r.Context(), mmsi)
+	if err == store.ErrNotFound {
+		jsonErr(w, http.StatusNotFound, "no persisted vessel events for this MMSI")
+		return
 	}
-	jsonOK(w, vessel)
+	if err != nil {
+		jsonErr(w, http.StatusServiceUnavailable, "vessel store unavailable: "+err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{
+		"vessel":     vessel,
+		"dataSource": "blueeconomy-geo-service geo.vessel-position.v1 (JWS-verified)",
+	})
 }
 
 func cargoHandler(w http.ResponseWriter, r *http.Request) {
@@ -135,15 +209,29 @@ func cargoHandler(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "ucr required")
 		return
 	}
-	events := []map[string]any{
-		{"event": "declaration_submitted", "timestamp": time.Now().UTC().Add(-48 * time.Hour).Format(time.RFC3339), "actor": "trader"},
-		{"event": "risk_assessed", "timestamp": time.Now().UTC().Add(-47 * time.Hour).Format(time.RFC3339), "lane": "green"},
-		{"event": "payment_confirmed", "timestamp": time.Now().UTC().Add(-46 * time.Hour).Format(time.RFC3339), "amount": 1250.00},
-		{"event": "gate_in", "timestamp": time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339), "portCode": "GHTMA"},
-		{"event": "inspection_cleared", "timestamp": time.Now().UTC().Add(-20 * time.Hour).Format(time.RFC3339)},
-		{"event": "gate_out", "timestamp": time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339), "portCode": "GHTMA"},
+	// SW-FLAG2: serve ONLY real recorded gate events for this UCR — the canned
+	// "cleared" timeline fabricated compliance evidence for any arbitrary UCR.
+	recorded := gateEvents.byUCR(ucr)
+	events := []map[string]any{}
+	for _, e := range recorded {
+		events = append(events, map[string]any{
+			"event":     e.EventType,
+			"timestamp": e.Timestamp.Format(time.RFC3339),
+			"portCode":  e.PortCode,
+			"container": e.Container,
+		})
 	}
-	jsonOK(w, map[string]any{"ucr": ucr, "events": events, "status": "cleared"})
+	status := "UNKNOWN"
+	if len(recorded) > 0 {
+		status = "GATE_EVENTS_RECORDED"
+	}
+	jsonOK(w, map[string]any{
+		"ucr":     ucr,
+		"events":  events,
+		"status":  status,
+		"noData":  len(recorded) == 0,
+		"source":  "recorded_gate_events",
+	})
 }
 
 func gateInHandler(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +246,7 @@ func gateInHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	event.EventType = "gate_in"
 	event.Timestamp = time.Now().UTC()
+	gateEvents.record(event)
 	log.Printf("[cargo-tracking] gate_in: UCR=%s port=%s container=%s", event.UCR, event.PortCode, event.Container)
 	jsonOK(w, map[string]any{"status": "recorded", "event": event})
 }
@@ -174,27 +263,41 @@ func gateOutHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	event.EventType = "gate_out"
 	event.Timestamp = time.Now().UTC()
+	gateEvents.record(event)
 	log.Printf("[cargo-tracking] gate_out: UCR=%s port=%s container=%s", event.UCR, event.PortCode, event.Container)
 	jsonOK(w, map[string]any{"status": "recorded", "event": event})
 }
 
 func portQueueHandler(w http.ResponseWriter, r *http.Request) {
+	// SW-FLAG2: the queue is derived ONLY from real recorded gate events.
+	// An empty queue is an honest no-data state, never random filler.
 	portCode := strings.TrimPrefix(r.URL.Path, "/api/v1/ports/")
 	portCode = strings.TrimSuffix(portCode, "/queue")
-	queue := make([]map[string]any, rand.Intn(8)+2)
-	for i := range queue {
-		queue[i] = map[string]any{
-			"position":  i + 1,
-			"ucr":       fmt.Sprintf("UCR-%s-%04d", portCode, rand.Intn(9999)),
-			"container": fmt.Sprintf("TEMU%07d", rand.Intn(9999999)),
-			"waitHours": rand.Intn(12) + 1,
-			"riskLane":  []string{"green", "yellow", "red"}[rand.Intn(3)],
-		}
-	}
-	jsonOK(w, map[string]any{"portCode": portCode, "queue": queue, "total": len(queue)})
+	queue := gateEvents.queueForPort(portCode)
+	jsonOK(w, map[string]any{
+		"portCode": portCode,
+		"queue":    queue,
+		"total":    len(queue),
+		"noData":   len(queue) == 0,
+		"source":   "recorded_gate_events",
+	})
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+// vesselStore / geoConsumer are the process-level integration surfaces.
+var (
+	vesselStore        *store.Store
+	geoConsumer        *consumer.Consumer
+	ingestionGapReason string
+)
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
 
 func main() {
 	port := os.Getenv("PORT")
@@ -202,8 +305,45 @@ func main() {
 		port = "8087"
 	}
 
+	// DATABASE_URL is required: /api/v1/vessels serves exclusively from
+	// persisted vessel events (fail-closed).
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("[cargo-tracking-service] DATABASE_URL is not set (fail-closed: vessel API is backed by persisted geo-service events)")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		log.Fatalf("[cargo-tracking-service] open database: %v", err)
+	}
+	defer db.Close()
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := db.PingContext(pingCtx); err != nil {
+		pingCancel()
+		log.Fatalf("[cargo-tracking-service] database unreachable (fail-closed): %v", err)
+	}
+	pingCancel()
+	vesselStore = store.New(db)
+	if err := vesselStore.EnsureSchema(context.Background()); err != nil {
+		log.Fatalf("[cargo-tracking-service] schema migration failed: %v", err)
+	}
+
+	// Ingestion side: configured → real consumer; unconfigured → honest
+	// GAP-AIS-FEED on /health, /healthz.
+	consumerCfg := consumer.ConfigFromEnv()
+	if consumerCfg == nil {
+		ingestionGapReason = "KAFKA_BROKERS not set"
+	} else if keys, err := envelope.ParseTrustKeys(os.Getenv(envelope.TrustKeysEnv)); err != nil {
+		ingestionGapReason = envelope.TrustKeysEnv + ": " + err.Error()
+	} else {
+		geoConsumer = consumer.New(consumerCfg, keys, vesselStore)
+		go geoConsumer.Run(context.Background())
+		log.Printf("[cargo-tracking-service] geo envelope consumer started (topic=%s group=%s dlq=%s)",
+			consumerCfg.Topic, consumerCfg.GroupID, consumerCfg.DLQTopic)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/api/v1/vessels", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/vessels" || r.URL.Path == "/api/v1/vessels/" {
 			vesselsHandler(w, r)
@@ -216,8 +356,27 @@ func main() {
 	mux.HandleFunc("/api/v1/events/gate-out", gateOutHandler)
 	mux.HandleFunc("/api/v1/ports/", portQueueHandler)
 
-	log.Printf("[cargo-tracking-service] Listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatalf("[cargo-tracking-service] Fatal: %v", err)
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+	go func() {
+		log.Printf("[cargo-tracking-service] Listening on :%s", port)
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("[cargo-tracking-service] Fatal: %v", err)
+		}
+	}()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	if geoConsumer != nil {
+		geoConsumer.Close()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
 }

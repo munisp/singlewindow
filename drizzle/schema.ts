@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid, date
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -30,7 +30,8 @@ export const declarationTypeEnum = pgEnum("declaration_type", [
 export const declarationStatusEnum = pgEnum("declaration_status", [
   "draft", "submitted", "under_assessment", "docs_required",
   "payment_pending", "payment_confirmed", "under_examination",
-  "examination_complete", "cleared", "rejected", "cancelled"
+  "examination_complete", "cleared", "rejected", "cancelled",
+  "held_sanctions"
 ]);
 
 export const riskLaneEnum = pgEnum("risk_lane", ["green", "yellow", "red", "blue"]);
@@ -59,7 +60,8 @@ export const paymentStatusEnum = pgEnum("payment_status", [
 
 export const auditEntityEnum = pgEnum("audit_entity", [
   "declaration", "user", "payment", "permit", "document",
-  "aeo_application", "kyc_verification"
+  "aeo_application", "kyc_verification",
+  "privileged_action", "four_eyes_request"
 ]);
 
 export const alertSeverityEnum = pgEnum("alert_severity", [
@@ -89,7 +91,9 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "document_required", "aeo_status_update", "security_alert", "system",
   "declaration_status_change", "permit_expiry_warning", "fraud_case_opened",
   "fraud_case_assigned", "sla_breach", "kyc_approved", "kyc_rejected",
-  "duty_payment_due", "clearance_complete", "general"
+  "duty_payment_due", "clearance_complete", "general",
+  // Phase 8 PCS trader portal (R6): event-driven port-community notifications.
+  "pcs_booking_confirmed", "pcs_gate_window", "pcs_berth_change", "pcs_invoice_issued"
 ]);
 
 // ─── USERS & AUTH ─────────────────────────────────────────────────────────────
@@ -494,6 +498,9 @@ export const portCongestionEvents = pgTable("port_congestion_events", {
   declarationBacklog: integer("declaration_backlog").default(0),
   inspectionQueueSize: integer("inspection_queue_size").default(0),
   metadata: json("metadata"),
+  // SW-O4: 'demo' for seeded rows, 'live' for real observations — alerts must
+  // never fire on demo data.
+  source: varchar("source", { length: 32 }).default("live"),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_pce_port_code").on(t.portCode),
@@ -514,9 +521,17 @@ export const vesselTrackingEvents = pgTable("vessel_tracking_events", {
   cargoType: varchar("cargo_type", { length: 64 }),
   flagCountry: varchar("flag_country", { length: 3 }),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  // PRA-096 (Phase 9): provenance + idempotency for the geoVesselProjection
+  // consumer (vessels.events, envelope v1.0). NULL for legacy rows; new rows
+  // always carry the verified envelope eventId. Migration 0056.
+  sourceEventId: varchar("source_event_id", { length: 64 }),
+  positionReportId: varchar("position_report_id", { length: 64 }),
+  sourceKid: varchar("source_kid", { length: 96 }),
 }, (t) => [
   index("idx_vte_mmsi").on(t.mmsi),
   index("idx_vte_recorded_at").on(t.recordedAt),
+  // Partial unique index: replays of the same verified envelope are no-ops.
+  uniqueIndex("uq_vte_source_event_id").on(t.sourceEventId).where(sql`"source_event_id" IS NOT NULL`),
 ]);
 
 export type PortLocation = typeof portLocations.$inferSelect;
@@ -821,7 +836,9 @@ export const documentVaultCategoryEnum = pgEnum("document_vault_category", [
   "certificate_of_origin", "phytosanitary_cert", "import_permit",
   "export_permit", "insurance_cert", "customs_bond",
   "kyc_identity", "kyc_business", "aeo_supporting",
-  "post_clearance", "correspondence", "other"
+  "post_clearance", "correspondence", "other",
+  // Phase 8 PCS trader portal (R5): port-community document exchange.
+  "delivery_order", "gate_pass", "terminal_notice", "pcs_correspondence"
 ]);
 
 export const documentVaultAccessEnum = pgEnum("document_vault_access", [
@@ -829,7 +846,7 @@ export const documentVaultAccessEnum = pgEnum("document_vault_access", [
 ]);
 
 export const documentVaultStatusEnum = pgEnum("document_vault_status", [
-  "active", "revoked", "expired"
+  "active", "revoked", "expired", "quarantined"
 ]);
 
 export const documentVault = pgTable("document_vault", {
@@ -1876,7 +1893,10 @@ export const auditTasks = pgTable("audit_tasks", {
   declaredValueUsd: decimal("declared_value_usd", { precision: 18, scale: 2 }).notNull(),
   dutyPaidUsd: decimal("duty_paid_usd", { precision: 18, scale: 2 }).notNull(),
   selectionReason: auditSelectionReasonEnum("selection_reason").notNull(),
-  riskScore: decimal("risk_score", { precision: 5, scale: 4 }).notNull(),
+  // PRA-004: 0-100 risk scores (zod input 0..100; selectForAudit thresholds
+  // 40/70). Was numeric(5,4) — max 9.9999 — so any score >= 10 failed at
+  // insert time (22003). Migration 0055 widens the live column.
+  riskScore: decimal("risk_score", { precision: 7, scale: 4 }).notNull(),
   status: auditTaskStatusEnum("status").default("pending").notNull(),
   assignedOfficerId: varchar("assigned_officer_id", { length: 64 }),
   assignedOfficerName: varchar("assigned_officer_name", { length: 255 }),
@@ -3370,3 +3390,359 @@ export const lpcoRecords = pgTable("lpco_records", {
 ]);
 export type LPCORecord = typeof lpcoRecords.$inferSelect;
 export type InsertLPCORecord = typeof lpcoRecords.$inferInsert;
+
+// ─── Phase-6 Remediation: Webhook Delivery Dedupe ────────────────────────────
+// Records every inbound webhook delivery exactly once so replays can be
+// acknowledged without re-applying side effects (see server/webhooks/dedupe.ts).
+export const webhookReceipts = pgTable("webhook_receipts", {
+  id: serial("id").primaryKey(),
+  source: varchar("source", { length: 32 }).notNull(),
+  deliveryKey: varchar("delivery_key", { length: 255 }).notNull(),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+}, (t) => [
+  unique("webhook_receipts_source_key_unique").on(t.source, t.deliveryKey),
+  index("idx_webhook_receipts_source").on(t.source),
+]);
+export type WebhookReceipt = typeof webhookReceipts.$inferSelect;
+export type InsertWebhookReceipt = typeof webhookReceipts.$inferInsert;
+
+// ─── Phase-7 Remediation: Device Push Tokens ─────────────────────────────────
+// Primary store for device push tokens (P0-5). The previous implementation
+// kept tokens in a process-local Map and ran a MySQL-dialect upsert
+// (ON DUPLICATE KEY UPDATE) against PostgreSQL that always threw and was
+// swallowed. The DB is now the authoritative store with a PG-native upsert.
+export const pushTokens = pgTable("push_tokens", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  token: varchar("token", { length: 512 }).notNull(),
+  platform: varchar("platform", { length: 16 }).notNull(), // ios | android | web
+  registeredAt: timestamp("registered_at").defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+}, (t) => [
+  unique("push_tokens_user_platform_unique").on(t.userId, t.platform),
+  index("idx_push_tokens_user").on(t.userId),
+]);
+export type PushToken = typeof pushTokens.$inferSelect;
+export type InsertPushToken = typeof pushTokens.$inferInsert;
+
+// ─── Phase-7 Remediation: Durable Payment Idempotency ────────────────────────
+// P0-6: server/_core/security.ts now uses the EXISTING durable
+// `payment_idempotency_keys` table (defined above, migration 0028) instead of
+// a process-local Map. No new table was needed.
+
+// ─── Phase-6 Remediation: 4-Eyes (Dual Control) Requests ─────────────────────
+// Postgres-backed dual-control approvals for privileged mutations. Consume-on-use:
+// a request can authorise exactly one execution of the action it approved.
+export const fourEyesRequests = pgTable("four_eyes_requests", {
+  id: serial("id").primaryKey(),
+  action: varchar("action", { length: 100 }).notNull(),
+  entityType: varchar("entity_type", { length: 100 }).notNull(),
+  entityId: varchar("entity_id", { length: 100 }).notNull(),
+  requestedBy: integer("requested_by").notNull().references(() => users.id),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  approvedBy: integer("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  consumedAt: timestamp("consumed_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_four_eyes_action_entity").on(t.action, t.entityType, t.entityId),
+]);
+export type FourEyesRequest = typeof fourEyesRequests.$inferSelect;
+export type InsertFourEyesRequest = typeof fourEyesRequests.$inferInsert;
+
+// ─── Phase-6 Remediation: Free-Zone Reconciliation Runs (SW-21) ──────────────
+// Real persisted reconciliation runs — never simulated history.
+export const freezoneReconciliationRuns = pgTable("freezone_reconciliation_runs", {
+  id: serial("id").primaryKey(),
+  zoneId: varchar("zone_id", { length: 64 }).notNull().default("all"),
+  tolerancePct: real("tolerance_pct").notNull(),
+  totalItems: integer("total_items").notNull().default(0),
+  matched: integer("matched").notNull().default(0),
+  unmatched: integer("unmatched").notNull().default(0),
+  surplus: integer("surplus").notNull().default(0),
+  reconciliationRate: real("reconciliation_rate"),
+  report: jsonb("report"),
+  triggeredBy: integer("triggered_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_fz_recon_zone").on(t.zoneId),
+  index("idx_fz_recon_created").on(t.createdAt),
+]);
+export type FreezoneReconciliationRun = typeof freezoneReconciliationRuns.$inferSelect;
+export type InsertFreezoneReconciliationRun = typeof freezoneReconciliationRuns.$inferInsert;
+
+// ─── Phase 8: PCS Trader Portal read models ──────────────────────────────────
+// Thin read/projection layer over blueeconomy-port-interoperability (the
+// system of record for port calls, bookings, slots, gate scans and billing).
+// These tables are PROJECTIONS of ports.*.v1 Kafka events (envelope v1.0,
+// EdDSA JWS provenance) — never a system of record. Every row traces to a
+// source event id; unverified events are rejected, never projected.
+export const pcsMilestoneEnum = pgEnum("pcs_milestone", [
+  "pre_arrival", "arrived", "berthed", "ops_started", "discharging",
+  "customs_hold", "customs_released", "gate_out", "departed"
+]);
+
+export const pcsConsignments = pgTable("pcs_consignments", {
+  id: serial("id").primaryKey(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  manifestId: integer("manifest_id").references(() => manifests.id, { onDelete: "set null" }),
+  // Nullable: port-interop booking events do not carry B/L numbers; the
+  // column is populated when a manifest association is established (spec §3
+  // keys the read model by bl_number + manifest_id once both are known).
+  blNumber: varchar("bl_number", { length: 64 }),
+  containerNos: jsonb("container_nos").$type<string[]>().notNull().default([]),
+  consignee: varchar("consignee", { length: 256 }),
+  portCode: varchar("port_code", { length: 8 }),
+  portCallId: varchar("port_call_id", { length: 256 }),
+  declarationUrn: varchar("declaration_urn", { length: 128 }),
+  lastMilestone: pcsMilestoneEnum("last_milestone"),
+  lastMilestoneAt: timestamp("last_milestone_at"),
+  sourceEventIds: jsonb("source_event_ids").$type<string[]>().notNull().default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_consignments_trader").on(t.traderUserId),
+  index("idx_pcs_consignments_bl").on(t.blNumber),
+  index("idx_pcs_consignments_port_call").on(t.portCallId),
+  unique("pcs_consignments_bl_manifest_unique").on(t.blNumber, t.manifestId),
+]);
+export type PcsConsignment = typeof pcsConsignments.$inferSelect;
+export type InsertPcsConsignment = typeof pcsConsignments.$inferInsert;
+
+// Append-only milestone projection; replay is idempotent via the
+// (consignment_id, source_event_id) uniqueness constraint.
+export const pcsMilestones = pgTable("pcs_milestones", {
+  id: serial("id").primaryKey(),
+  consignmentId: integer("consignment_id").notNull().references(() => pcsConsignments.id, { onDelete: "cascade" }),
+  milestone: pcsMilestoneEnum("milestone").notNull(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  sourceTopic: varchar("source_topic", { length: 64 }).notNull(),
+  sourceEventId: uuid("source_event_id").notNull(),
+  provenanceSignatureVerified: boolean("provenance_signature_verified").notNull(),
+}, (t) => [
+  index("idx_pcs_milestones_consignment").on(t.consignmentId),
+  unique("pcs_milestones_consignment_event_unique").on(t.consignmentId, t.sourceEventId),
+]);
+export type PcsMilestone = typeof pcsMilestones.$inferSelect;
+export type InsertPcsMilestone = typeof pcsMilestones.$inferInsert;
+
+export const pcsBookingLinks = pgTable("pcs_booking_links", {
+  id: serial("id").primaryKey(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id", { length: 128 }).notNull(),
+  consignmentId: integer("consignment_id").references(() => pcsConsignments.id, { onDelete: "set null" }),
+  createdVia: varchar("created_via", { length: 16 }).notNull(), // pcs | ussd | direct
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_booking_links_trader").on(t.traderUserId),
+  unique("pcs_booking_links_booking_unique").on(t.bookingId),
+]);
+export type PcsBookingLink = typeof pcsBookingLinks.$inferSelect;
+export type InsertPcsBookingLink = typeof pcsBookingLinks.$inferInsert;
+
+// Read-only ledger projection — NOT double-entry truth (billing truth stays in
+// port-interop's TigerBeetle/Mojaloop). projectionLagMs labels every row so UI
+// figures trace to their source event and staleness.
+export const pcsBillingSnapshots = pgTable("pcs_billing_snapshots", {
+  id: serial("id").primaryKey(),
+  bookingId: varchar("booking_id", { length: 128 }).notNull(),
+  invoiceId: varchar("invoice_id", { length: 128 }),
+  amountKobo: bigint("amount_kobo", { mode: "number" }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  status: varchar("status", { length: 32 }).notNull(),
+  receiptId: varchar("receipt_id", { length: 128 }),
+  ledgerCommitHash: varchar("ledger_commit_hash", { length: 128 }),
+  projectionLagMs: integer("projection_lag_ms"),
+  sourceEventId: uuid("source_event_id").notNull().unique(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_billing_booking").on(t.bookingId),
+]);
+export type PcsBillingSnapshot = typeof pcsBillingSnapshots.$inferSelect;
+export type InsertPcsBillingSnapshot = typeof pcsBillingSnapshots.$inferInsert;
+
+// ─── MARITIME SINGLE WINDOW (MSW / IMO FAL; Phase 9 WP-C) ────────────────────
+// Producing boundary `blueeconomy-singlewindow-msw` for topic maritime.msw.v1.
+// Contract: blueeconomy-contracts proto/blueeconomy/msw/v1/msw.proto + docs/msw.md
+// (commit eb6b1ae — NORMATIVE). 11 event types; enum wire forms carry NO
+// MSW_FORM_TYPE_/MSW_AGENCY_ prefixes; digests are "sha256:<64 lowercase hex>".
+// Data minimization: form payloads / instruments / notes are retained HERE in
+// the boundary (jsonb/text columns); events carry identifiers + digests only.
+// Pratique-first (NPPM 2021) is enforced at the DB level where expressible
+// (checks below) and at the service level (server/mswService.ts) for the
+// temporal ordering rules (grant-before-schedule, no later refusal, maker-
+// checker, version chain) that a static CHECK cannot express.
+
+export const mswVisitStatusEnum = pgEnum("msw_visit_status", [
+  "DRAFT", "SUBMITTED", "UNDER_REVIEW", "CLEARED_TO_ENTER", "IN_PORT",
+  "CLEARED_TO_DEPART", "DEPARTED", "CANCELLED",
+]);
+export const mswFormTypeEnum = pgEnum("msw_form_type", [
+  "FAL1", "FAL2", "FAL3", "FAL4", "FAL5", "FAL6", "FAL7", "MDOH",
+]);
+export const mswAgencyEnum = pgEnum("msw_agency", [
+  "PORT_HEALTH", "NIS", "NCS", "NDLEA", "NIMASA", "NPA",
+]);
+export const mswClearanceKindEnum = pgEnum("msw_clearance_kind", ["ARRIVAL", "DEPARTURE"]);
+export const mswDeclarationStatusEnum = pgEnum("msw_declaration_status", [
+  "SUBMITTED", "ACCEPTED", "RETURNED",
+]);
+export const mswPratiqueDecisionEnum = pgEnum("msw_pratique_decision", ["GRANTED", "REFUSED"]);
+export const mswBoardingStatusEnum = pgEnum("msw_boarding_status", ["SCHEDULED", "COMPLETED"]);
+export const mswClearanceDecisionEnum = pgEnum("msw_clearance_decision", ["GRANTED", "REFUSED"]);
+
+export const mswVisits = pgTable("msw_visits", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswv-000001 style) from a dedicated
+  // sequence — never client-supplied.
+  visitId: varchar("visit_id", { length: 32 }).notNull().unique(),
+  // Port-call identifier owned by the port-interoperability boundary. NULL
+  // when unlinked; port-call fields are NEVER duplicated here beyond the id.
+  portCallId: varchar("port_call_id", { length: 256 }),
+  // True ONLY when the vessel identity was verified against the port-call
+  // record at creation time. False is the honest state for unlinked or
+  // unverifiable visits (PORT_CALL_UNVERIFIED / PORT_CALL_UNAVAILABLE).
+  portCallVerified: boolean("port_call_verified").notNull().default(false),
+  vesselImoNumber: varchar("vessel_imo_number", { length: 7 }).notNull(),
+  vesselName: varchar("vessel_name", { length: 256 }).notNull(),
+  vesselFlagCode: varchar("vessel_flag_code", { length: 2 }).notNull(),
+  portCode: varchar("port_code", { length: 5 }).notNull(),
+  agentReference: varchar("agent_reference", { length: 128 }).notNull(),
+  eta: timestamp("eta").notNull(),
+  etd: timestamp("etd"),
+  status: mswVisitStatusEnum("status").notNull().default("SUBMITTED"),
+  declaredByUserId: integer("declared_by_user_id").notNull().references(() => users.id),
+  declaredAt: timestamp("declared_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_visits_port_call").on(t.portCallId),
+  index("idx_msw_visits_vessel_imo").on(t.vesselImoNumber),
+  index("idx_msw_visits_status").on(t.status),
+]);
+export type MswVisit = typeof mswVisits.$inferSelect;
+export type InsertMswVisit = typeof mswVisits.$inferInsert;
+
+export const mswAgentNominations = pgTable("msw_agent_nominations", {
+  id: serial("id").primaryKey(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  agentReference: varchar("agent_reference", { length: 128 }).notNull(),
+  // Digest of the nomination instrument; the instrument itself is retained in
+  // the boundary (nomination_document), never emitted on the wire.
+  nominationDocumentDigestSha256: varchar("nomination_document_digest_sha256", { length: 80 }).notNull(),
+  nominationDocument: jsonb("nomination_document"),
+  nominatedByUserId: integer("nominated_by_user_id").notNull().references(() => users.id),
+  nominatedAt: timestamp("nominated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_agent_nominations_visit").on(t.visitPk),
+]);
+export type MswAgentNomination = typeof mswAgentNominations.$inferSelect;
+export type InsertMswAgentNomination = typeof mswAgentNominations.$inferInsert;
+
+export const mswDeclarations = pgTable("msw_declarations", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswd-000001 style).
+  declarationId: varchar("declaration_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  formType: mswFormTypeEnum("form_type").notNull(),
+  // Monotonic per-(visit, form_type), starting at 1 (single-submission
+  // principle, UNECE Rec-33): a re-submission is a NEW version chained to the
+  // prior submission by digest; returned versions are never edited.
+  version: integer("version").notNull(),
+  formPayloadDigestSha256: varchar("form_payload_digest_sha256", { length: 80 }).notNull(),
+  // Empty on version 1; otherwise the digest of the prior submission.
+  priorSubmissionDigestSha256: varchar("prior_submission_digest_sha256", { length: 80 }).notNull().default(""),
+  // NDPA PERSONAL category flag (FAL4/FAL5/FAL6/MDOH) — floors the envelope
+  // at RESTRICTED on the wire.
+  containsPersonalData: boolean("contains_personal_data").notNull(),
+  // Schema-validated form payload retained INSIDE the producing boundary;
+  // only its digest is emitted.
+  formPayload: jsonb("form_payload").notNull(),
+  status: mswDeclarationStatusEnum("status").notNull().default("SUBMITTED"),
+  submittedByUserId: integer("submitted_by_user_id").notNull().references(() => users.id),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  // Review (maker-checker) fields — populated on accept/return.
+  reviewingAgency: mswAgencyEnum("reviewing_agency"),
+  reviewedByUserId: integer("reviewed_by_user_id").references(() => users.id),
+  returnReasonCode: varchar("return_reason_code", { length: 64 }),
+  reviewNote: text("review_note"),
+  reviewNoteDigestSha256: varchar("review_note_digest_sha256", { length: 80 }),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [
+  index("idx_msw_declarations_visit").on(t.visitPk),
+  index("idx_msw_declarations_form").on(t.visitPk, t.formType),
+  unique("msw_declarations_visit_form_version_unique").on(t.visitPk, t.formType, t.version),
+]);
+export type MswDeclaration = typeof mswDeclarations.$inferSelect;
+export type InsertMswDeclaration = typeof mswDeclarations.$inferInsert;
+
+export const mswPratique = pgTable("msw_pratique", {
+  id: serial("id").primaryKey(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  decision: mswPratiqueDecisionEnum("decision").notNull(),
+  // Anchored to the Maritime Declaration of Health the decision is based on.
+  healthDeclarationPk: integer("health_declaration_pk").notNull().references(() => mswDeclarations.id),
+  officerReference: varchar("officer_reference", { length: 128 }).notNull(),
+  refusalReasonCode: varchar("refusal_reason_code", { length: 64 }),
+  // Digest of the decision record (grant or refusal) computed by the service;
+  // boarding completions bind to the GRANT digest (pratique-first invariant).
+  pratiqueRecordDigestSha256: varchar("pratique_record_digest_sha256", { length: 80 }).notNull(),
+  decidedByUserId: integer("decided_by_user_id").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_pratique_visit").on(t.visitPk),
+]);
+export type MswPratique = typeof mswPratique.$inferSelect;
+export type InsertMswPratique = typeof mswPratique.$inferInsert;
+
+export const mswBoardings = pgTable("msw_boardings", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswb-000001 style).
+  boardingId: varchar("boarding_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  // Fail-closed agency set (wire enum values). DB CHECK below enforces the
+  // pratique-first invariant at COMPLETION: a completed party containing any
+  // non-Port-Health agency must carry the antecedent pratique grant digest.
+  // The temporal scheduling rule (non-PH parties scheduled only after grant,
+  // no later refusal) is service-enforced (server/mswService.ts).
+  agencies: jsonb("agencies").$type<string[]>().notNull(),
+  scheduledByAgency: mswAgencyEnum("scheduled_by_agency").notNull(),
+  scheduledAt: timestamp("scheduled_at").notNull(),
+  scheduleNoteDigestSha256: varchar("schedule_note_digest_sha256", { length: 80 }).notNull().default(""),
+  status: mswBoardingStatusEnum("status").notNull().default("SCHEDULED"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  pratiqueGrantDigestSha256: varchar("pratique_grant_digest_sha256", { length: 80 }).notNull().default(""),
+  outcomeDigestSha256: varchar("outcome_digest_sha256", { length: 80 }),
+}, (t) => [
+  index("idx_msw_boardings_visit").on(t.visitPk),
+]);
+export type MswBoarding = typeof mswBoardings.$inferSelect;
+export type InsertMswBoarding = typeof mswBoardings.$inferInsert;
+
+export const mswClearances = pgTable("msw_clearances", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswc-000001 style).
+  clearanceId: varchar("clearance_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  kind: mswClearanceKindEnum("kind").notNull(),
+  decision: mswClearanceDecisionEnum("decision").notNull(),
+  decidedByAgency: mswAgencyEnum("decided_by_agency").notNull(),
+  refusalReasonCode: varchar("refusal_reason_code", { length: 64 }),
+  // Digest of the evaluated precondition checklist. Mandatory for a DEPARTURE
+  // grant (DB CHECK below); the checklist content is computed by the service
+  // (all submitted form versions accepted + pratique granted + joint boarding
+  // completed — service-enforced temporal preconditions).
+  preconditionChecklistDigestSha256: varchar("precondition_checklist_digest_sha256", { length: 80 }).notNull().default(""),
+  conditionsDigestSha256: varchar("conditions_digest_sha256", { length: 80 }).notNull().default(""),
+  refusalRecordDigestSha256: varchar("refusal_record_digest_sha256", { length: 80 }).notNull().default(""),
+  decidedByUserId: integer("decided_by_user_id").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_clearances_visit").on(t.visitPk),
+]);
+export type MswClearance = typeof mswClearances.$inferSelect;
+export type InsertMswClearance = typeof mswClearances.$inferInsert;

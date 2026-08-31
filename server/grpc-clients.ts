@@ -21,14 +21,18 @@
  */
 
 import * as grpc from "@grpc/grpc-js";
-import * as protoLoader from "@grpc/proto-loader";
-import path from "path";
 import fs from "fs";
 
-// Resolve proto directory relative to the project root (process.cwd()).
-// Using process.cwd() instead of import.meta.url avoids the Vite 8 SSR
-// transform injecting __vite_ssr_exportName__ which breaks vitest 2.x.
-const PROTO_DIR = path.resolve(process.cwd(), "services/proto");
+// PRA-038/039 (Phase 9): the runtime proto-loader and the three unary service
+// clients (declaration/payment/OGA) were REMOVED — nothing on a production
+// path imported them (only test mocks did), and the OGA getter carried a
+// copy-paste bug (it loaded declarations.proto and looked up a non-existent
+// OGAService, so it could NEVER construct a client). The services/proto tree
+// that fed them was a stale, drifted duplicate of the authoritative flat
+// proto/*.proto contracts (see scripts/gen-proto.sh) and has been deleted;
+// scripts/checkProtoDrift.mjs fails CI on divergent duplicate definitions.
+// What remains here is what production actually uses: mTLS credentials,
+// channel health probes, and the service health summary.
 
 // ─── B4 FIX: Shared gRPC Credentials Factory ─────────────────────────────────────────
 //
@@ -103,28 +107,9 @@ const WAZUH_PROXY_GRPC        = process.env.WAZUH_PROXY_GRPC_ADDR        || "loc
 const OPENCTI_PROXY_GRPC      = process.env.OPENCTI_PROXY_GRPC_ADDR      || "localhost:9097";
 const KEYCLOAK_PROXY_GRPC     = process.env.KEYCLOAK_PROXY_GRPC_ADDR     || "localhost:8080";
 
-// TigerBeetle bridges expose HTTP (not gRPC) health endpoints
+// The canonical Go TigerBeetle bridge exposes an HTTP (not gRPC) health
+// endpoint. The Rust bridge replica was removed from deploy surfaces (SW-O3).
 const TB_GO_BRIDGE_HTTP       = process.env.TB_GO_BRIDGE_HTTP_ADDR        || "localhost:8086";
-const TB_RUST_BRIDGE_HTTP     = process.env.TB_RUST_BRIDGE_HTTP_ADDR      || "localhost:8093";
-
-// ─── PROTO LOADER ─────────────────────────────────────────────────────────────
-
-function loadProto(protoFile: string): grpc.GrpcObject | null {
-  const protoPath = path.join(PROTO_DIR, protoFile);
-  try {
-    const packageDef = protoLoader.loadSync(protoPath, {
-      keepCase: true,
-      longs: String,
-      enums: String,
-      defaults: true,
-      oneofs: true,
-    });
-    return grpc.loadPackageDefinition(packageDef);
-  } catch (e) {
-    console.warn(`[gRPC] Failed to load proto ${protoFile}:`, e);
-    return null;
-  }
-}
 
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 
@@ -154,97 +139,6 @@ export async function checkGRPCHealth(addr: string): Promise<boolean> {
     channel.getConnectivityState(true);
     setTimeout(() => settle(false), 2000);
   });
-}
-
-// ─── GENERIC GRPC UNARY CALL ─────────────────────────────────────────────────
-
-export function grpcUnaryCall<TResponse>(
-  client: grpc.Client,
-  methodName: string,
-  request: Record<string, unknown>,
-  timeoutMs = 10000
-): Promise<TResponse> {
-  return new Promise((resolve, reject) => {
-    const deadline = new Date();
-    deadline.setMilliseconds(deadline.getMilliseconds() + timeoutMs);
-
-    const method = (client as unknown as Record<string, Function>)[methodName];
-    if (typeof method !== "function") {
-      reject(new Error(`gRPC method '${methodName}' not found on client`));
-      return;
-    }
-
-    method.call(
-      client,
-      request,
-      new grpc.Metadata(),
-      { deadline },
-      (err: grpc.ServiceError | null, response: TResponse) => {
-        if (err) reject(err);
-        else resolve(response);
-      }
-    );
-  });
-}
-
-// ─── DECLARATION SERVICE CLIENT ───────────────────────────────────────────────
-
-let _declarationPkg: grpc.GrpcObject | null = null;
-
-export function getDeclarationGRPCClient(): grpc.Client | null {
-  if (!_declarationPkg) {
-    _declarationPkg = loadProto("declarations.proto");
-  }
-  if (!_declarationPkg) return null;
-  try {
-    const pkg = _declarationPkg as Record<string, Record<string, Record<string, Record<string, grpc.ServiceClientConstructor>>>>;
-    const ServiceCtor = pkg?.ngswtp?.declarations?.v1?.DeclarationService;
-    if (!ServiceCtor) return null;
-    return new ServiceCtor(DECLARATION_GRPC, getGrpcCredentials());
-  } catch (e) {
-    console.warn("[gRPC/declaration] Client init failed:", e);
-    return null;
-  }
-}
-
-// ─── PAYMENT SERVICE CLIENT ───────────────────────────────────────────────────
-
-let _paymentPkg: grpc.GrpcObject | null = null;
-
-export function getPaymentGRPCClient(): grpc.Client | null {
-  if (!_paymentPkg) {
-    _paymentPkg = loadProto("payments.proto");
-  }
-  if (!_paymentPkg) return null;
-  try {
-    const pkg = _paymentPkg as Record<string, Record<string, Record<string, Record<string, grpc.ServiceClientConstructor>>>>;
-    const ServiceCtor = pkg?.ngswtp?.payments?.v1?.PaymentService;
-    if (!ServiceCtor) return null;
-    return new ServiceCtor(PAYMENT_GRPC, getGrpcCredentials());
-  } catch (e) {
-    console.warn("[gRPC/payment] Client init failed:", e);
-    return null;
-  }
-}
-
-// ─── OGA SERVICE CLIENT ───────────────────────────────────────────────────────
-
-let _ogaPkg: grpc.GrpcObject | null = null;
-
-export function getOGAGRPCClient(): grpc.Client | null {
-  if (!_ogaPkg) {
-    _ogaPkg = loadProto("declarations.proto");
-  }
-  if (!_ogaPkg) return null;
-  try {
-    const pkg = _ogaPkg as Record<string, Record<string, Record<string, Record<string, grpc.ServiceClientConstructor>>>>;
-    const ServiceCtor = pkg?.ngswtp?.declarations?.v1?.OGAService;
-    if (!ServiceCtor) return null;
-    return new ServiceCtor(OGA_GRPC, getGrpcCredentials());
-  } catch (e) {
-    console.warn("[gRPC/oga] Client init failed:", e);
-    return null;
-  }
 }
 
 // ─── SERVICE HEALTH SUMMARY ───────────────────────────────────────────────────
@@ -298,11 +192,17 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
     ["keycloak-proxy",       KEYCLOAK_PROXY_GRPC],
   ];
 
-  // Run gRPC checks and TB HTTP checks in parallel
-  const [grpcResults, tbGoResult, tbRustResult] = await Promise.all([
+  // Run gRPC checks and TB HTTP checks in parallel. P0-2 remediation: EVERY
+  // probe path is settled/caught — a rejected or timed-out probe maps to an
+  // honest `false` (unhealthy) entry. A health summary must NEVER throw
+  // because a probed service is down. (Previously `tbRustResult` was
+  // destructured from a Promise.all that never included it, so any caller
+  // crashed with TypeError whenever this ran — i.e. exactly when a bridge was
+  // down in the test environment.)
+  const [grpcResults, tbGoResult] = await Promise.all([
     Promise.allSettled(grpcChecks.map(([, addr]) => checkGRPCHealth(addr))),
-    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
-    checkTigerBeetleBridgeHealth(TB_RUST_BRIDGE_HTTP),
+    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP)
+      .catch(() => ({ healthy: false, mode: "unreachable" })),
   ]);
 
   const summary: Record<string, boolean> = Object.fromEntries(
@@ -312,9 +212,9 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
     ])
   );
 
-  // Add TigerBeetle bridge health (HTTP)
-  summary["tigerbeetle-go-bridge"]   = tbGoResult.healthy;
-  summary["tigerbeetle-rust-bridge"] = tbRustResult.healthy;
+  // Add TigerBeetle bridge health (HTTP). The Rust bridge replica was removed
+  // from deploy surfaces (SW-O3) — no phantom entry is reported for it.
+  summary["tigerbeetle-go-bridge"] = tbGoResult.healthy;
 
   return summary;
 }
@@ -328,9 +228,12 @@ export async function getTigerBeetleBridgeModes(): Promise<{
   go: { healthy: boolean; mode: string };
   rust: { healthy: boolean; mode: string };
 }> {
-  const [go, rust] = await Promise.all([
-    checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP),
-    checkTigerBeetleBridgeHealth(TB_RUST_BRIDGE_HTTP),
-  ]);
+  // The Rust bridge replica was removed from deploy surfaces (SW-O3): report
+  // it honestly as not deployed instead of probing a phantom endpoint or
+  // returning undefined (which previously crashed consumers). Probe failures
+  // map to an honest unhealthy result — never an exception.
+  const go = await checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP)
+    .catch(() => ({ healthy: false, mode: "unreachable" }));
+  const rust = { healthy: false, mode: "not_deployed" };
   return { go, rust };
 }

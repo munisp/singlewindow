@@ -26,8 +26,9 @@ class MiddlewareConfig:
     # Dapr
     dapr_http_port: str = field(default_factory=lambda: os.getenv("DAPR_HTTP_PORT", "3500"))
     dapr_grpc_port: str = field(default_factory=lambda: os.getenv("DAPR_GRPC_PORT", "50001"))
-    # Fluvio
-    fluvio_endpoint: str = field(default_factory=lambda: os.getenv("FLUVIO_ENDPOINT", "fluvio-sc:9003"))
+    # Fluvio — P0 remediation: Fluvio is NOT deployed on this platform; Kafka
+    # is the real event bus. No default endpoint: empty means honestly disabled.
+    fluvio_endpoint: str = field(default_factory=lambda: os.getenv("FLUVIO_ENDPOINT", ""))
     # Temporal
     temporal_address: str = field(default_factory=lambda: os.getenv("TEMPORAL_ADDRESS", "temporal:7233"))
     temporal_namespace: str = field(default_factory=lambda: os.getenv("TEMPORAL_NAMESPACE", "tradegateway"))

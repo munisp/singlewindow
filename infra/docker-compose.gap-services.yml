@@ -62,7 +62,7 @@ services:
       DATABASE_URL: "${DATABASE_URL}"
       MOJALOOP_URL: "${MOJALOOP_URL:-http://mojaloop-ml-api-adapter:3000}"
       MOJALOOP_FSP_ID: "tradegateway-ng"
-      TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:50055"
+      TIGERBEETLE_BRIDGE_URL: "http://tigerbeetle-bridge:8086"
       KAFKA_BROKERS: "kafka:9092"
       DAPR_HTTP_PORT: "3500"
     ports:
@@ -299,6 +299,32 @@ volumes:
   geolibre_cache:
   spark_data:
   opensearch_data:
+
+  # ── Payment Risk Scorer (Python/FastAPI — payment risk scoring) ─────────────
+  # SW-MP3: service existed in code + APISIX routes but had no deploy surface.
+  payment-risk-scorer:
+    build:
+      context: ../services/python/payment-risk-scorer
+      dockerfile: Dockerfile
+    container_name: tg-payment-risk-scorer
+    restart: unless-stopped
+    environment:
+      PAYMENT_RISK_PORT: "8092"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tradegateway}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
+    ports:
+      - "8092:8092"
+    networks:
+      - tradegateway
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8092/health',timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 networks:
   tradegateway:

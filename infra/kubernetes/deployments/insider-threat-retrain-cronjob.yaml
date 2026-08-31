@@ -1,0 +1,84 @@
+# ─── insider-threat-svc scheduled retrain loop ───────────────────────────────
+# Weekly retraining of the IsolationForest insider-threat model.
+# The job runs INSIDE the service image and calls run_nightly_retrain(),
+# which fetches the last 30 days of insider_threat_events from PostgreSQL
+# and POSTs them to the service's /train endpoint. The service versions the
+# new model artefact onto the insider-threat-models-pvc and hot-swaps it.
+#
+# Cadence: Sundays 02:00 UTC (mirrors the in-process APScheduler default).
+# Safe to trigger manually:
+#   kubectl create job --from=cronjob/insider-threat-retrain \
+#     insider-threat-retrain-manual -n tradegateway
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: insider-threat-retrain
+  namespace: tradegateway
+  labels:
+    app: insider-threat-svc
+    tier: ai
+    language: python
+spec:
+  schedule: "0 2 * * 0"  # Sunday 02:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: insider-threat-svc
+            job: retrain
+        spec:
+          serviceAccountName: tradegateway-sa
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+          containers:
+            - name: retrain
+              image: tradegateway/insider-threat-svc:latest
+              imagePullPolicy: IfNotPresent
+              command:
+                - python
+                - -c
+                - |
+                  import logging, sys
+                  from retrain_scheduler import run_nightly_retrain
+                  logging.basicConfig(level=logging.INFO)
+                  result = run_nightly_retrain()
+                  if result is None:
+                      # Insufficient data or failed retrain: exit non-zero so
+                      # the failure is visible in job history and alerting.
+                      sys.exit(1)
+                  print(f"retrain OK: model v{result.get('version')} "
+                        f"on {result.get('n_samples')} samples")
+              env:
+                - name: INSIDER_THREAT_SVC_URL
+                  value: "http://insider-threat-svc.tradegateway.svc:8093"
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: tradegateway-secrets
+                      key: database-url
+                - name: RETRAIN_CONTAMINATION
+                  valueFrom:
+                    configMapKeyRef:
+                      name: tradegateway-config
+                      key: insider-threat-retrain-contamination
+                - name: RETRAIN_N_ESTIMATORS
+                  value: "100"
+                - name: RETRAIN_MIN_EVENTS
+                  value: "50"
+              resources:
+                requests:
+                  cpu: "250m"
+                  memory: "512Mi"
+                limits:
+                  cpu: "1000m"
+                  memory: "2Gi"

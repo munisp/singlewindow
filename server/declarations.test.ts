@@ -6,6 +6,15 @@ import type { TrpcContext } from "./_core/context";
 // myDeclarations uses limit/offset (not page/limit)
 // stats is admin-only
 // create requires an approved trader profile
+// SW-MP15: Permify writeTuple now fails closed instead of silently swallowing
+// — the create happy path (setOwner) must run against a reachable (mocked)
+// Permify endpoint.
+global.fetch = vi.fn().mockResolvedValue({
+  ok: true,
+  json: async () => ({}),
+  text: async () => "",
+} as Response);
+
 vi.mock("./db", () => ({
   createDeclaration: vi.fn().mockResolvedValue({
     id: 1,

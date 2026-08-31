@@ -23,6 +23,7 @@ networks:
 
 # ─── Persistent volumes ──────────────────────────────────────────────────────
 volumes:
+  tigerbeetle_data:
   postgres_data:
   redis_data:
   temporal_data:
@@ -279,22 +280,56 @@ services:
   # ── Microservices ─────────────────────────────────────────────────────────────
   # All 15 microservices are built from source in microservices/<name>/
   # They communicate with the main app via HTTP REST and gRPC.
-  # Port assignments (no conflicts):
+  #
+  # ⚠ PORT REGISTRY: this list is NOT the source of truth. The canonical
+  # gateway-side registry is PORTS in server/_core/env.ts (SW-MP8), and the
+  # gateway REFUSES TO BOOT when two resolved service URLs share a host:port
+  # (assertNoServiceUrlCollisions, PRA-067). Keep this comment in sync with
+  # that registry — the previous "(no conflicts)" claim was FALSE.
+  #
+  # Port assignments:
   #   declaration-service:  8083  (gRPC: 50051)
   #   payment-service:      8082  (gRPC: 50053)
   #   oga-service:          8084  (gRPC: 50054)
   #   analytics-service:    8085  (gRPC: 50055)
-  #   profile-service:      8086  (gRPC: 50056)
-  #   risk-engine:          8087  (gRPC: 50052)
+  #   tigerbeetle-bridge:   8086  (gRPC: 9086)  ← canonical money-rail bridge
+  #   profile-service:      8097  (gRPC: 50056) ← canonical owner of 8097
+  #   risk-engine:          8087  (gRPC: 50052) ← KNOWN COLLISION: 8087 is
+  #                         canonically owned by keycloak-svc (PORTS.keycloakSvc,
+  #                         Go bind default 8087). Gateway default for
+  #                         RISK_ENGINE_URL moved off to 8111-block; compose
+  #                         deployments MUST set RISK_ENGINE_URL=http://risk-engine:8087
+  #                         explicitly (container DNS is unambiguous).
   #   cargo-tracking:       8088  (gRPC: 50057)
   #   sanctions-service:    8089  (gRPC: 50058)
   #   temporal-worker:      8090
-  #   anomaly-detection:    8091
-  #   gnn-risk:             8092
-  #   hs-classifier:        8093
+  #   anomaly-detection:    8091  (no PORTS-registry conflict; gateway default matches)
+  #   gnn-risk:             8092  (no PORTS-registry conflict; gateway default matches.
+  #                         NOTE: services/python/vision-service also defaults to
+  #                         8092 — do not co-locate both on one host without
+  #                         explicit ports.)
+  #   hs-classifier:        8093  ← KNOWN COLLISION: 8093 is canonically owned by
+  #                         cen-service (PORTS.cenService, Go bind default 8093,
+  #                         P0-7 renumber). Gateway HS_CLASSIFIER_URL default
+  #                         moved off; set HS_CLASSIFIER_URL=http://hs-classifier:8093
+  #                         explicitly in compose. SHOULD be renumbered here.
   #   risk-ai:              8094
-  #   vision-service:       8095
-  #   fluvio-consumer:      8096
+  #   vision-service:       8095  ← KNOWN DIVERGENCE: PORTS.visionService is 8105
+  #                         (no real service binds 8105 — fail-closed placeholder).
+  #                         This compose service is the vision-OCR probe target
+  #                         (VISION_SVC_URL, default 8095, matches). Set
+  #                         VISION_SERVICE_URL explicitly for the NLP/vision API.
+  #   fluvio-consumer:      8096  ← KNOWN COLLISION: 8096 is canonically owned by
+  #                         asean-sw-service (PORTS.aseanSwService, Go bind
+  #                         default 8096). Gateway FLUVIO_CONSUMER_URL default
+  #                         moved off; set FLUVIO_CONSUMER_URL=http://fluvio-consumer:8096
+  #                         explicitly in compose. SHOULD be renumbered here.
+  #
+  # Historical note: an earlier wave-4 flag listed anomaly-detection 8091 vs
+  # aseanSwService and gnn-risk 8092 vs freeZoneService as collisions. Those
+  # were resolved when PORTS was aligned to the real Go bind defaults
+  # (asean-sw-service → 8096, freezone-service → 8098); the collisions above
+  # are the ones that remain.
 
   # ── Declaration Service (Go) ─────────────────────────────────────────────────
   declaration-service:
@@ -419,16 +454,16 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PORT: 8086
+      PORT: 8097
       GRPC_PORT: 50056
       DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
     ports:
-      - "8086:8086"
+      - "8097:8097"
       - "50056:50056"
     networks:
       - tradegateway-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8097/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -764,25 +799,55 @@ services:
     networks:
       - tradegateway-net
 
-  # ── TigerBeetle Bridge (Rust / gRPC ledger service) ──────────────────────────
+  # ── TigerBeetle Bridge (canonical Go ledger service, HTTP /api/ledger/*) ──────
+  # SW-O3: THE canonical money-rail bridge. The Rust gRPC bridges are dev-only
+  # (TB_ALLOW_SIM_BACKEND=1) and were removed from all deploy surfaces.
+  # Production images must be built from Dockerfile.production (-tags tigerbeetle,
+  # live TB backend). The default build is the DEV-only sim backend, which
+  # refuses to boot when ENVIRONMENT=production.
   tigerbeetle-bridge:
     build:
-      context: ./services/tigerbeetle-bridge
+      context: ./services/go/tigerbeetle-bridge
       dockerfile: Dockerfile
     container_name: tg-tigerbeetle-bridge
     restart: unless-stopped
+    depends_on:
+      tigerbeetle:
+        condition: service_started
     environment:
-      GRPC_PORT: "50055"
-      TIGERBEETLE_ADDRESS: ${TIGERBEETLE_ADDRESS:-tigerbeetle:3000}
+      TB_BRIDGE_HTTP_PORT: "8086"
+      TB_BRIDGE_GRPC_PORT: "9086"
+      TIGERBEETLE_ADDR: ${TIGERBEETLE_ADDR:-tigerbeetle:3000}
+      TB_ALLOW_SIM_BACKEND: ${TB_ALLOW_SIM_BACKEND:-}
       KAFKA_BROKERS: ${KAFKA_BROKERS:-kafka:9092}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-tradegateway}:${POSTGRES_PASSWORD:-tradegateway_secure_2026}@postgres:5432/${POSTGRES_DB:-tradegateway}
-      GRPC_TLS_CERT_PATH: /certs/server.crt
-      GRPC_TLS_KEY_PATH: /certs/server.key
-      GRPC_TLS_CA_PATH: /certs/ca.crt
-    volumes:
-      - ./certs:/certs:ro
     ports:
-      - "50055:50055"
+      - "8086:8086"
+      - "9086:9086"
+    networks:
+      - tradegateway-net
+    healthcheck:
+      # distroless image: no shell/wget — the binary serves its own probe
+      test: ["CMD", "/tigerbeetle-bridge", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── TigerBeetle (ledger datastore) ───────────────────────────────────────────
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.11
+    container_name: tg-tigerbeetle
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -f /var/lib/tigerbeetle/0_0.tigerbeetle ]; then
+          /tigerbeetle format --cluster=0 --replica=0 --replica-count=1 /var/lib/tigerbeetle/0_0.tigerbeetle;
+        fi;
+        exec /tigerbeetle start --addresses=0.0.0.0:3000 /var/lib/tigerbeetle/0_0.tigerbeetle
+    volumes:
+      - tigerbeetle_data:/var/lib/tigerbeetle
     networks:
       - tradegateway-net
 

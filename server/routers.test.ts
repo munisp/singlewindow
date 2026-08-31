@@ -139,10 +139,10 @@ describe("temporal.listWorkflows", () => {
 // ─── ai router ───────────────────────────────────────────────────────────────
 
 describe("ai.models", () => {
-  it("returns available AI models (public procedure)", async () => {
-    const ctx = createAnonContext();
+  it("returns available AI models (protected procedure, PRA-014)", async () => {
+    const ctx = createAuthContext();
     const caller = appRouter.createCaller(ctx);
-    // ai.models is a publicProcedure — no auth required
+    // PRA-014 (Phase 9): ai.models is now a protectedProcedure — auth required
     const result = await caller.ai.models();
     expect(result).toHaveProperty("recommendedModels");
     expect(Array.isArray(result.recommendedModels)).toBe(true);

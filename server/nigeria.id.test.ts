@@ -3,7 +3,15 @@
  * Procedures: initiateAuth, verifyToken, getVerificationStatus, adminListVerified
  * External NIMC IDP calls will fail in test env — we verify graceful handling.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// SW-B made NIGERIA_ID_REDIRECT_URI mandatory at request time (fail-closed:
+// no fabricated callback URL). The module reads it at load time, so stub the
+// env BEFORE the router module is imported (vi.hoisted runs first).
+vi.hoisted(() => {
+  process.env.NIGERIA_ID_REDIRECT_URI = "https://tradegateway.example.com/api/nigeria-id/callback";
+});
+
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 

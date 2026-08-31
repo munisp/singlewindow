@@ -6,8 +6,13 @@
  *   - unregisterPushToken: remove a token (on logout or permission revocation)
  *   - sendAnomalyPushNotification: admin procedure to send a push to all admin tokens
  *
- * The tokens are stored in the `push_tokens` table and used by the Kafka consumer
- * to dispatch push notifications when `insider.threat.detected` events arrive.
+ * P0-5 remediation: the DATABASE is the primary (authoritative) store. The
+ * previous implementation kept tokens in a process-local Map and ran a
+ * MySQL-dialect upsert (ON DUPLICATE KEY UPDATE) against PostgreSQL that
+ * always threw and was silently swallowed — registrations were lost on every
+ * restart/replica. Now: drizzle `push_tokens` table + PG-native
+ * onConflictDoUpdate, and no swallowed errors. If the DB is unavailable the
+ * mutation FAILS honestly (503) instead of pretending the token was stored.
  *
  * FCM/APNs dispatch is handled by the Go notification-dispatcher service.
  * This router only manages token CRUD and triggers the dispatch via Kafka.
@@ -15,7 +20,10 @@
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { eq, and } from "drizzle-orm";
 import { router, protectedProcedure } from "../_core/trpc";
+import { getDb } from "../db";
+import { pushTokens, users } from "../../drizzle/schema";
 
 // ─── Admin procedure ──────────────────────────────────────────────────────────
 
@@ -26,29 +34,82 @@ const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   return next({ ctx });
 });
 
-// ─── In-memory token store (fallback when DB unavailable) ─────────────────────
-// In production, tokens are persisted in the `push_tokens` DB table.
+async function requireDb() {
+  const db = await getDb();
+  if (!db) {
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: "Push token store unavailable — token NOT saved (fail-closed)",
+    });
+  }
+  return db;
+}
 
-const tokenStore = new Map<string, {
-  userId: number;
-  token: string;
-  platform: "ios" | "android" | "web";
-  registeredAt: Date;
-  lastSeenAt: Date;
-}>();
+// ─── Kafka publish helper (PRA-027, Phase 9) ─────────────────────────────────
+//
+// Posture: the push-dispatch event is IMPORTANT but not transactional with the
+// token row — the token registration/unregistration MUST still commit even if
+// the publish fails (documented contract: the dispatcher re-reads target
+// tokens from the DB at send time for register-triggered flows, and the
+// outbox carries the anomaly payload for replay). On publish failure we:
+//   1. surface it via the tradegateway_push_dispatch_failures_total metric,
+//   2. emit a structured error log (never silent),
+//   3. persist the event to the durable kafka_event_log outbox for retry.
+// GAP-PUSH-OUTBOX: the outbox table + helpers exist (server/db.ts v78) but no
+// drainer worker ships in this repo — replay requires an operator/script until
+// an outbox-worker lands. Registered in server/_core/gapRegistry.ts.
 
-// ─── Kafka publish helper ─────────────────────────────────────────────────────
+import { createKafkaEventLogEntry } from "../db";
+import { pushDispatchFailuresTotal } from "../_core/metrics";
 
-async function publishPushEvent(payload: Record<string, unknown>): Promise<void> {
+export type PushPublishOutcome = "published" | "queued_to_outbox";
+
+async function publishPushEvent(payload: Record<string, unknown>): Promise<PushPublishOutcome> {
   const kafkaUrl = process.env.KAFKA_REST_URL ?? "http://kafka-rest:8082";
+  const topic = "insider.push.dispatch";
   try {
-    await fetch(`${kafkaUrl}/topics/insider.push.dispatch`, {
+    const res = await fetch(`${kafkaUrl}/topics/${topic}`, {
       method: "POST",
       headers: { "Content-Type": "application/vnd.kafka.json.v2+json" },
       body: JSON.stringify({ records: [{ value: payload }] }),
+      signal: AbortSignal.timeout(5_000), // PRA-027: bounded, never fire-and-forget
     });
-  } catch {
-    // Non-fatal: push dispatch is best-effort
+    if (!res.ok) {
+      throw new Error(`Kafka REST proxy answered HTTP ${res.status}`);
+    }
+    return "published";
+  } catch (err) {
+    const reason = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "publish_failed";
+    pushDispatchFailuresTotal.inc({ reason });
+    console.error(JSON.stringify({
+      level: "error",
+      msg: "[pushTokens] push-dispatch Kafka publish failed — event queued to durable outbox (token commit unaffected)",
+      topic,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+      eventType: typeof payload.type === "string" ? payload.type : "unknown",
+    }));
+    // Durable outbox record (at-least-once replay source). A failure to even
+    // record the outbox is logged loudly but still does not roll back the
+    // token commit (documented contract above).
+    try {
+      await createKafkaEventLogEntry({
+        topic,
+        eventType: typeof payload.type === "string" ? payload.type : "push_dispatch",
+        aggregateId: typeof payload.userId === "string" ? payload.userId : "push",
+        payload: payload as Record<string, unknown>,
+        status: "pending",
+      });
+    } catch (outboxErr) {
+      pushDispatchFailuresTotal.inc({ reason: "outbox_write_failed" });
+      console.error(JSON.stringify({
+        level: "error",
+        msg: "[pushTokens] CRITICAL: push-dispatch publish failed AND outbox write failed — event LOST",
+        topic,
+        error: outboxErr instanceof Error ? outboxErr.message : String(outboxErr),
+      }));
+    }
+    return "queued_to_outbox";
   }
 }
 
@@ -59,6 +120,7 @@ export const pushTokensRouter = router({
   /**
    * registerPushToken — store the device push token for the authenticated user.
    * Called by the mobile app after obtaining the FCM/APNs/Expo token.
+   * PG-native upsert on (user_id, platform).
    */
   registerPushToken: protectedProcedure
     .input(z.object({
@@ -67,34 +129,20 @@ export const pushTokensRouter = router({
       userId: z.string().optional(), // Provided by mobile client for cross-validation
     }))
     .mutation(async ({ ctx, input }) => {
-      const key = `${ctx.user.id}:${input.platform}`;
-
-      // Upsert in memory store
-      tokenStore.set(key, {
-        userId: ctx.user.id,
-        token: input.token,
-        platform: input.platform,
-        registeredAt: tokenStore.get(key)?.registeredAt ?? new Date(),
-        lastSeenAt: new Date(),
-      });
-
-      // Persist to DB if available
-      try {
-        const { getDb } = await import("../db");
-        const db = await getDb();
-        if (db) {
-          // Raw SQL upsert — avoids schema dependency for this auxiliary table
-          // Use raw SQL via drizzle sql tag to avoid type issues
-          const { sql } = await import("drizzle-orm");
-          await db.execute(
-            sql`INSERT INTO push_tokens (user_id, token, platform, registered_at, last_seen_at)
-             VALUES (${ctx.user.id}, ${input.token}, ${input.platform}, NOW(), NOW())
-             ON DUPLICATE KEY UPDATE token = VALUES(token), last_seen_at = NOW()`
-          );
-        }
-      } catch {
-        // Non-fatal: in-memory store is the fallback
-      }
+      const db = await requireDb();
+      await db
+        .insert(pushTokens)
+        .values({
+          userId: ctx.user.id,
+          token: input.token,
+          platform: input.platform,
+          registeredAt: new Date(),
+          lastSeenAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: [pushTokens.userId, pushTokens.platform],
+          set: { token: input.token, lastSeenAt: new Date() },
+        });
 
       return {
         success: true,
@@ -111,21 +159,10 @@ export const pushTokensRouter = router({
       platform: z.enum(["ios", "android", "web"]),
     }))
     .mutation(async ({ ctx, input }) => {
-      const key = `${ctx.user.id}:${input.platform}`;
-      tokenStore.delete(key);
-
-      try {
-        const { getDb } = await import("../db");
-        const db = await getDb();
-        if (db) {
-          const { sql } = await import("drizzle-orm");
-          await db.execute(
-            sql`DELETE FROM push_tokens WHERE user_id = ${ctx.user.id} AND platform = ${input.platform}`
-          );
-        }
-      } catch {
-        // Non-fatal
-      }
+      const db = await requireDb();
+      await db
+        .delete(pushTokens)
+        .where(and(eq(pushTokens.userId, ctx.user.id), eq(pushTokens.platform, input.platform)));
 
       return { success: true };
     }),
@@ -137,6 +174,10 @@ export const pushTokensRouter = router({
    * This is triggered by the Kafka consumer (kafkaConsumer.ts) when
    * `insider.threat.detected` events with score > 0.7 arrive.
    * It can also be triggered manually from the SecurityMonitor admin panel.
+   *
+   * Target tokens are read from the DB (authoritative store). With
+   * targetAdminsOnly, only tokens whose owner has role='admin' are targeted;
+   * tokens whose owner cannot be resolved are EXCLUDED (fail-closed).
    */
   sendAnomalyPushNotification: adminProcedure
     .input(z.object({
@@ -161,21 +202,19 @@ export const pushTokensRouter = router({
         triggeredBy: ctx.user.id,
       };
 
-      // Collect target tokens
-      const targetTokens: string[] = [];
+      // Collect target tokens from the authoritative DB store
+      const db = await requireDb();
+      const rows = await db
+        .select({ token: pushTokens.token, role: users.role })
+        .from(pushTokens)
+        .leftJoin(users, eq(users.id, pushTokens.userId));
 
-      // From in-memory store (sandbox mode)
-      for (const [, record] of tokenStore.entries()) {
-        if (input.targetAdminsOnly) {
-          // In production, check user role from DB; in sandbox, include all registered tokens
-          targetTokens.push(record.token);
-        } else {
-          targetTokens.push(record.token);
-        }
-      }
+      const targetTokens = rows
+        .filter((r) => (input.targetAdminsOnly ? r.role === "admin" : true))
+        .map((r) => r.token);
 
       // Publish to Kafka for the Go notification-dispatcher to handle FCM/APNs dispatch
-      await publishPushEvent({
+      const dispatch = await publishPushEvent({
         ...payload,
         tokens: targetTokens,
         channelId: "tradegateway-anomaly-alerts",
@@ -184,6 +223,7 @@ export const pushTokensRouter = router({
       return {
         success: true,
         tokensTargeted: targetTokens.length,
+        dispatch, // "published" | "queued_to_outbox" — honest delivery posture
         payload,
       };
     }),
@@ -193,7 +233,18 @@ export const pushTokensRouter = router({
    * Used for debugging and monitoring push notification delivery.
    */
   getRegisteredTokens: adminProcedure.query(async () => {
-    const tokens = Array.from(tokenStore.values()).map((t) => ({
+    const db = await requireDb();
+    const rows = await db
+      .select({
+        userId: pushTokens.userId,
+        platform: pushTokens.platform,
+        token: pushTokens.token,
+        registeredAt: pushTokens.registeredAt,
+        lastSeenAt: pushTokens.lastSeenAt,
+      })
+      .from(pushTokens);
+
+    const tokens = rows.map((t) => ({
       userId: t.userId,
       platform: t.platform,
       tokenPrefix: t.token.slice(0, 20) + "…",
