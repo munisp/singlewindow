@@ -62,6 +62,8 @@ export const TOPICS = {
   BOND_DEPOSITED:          "tradegateway.ledger.bond_deposited",
   BOND_RELEASED:           "tradegateway.ledger.bond_released",
   PENALTY_ASSESSED:        "tradegateway.ledger.penalty_assessed",
+  // Maritime Single Window (IMO FAL; Phase 9 WP-C) — raw envelope v1.0 values
+  MSW_EVENTS:              "maritime.msw.v1",
   // Bonded warehouse
   WAREHOUSE_DEPOSIT:       "tradegateway.warehouse.deposit",
   WAREHOUSE_RELEASE:       "tradegateway.warehouse.release",
