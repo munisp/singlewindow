@@ -115,6 +115,7 @@ export const financeRouter = router({
 
   // summary — wraps kpis + 30-day trend for the Flutter Summary tab
   summary: protectedProcedure.query(async ({ ctx }) => {
+    assertFinanceAccess(ctx.user.role);
     const kpis = await getFinanceKPIs();
     const trend = await getPaymentTrend(30);
     return {
@@ -133,6 +134,7 @@ export const financeRouter = router({
 
   // transactions — last 50 payments for the Flutter Transactions tab
   transactions: protectedProcedure.query(async ({ ctx }) => {
+    assertFinanceAccess(ctx.user.role);
     const pool = getPool();
     if (!pool) return [];
     const { rows } = await pool.query(`
@@ -155,6 +157,7 @@ export const financeRouter = router({
 
   // duties — pending duty obligations for the Flutter Duties tab
   duties: protectedProcedure.query(async ({ ctx }) => {
+    assertFinanceAccess(ctx.user.role);
     const pool = getPool();
     if (!pool) return [];
     const { rows } = await pool.query(`
@@ -176,6 +179,7 @@ export const financeRouter = router({
 
   // clusterSummary — FinOps cost breakdown from cost_records table for Flutter Finance screen
   clusterSummary: protectedProcedure.query(async ({ ctx }) => {
+    assertFinanceAccess(ctx.user.role);
     const pool = getPool();
     if (!pool) return { services: [], totalMonthly: 0, totalYtd: 0 };
     const { rows: serviceRows } = await pool.query(`

@@ -6,8 +6,16 @@ import "./telemetryBootstrap";
 // Override DATABASE_URL: use LOCAL_DATABASE_URL if set, otherwise keep injected URL only
 // if it is a PostgreSQL URL; otherwise fall back to the default local postgres connection.
 const _injectedDbUrl = process.env.DATABASE_URL ?? "";
-const _localDbUrl = process.env.LOCAL_DATABASE_URL ?? "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
+// SW-S11-4: no hardcoded credential fallback in production — a boot with no
+// configured database URL must fail closed, never silently connect with a
+// source-controlled password. The localhost default is development-only.
 if (!_injectedDbUrl.startsWith("postgresql://") && !_injectedDbUrl.startsWith("postgres://")) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "[security] DATABASE_URL is not a PostgreSQL URL in production — refusing to boot (fail-closed)."
+    );
+  }
+  const _localDbUrl = process.env.LOCAL_DATABASE_URL ?? "postgresql://tradegateway:tradegateway_secure_2026@localhost:5432/tradegateway";
   process.env.DATABASE_URL = _localDbUrl;
 }
 import express from "express";
@@ -22,7 +30,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
-import { ddosSlowDown, financialRateLimit, adminOperationRateLimit, fileUploadGuard } from "./security";
+import { ddosSlowDown, financialRateLimit, adminOperationRateLimit, fileUploadGuard, scheduledJobAuth } from "./security";
 import helmet from "helmet";
 import cors from "cors";
 import { sanitizeMiddleware } from "./sanitize";
@@ -1248,11 +1256,28 @@ async function startServer() {
     });
   }
   // ── CORS ─────────────────────────────────────────────────────────────────────
-  const allowedOrigins = [
+  // Explicit allowlist. Additional deployment origins are configured via the
+  // CORS_ALLOWED_ORIGINS env var (comma-separated exact origins, https only in
+  // production). localhost/127.0.0.1 origins are development-only. Credentials
+  // are enabled, so no wildcard/pattern-broad origins are ever permitted.
+  const envOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map(o => o.trim())
+    .filter(Boolean)
+    .filter(o => {
+      if (process.env.NODE_ENV === "production" && !o.startsWith("https://")) {
+        console.warn(`[CORS] Ignoring non-HTTPS origin in production: ${o}`);
+        return false;
+      }
+      return true;
+    });
+  const allowedOrigins: (RegExp | string)[] = [
     /\.manus\.space$/,
     /\.manus\.computer$/,
-    /^https?:\/\/localhost(:\d+)?$/,
-    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
+    ...envOrigins,
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : [/^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/]),
   ];
   // ── DDoS slow-down (global — applied before CORS so it catches all traffic) ──
   app.use("/api", ddosSlowDown);
@@ -1281,7 +1306,11 @@ async function startServer() {
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
-        connectSrc: ["'self'", "wss:", "https:"],
+        // SW-S11-3: production connect-src is same-origin + websockets only —
+        // the previous `https:` allowed exfiltration to any HTTPS endpoint.
+        connectSrc: process.env.NODE_ENV === 'production'
+          ? ["'self'", "wss:"]
+          : ["'self'", "wss:", "https:"],
         frameSrc: ["'none'"],
         objectSrc: ["'none'"],
         upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
@@ -1310,6 +1339,20 @@ async function startServer() {
   app.use("/api/trpc/bulkExport", adminOperationRateLimit);
   app.use("/api/trpc/tenant", adminOperationRateLimit);
   app.use("/api/trpc/keycloak", adminOperationRateLimit);
+
+  // ── Scheduled-job endpoints: Bearer-auth, fail-closed in production ────────
+  app.use("/api/scheduled", scheduledJobAuth);
+
+  // ── Webhook/ingest endpoints: strict unauthenticated-traffic rate limits ──
+  const webhookRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many webhook requests." },
+  });
+  app.use("/api/webhooks", webhookRateLimit);
+  app.use("/api/v1/msw/exchange", webhookRateLimit);
 
   // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)
   app.use(express.json({ limit: "10mb" }));
