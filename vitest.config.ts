@@ -1,6 +1,16 @@
 import { defineConfig } from "vitest/config";
+import path from "path";
+
+const templateRoot = path.resolve(import.meta.dirname);
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": path.resolve(templateRoot, "client", "src"),
+      "@shared": path.resolve(templateRoot, "shared"),
+      "@assets": path.resolve(templateRoot, "attached_assets"),
+    },
+  },
   test: {
     // PRA-004/PRA-043 (Phase 9): provision the per-run PostgreSQL template
     // database (full drizzle migration chain) before any test file loads;
