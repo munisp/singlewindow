@@ -292,6 +292,13 @@ export interface SendOptions {
   principalRole: string;
   classification?: string;
   recordClassification?: string;
+  /**
+   * Extra request headers. Reserved for TEST/SANDBOX scope only (e.g. the
+   * agency sandbox's X-Sandbox-Scenario fault-injection header); production
+   * adapter call sites never set this. Never carries credentials — the
+   * Authorization header remains governed solely by the env-configured token.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface ExternalAdapter {
@@ -400,6 +407,7 @@ export function createExternalAdapter(def: ExternalAdapterDefinition): ExternalA
         method: "POST",
         headers: {
           "content-type": "application/json",
+          ...(options.headers ?? {}),
           ...(config.token ? { authorization: `Bearer ${config.token}` } : {}),
         },
         body: JSON.stringify(envelope),
