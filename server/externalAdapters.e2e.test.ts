@@ -70,7 +70,7 @@ const PLATFORM_KEY_ID = process.env.AGENCY_SANDBOX_PLATFORM_KEY_ID ?? "1";
 const EVIDENCE_OUT = process.env.AGENCY_SANDBOX_EVIDENCE_OUT ?? "";
 
 const PRINCIPAL = { principalId: "msw-user:e2e", principalRole: "msw-customs" };
-const DIGEST = `sha256:${"ab".repeat(32)}`;
+const DIGEST = "ab".repeat(32); // 64-char hex sha256 digest (sandbox contract)
 const NOW = "2026-09-01T00:00:00Z";
 const SCENARIO = "X-Sandbox-Scenario";
 
@@ -396,14 +396,18 @@ describeLive("WP-2b live agency-sandbox end-to-end (real sandbox processes, no m
         const trust = await sandboxTrustKeys(BASE_URLS[c.adapter.adapterId]);
         const { envelope, response, rawBody } = await sendCapturing(c, c.parse, { [SCENARIO]: "REFUSE" });
         expect(response.status).toBe(c.refusalStatus);
-        expect(typeof rawBody.detail === "string" ? rawBody.detail : "").not.toBe("");
         const verified = verifySandboxResponse(c.adapter, rawBody, trust);
         expect(verified.ok).toBe(true);
+        if (verified.ok) {
+          const payload = verified.envelope.payload as Record<string, unknown>;
+          // The signed payload carries the agency's realistic refusal reason.
+          expect(typeof payload.detail === "string" && payload.detail.length > 0).toBe(true);
+        }
         record({
           adapterId: c.adapter.adapterId, path: "refusal", outcome: "pass",
           requestSha256: sha256(envelope), responseSha256: sha256(rawBody),
           responseKid: verified.ok ? verified.kid : undefined,
-          detail: `typed refusal surfaced: status=${response.status} detail=${String(rawBody.detail)}`,
+          detail: `typed refusal surfaced: status=${response.status} (signed refusal detail in the response envelope payload)`,
         });
       });
 
