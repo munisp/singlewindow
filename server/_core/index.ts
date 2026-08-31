@@ -192,7 +192,7 @@ async function runSLABreachScan() {
       red: 72 * 60 * 60 * 1000,
       blue: 48 * 60 * 60 * 1000,
     };
-    const SLA_LABELS: Record<string, string> = {
+    const SLA_LABELS: Record<string, number | string> = {
       green: "4 hours", yellow: "24 hours", red: "72 hours", blue: "48 hours",
     };
 
@@ -1465,6 +1465,15 @@ async function startServer() {
     const { startPcsProjectionConsumer } = await import("../pcsProjection");
     startPcsProjectionConsumer().catch((err: Error) =>
       console.warn("[PcsProjection] Failed to start PCS projection consumer:", err.message)
+    );
+  }
+
+  // PRA-096 (Phase 9): geo vessel projection consumer for vessels.events →
+  // vessel_tracking_events read model (envelope v1.0 verified, fail-closed DLQ)
+  {
+    const { startGeoVesselProjectionConsumer } = await import("../geoVesselProjection");
+    startGeoVesselProjectionConsumer().catch((err: Error) =>
+      console.warn("[GeoVesselProjection] Failed to start geo vessel consumer (GAP-AIS-FEED stays open):", err.message)
     );
   }
 
