@@ -9,6 +9,26 @@ import { getDb } from "../db";
 import { geofences, geofenceEvents } from "../../drizzle/schema";
 import { eq, desc, and, gte, count } from "drizzle-orm";
 import { notifyOwner } from "../_core/notification";
+import { geoServiceFetch, geoServiceStatus } from "../_core/geoServiceClient";
+
+// ─── WP-10: geo-service backed geofencing (fail-closed) ─────────────────────
+// The authoritative geofence engine is blueeconomy-geo-service (PostGIS-backed
+// versioned fences, signed geo.geofence-event.v1 transitions). The procedures
+// below consume it fail-closed: when GEO_SERVICE_URL/GEO_SERVICE_TOKEN are
+// unset they return an honest GEO_SERVICE_UNCONFIGURED state; when the
+// service is configured but failing they surface the upstream error — they
+// NEVER silently fall back to the legacy local tables.
+//
+// The legacy local-table procedures above are retained for migration but must
+// be treated as deprecated; new consumers use the remote* procedures.
+
+function toMicrosRing(polygon: Array<{ lat: number; lon: number }>): [number, number][] {
+  const ring = polygon.map(p => [Math.round(p.lat * 1e6), Math.round(p.lon * 1e6)] as [number, number]);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first] as [number, number]);
+  return ring;
+}
 
 const polygonPointSchema = z.object({ lat: z.number(), lon: z.number() });
 
@@ -164,6 +184,79 @@ export const geofencesRouter = router({
       }
 
       return event;
+    }),
+
+  /** WP-10: geo-service connectivity/config status (never throws). */
+  geoStatus: adminProcedure.query(async () => geoServiceStatus()),
+
+  /** WP-10: list ACTIVE geofences from the geo-service (fail-closed). */
+  remoteList: adminProcedure.query(async () => {
+    try {
+      return await geoServiceFetch("/v1/geo/fences");
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("GEO_SERVICE_UNCONFIGURED")) {
+        return {
+          fences: [], count: 0, unavailable: true,
+          message: "GEO_SERVICE_UNCONFIGURED: versioned geofencing requires GEO_SERVICE_URL/GEO_SERVICE_TOKEN. Legacy local geofences remain available via the deprecated list procedure.",
+        };
+      }
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : String(err) });
+    }
+  }),
+
+  /** WP-10: version history of one geofence from the geo-service. */
+  remoteHistory: adminProcedure
+    .input(z.object({ geofenceId: z.string().min(1).max(64) }))
+    .query(async ({ input }) => {
+      try {
+        return await geoServiceFetch(`/v1/geo/fences/${encodeURIComponent(input.geofenceId)}`);
+      } catch (err) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : String(err) });
+      }
+    }),
+
+  /**
+   * WP-10: create (or version) a geofence in the geo-service. expectedVersion
+   * 0 creates a new fence; N creates version N+1 (optimistic concurrency).
+   */
+  createRemote: adminProcedure
+    .input(z.object({
+      geofenceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/),
+      name: z.string().min(3).max(256),
+      classification: z.enum(["PUBLIC", "INTERNAL", "RESTRICTED", "CONFIDENTIAL", "SECRET"]).default("INTERNAL"),
+      polygon: z.array(polygonPointSchema).min(3),
+      dwellThresholdSeconds: z.number().int().min(0).max(86400).default(0),
+      dwellSpeedGateKnots: z.number().min(0).max(102.3).default(1),
+      expectedVersion: z.number().int().min(0).default(0),
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        return await geoServiceFetch("/v1/geo/fences", {
+          method: "POST",
+          body: {
+            geofenceId: input.geofenceId,
+            name: input.name,
+            classification: input.classification,
+            verticesMicros: toMicrosRing(input.polygon),
+            dwellThresholdSeconds: input.dwellThresholdSeconds,
+            dwellSpeedGateMilliknots: Math.round(input.dwellSpeedGateKnots * 1000),
+            expectedVersion: input.expectedVersion,
+          },
+        });
+      } catch (err) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : String(err) });
+      }
+    }),
+
+  /** WP-10: provenanced fence transition events from the geo-service. */
+  remoteEvents: adminProcedure
+    .input(z.object({ geofenceId: z.string().min(1).max(64), limit: z.number().int().min(1).max(1000).default(100) }))
+    .query(async ({ input }) => {
+      try {
+        return await geoServiceFetch(`/v1/geo/fences/${encodeURIComponent(input.geofenceId)}/events?limit=${input.limit}`);
+      } catch (err) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: err instanceof Error ? err.message : String(err) });
+      }
     }),
 
   /** Get geofence statistics */
