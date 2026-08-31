@@ -25,8 +25,9 @@
 //        → KNOWN COLLISION (deltaLakeSvc deprecated, unassigned).
 //   8095 compose vision-service (OCR) vs PORTS.visionService 8105 — KNOWN
 //        DIVERGENCE: no real service binds 8105 (microservices/vision-service
-//        compose-binds 8095; services/python/vision-service binds 8092 and
-//        itself collides with compose gnn-risk). VISION_SERVICE_URL must be
+//        compose-binds 8095; the legacy services/python/vision-service that
+//        bound 8092 was REMOVED for AGPL compliance — Ultralytics YOLOv8 —
+//        in phase-10 remediation). VISION_SERVICE_URL must be
 //        set explicitly; 8105 stays a fail-closed placeholder.
 // The gateway defaults for the NON-owning services were moved to the
 // deliberately-unassigned 8111-8116 block (see below) — connection-refused
@@ -221,11 +222,10 @@ export const ENV = {
   // ─── Vision / Document AI ─────────────────────────────────────────────────
   // KNOWN DIVERGENCE (PRA-067): no real service binds PORTS.visionService
   // (8105) — microservices/vision-service compose-binds 8095 (see
-  // visionSvcUrl, used for the vision-ocr health probe) and
-  // services/python/vision-service binds 8092 (itself colliding with compose
-  // gnn-risk). 8105 remains a fail-closed placeholder: set VISION_SERVICE_URL
-  // explicitly to the real NLP/vision endpoint. routers/vision.ts still
-  // hardcodes its own stale 8092 literal — KNOWN STRAGGLER, flagged.
+  // visionSvcUrl, used for the vision-ocr health probe); the legacy
+  // services/python/vision-service (8092, AGPL Ultralytics) was removed in
+  // phase-10 remediation. 8105 remains a fail-closed placeholder: set
+  // VISION_SERVICE_URL explicitly to the real NLP/vision endpoint.
   visionServiceUrl: process.env.VISION_SERVICE_URL ?? "http://localhost:8105",
 
   // ─── Warehouse Service ────────────────────────────────────────────────────

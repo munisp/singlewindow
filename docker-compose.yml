@@ -305,9 +305,11 @@ services:
   #   temporal-worker:      8090
   #   anomaly-detection:    8091  (no PORTS-registry conflict; gateway default matches)
   #   gnn-risk:             8092  (no PORTS-registry conflict; gateway default matches.
-  #                         NOTE: services/python/vision-service also defaults to
-  #                         8092 — do not co-locate both on one host without
-  #                         explicit ports.)
+  #                         Historical note: the legacy services/python/vision-service
+  #                         also defaulted to 8092 — it was REMOVED for AGPL
+  #                         compliance (Ultralytics YOLOv8) in phase-10 remediation
+  #                         and replaced by microservices/vision-service (YOLOX-s
+  #                         ONNX, Apache-2.0).)
   #   hs-classifier:        8093  ← KNOWN COLLISION: 8093 is canonically owned by
   #                         cen-service (PORTS.cenService, Go bind default 8093,
   #                         P0-7 renumber). Gateway HS_CLASSIFIER_URL default
