@@ -1,0 +1,42 @@
+{
+ "envelope": {
+  "envelopeVersion": "1.0",
+  "eventId": "evt-00f7221b-e6d1-44b4-bea7-29980f991ce4",
+  "eventType": "cv.container-code.v1",
+  "occurredAt": "2026-08-31T13:42:20.765Z",
+  "producer": "blueeconomy-cv-service",
+  "correlationId": "corr-5a3e19e9-1b07-4367-a785-a913b22a4ba1",
+  "fhir": {
+   "resourceType": "Bundle",
+   "type": "message",
+   "bundleId": "bdl-e942f402-f1dc-4b29-a5ce-3d1a2abc4090",
+   "entry": [
+    {
+     "fullUrl": "urn:uuid:f4ffa9de-73bc-4150-af19-d75c3882a496",
+     "resource": {
+      "@type": "type.googleapis.com/blueeconomy.ml.v1.ContainerCodeRead",
+      "cameraId": "gate-1",
+      "code": "CSQU-305438-3",
+      "status": "confirmed",
+      "confidence": 0.95,
+      "checkDigitValid": true,
+      "ownerLexiconMatch": "CSQ",
+      "rawOcrText": "CSQU3054383",
+      "reason": "",
+      "frameSha256": "abc",
+      "modelVersion": "paddleocr@x"
+     }
+    }
+   ]
+  },
+  "provenance": {
+   "principalId": "cv",
+   "principalRole": "SERVICE",
+   "ledgerCommitHash": "",
+   "signature": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJsdWVlY29ub215LWN2LXNlcnZpY2UtMCJ9.eyJjbGFzc2lmaWNhdGlvbiI6IklOVEVSTkFMIiwiY29ycmVsYXRpb25JZCI6ImNvcnItNWEzZTE5ZTktMWIwNy00MzY3LWE3ODUtYTkxM2IyMmE0YmExIiwiZW52ZWxvcGVWZXJzaW9uIjoiMS4wIiwiZXZlbnRJZCI6ImV2dC0wMGY3MjIxYi1lNmQxLTQ0YjQtYmVhNy0yOTk4MGY5OTFjZTQiLCJldmVudFR5cGUiOiJjdi5jb250YWluZXItY29kZS52MSIsImZoaXIiOnsiYnVuZGxlSWQiOiJiZGwtZTk0MmY0MDItZjFkYy00YjI5LWE1Y2UtM2QxYTJhYmM0MDkwIiwiZW50cnkiOlt7ImZ1bGxVcmwiOiJ1cm46dXVpZDpmNGZmYTlkZS03M2JjLTQxNTAtYWYxOS1kNzVjMzg4MmE0OTYiLCJyZXNvdXJjZSI6eyJAdHlwZSI6InR5cGUuZ29vZ2xlYXBpcy5jb20vYmx1ZWVjb25vbXkubWwudjEuQ29udGFpbmVyQ29kZVJlYWQiLCJjYW1lcmFJZCI6ImdhdGUtMSIsImNoZWNrRGlnaXRWYWxpZCI6dHJ1ZSwiY29kZSI6IkNTUVUtMzA1NDM4LTMiLCJjb25maWRlbmNlIjowLjk1LCJmcmFtZVNoYTI1NiI6ImFiYyIsIm1vZGVsVmVyc2lvbiI6InBhZGRsZW9jckB4Iiwib3duZXJMZXhpY29uTWF0Y2giOiJDU1EiLCJyYXdPY3JUZXh0IjoiQ1NRVTMwNTQzODMiLCJyZWFzb24iOiIiLCJzdGF0dXMiOiJjb25maXJtZWQifX1dLCJyZXNvdXJjZVR5cGUiOiJCdW5kbGUiLCJ0eXBlIjoibWVzc2FnZSJ9LCJvY2N1cnJlZEF0IjoiMjAyNi0wOC0zMVQxMzo0MjoyMC43NjVaIiwicHJvZHVjZXIiOiJibHVlZWNvbm9teS1jdi1zZXJ2aWNlIiwicHJvdmVuYW5jZSI6eyJsZWRnZXJDb21taXRIYXNoIjoiIiwicHJpbmNpcGFsSWQiOiJjdiIsInByaW5jaXBhbFJvbGUiOiJTRVJWSUNFIn19.IfyTXf2u8X7UQfegkiIFga3BRxFi4xd7Fx_xusWbf4mD_94T8GoO_sG8gXDOHXxdG6mgrJtd9N2QhohOoiZECg"
+  },
+  "classification": "INTERNAL"
+ },
+ "kid": "blueeconomy-cv-service-0",
+ "pubkey": "WTGvfj2HJAmLdiFi1LnAuCTvNrXIfZWitVWOqPpGl8s"
+}
