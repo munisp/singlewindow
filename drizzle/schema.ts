@@ -3563,3 +3563,186 @@ export const pcsBillingSnapshots = pgTable("pcs_billing_snapshots", {
 ]);
 export type PcsBillingSnapshot = typeof pcsBillingSnapshots.$inferSelect;
 export type InsertPcsBillingSnapshot = typeof pcsBillingSnapshots.$inferInsert;
+
+// ─── MARITIME SINGLE WINDOW (MSW / IMO FAL; Phase 9 WP-C) ────────────────────
+// Producing boundary `blueeconomy-singlewindow-msw` for topic maritime.msw.v1.
+// Contract: blueeconomy-contracts proto/blueeconomy/msw/v1/msw.proto + docs/msw.md
+// (commit eb6b1ae — NORMATIVE). 11 event types; enum wire forms carry NO
+// MSW_FORM_TYPE_/MSW_AGENCY_ prefixes; digests are "sha256:<64 lowercase hex>".
+// Data minimization: form payloads / instruments / notes are retained HERE in
+// the boundary (jsonb/text columns); events carry identifiers + digests only.
+// Pratique-first (NPPM 2021) is enforced at the DB level where expressible
+// (checks below) and at the service level (server/mswService.ts) for the
+// temporal ordering rules (grant-before-schedule, no later refusal, maker-
+// checker, version chain) that a static CHECK cannot express.
+
+export const mswVisitStatusEnum = pgEnum("msw_visit_status", [
+  "DRAFT", "SUBMITTED", "UNDER_REVIEW", "CLEARED_TO_ENTER", "IN_PORT",
+  "CLEARED_TO_DEPART", "DEPARTED", "CANCELLED",
+]);
+export const mswFormTypeEnum = pgEnum("msw_form_type", [
+  "FAL1", "FAL2", "FAL3", "FAL4", "FAL5", "FAL6", "FAL7", "MDOH",
+]);
+export const mswAgencyEnum = pgEnum("msw_agency", [
+  "PORT_HEALTH", "NIS", "NCS", "NDLEA", "NIMASA", "NPA",
+]);
+export const mswClearanceKindEnum = pgEnum("msw_clearance_kind", ["ARRIVAL", "DEPARTURE"]);
+export const mswDeclarationStatusEnum = pgEnum("msw_declaration_status", [
+  "SUBMITTED", "ACCEPTED", "RETURNED",
+]);
+export const mswPratiqueDecisionEnum = pgEnum("msw_pratique_decision", ["GRANTED", "REFUSED"]);
+export const mswBoardingStatusEnum = pgEnum("msw_boarding_status", ["SCHEDULED", "COMPLETED"]);
+export const mswClearanceDecisionEnum = pgEnum("msw_clearance_decision", ["GRANTED", "REFUSED"]);
+
+export const mswVisits = pgTable("msw_visits", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswv-000001 style) from a dedicated
+  // sequence — never client-supplied.
+  visitId: varchar("visit_id", { length: 32 }).notNull().unique(),
+  // Port-call identifier owned by the port-interoperability boundary. NULL
+  // when unlinked; port-call fields are NEVER duplicated here beyond the id.
+  portCallId: varchar("port_call_id", { length: 256 }),
+  // True ONLY when the vessel identity was verified against the port-call
+  // record at creation time. False is the honest state for unlinked or
+  // unverifiable visits (PORT_CALL_UNVERIFIED / PORT_CALL_UNAVAILABLE).
+  portCallVerified: boolean("port_call_verified").notNull().default(false),
+  vesselImoNumber: varchar("vessel_imo_number", { length: 7 }).notNull(),
+  vesselName: varchar("vessel_name", { length: 256 }).notNull(),
+  vesselFlagCode: varchar("vessel_flag_code", { length: 2 }).notNull(),
+  portCode: varchar("port_code", { length: 5 }).notNull(),
+  agentReference: varchar("agent_reference", { length: 128 }).notNull(),
+  eta: timestamp("eta").notNull(),
+  etd: timestamp("etd"),
+  status: mswVisitStatusEnum("status").notNull().default("SUBMITTED"),
+  declaredByUserId: integer("declared_by_user_id").notNull().references(() => users.id),
+  declaredAt: timestamp("declared_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_visits_port_call").on(t.portCallId),
+  index("idx_msw_visits_vessel_imo").on(t.vesselImoNumber),
+  index("idx_msw_visits_status").on(t.status),
+]);
+export type MswVisit = typeof mswVisits.$inferSelect;
+export type InsertMswVisit = typeof mswVisits.$inferInsert;
+
+export const mswAgentNominations = pgTable("msw_agent_nominations", {
+  id: serial("id").primaryKey(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  agentReference: varchar("agent_reference", { length: 128 }).notNull(),
+  // Digest of the nomination instrument; the instrument itself is retained in
+  // the boundary (nomination_document), never emitted on the wire.
+  nominationDocumentDigestSha256: varchar("nomination_document_digest_sha256", { length: 80 }).notNull(),
+  nominationDocument: jsonb("nomination_document"),
+  nominatedByUserId: integer("nominated_by_user_id").notNull().references(() => users.id),
+  nominatedAt: timestamp("nominated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_agent_nominations_visit").on(t.visitPk),
+]);
+export type MswAgentNomination = typeof mswAgentNominations.$inferSelect;
+export type InsertMswAgentNomination = typeof mswAgentNominations.$inferInsert;
+
+export const mswDeclarations = pgTable("msw_declarations", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswd-000001 style).
+  declarationId: varchar("declaration_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  formType: mswFormTypeEnum("form_type").notNull(),
+  // Monotonic per-(visit, form_type), starting at 1 (single-submission
+  // principle, UNECE Rec-33): a re-submission is a NEW version chained to the
+  // prior submission by digest; returned versions are never edited.
+  version: integer("version").notNull(),
+  formPayloadDigestSha256: varchar("form_payload_digest_sha256", { length: 80 }).notNull(),
+  // Empty on version 1; otherwise the digest of the prior submission.
+  priorSubmissionDigestSha256: varchar("prior_submission_digest_sha256", { length: 80 }).notNull().default(""),
+  // NDPA PERSONAL category flag (FAL4/FAL5/FAL6/MDOH) — floors the envelope
+  // at RESTRICTED on the wire.
+  containsPersonalData: boolean("contains_personal_data").notNull(),
+  // Schema-validated form payload retained INSIDE the producing boundary;
+  // only its digest is emitted.
+  formPayload: jsonb("form_payload").notNull(),
+  status: mswDeclarationStatusEnum("status").notNull().default("SUBMITTED"),
+  submittedByUserId: integer("submitted_by_user_id").notNull().references(() => users.id),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  // Review (maker-checker) fields — populated on accept/return.
+  reviewingAgency: mswAgencyEnum("reviewing_agency"),
+  reviewedByUserId: integer("reviewed_by_user_id").references(() => users.id),
+  returnReasonCode: varchar("return_reason_code", { length: 64 }),
+  reviewNote: text("review_note"),
+  reviewNoteDigestSha256: varchar("review_note_digest_sha256", { length: 80 }),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [
+  index("idx_msw_declarations_visit").on(t.visitPk),
+  index("idx_msw_declarations_form").on(t.visitPk, t.formType),
+  unique("msw_declarations_visit_form_version_unique").on(t.visitPk, t.formType, t.version),
+]);
+export type MswDeclaration = typeof mswDeclarations.$inferSelect;
+export type InsertMswDeclaration = typeof mswDeclarations.$inferInsert;
+
+export const mswPratique = pgTable("msw_pratique", {
+  id: serial("id").primaryKey(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  decision: mswPratiqueDecisionEnum("decision").notNull(),
+  // Anchored to the Maritime Declaration of Health the decision is based on.
+  healthDeclarationPk: integer("health_declaration_pk").notNull().references(() => mswDeclarations.id),
+  officerReference: varchar("officer_reference", { length: 128 }).notNull(),
+  refusalReasonCode: varchar("refusal_reason_code", { length: 64 }),
+  // Digest of the decision record (grant or refusal) computed by the service;
+  // boarding completions bind to the GRANT digest (pratique-first invariant).
+  pratiqueRecordDigestSha256: varchar("pratique_record_digest_sha256", { length: 80 }).notNull(),
+  decidedByUserId: integer("decided_by_user_id").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_pratique_visit").on(t.visitPk),
+]);
+export type MswPratique = typeof mswPratique.$inferSelect;
+export type InsertMswPratique = typeof mswPratique.$inferInsert;
+
+export const mswBoardings = pgTable("msw_boardings", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswb-000001 style).
+  boardingId: varchar("boarding_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  // Fail-closed agency set (wire enum values). DB CHECK below enforces the
+  // pratique-first invariant at COMPLETION: a completed party containing any
+  // non-Port-Health agency must carry the antecedent pratique grant digest.
+  // The temporal scheduling rule (non-PH parties scheduled only after grant,
+  // no later refusal) is service-enforced (server/mswService.ts).
+  agencies: jsonb("agencies").$type<string[]>().notNull(),
+  scheduledByAgency: mswAgencyEnum("scheduled_by_agency").notNull(),
+  scheduledAt: timestamp("scheduled_at").notNull(),
+  scheduleNoteDigestSha256: varchar("schedule_note_digest_sha256", { length: 80 }).notNull().default(""),
+  status: mswBoardingStatusEnum("status").notNull().default("SCHEDULED"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  pratiqueGrantDigestSha256: varchar("pratique_grant_digest_sha256", { length: 80 }).notNull().default(""),
+  outcomeDigestSha256: varchar("outcome_digest_sha256", { length: 80 }),
+}, (t) => [
+  index("idx_msw_boardings_visit").on(t.visitPk),
+]);
+export type MswBoarding = typeof mswBoardings.$inferSelect;
+export type InsertMswBoarding = typeof mswBoardings.$inferInsert;
+
+export const mswClearances = pgTable("msw_clearances", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswc-000001 style).
+  clearanceId: varchar("clearance_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  kind: mswClearanceKindEnum("kind").notNull(),
+  decision: mswClearanceDecisionEnum("decision").notNull(),
+  decidedByAgency: mswAgencyEnum("decided_by_agency").notNull(),
+  refusalReasonCode: varchar("refusal_reason_code", { length: 64 }),
+  // Digest of the evaluated precondition checklist. Mandatory for a DEPARTURE
+  // grant (DB CHECK below); the checklist content is computed by the service
+  // (all submitted form versions accepted + pratique granted + joint boarding
+  // completed — service-enforced temporal preconditions).
+  preconditionChecklistDigestSha256: varchar("precondition_checklist_digest_sha256", { length: 80 }).notNull().default(""),
+  conditionsDigestSha256: varchar("conditions_digest_sha256", { length: 80 }).notNull().default(""),
+  refusalRecordDigestSha256: varchar("refusal_record_digest_sha256", { length: 80 }).notNull().default(""),
+  decidedByUserId: integer("decided_by_user_id").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_clearances_visit").on(t.visitPk),
+]);
+export type MswClearance = typeof mswClearances.$inferSelect;
+export type InsertMswClearance = typeof mswClearances.$inferInsert;
