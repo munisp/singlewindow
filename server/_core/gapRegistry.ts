@@ -109,6 +109,38 @@ export const PLATFORM_GAPS = {
     affected: "direct NCS system delivery of FAL declaration review decisions",
     neededUpstream: "NCS endpoint agreement + adapter configuration.",
   },
+  /**
+   * Phase 9 WP-D: NCS B'Odogwu customs-clearance integration is adapter-ready
+   * only; no wire compatibility is claimed until counterpart credentials
+   * exist. The egress adapter (server/_core/externalAdapters/ncsBodogwu.ts)
+   * fails closed ADAPTER_UNCONFIGURED until NCS_BODOGWU_* env is set.
+   */
+  OGA_BODOGWU: {
+    id: "GAP-OGA-BODOGWU",
+    summary:
+      "NCS B'Odogwu integration agreement is not in place; customs-clearance egress is disabled and fails closed (ADAPTER_UNCONFIGURED) — no stub success paths.",
+    affected: "customs clearance submission toward NCS B'Odogwu",
+    neededUpstream:
+      "NCS B'Odogwu counterpart credentials + endpoint agreement (NCS_BODOGWU_URL / NCS_BODOGWU_SIGNING_KEY / NCS_BODOGWU_KEY_ID).",
+  },
+  /** Phase 9 WP-D: CBN TMS (e-Form M / PAAR) integration is adapter-ready only. */
+  OGA_CBNTMS: {
+    id: "GAP-OGA-CBNTMS",
+    summary:
+      "CBN Trade Monitoring System integration agreement is not in place; e-Form M / PAAR egress is disabled and fails closed (ADAPTER_UNCONFIGURED).",
+    affected: "e-Form M registration and PAAR requests toward CBN TMS",
+    neededUpstream:
+      "CBN TMS counterpart credentials + endpoint agreement (CBN_TMS_URL / CBN_TMS_SIGNING_KEY / CBN_TMS_KEY_ID).",
+  },
+  /** Phase 9 WP-D: NEPC export-documentation integration is adapter-ready only. */
+  OGA_NEPC: {
+    id: "GAP-OGA-NEPC",
+    summary:
+      "NEPC integration agreement is not in place; export-documentation egress is disabled and fails closed (ADAPTER_UNCONFIGURED).",
+    affected: "export documentation submission toward NEPC",
+    neededUpstream:
+      "NEPC counterpart credentials + endpoint agreement (NEPC_URL / NEPC_SIGNING_KEY / NEPC_KEY_ID).",
+  },
 } as const satisfies Record<string, PlatformGap>;
 
 export type PlatformGapId = keyof typeof PLATFORM_GAPS;
