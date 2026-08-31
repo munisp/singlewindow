@@ -15,10 +15,15 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 
-const FLUVIO_SVC_URL = process.env.FLUVIO_SVC_URL || "http://localhost:8093";
-const FLUVIO_WS_URL = process.env.FLUVIO_WS_URL || "ws://localhost:8093";
+// Fail-closed (phase-10 audit remediation, finding C-3): Fluvio is not
+// deployed and the old 8093 literal collided with hs-classifier/cen-service.
+// FLUVIO_SVC_URL / FLUVIO_WS_URL must be set explicitly; when unset the
+// router reports unavailable instead of probing a wrong port.
+const FLUVIO_SVC_URL = process.env.FLUVIO_SVC_URL ?? "";
+const FLUVIO_WS_URL = process.env.FLUVIO_WS_URL ?? "";
 
 async function fluvioAvailable(): Promise<boolean> {
+  if (!FLUVIO_SVC_URL) return false;
   try {
     const res = await fetch(`${FLUVIO_SVC_URL}/health`, {
       signal: AbortSignal.timeout(3_000),
@@ -106,7 +111,7 @@ export const streamRouter = router({
       return {
         available,
         wsUrl: available ? `${FLUVIO_WS_URL}/api/stream/ws${params}` : null,
-        httpUrl: `${FLUVIO_SVC_URL}/api/stream/events${params}`,
+        httpUrl: available ? `${FLUVIO_SVC_URL}/api/stream/events${params}` : null,
         pollingIntervalMs: available ? null : 5_000,
       };
     }),

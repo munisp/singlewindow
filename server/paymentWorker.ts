@@ -28,7 +28,11 @@ import { withSpan, injectKafkaHeaders } from "./_core/telemetry";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const MOJALOOP_URL = process.env.MOJALOOP_URL ?? "http://localhost:3003";
+// Fail-closed (phase-10 audit remediation, finding C-3): no deployed
+// mojaloop-hub exists; the previous localhost:3003 literal diverged from
+// env.ts (3001) and compose. MOJALOOP_URL must be set explicitly or the worker
+// fails closed as MOJALOOP_UNCONFIGURED.
+const MOJALOOP_URL = process.env.MOJALOOP_URL ?? "";
 const MOJALOOP_API_KEY = process.env.MOJALOOP_API_KEY ?? "";
 const WORKER_BATCH_SIZE = 50;          // items per poll cycle
 const WORKER_INTERVAL_MS = 5_000;      // poll every 5 s
@@ -43,6 +47,7 @@ export function calcBackoffMs(attempt: number): number {
 // ─── Mojaloop availability check ─────────────────────────────────────────────
 
 async function mojaloopAvailable(): Promise<boolean> {
+  if (!MOJALOOP_URL) return false; // MOJALOOP_UNCONFIGURED — fail closed
   try {
     const res = await fetch(`${MOJALOOP_URL}/health`, {
       signal: AbortSignal.timeout(3_000),

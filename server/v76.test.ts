@@ -448,10 +448,11 @@ describe("tRPC: forceTokenRefresh procedure", () => {
     expect(snippet).toContain("/admin/force-refresh");
   });
 
-  it("returns offline stub when service unavailable", () => {
+  it("fails closed when service unavailable (phase-10 remediation)", () => {
     const idx = routerTs.indexOf("forceTokenRefresh:");
-    const snippet = routerTs.slice(idx, idx + 800);
-    expect(snippet).toContain("offline-stub");
+    const snippet = routerTs.slice(idx, idx + 900);
+    expect(snippet).toContain("TOKEN_REFRESH_UNAVAILABLE");
+    expect(snippet).not.toContain("offline-stub");
   });
 });
 

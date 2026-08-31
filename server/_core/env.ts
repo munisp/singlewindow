@@ -232,7 +232,10 @@ export const ENV = {
   warehouseServiceUrl: process.env.WAREHOUSE_SERVICE_URL ?? "http://localhost:8106",
 
   // ─── Mojaloop ─────────────────────────────────────────────────────────────
-  mojaloopUrl: process.env.MOJALOOP_URL ?? "http://localhost:3001",
+  // FAIL-CLOSED (phase-10 audit remediation): no deployed mojaloop-hub service
+  // exists; the old localhost:3001 default diverged from router/paymentWorker
+  // literals (3003). Empty default = MOJALOOP_UNCONFIGURED; set explicitly.
+  mojaloopUrl: process.env.MOJALOOP_URL ?? "",
 
   // ─── Tariff Engine (blueeconomy-financial-controls W-FEAT-4) ──────────────
   // PRA-100: authoritative statutory tariff assessment upstream. NO local

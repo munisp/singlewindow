@@ -552,6 +552,35 @@ const FALLBACK_RATES_TO_EUR: Record<string, number> = {
 };
 
 /**
+ * Returns the exchange rate from `fromCurrency` to `toCurrency` using ONLY the
+ * live ECB eurofxref-daily feed. Throws when the feed is unreachable or the
+ * currency pair is not published — fail-closed, never falls back to hardcoded
+ * rates (phase-10 audit remediation, finding B-4).
+ */
+export async function getLiveExchangeRate(fromCurrency: string, toCurrency: string): Promise<number> {
+  if (fromCurrency === toCurrency) return 1;
+
+  // ECB provides EUR-based rates; convert via EUR as pivot
+  const res = await fetch("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml", {
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`ECB FX feed returned HTTP ${res.status}`);
+  const xml = await res.text();
+  const rates: Record<string, number> = { EUR: 1 };
+  const re = /currency='([A-Z]+)' rate='([0-9.]+)'/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) rates[m[1]] = parseFloat(m[2]);
+
+  const fromRate = rates[fromCurrency];
+  const toRate   = rates[toCurrency];
+  if (!fromRate || !toRate) throw new Error(`Currency pair not published by ECB: ${fromCurrency}/${toCurrency}`);
+
+  const rate = toRate / fromRate;
+  _rateCache.set(`${fromCurrency}:${toCurrency}`, { rate, fetchedAt: Date.now() });
+  return rate;
+}
+
+/**
  * Returns the exchange rate from `fromCurrency` to `toCurrency`.
  * Fetches from ECB on first call or after TTL expiry; uses in-memory cache otherwise.
  */
@@ -563,23 +592,7 @@ export async function getExchangeRate(fromCurrency: string, toCurrency: string):
   if (cached && Date.now() - cached.fetchedAt < RATE_TTL_MS) return cached.rate;
 
   try {
-    // ECB provides EUR-based rates; convert via EUR as pivot
-    const res = await fetch("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml", {
-      signal: AbortSignal.timeout(5000),
-    });
-    const xml = await res.text();
-    const rates: Record<string, number> = { EUR: 1 };
-    const re = /currency='([A-Z]+)' rate='([0-9.]+)'/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(xml)) !== null) rates[m[1]] = parseFloat(m[2]);
-
-    const fromRate = rates[fromCurrency] ?? FALLBACK_RATES_TO_EUR[fromCurrency];
-    const toRate   = rates[toCurrency]   ?? FALLBACK_RATES_TO_EUR[toCurrency];
-    if (!fromRate || !toRate) throw new Error(`Unknown currency pair: ${fromCurrency}/${toCurrency}`);
-
-    const rate = toRate / fromRate;
-    _rateCache.set(cacheKey, { rate, fetchedAt: Date.now() });
-    return rate;
+    return await getLiveExchangeRate(fromCurrency, toCurrency);
   } catch (err) {
     console.warn(`[ExchangeRate] ECB fetch failed (${err}), using fallback rates`);
     const fromRate = FALLBACK_RATES_TO_EUR[fromCurrency] ?? 1;
