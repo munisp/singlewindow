@@ -288,6 +288,17 @@ export const ENV = {
   // data-platform consumer). Secrets/key material are env-only.
   pcsEnvelopeTrustKeys: process.env.PCS_ENVELOPE_TRUST_KEYS ?? "",
 
+  // ─── Geo vessel projection (PRA-096, Phase 9) ─────────────────────────────
+  // Trusted Ed25519 public keys for the envelope v1.0 provenance JWS on
+  // vessels.events (blueeconomy-geo-service producer). Format mirrors the Go
+  // cargo-tracking-service: comma-separated "kid=base64-or-hex-public-key"
+  // entries, kid = "blueeconomy-geo-service-<epoch>". Unset or unparseable →
+  // every consumed event is rejected (fail closed). Env-only key material.
+  geoEnvelopeTrustKeys: process.env.GEO_ENVELOPE_TRUST_KEYS ?? "",
+  geoVesselEventsTopic: process.env.GEO_VESSEL_EVENTS_TOPIC ?? "vessels.events",
+  geoVesselEventsDlqTopic: process.env.GEO_VESSEL_EVENTS_DLQ_TOPIC ?? "vessels.events.dlq",
+  geoVesselKafkaGroupId: process.env.GEO_VESSEL_KAFKA_GROUP_ID ?? "tradegateway-geo-vessel-projection",
+
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
 
@@ -360,6 +371,119 @@ export const ENV = {
 
   // ─── App Version ──────────────────────────────────────────────────────────
   appVersion: process.env.APP_VERSION ?? "1.0.0",
+
+  // ─── DB-gated test harness (PRA-004/PRA-043, Phase 9) ─────────────────────
+  // Admin connection used ONLY by server/testutils/pgTestHarness.ts (vitest
+  // globalSetup) to provision per-run template + per-file databases carrying
+  // the full migration chain. Passwordless local-trust default matches the
+  // developer/CI stack; production never reads this (tests do not boot the
+  // server). No credentials are embedded here beyond local trust.
+
+  // ─── PRA-068 sweep registry (Phase 9) ─────────────────────────────────
+  // Every remaining process.env read in server code, centrally registered
+  // (server/envSweep.test.ts fails the suite on unregistered reads).
+  // Secret-shaped values default to "" (env-only, never a default);
+  // endpoint/test-flag values keep their documented local defaults at the
+  // read site — this registry records existence + name, not new defaults.
+  aeoMraServiceUrl: process.env.AEO_MRA_SERVICE_URL ?? "",
+  aiRiskScorerUrl: process.env.AI_RISK_SCORER_URL ?? "",
+  anomalyDetectionSvcUrl: process.env.ANOMALY_DETECTION_SVC_URL ?? "",
+  aseanSwBnUrl: process.env.ASEAN_SW_BN_URL ?? "",
+  aseanSwIdUrl: process.env.ASEAN_SW_ID_URL ?? "",
+  aseanSwKhUrl: process.env.ASEAN_SW_KH_URL ?? "",
+  aseanSwLaUrl: process.env.ASEAN_SW_LA_URL ?? "",
+  aseanSwMmUrl: process.env.ASEAN_SW_MM_URL ?? "",
+  aseanSwMyUrl: process.env.ASEAN_SW_MY_URL ?? "",
+  aseanSwPhUrl: process.env.ASEAN_SW_PH_URL ?? "",
+  aseanSwSgUrl: process.env.ASEAN_SW_SG_URL ?? "",
+  aseanSwThUrl: process.env.ASEAN_SW_TH_URL ?? "",
+  aseanSwVnUrl: process.env.ASEAN_SW_VN_URL ?? "",
+  baseUrl: process.env.BASE_URL ?? "",
+  caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? "",
+  cargoTrackingGoUrl: process.env.CARGO_TRACKING_GO_URL ?? "",
+  cargoTrackingHttpUrl: process.env.CARGO_TRACKING_HTTP_URL ?? "",
+  cbnReportingUrl: process.env.CBN_REPORTING_URL ?? "",
+  cepServiceUrl: process.env.CEP_SERVICE_URL ?? "",
+  costServiceUrl: process.env.COST_SERVICE_URL ?? "",
+  csrfEnforceDev: process.env.CSRF_ENFORCE_DEV ?? "",
+  declarationEngineHttpUrl: process.env.DECLARATION_ENGINE_HTTP_URL ?? "",
+  declarationEngineUrl: process.env.DECLARATION_ENGINE_URL ?? "",
+  demoMode: process.env.DEMO_MODE ?? "",
+  drawbackFourEyesThresholdMinor: process.env.DRAWBACK_FOUR_EYES_THRESHOLD_MINOR ?? "",
+  e2eTestMode: process.env.E2E_TEST_MODE ?? "",
+  firsApiUrl: process.env.FIRS_API_URL ?? "",
+  grpcTlsCaPath: process.env.GRPC_TLS_CA_PATH ?? "",
+  grpcTlsCertPath: process.env.GRPC_TLS_CERT_PATH ?? "",
+  grpcTlsKeyPath: process.env.GRPC_TLS_KEY_PATH ?? "",
+  insiderThreatSvcUrl: process.env.INSIDER_THREAT_SVC_URL ?? "",
+  kafkaConsumerMetricsUrl: process.env.KAFKA_CONSUMER_METRICS_URL ?? "",
+  kafkaGroupId: process.env.KAFKA_GROUP_ID ?? "",
+  kafkaHost: process.env.KAFKA_HOST ?? "",
+  kafkaRestPort: process.env.KAFKA_REST_PORT ?? "",
+  kafkaRestUrl: process.env.KAFKA_REST_URL ?? "",
+  keycloakExpectedAudience: process.env.KEYCLOAK_EXPECTED_AUDIENCE ?? "",
+  keycloakRealmUrl: process.env.KEYCLOAK_REALM_URL ?? "",
+  keycloakWebhookSecret: process.env.KEYCLOAK_WEBHOOK_SECRET ?? "",
+  kycServiceUrl: process.env.KYC_SERVICE_URL ?? "",
+  localDatabaseUrl: process.env.LOCAL_DATABASE_URL ?? "",
+  manifestServiceUrl: process.env.MANIFEST_SERVICE_URL ?? "",
+  metricsBearerToken: process.env.METRICS_BEARER_TOKEN ?? "",
+  microserviceMockHealth: process.env.MICROSERVICE_MOCK_HEALTH ?? "",
+  mojaloopApiKey: process.env.MOJALOOP_API_KEY ?? "",
+  mojaloopFspiopDestination: process.env.MOJALOOP_FSPIOP_DESTINATION ?? "",
+  mojaloopFspiopSource: process.env.MOJALOOP_FSPIOP_SOURCE ?? "",
+  mojaloopWebhookSecret: process.env.MOJALOOP_WEBHOOK_SECRET ?? "",
+  naicomApiUrl: process.env.NAICOM_API_URL ?? "",
+  nccApiUrl: process.env.NCC_API_URL ?? "",
+  ncsApiUrl: process.env.NCS_API_URL ?? "",
+  ncsNrsGatewayUrl: process.env.NCS_NRS_GATEWAY_URL ?? "",
+  ndpcApiUrl: process.env.NDPC_API_URL ?? "",
+  nfiuApiUrl: process.env.NFIU_API_URL ?? "",
+  nigeriaIdIdpAlias: process.env.NIGERIA_ID_IDP_ALIAS ?? "",
+  nigeriaIdRedirectUri: process.env.NIGERIA_ID_REDIRECT_URI ?? "",
+  notificationDispatcherAdminUrl: process.env.NOTIFICATION_DISPATCHER_ADMIN_URL ?? "",
+  notificationSvcGrpcAddr: process.env.NOTIFICATION_SVC_GRPC_ADDR ?? "",
+  ogaGrpcAddr: process.env.OGA_GRPC_ADDR ?? "",
+  ogaHubHttpUrl: process.env.OGA_HUB_HTTP_URL ?? "",
+  ogaHubUrl: process.env.OGA_HUB_URL ?? "",
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? "",
+  ollamaProxyUrl: process.env.OLLAMA_PROXY_URL ?? "",
+  openctiSvcUrl: process.env.OPENCTI_SVC_URL ?? "",
+  opensearchIndexerUrl: process.env.OPENSEARCH_INDEXER_URL ?? "",
+  opensearchPassword: process.env.OPENSEARCH_PASSWORD ?? "",
+  opensearchUrl: process.env.OPENSEARCH_URL ?? "",
+  opensearchUsername: process.env.OPENSEARCH_USERNAME ?? "",
+  otelExporterOtlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "",
+  otelServiceName: process.env.OTEL_SERVICE_NAME ?? "",
+  paymentServiceGrpcAddr: process.env.PAYMENT_SERVICE_GRPC_ADDR ?? "",
+  pcsKafkaGroupId: process.env.PCS_KAFKA_GROUP_ID ?? "",
+  permifyGrpcUrl: process.env.PERMIFY_GRPC_URL ?? "",
+  permifyHost: process.env.PERMIFY_HOST ?? "",
+  permifyPort: process.env.PERMIFY_PORT ?? "",
+  permifyTenant: process.env.PERMIFY_TENANT ?? "",
+  piiEncryptionKey: process.env.PII_ENCRYPTION_KEY ?? "",
+  port: process.env.PORT ?? "",
+  rateLimitAllowInmemoryFallback: process.env.RATE_LIMIT_ALLOW_INMEMORY_FALLBACK ?? "",
+  redisTestStub: process.env.REDIS_TEST_STUB ?? "",
+  riskEngineGoUrl: process.env.RISK_ENGINE_GO_URL ?? "",
+  rustfsServiceToken: process.env.RUSTFS_SERVICE_TOKEN ?? "",
+  sessionCookieName: process.env.SESSION_COOKIE_NAME ?? "",
+  tbBridgeSharedSecret: process.env.TB_BRIDGE_SHARED_SECRET ?? "",
+  temporalHost: process.env.TEMPORAL_HOST ?? "",
+  temporalPort: process.env.TEMPORAL_PORT ?? "",
+  temporalUiUrl: process.env.TEMPORAL_UI_URL ?? "",
+  temporalUrl: process.env.TEMPORAL_URL ?? "",
+  tigerbeetleBridgeHost: process.env.TIGERBEETLE_BRIDGE_HOST ?? "",
+  tigerbeetleBridgePort: process.env.TIGERBEETLE_BRIDGE_PORT ?? "",
+  tigerbeetleBridgeUrl: process.env.TIGERBEETLE_BRIDGE_URL ?? "",
+  totallyUnsetSecret: process.env.TOTALLY_UNSET_SECRET ?? "",
+  tradeFinanceServiceUrl: process.env.TRADE_FINANCE_SERVICE_URL ?? "",
+  ucrServiceUrl: process.env.UCR_SERVICE_URL ?? "",
+  vitest: process.env.VITEST ?? "",
+  wazuhSvcUrl: process.env.WAZUH_SVC_URL ?? "",
+  workflowServiceUrl: process.env.WORKFLOW_SERVICE_URL ?? "",
+  wtoValuationServiceUrl: process.env.WTO_VALUATION_SERVICE_URL ?? "",
+  praTestDatabaseUrl: process.env.PRA_TEST_DATABASE_URL ?? "postgres://postgres@127.0.0.1:5432/postgres",
 };
 
 // ─── Production validation — fail closed on unsafe configuration ─────────────
