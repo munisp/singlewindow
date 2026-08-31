@@ -1,0 +1,62 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-mdoh-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "MDOH",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:41b75a0e67a923804c59bfeb6a8834776e1b47f91ba73a656deb0776cc15d283"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "MaritimeDeclarationOfHealth": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfArrival": "NGAPP",
+          "ArrivalDateTime": "2026-08-30T08:30:00Z",
+          "LastPortOfCall": "GHAAO",
+          "PortsOfCallLastThirtyDays": {
+            "Item": [
+              {
+                "Port": "GHAAO",
+                "DepartureDate": "2026-08-24"
+              },
+              {
+                "Port": "CIABJ"
+              }
+            ]
+          }
+        },
+        "Health": {
+          "CrewCount": 24,
+          "PassengerCount": 1,
+          "DeathOnBoardIndicator": false,
+          "DiseaseOnBoardIndicator": false,
+          "SanitaryMeasuresAppliedIndicator": false,
+          "ShipSanitationControlCertificate": {
+            "Type": "SSCEC",
+            "ExpiryDate": "2027-02-28"
+          },
+          "VisitedAffectedAreaIndicator": false
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "MDOH": {
+        "portCallId": "pc-000991",
+        "submittedByAgentReference": "agent-ref-77aa"
+      }
+    }
+  }
+}

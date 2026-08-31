@@ -1,0 +1,54 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal4-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL4",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:e1de308cc0c4db54ae5b51d251eacbdb8b20892564f433b28e86b3694e36c6a1"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "CrewsEffectsDeclaration": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfArrival": "NGAPP",
+          "ArrivalDateTime": "2026-08-30T08:30:00Z"
+        },
+        "CrewEffects": {
+          "Item": [
+            {
+              "CrewMember": {
+                "FamilyName": "Mensah",
+                "GivenNames": "Kofi",
+                "RankOrRating": "Bosun"
+              },
+              "EffectsInExcessOfAllowance": {
+                "Description": "Cigarettes",
+                "Quantity": 400,
+                "DutiableIndicator": true
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL4": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}

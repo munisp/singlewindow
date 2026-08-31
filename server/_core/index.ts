@@ -1315,6 +1315,34 @@ async function startServer() {
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
+  // ─── MSW CROSS-BORDER EXCHANGE INGEST (Phase 10 WP-3) ───────────────────────
+  // MSW-to-MSW signed ingest, mirroring port-interop's NSW JWS ingress
+  // (POST /v1/nsw/port-calls): authority JWS (RS256, pinned peer JWKS) +
+  // jti replay reserve + envelope v1.0 content-signature verify + fail-closed
+  // IMO reverse mapping into a foreign declaration DRAFT (never auto-accepted).
+  app.post("/api/v1/msw/exchange/ingest", async (req, res) => {
+    try {
+      const { ingestExchangeMessage } = await import("./mswExchange");
+      const result = await ingestExchangeMessage({
+        authorityJws: req.headers["x-msw-authority-signature"] as string | undefined,
+        rawBody: JSON.stringify(req.body ?? {}),
+      });
+      res.status(202).json({ ok: true, ...result });
+    } catch (err) {
+      const { MswExchangeError } = await import("./mswExchange");
+      if (err instanceof MswExchangeError) {
+        const status =
+          err.reasonCode === "EXCHANGE_SIGNATURE_MISSING" || err.reasonCode === "EXCHANGE_SIGNATURE_REJECTED" ? 401
+          : err.reasonCode === "EXCHANGE_REPLAY" ? 409
+          : err.reasonCode === "EXCHANGE_ENVELOPE_REJECTED" || err.reasonCode === "EXCHANGE_IMPORT_REJECTED" ? 400
+          : 503; // CONFIG / REPLAY_STORE_UNAVAILABLE / PERSISTENCE_UNAVAILABLE fail closed as unavailable
+        res.status(status).json({ ok: false, reasonCode: err.reasonCode, error: err.message });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "internal error" });
+    }
+  });
+
   // ─── KEYCLOAK EVENT WEBHOOK ──────────────────────────────────────────────────
   app.post("/api/webhooks/keycloak-event", express.json(), async (req, res) => {
     try {

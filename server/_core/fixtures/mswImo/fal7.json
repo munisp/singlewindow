@@ -1,0 +1,33 @@
+{
+  "formType": "FAL7",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-fal7-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "callSign": "5NAB2",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "portOfLoadingCode": "GHAAO",
+    "portOfDischargeCode": "NGAPP",
+    "dangerousGoodsItems": [
+      {
+        "unNumber": "1263",
+        "properShippingName": "Paint",
+        "hazardClass": "3",
+        "packingGroup": "II",
+        "marinePollutantIndicator": false,
+        "flashpointCelsius": 23.5,
+        "packageCount": 120,
+        "packageKind": "Drums",
+        "quantity": 24000.0,
+        "stowagePosition": "Bay 12-08-02"
+      }
+    ],
+    "portCallId": "pc-000991"
+  }
+}

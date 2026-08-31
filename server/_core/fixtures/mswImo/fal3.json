@@ -1,0 +1,35 @@
+{
+  "formType": "FAL3",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-fal3-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "callSign": "5NAB2",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "portCode": "NGAPP",
+    "arrivalDateTime": "2026-08-30T08:30:00Z",
+    "personsOnBoardCount": 24,
+    "periodOfStay": "3 days",
+    "storesItems": [
+      {
+        "articleName": "Fresh water",
+        "quantity": 120,
+        "quantityUnit": "tonnes",
+        "locationOnBoard": "Forepeak tank"
+      },
+      {
+        "articleName": "Frozen provisions",
+        "quantity": 1.5,
+        "quantityUnit": "tonnes",
+        "locationOnBoard": "Reefer chamber"
+      }
+    ],
+    "portCallId": "pc-000991"
+  }
+}

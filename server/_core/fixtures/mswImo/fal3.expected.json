@@ -1,0 +1,56 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal3-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL3",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:8b8e9035676201339eba78e8e91f62a4f19635bdd0a56018e0e051477d865d88"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "ShipsStoresDeclaration": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfArrival": "NGAPP",
+          "ArrivalDateTime": "2026-08-30T08:30:00Z",
+          "PersonsOnBoard": 24,
+          "PeriodOfStay": "3 days"
+        },
+        "Stores": {
+          "Article": [
+            {
+              "ArticleName": "Fresh water",
+              "Quantity": 120,
+              "QuantityUnit": "tonnes",
+              "PlaceOfStorageOnBoard": "Forepeak tank"
+            },
+            {
+              "ArticleName": "Frozen provisions",
+              "Quantity": 1.5,
+              "QuantityUnit": "tonnes",
+              "PlaceOfStorageOnBoard": "Reefer chamber"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL3": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}

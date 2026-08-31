@@ -1,0 +1,60 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal6-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL6",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:ca157c0bcc2bfc4e10155e1b27d45e3defdcf53fff7c579e4fde5cf1705fbcd4"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "PassengerList": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfArrival": "NGAPP",
+          "ArrivalDateTime": "2026-08-30T08:30:00Z"
+        },
+        "Passenger": {
+          "Item": [
+            {
+              "FamilyName": "Diallo",
+              "GivenNames": "Aminata",
+              "Nationality": "SN",
+              "DateOfBirth": "1990-07-22",
+              "PlaceOfBirth": "Dakar",
+              "IdentityDocument": {
+                "Type": "Passport",
+                "Number": "SN-P-99881"
+              },
+              "Embarkation": {
+                "Port": "SNDKR"
+              },
+              "Disembarkation": {
+                "Port": "NGAPP"
+              },
+              "TransitPassengerIndicator": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL6": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}

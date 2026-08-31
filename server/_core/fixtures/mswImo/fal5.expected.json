@@ -1,0 +1,70 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal5-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL5",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:b11dde800ed53cbf39bd75df71c6c55561d65c2946f89849b1aced95c582adc4"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "CrewList": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfArrival": "NGAPP",
+          "ArrivalDateTime": "2026-08-30T08:30:00Z"
+        },
+        "Crew": {
+          "CrewMember": [
+            {
+              "FamilyName": "Okonkwo",
+              "GivenNames": "Adaeze",
+              "Nationality": "NG",
+              "RankOrRating": "Master",
+              "DateOfBirth": "1979-04-12",
+              "PlaceOfBirth": "Enugu",
+              "IdentityDocument": {
+                "Type": "SeafarersID",
+                "Number": "NG-SID-77120",
+                "ExpiryDate": "2029-01-31"
+              },
+              "Embarkation": {
+                "Port": "NGLOS",
+                "Date": "2026-06-01"
+              }
+            },
+            {
+              "FamilyName": "Mensah",
+              "GivenNames": "Kofi",
+              "Nationality": "GH",
+              "RankOrRating": "Bosun",
+              "DateOfBirth": "1985-11-03",
+              "IdentityDocument": {
+                "Type": "Passport",
+                "Number": "G1234567"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL5": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}

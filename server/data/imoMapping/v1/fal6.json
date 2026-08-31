@@ -1,0 +1,147 @@
+{
+  "mappingVersion": "1.0",
+  "form": "FAL6",
+  "imoMessage": "IMOCompendium/PassengerList",
+  "reference": "IMO Compendium Reference Model, FAL.5/Circ.45 Annex",
+  "fields": [
+    {
+      "platform": "vesselName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Ship/Name",
+      "wcoPath": null
+    },
+    {
+      "platform": "vesselImoNumber",
+      "type": "string",
+      "pattern": "^[0-9]{7}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Ship/IMONumber",
+      "wcoPath": "Declaration/Consignment/TransportMeans/Identification"
+    },
+    {
+      "platform": "callSign",
+      "type": "string",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/PassengerList/Ship/CallSign",
+      "wcoPath": null
+    },
+    {
+      "platform": "flagCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Ship/FlagState",
+      "wcoPath": "Declaration/Consignment/TransportMeans/RegistrationNationality"
+    },
+    {
+      "platform": "masterName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Ship/MasterName",
+      "wcoPath": null
+    },
+    {
+      "platform": "portCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Voyage/PortOfArrival",
+      "wcoPath": null
+    },
+    {
+      "platform": "arrivalDateTime",
+      "type": "datetime",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Voyage/ArrivalDateTime",
+      "wcoPath": null
+    },
+    {
+      "platform": "passengers",
+      "type": "array",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/PassengerList/Passenger/Item",
+      "wcoPath": null,
+      "repeating": true,
+      "itemFields": [
+        {
+          "platform": "familyName",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "FamilyName",
+          "wcoPath": null
+        },
+        {
+          "platform": "givenNames",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "GivenNames",
+          "wcoPath": null
+        },
+        {
+          "platform": "nationalityCode",
+          "type": "string",
+          "pattern": "^[A-Z]{2}$",
+          "mandatory": true,
+          "imoPath": "Nationality",
+          "wcoPath": null
+        },
+        {
+          "platform": "dateOfBirth",
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "mandatory": true,
+          "imoPath": "DateOfBirth",
+          "wcoPath": null
+        },
+        {
+          "platform": "placeOfBirth",
+          "type": "string",
+          "mandatory": false,
+          "imoPath": "PlaceOfBirth",
+          "wcoPath": null
+        },
+        {
+          "platform": "identityDocumentType",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "IdentityDocument/Type",
+          "wcoPath": null
+        },
+        {
+          "platform": "identityDocumentNumber",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "IdentityDocument/Number",
+          "wcoPath": null
+        },
+        {
+          "platform": "portOfEmbarkationCode",
+          "type": "string",
+          "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+          "mandatory": true,
+          "imoPath": "Embarkation/Port",
+          "wcoPath": null
+        },
+        {
+          "platform": "portOfDisembarkationCode",
+          "type": "string",
+          "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+          "mandatory": true,
+          "imoPath": "Disembarkation/Port",
+          "wcoPath": null
+        },
+        {
+          "platform": "transitIndicator",
+          "type": "boolean",
+          "mandatory": false,
+          "imoPath": "TransitPassengerIndicator",
+          "wcoPath": null
+        }
+      ]
+    }
+  ],
+  "extensionFields": [
+    "portCallId"
+  ]
+}
