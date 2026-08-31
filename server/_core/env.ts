@@ -160,7 +160,7 @@ export const ENV = {
   openctiToken: process.env.OPENCTI_TOKEN ?? "",
 
   // ─── Kubecost ─────────────────────────────────────────────────────────────
-  kubecostUrl: process.env.KUBOCOST_URL ?? "http://localhost:9090",
+  kubecostUrl: process.env.KUBECOST_URL ?? "http://localhost:9090",
 
   // ─── ASEAN Single Window ──────────────────────────────────────────────────
   // Canonical owner of 8096 per PORTS.aseanSwService (Go bind default 8096).
