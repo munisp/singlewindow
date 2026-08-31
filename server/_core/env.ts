@@ -148,7 +148,7 @@ export const ENV = {
   // ─── SendGrid ─────────────────────────────────────────────────────────────
   sendgridApiKey: process.env.SENDGRID_API_KEY ?? "",
   sendgridFromEmail: process.env.SENDGRID_FROM_EMAIL ?? "noreply@tradegateway.gov.ng",
-  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway\u2122 NGSWTP",
+  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway™ NGSWTP",
 
   // ─── Wazuh ────────────────────────────────────────────────────────────────
   wazuhApiUrl: process.env.WAZUH_API_URL ?? "https://localhost:55000",
@@ -160,7 +160,7 @@ export const ENV = {
   openctiToken: process.env.OPENCTI_TOKEN ?? "",
 
   // ─── Kubecost ─────────────────────────────────────────────────────────────
-  kubecostUrl: process.env.KUBECOST_URL ?? "http://localhost:9090",
+  kubecostUrl: process.env.KUBOCOST_URL ?? "http://localhost:9090",
 
   // ─── ASEAN Single Window ──────────────────────────────────────────────────
   // Canonical owner of 8096 per PORTS.aseanSwService (Go bind default 8096).
@@ -298,6 +298,16 @@ export const ENV = {
   geoVesselEventsTopic: process.env.GEO_VESSEL_EVENTS_TOPIC ?? "vessels.events",
   geoVesselEventsDlqTopic: process.env.GEO_VESSEL_EVENTS_DLQ_TOPIC ?? "vessels.events.dlq",
   geoVesselKafkaGroupId: process.env.GEO_VESSEL_KAFKA_GROUP_ID ?? "tradegateway-geo-vessel-projection",
+
+  // ─── Maritime Single Window (MSW / IMO FAL; Phase 9 WP-C) ────────────────
+  // Producer signing key for the envelope v1.0 provenance JWS on
+  // maritime.msw.v1 (blueeconomy-singlewindow-msw). MSW_ENVELOPE_SIGNING_KEY
+  // is an Ed25519 private key (base64/hex 32-byte seed or PKCS#8 PEM);
+  // MSW_ENVELOPE_KEY_ID is the decimal epoch forming the JWS kid
+  // "blueeconomy-singlewindow-msw-<epoch>". NO defaults: unset → signing
+  // fails closed at emit time (no unsigned admission, no placeholder keys).
+  mswEnvelopeSigningKey: process.env.MSW_ENVELOPE_SIGNING_KEY ?? "",
+  mswEnvelopeKeyId: process.env.MSW_ENVELOPE_KEY_ID ?? "",
 
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
