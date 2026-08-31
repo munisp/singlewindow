@@ -1,0 +1,31 @@
+{
+  "formType": "FAL1",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-fal1-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "callSign": "5NAB2",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "registryPort": "Lagos",
+    "registryDate": "2015-03-11",
+    "registryNumber": "NG-REG-8842",
+    "agentName": "BlueWave Shipping Ltd",
+    "agentContact": "+234-1-555-0100",
+    "grossTonnage": 24117.5,
+    "netTonnage": 11890.2,
+    "positionInPort": "Berth 4, Apapa",
+    "purposeOfCall": "Cargo discharge and loading",
+    "arrivalDateTime": "2026-08-30T08:30:00Z",
+    "departureDateTime": "2026-09-02T18:00:00Z",
+    "lastPortCode": "GHAAO",
+    "nextPortCode": "CMLFW",
+    "cargoDescription": "Containers (general merchandise)",
+    "portCallId": "pc-000991"
+  }
+}

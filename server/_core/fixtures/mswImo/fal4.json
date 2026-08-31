@@ -1,0 +1,29 @@
+{
+  "formType": "FAL4",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-fal4-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "callSign": "5NAB2",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "portCode": "NGAPP",
+    "arrivalDateTime": "2026-08-30T08:30:00Z",
+    "crewEffects": [
+      {
+        "familyName": "Mensah",
+        "givenNames": "Kofi",
+        "rankOrRating": "Bosun",
+        "effectsDescription": "Cigarettes",
+        "quantity": 400,
+        "dutiableIndicator": true
+      }
+    ],
+    "portCallId": "pc-000991"
+  }
+}

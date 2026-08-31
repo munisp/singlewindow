@@ -1,0 +1,36 @@
+{
+  "formType": "FAL2",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-fal2-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "callSign": "5NAB2",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "portOfLoadingCode": "GHAAO",
+    "portOfDischargeCode": "NGAPP",
+    "cargoItems": [
+      {
+        "marksAndNumbers": "MSKU1234567",
+        "packageCount": 18,
+        "packageKind": "Pallets",
+        "goodsDescription": "Frozen mackerel cartons",
+        "grossWeightKg": 12400.5,
+        "measurementM3": 56.0
+      },
+      {
+        "marksAndNumbers": "TCLU7654321",
+        "packageCount": 40,
+        "packageKind": "Cartons",
+        "goodsDescription": "Textile fabrics",
+        "grossWeightKg": 8200.0
+      }
+    ],
+    "portCallId": "pc-000991"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal2-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL2",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:90aae1b0b06d931be463b12fb9f43870cde97feb87606b654c04291b0bbcddd0"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "CargoDeclaration": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfLoading": "GHAAO",
+          "PortOfDischarge": "NGAPP"
+        },
+        "Cargo": {
+          "ConsignmentItem": [
+            {
+              "MarksAndNumbers": "MSKU1234567",
+              "NumberOfPackages": 18,
+              "KindOfPackages": "Pallets",
+              "DescriptionOfGoods": "Frozen mackerel cartons",
+              "GrossWeightKg": 12400.5,
+              "MeasurementCubicMetres": 56
+            },
+            {
+              "MarksAndNumbers": "TCLU7654321",
+              "NumberOfPackages": 40,
+              "KindOfPackages": "Cartons",
+              "DescriptionOfGoods": "Textile fabrics",
+              "GrossWeightKg": 8200
+            }
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL2": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}

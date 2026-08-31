@@ -1,0 +1,365 @@
+{
+  "reportVersion": "1.0",
+  "layer": "imo-wco-wire-conformance",
+  "disclaimer": "Wire-conformance evidence for the IMO Compendium mapping layer. Fixture-based; no live cross-border connectivity is claimed.",
+  "startedAt": "2026-08-31T14:27:31.758Z",
+  "finishedAt": "2026-08-31T14:27:31.890Z",
+  "coverage": {
+    "FAL1": "19/20 mapped (+1 registered extensions)",
+    "FAL2": "14/15 mapped (+1 registered extensions)",
+    "FAL3": "14/15 mapped (+1 registered extensions)",
+    "FAL4": "14/15 mapped (+1 registered extensions)",
+    "FAL5": "19/20 mapped (+1 registered extensions)",
+    "FAL6": "18/19 mapped (+1 registered extensions)",
+    "FAL7": "19/20 mapped (+1 registered extensions)",
+    "MDOH": "18/20 mapped (+2 registered extensions)"
+  },
+  "coverageStats": {
+    "FAL1": {
+      "mapped": 19,
+      "extensions": 1,
+      "total": 20
+    },
+    "FAL2": {
+      "mapped": 14,
+      "extensions": 1,
+      "total": 15
+    },
+    "FAL3": {
+      "mapped": 14,
+      "extensions": 1,
+      "total": 15
+    },
+    "FAL4": {
+      "mapped": 14,
+      "extensions": 1,
+      "total": 15
+    },
+    "FAL5": {
+      "mapped": 19,
+      "extensions": 1,
+      "total": 20
+    },
+    "FAL6": {
+      "mapped": 18,
+      "extensions": 1,
+      "total": 19
+    },
+    "FAL7": {
+      "mapped": 19,
+      "extensions": 1,
+      "total": 20
+    },
+    "MDOH": {
+      "mapped": 18,
+      "extensions": 2,
+      "total": 20
+    }
+  },
+  "scenarios": [
+    {
+      "id": "fal1-roundtrip",
+      "form": "fal1",
+      "description": "FAL1 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fal2-roundtrip",
+      "form": "fal2",
+      "description": "FAL2 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fal3-roundtrip",
+      "form": "fal3",
+      "description": "FAL3 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fal4-roundtrip",
+      "form": "fal4",
+      "description": "FAL4 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fal5-roundtrip",
+      "form": "fal5",
+      "description": "FAL5 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fal6-roundtrip",
+      "form": "fal6",
+      "description": "FAL6 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fal7-roundtrip",
+      "form": "fal7",
+      "description": "FAL7 golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "mdoh-roundtrip",
+      "form": "mdoh",
+      "description": "MDOH golden export + round-trip",
+      "passed": true,
+      "checks": [
+        {
+          "name": "export-ok",
+          "passed": true
+        },
+        {
+          "name": "export-matches-golden",
+          "passed": true
+        },
+        {
+          "name": "roundtrip-lossless",
+          "passed": true
+        },
+        {
+          "name": "provenance-stamped",
+          "passed": true
+        },
+        {
+          "name": "personal-data-flag",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "id": "fail-closed-export",
+      "description": "fail-closed export rejections",
+      "passed": true,
+      "checks": [
+        {
+          "name": "reject-unmapped-field",
+          "passed": true,
+          "detail": "IMO_EXPORT_UNMAPPED_ELEMENT"
+        },
+        {
+          "name": "reject-missing-mandatory",
+          "passed": true,
+          "detail": "IMO_EXPORT_MISSING_MANDATORY"
+        },
+        {
+          "name": "reject-type-violation",
+          "passed": true,
+          "detail": "IMO_EXPORT_TYPE_VIOLATION"
+        },
+        {
+          "name": "reject-digest-mismatch",
+          "passed": true,
+          "detail": "IMO_EXPORT_DIGEST_MISMATCH"
+        }
+      ]
+    },
+    {
+      "id": "signature-and-replay",
+      "description": "envelope signature, authority JWS, JWKS pin, replay reserve",
+      "passed": true,
+      "checks": [
+        {
+          "name": "envelope-verify-ok",
+          "passed": true
+        },
+        {
+          "name": "envelope-tamper-rejected",
+          "passed": true,
+          "detail": "payload_mismatch"
+        },
+        {
+          "name": "authority-jws-verify-ok",
+          "passed": true
+        },
+        {
+          "name": "authority-jws-bad-signature-rejected",
+          "passed": true
+        },
+        {
+          "name": "authority-jws-disallowed-alg-rejected",
+          "passed": true
+        },
+        {
+          "name": "jwks-pin-mismatch-rejected",
+          "passed": true
+        },
+        {
+          "name": "replay-first-reserve-ok",
+          "passed": true
+        },
+        {
+          "name": "replay-second-reserve-rejected",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0
+  },
+  "ephemeralKeyWarning": "Report signed with an EPHEMERAL key (CONFORMANCE_ALLOW_EPHEMERAL_KEY=1) — local/dev evidence only, not attestable.",
+  "signature": {
+    "alg": "EdDSA",
+    "kid": "msw-conformance-ephemeral",
+    "canonical": "JCS(RFC8785)",
+    "value": "c6FfB71sxYdk5XSfIZmABfJAdjaTT/VsG8WcSJJX5WVNlVw8rj8miVOXFq8T+thmn2uFmGC5wTBah9z8/jw/Bw==",
+    "ephemeral": true
+  }
+}

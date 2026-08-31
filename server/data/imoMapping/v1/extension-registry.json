@@ -1,0 +1,50 @@
+{
+  "registryVersion": "1.0",
+  "extensions": [
+    {
+      "form": "FAL1",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "FAL2",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "FAL3",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "FAL4",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "FAL5",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "FAL6",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "FAL7",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "MDOH",
+      "field": "portCallId",
+      "reason": "Anchor to the port-interoperability boundary port-call record; platform-internal correlation, no IMO element."
+    },
+    {
+      "form": "MDOH",
+      "field": "submittedByAgentReference",
+      "reason": "Tokenized platform reference of the submitting shipping agent; platform-internal provenance, no IMO element."
+    }
+  ]
+}

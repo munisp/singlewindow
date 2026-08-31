@@ -1,0 +1,115 @@
+{
+  "mappingVersion": "1.0",
+  "form": "FAL3",
+  "imoMessage": "IMOCompendium/ShipsStoresDeclaration",
+  "reference": "IMO Compendium Reference Model, FAL.5/Circ.45 Annex",
+  "fields": [
+    {
+      "platform": "vesselName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Ship/Name",
+      "wcoPath": null
+    },
+    {
+      "platform": "vesselImoNumber",
+      "type": "string",
+      "pattern": "^[0-9]{7}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Ship/IMONumber",
+      "wcoPath": "Declaration/Consignment/TransportMeans/Identification"
+    },
+    {
+      "platform": "callSign",
+      "type": "string",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Ship/CallSign",
+      "wcoPath": null
+    },
+    {
+      "platform": "flagCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Ship/FlagState",
+      "wcoPath": "Declaration/Consignment/TransportMeans/RegistrationNationality"
+    },
+    {
+      "platform": "masterName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Ship/MasterName",
+      "wcoPath": null
+    },
+    {
+      "platform": "portCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Voyage/PortOfArrival",
+      "wcoPath": null
+    },
+    {
+      "platform": "arrivalDateTime",
+      "type": "datetime",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Voyage/ArrivalDateTime",
+      "wcoPath": null
+    },
+    {
+      "platform": "personsOnBoardCount",
+      "type": "integer",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Voyage/PersonsOnBoard",
+      "wcoPath": null
+    },
+    {
+      "platform": "periodOfStay",
+      "type": "string",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Voyage/PeriodOfStay",
+      "wcoPath": null
+    },
+    {
+      "platform": "storesItems",
+      "type": "array",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/ShipsStoresDeclaration/Stores/Article",
+      "wcoPath": "Declaration/GoodsItem",
+      "repeating": true,
+      "itemFields": [
+        {
+          "platform": "articleName",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "ArticleName",
+          "wcoPath": null
+        },
+        {
+          "platform": "quantity",
+          "type": "number",
+          "mandatory": true,
+          "imoPath": "Quantity",
+          "wcoPath": null
+        },
+        {
+          "platform": "quantityUnit",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "QuantityUnit",
+          "wcoPath": null
+        },
+        {
+          "platform": "locationOnBoard",
+          "type": "string",
+          "mandatory": false,
+          "imoPath": "PlaceOfStorageOnBoard",
+          "wcoPath": null
+        }
+      ]
+    }
+  ],
+  "extensionFields": [
+    "portCallId"
+  ]
+}

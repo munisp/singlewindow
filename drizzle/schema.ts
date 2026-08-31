@@ -3793,3 +3793,33 @@ export const tradeFinanceConsentEvidence = pgTable("trade_finance_consent_eviden
 ]);
 export type TradeFinanceConsentEvidence = typeof tradeFinanceConsentEvidence.$inferSelect;
 export type InsertTradeFinanceConsentEvidence = typeof tradeFinanceConsentEvidence.$inferInsert;
+
+// ─── Phase 10 WP-3: cross-border MSW exchange foreign drafts ─────────────────
+// Inbound IMO Compendium messages (mswExchange.ts ingest) persist as DRAFTS
+// here — provenance-stamped, never auto-accepted; they must traverse the
+// platform's own submission/maker-checker lifecycle before any agency use.
+export const mswForeignDraftStatusEnum = pgEnum("msw_foreign_draft_status", ["DRAFT", "ADMITTED", "REJECTED"]);
+
+export const mswForeignDrafts = pgTable("msw_foreign_drafts", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswfd-<uuid fragment>).
+  draftId: varchar("draft_id", { length: 40 }).notNull().unique(),
+  formType: mswFormTypeEnum("form_type").notNull(),
+  // Provenance stamp (docs/imo-wco-conformance.md §5).
+  foreignSender: varchar("foreign_sender", { length: 128 }).notNull(),
+  sourceMessageId: varchar("source_message_id", { length: 128 }).notNull(),
+  envelopeEventId: varchar("envelope_event_id", { length: 80 }).notNull(),
+  // JCS-canonical sha256 digest of the inbound IMO payload (integrity anchor).
+  envelopeDigestSha256: varchar("envelope_digest_sha256", { length: 80 }).notNull(),
+  // Reverse-mapped platform payload incl. embedded provenance block.
+  formPayload: jsonb("form_payload").notNull(),
+  // NDPA PERSONAL category flag (FAL4/FAL5/FAL6/MDOH) — floors at RESTRICTED.
+  containsPersonalData: boolean("contains_personal_data").notNull(),
+  status: mswForeignDraftStatusEnum("status").notNull().default("DRAFT"),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_foreign_drafts_sender").on(t.foreignSender),
+  unique("msw_foreign_drafts_message_unique").on(t.foreignSender, t.sourceMessageId),
+]);
+export type MswForeignDraft = typeof mswForeignDrafts.$inferSelect;
+export type InsertMswForeignDraft = typeof mswForeignDrafts.$inferInsert;

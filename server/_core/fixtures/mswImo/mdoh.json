@@ -1,0 +1,37 @@
+{
+  "formType": "MDOH",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-mdoh-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "portCode": "NGAPP",
+    "arrivalDateTime": "2026-08-30T08:30:00Z",
+    "lastPortCode": "GHAAO",
+    "crewCount": 24,
+    "passengerCount": 1,
+    "deathOnBoardIndicator": false,
+    "diseaseOnBoardIndicator": false,
+    "sanitaryMeasuresAppliedIndicator": false,
+    "sanitaryControlCertificateType": "SSCEC",
+    "sanitaryControlCertificateExpiry": "2027-02-28",
+    "visitedAffectedAreaIndicator": false,
+    "portsOfCallLast30Days": [
+      {
+        "portCode": "GHAAO",
+        "departureDate": "2026-08-24"
+      },
+      {
+        "portCode": "CIABJ"
+      }
+    ],
+    "portCallId": "pc-000991",
+    "submittedByAgentReference": "agent-ref-77aa"
+  }
+}

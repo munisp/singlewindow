@@ -1,0 +1,115 @@
+{
+  "mappingVersion": "1.0",
+  "form": "FAL4",
+  "imoMessage": "IMOCompendium/CrewsEffectsDeclaration",
+  "reference": "IMO Compendium Reference Model, FAL.5/Circ.45 Annex",
+  "fields": [
+    {
+      "platform": "vesselName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Ship/Name",
+      "wcoPath": null
+    },
+    {
+      "platform": "vesselImoNumber",
+      "type": "string",
+      "pattern": "^[0-9]{7}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Ship/IMONumber",
+      "wcoPath": "Declaration/Consignment/TransportMeans/Identification"
+    },
+    {
+      "platform": "callSign",
+      "type": "string",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Ship/CallSign",
+      "wcoPath": null
+    },
+    {
+      "platform": "flagCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Ship/FlagState",
+      "wcoPath": "Declaration/Consignment/TransportMeans/RegistrationNationality"
+    },
+    {
+      "platform": "masterName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Ship/MasterName",
+      "wcoPath": null
+    },
+    {
+      "platform": "portCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Voyage/PortOfArrival",
+      "wcoPath": null
+    },
+    {
+      "platform": "arrivalDateTime",
+      "type": "datetime",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/Voyage/ArrivalDateTime",
+      "wcoPath": null
+    },
+    {
+      "platform": "crewEffects",
+      "type": "array",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CrewsEffectsDeclaration/CrewEffects/Item",
+      "wcoPath": "Declaration/GoodsItem",
+      "repeating": true,
+      "itemFields": [
+        {
+          "platform": "familyName",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "CrewMember/FamilyName",
+          "wcoPath": null
+        },
+        {
+          "platform": "givenNames",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "CrewMember/GivenNames",
+          "wcoPath": null
+        },
+        {
+          "platform": "rankOrRating",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "CrewMember/RankOrRating",
+          "wcoPath": null
+        },
+        {
+          "platform": "effectsDescription",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "EffectsInExcessOfAllowance/Description",
+          "wcoPath": null
+        },
+        {
+          "platform": "quantity",
+          "type": "number",
+          "mandatory": true,
+          "imoPath": "EffectsInExcessOfAllowance/Quantity",
+          "wcoPath": null
+        },
+        {
+          "platform": "dutiableIndicator",
+          "type": "boolean",
+          "mandatory": false,
+          "imoPath": "EffectsInExcessOfAllowance/DutiableIndicator",
+          "wcoPath": null
+        }
+      ]
+    }
+  ],
+  "extensionFields": [
+    "portCallId"
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "mappingVersion": "1.0",
+  "form": "FAL2",
+  "imoMessage": "IMOCompendium/CargoDeclaration",
+  "reference": "IMO Compendium Reference Model, FAL.5/Circ.45 Annex",
+  "fields": [
+    {
+      "platform": "vesselName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Ship/Name",
+      "wcoPath": null
+    },
+    {
+      "platform": "vesselImoNumber",
+      "type": "string",
+      "pattern": "^[0-9]{7}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Ship/IMONumber",
+      "wcoPath": "Declaration/Consignment/TransportMeans/Identification"
+    },
+    {
+      "platform": "callSign",
+      "type": "string",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/CargoDeclaration/Ship/CallSign",
+      "wcoPath": null
+    },
+    {
+      "platform": "flagCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Ship/FlagState",
+      "wcoPath": "Declaration/Consignment/TransportMeans/RegistrationNationality"
+    },
+    {
+      "platform": "masterName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Ship/MasterName",
+      "wcoPath": null
+    },
+    {
+      "platform": "portOfLoadingCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Voyage/PortOfLoading",
+      "wcoPath": "Declaration/Consignment/LoadingLocation/Identification"
+    },
+    {
+      "platform": "portOfDischargeCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Voyage/PortOfDischarge",
+      "wcoPath": "Declaration/Consignment/UnloadingLocation/Identification"
+    },
+    {
+      "platform": "cargoItems",
+      "type": "array",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/CargoDeclaration/Cargo/ConsignmentItem",
+      "wcoPath": "Declaration/Consignment/GoodsItem",
+      "repeating": true,
+      "itemFields": [
+        {
+          "platform": "marksAndNumbers",
+          "type": "string",
+          "mandatory": false,
+          "imoPath": "MarksAndNumbers",
+          "wcoPath": null
+        },
+        {
+          "platform": "packageCount",
+          "type": "integer",
+          "mandatory": true,
+          "imoPath": "NumberOfPackages",
+          "wcoPath": null
+        },
+        {
+          "platform": "packageKind",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "KindOfPackages",
+          "wcoPath": null
+        },
+        {
+          "platform": "goodsDescription",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "DescriptionOfGoods",
+          "wcoPath": null
+        },
+        {
+          "platform": "grossWeightKg",
+          "type": "number",
+          "mandatory": false,
+          "imoPath": "GrossWeightKg",
+          "wcoPath": null
+        },
+        {
+          "platform": "measurementM3",
+          "type": "number",
+          "mandatory": false,
+          "imoPath": "MeasurementCubicMetres",
+          "wcoPath": null
+        }
+      ]
+    }
+  ],
+  "extensionFields": [
+    "portCallId"
+  ]
+}

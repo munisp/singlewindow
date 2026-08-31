@@ -1,0 +1,152 @@
+{
+  "mappingVersion": "1.0",
+  "form": "FAL7",
+  "imoMessage": "IMOCompendium/DangerousGoodsManifest",
+  "reference": "IMO Compendium Reference Model, FAL.5/Circ.45 Annex",
+  "fields": [
+    {
+      "platform": "vesselName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Ship/Name",
+      "wcoPath": null
+    },
+    {
+      "platform": "vesselImoNumber",
+      "type": "string",
+      "pattern": "^[0-9]{7}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Ship/IMONumber",
+      "wcoPath": "Declaration/Consignment/TransportMeans/Identification"
+    },
+    {
+      "platform": "callSign",
+      "type": "string",
+      "mandatory": false,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Ship/CallSign",
+      "wcoPath": null
+    },
+    {
+      "platform": "flagCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Ship/FlagState",
+      "wcoPath": "Declaration/Consignment/TransportMeans/RegistrationNationality"
+    },
+    {
+      "platform": "masterName",
+      "type": "string",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Ship/MasterName",
+      "wcoPath": null
+    },
+    {
+      "platform": "portOfLoadingCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Voyage/PortOfLoading",
+      "wcoPath": null
+    },
+    {
+      "platform": "portOfDischargeCode",
+      "type": "string",
+      "pattern": "^[A-Z]{2}[A-Z0-9]{3}$",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/Voyage/PortOfDischarge",
+      "wcoPath": null
+    },
+    {
+      "platform": "dangerousGoodsItems",
+      "type": "array",
+      "mandatory": true,
+      "imoPath": "IMOCompendium/DangerousGoodsManifest/DangerousGoods/Item",
+      "wcoPath": "Declaration/Consignment/GoodsItem",
+      "repeating": true,
+      "itemFields": [
+        {
+          "platform": "unNumber",
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "mandatory": true,
+          "imoPath": "UNDGNumber",
+          "wcoPath": null
+        },
+        {
+          "platform": "properShippingName",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "ProperShippingName",
+          "wcoPath": null
+        },
+        {
+          "platform": "hazardClass",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "IMDGClass",
+          "wcoPath": null
+        },
+        {
+          "platform": "packingGroup",
+          "type": "string",
+          "mandatory": false,
+          "imoPath": "PackingGroup",
+          "wcoPath": null
+        },
+        {
+          "platform": "subsidiaryRisks",
+          "type": "string",
+          "mandatory": false,
+          "imoPath": "SubsidiaryRisks",
+          "wcoPath": null
+        },
+        {
+          "platform": "marinePollutantIndicator",
+          "type": "boolean",
+          "mandatory": true,
+          "imoPath": "MarinePollutantIndicator",
+          "wcoPath": null
+        },
+        {
+          "platform": "flashpointCelsius",
+          "type": "number",
+          "mandatory": false,
+          "imoPath": "FlashpointCelsius",
+          "wcoPath": null
+        },
+        {
+          "platform": "packageCount",
+          "type": "integer",
+          "mandatory": true,
+          "imoPath": "NumberAndKindOfPackages/Count",
+          "wcoPath": null
+        },
+        {
+          "platform": "packageKind",
+          "type": "string",
+          "mandatory": true,
+          "imoPath": "NumberAndKindOfPackages/Kind",
+          "wcoPath": null
+        },
+        {
+          "platform": "quantity",
+          "type": "number",
+          "mandatory": false,
+          "imoPath": "MassOrVolume/Quantity",
+          "wcoPath": null
+        },
+        {
+          "platform": "stowagePosition",
+          "type": "string",
+          "mandatory": false,
+          "imoPath": "StowagePositionOnBoard",
+          "wcoPath": null
+        }
+      ]
+    }
+  ],
+  "extensionFields": [
+    "portCallId"
+  ]
+}

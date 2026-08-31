@@ -1,0 +1,54 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal1-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL1",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:11313eab4ba37b60e3d5ac0389887c19faabd4a17998582a42b5f61eb7da90a7"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "GeneralDeclaration": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo",
+          "RegistryPort": "Lagos",
+          "RegistryDate": "2015-03-11",
+          "RegistryNumber": "NG-REG-8842",
+          "GrossTonnage": 24117.5,
+          "NetTonnage": 11890.2
+        },
+        "Agent": {
+          "Name": "BlueWave Shipping Ltd",
+          "Contact": "+234-1-555-0100"
+        },
+        "Voyage": {
+          "BerthPosition": "Berth 4, Apapa",
+          "PurposeOfCall": "Cargo discharge and loading",
+          "ArrivalDateTime": "2026-08-30T08:30:00Z",
+          "DepartureDateTime": "2026-09-02T18:00:00Z",
+          "LastPortOfCall": "GHAAO",
+          "NextPortOfCall": "CMLFW"
+        },
+        "Cargo": {
+          "BriefDescription": "Containers (general merchandise)"
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL1": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}

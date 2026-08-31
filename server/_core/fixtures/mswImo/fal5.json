@@ -1,0 +1,43 @@
+{
+  "formType": "FAL5",
+  "declarationId": "mswd-000042",
+  "visitId": "mswv-000017",
+  "version": 1,
+  "sender": "blueeconomy-msw-ng",
+  "messageId": "fixture-fal5-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "formPayload": {
+    "vesselName": "MT BLUE HORIZON",
+    "vesselImoNumber": "9074729",
+    "callSign": "5NAB2",
+    "flagCode": "NG",
+    "masterName": "Adaeze Okonkwo",
+    "portCode": "NGAPP",
+    "arrivalDateTime": "2026-08-30T08:30:00Z",
+    "crew": [
+      {
+        "familyName": "Okonkwo",
+        "givenNames": "Adaeze",
+        "nationalityCode": "NG",
+        "rankOrRating": "Master",
+        "dateOfBirth": "1979-04-12",
+        "placeOfBirth": "Enugu",
+        "identityDocumentType": "SeafarersID",
+        "identityDocumentNumber": "NG-SID-77120",
+        "identityDocumentExpiry": "2029-01-31",
+        "portOfEmbarkationCode": "NGLOS",
+        "dateOfEmbarkation": "2026-06-01"
+      },
+      {
+        "familyName": "Mensah",
+        "givenNames": "Kofi",
+        "nationalityCode": "GH",
+        "rankOrRating": "Bosun",
+        "dateOfBirth": "1985-11-03",
+        "identityDocumentType": "Passport",
+        "identityDocumentNumber": "G1234567"
+      }
+    ],
+    "portCallId": "pc-000991"
+  }
+}

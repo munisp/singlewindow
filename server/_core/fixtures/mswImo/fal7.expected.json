@@ -1,0 +1,58 @@
+{
+  "messageType": "IMO-MSW-FAL-EXPORT",
+  "specVersion": "1.0",
+  "messageId": "fixture-fal7-00000001",
+  "issuedAt": "2026-08-31T12:00:00Z",
+  "sender": "blueeconomy-msw-ng",
+  "formType": "FAL7",
+  "source": {
+    "declarationId": "mswd-000042",
+    "visitId": "mswv-000017",
+    "version": 1,
+    "formPayloadDigestSha256": "sha256:64884d033a97cf1c9bd305b94fed8bbab7e1158fcdbf62f09e2d9e9d6a52348c"
+  },
+  "imoMessage": {
+    "IMOCompendium": {
+      "DangerousGoodsManifest": {
+        "Ship": {
+          "Name": "MT BLUE HORIZON",
+          "IMONumber": "9074729",
+          "CallSign": "5NAB2",
+          "FlagState": "NG",
+          "MasterName": "Adaeze Okonkwo"
+        },
+        "Voyage": {
+          "PortOfLoading": "GHAAO",
+          "PortOfDischarge": "NGAPP"
+        },
+        "DangerousGoods": {
+          "Item": [
+            {
+              "UNDGNumber": "1263",
+              "ProperShippingName": "Paint",
+              "IMDGClass": "3",
+              "PackingGroup": "II",
+              "MarinePollutantIndicator": false,
+              "FlashpointCelsius": 23.5,
+              "NumberAndKindOfPackages": {
+                "Count": 120,
+                "Kind": "Drums"
+              },
+              "MassOrVolume": {
+                "Quantity": 24000
+              },
+              "StowagePositionOnBoard": "Bay 12-08-02"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "extensions": {
+    "blueeconomy": {
+      "FAL7": {
+        "portCallId": "pc-000991"
+      }
+    }
+  }
+}
