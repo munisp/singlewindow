@@ -109,6 +109,49 @@ export async function fetchEsenShipEntryNotice(
   );
 }
 
+export interface EsenPortCallVerification {
+  /** True ONLY when the upstream e-SEN registry holds a registered notice matching BOTH IMO and UN/LOCODE. */
+  verified: boolean;
+  vesselImoNumber: string;
+  portCode: string;
+  status: string;
+}
+
+export function parseEsenPortCallVerification(body: unknown): EsenPortCallVerification {
+  const verified = (body as Record<string, unknown> | null)?.verified;
+  if (typeof verified !== "boolean") throw new Error("missing verified");
+  return {
+    verified,
+    vesselImoNumber: requireString(body, "vesselImoNumber"),
+    portCode: requireString(body, "portCode"),
+    status: requireString(body, "status"),
+  };
+}
+
+/**
+ * Verifies a port call by IMO + UN/LOCODE against the e-SEN registry
+ * (/v1/port-calls/verify) — the upstream behind the MSW
+ * PORT_CALL_UNAVAILABLE gap closure. verified=true only when a registered
+ * e-SEN matches both; an unknown IMO/port is an honest verified:false /
+ * NOT_FOUND, never an error, never fabricated.
+ */
+export async function verifyEsenPortCall(
+  req: { vesselImoNumber: string; portCode: string; portCallId?: string },
+  principal: { principalId: string; principalRole: string }
+) {
+  return npaEsenAdapter.send(
+    {
+      path: "/v1/port-calls/verify",
+      eventType: "oga.npa.esen.port_call_verification_requested.v1",
+      payload: { ...req },
+      principalId: principal.principalId,
+      principalRole: principal.principalRole,
+      classification: "INTERNAL",
+    },
+    parseEsenPortCallVerification
+  );
+}
+
 /** Builds the signed egress envelope without network I/O (verification/tests). */
 export function buildEsenShipEntryNoticeEnvelope(
   req: EsenShipEntryNotice,

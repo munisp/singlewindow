@@ -1,0 +1,313 @@
+{
+  "reportVersion": "1.0",
+  "reportType": "agency-sandbox-e2e-conformance",
+  "generatedAt": "2026-08-31T15:07:52.258Z",
+  "evidenceGeneratedAt": "2026-08-31T15:07:45.501Z",
+  "suite": "singlewindow server/externalAdapters.e2e.test.ts + server/mswPortCall.e2e.test.ts (live blueeconomy-agency-sandbox)",
+  "scenarioCount": 40,
+  "scenariosPassed": 40,
+  "scenariosDigestSha256": "8979420d4b49525770a5dbff463431bec3b6dfd778babdad483d7ddabe178dab",
+  "scenarios": [
+    {
+      "adapterId": "ncs-bodogwu",
+      "path": "happy",
+      "outcome": "pass",
+      "requestSha256": "cc24c48712a0a33939c7522f49ae6b29c2caf12c03a4fad0efd65cb115344e85",
+      "responseSha256": "bcba281e5e7ad36df33c14c935571177d3ad6d1c7131d2c14386f8dab7ceb403",
+      "responseKid": "ncs-bodogwu-sandbox-1",
+      "signatureVerified": true,
+      "detail": "typed receipt status=ACCEPTED; response envelope JWS verified against sandbox JWKS"
+    },
+    {
+      "adapterId": "ncs-bodogwu",
+      "path": "refusal",
+      "outcome": "pass",
+      "requestSha256": "859bbfdba35c133139d565cad77c0837418668f1faabe9f5b625d599a7c4e955",
+      "responseSha256": "c8eb190e87bfce5ed057bcdcf38ac6ad3b24cb666e73a642369b4b7973ca9b3e",
+      "responseKid": "ncs-bodogwu-sandbox-1",
+      "detail": "typed refusal surfaced: status=REJECTED (signed refusal detail in the response envelope payload)"
+    },
+    {
+      "adapterId": "ncs-bodogwu",
+      "path": "fault",
+      "outcome": "pass",
+      "detail": "FAULT scenario surfaced as AdapterTransportError UPSTREAM_ERROR (HTTP 503); no fabricated success"
+    },
+    {
+      "adapterId": "ncs-bodogwu",
+      "path": "timeout",
+      "outcome": "pass",
+      "detail": "TIMEOUT scenario tripped the adapter deadline in 10004ms (sandbox hangs 30s); fail closed"
+    },
+    {
+      "adapterId": "ncs-bodogwu",
+      "path": "trust",
+      "outcome": "pass",
+      "responseSha256": "1a6337a5d5321dccc21ced8a894c169e1947ba8ffc0a9eafa76d322ee3846ef6",
+      "responseKid": "ncs-bodogwu-sandbox-99",
+      "detail": "unknown-kid response rejected with untrusted_kid against the trusted JWKS set; verifies only under the rogue JWKS"
+    },
+    {
+      "adapterId": "cbn-tms",
+      "path": "happy",
+      "outcome": "pass",
+      "requestSha256": "101834deb330ccfb1e380565ce88b4aff12fcf94d9b0d73191ef15c9fd47795a",
+      "responseSha256": "bcda5d6e933e2ade515e25fd9fcf8bb750f3fd0f1f4b24d10190b7a8ab726c38",
+      "responseKid": "cbn-tms-sandbox-1",
+      "signatureVerified": true,
+      "detail": "typed receipt status=REGISTERED; response envelope JWS verified against sandbox JWKS"
+    },
+    {
+      "adapterId": "cbn-tms",
+      "path": "refusal",
+      "outcome": "pass",
+      "requestSha256": "6d4560d8e013a5ba8b165962d9457bb4e901ea673d1c53bd561a873ca4baba33",
+      "responseSha256": "2ca110e8e0ca8ae96e3b603366aa2e3faeabfc4411007d83fea50c89513c1b2b",
+      "responseKid": "cbn-tms-sandbox-1",
+      "detail": "typed refusal surfaced: status=REJECTED (signed refusal detail in the response envelope payload)"
+    },
+    {
+      "adapterId": "cbn-tms",
+      "path": "fault",
+      "outcome": "pass",
+      "detail": "FAULT scenario surfaced as AdapterTransportError UPSTREAM_ERROR (HTTP 503); no fabricated success"
+    },
+    {
+      "adapterId": "cbn-tms",
+      "path": "timeout",
+      "outcome": "pass",
+      "detail": "TIMEOUT scenario tripped the adapter deadline in 10003ms (sandbox hangs 30s); fail closed"
+    },
+    {
+      "adapterId": "cbn-tms",
+      "path": "trust",
+      "outcome": "pass",
+      "responseSha256": "f9bf7f59d4345a4c5a04ee7cd9cd8b0a14b3d928793d4e06a77eaa13b123687b",
+      "responseKid": "cbn-tms-sandbox-99",
+      "detail": "unknown-kid response rejected with untrusted_kid against the trusted JWKS set; verifies only under the rogue JWKS"
+    },
+    {
+      "adapterId": "nepc",
+      "path": "happy",
+      "outcome": "pass",
+      "requestSha256": "e9429f40de8a29b0274fafbd4351122e795bdf7a45b985e767487c72433ab563",
+      "responseSha256": "666d37d0f6ca8a69cb4f5458be76d9b8d1be5f0a6115252ea27195c7584e3b58",
+      "responseKid": "nepc-sandbox-1",
+      "signatureVerified": true,
+      "detail": "typed receipt status=ACCEPTED; response envelope JWS verified against sandbox JWKS"
+    },
+    {
+      "adapterId": "nepc",
+      "path": "refusal",
+      "outcome": "pass",
+      "requestSha256": "2d8c01305626bb8ad72d247c76c59387b44dc072bda84103401247f72fbc05eb",
+      "responseSha256": "f37d161e21e09c7b9be0042a784b71cd67d4ef4e7034ec9fae8cc40402e7891d",
+      "responseKid": "nepc-sandbox-1",
+      "detail": "typed refusal surfaced: status=REJECTED (signed refusal detail in the response envelope payload)"
+    },
+    {
+      "adapterId": "nepc",
+      "path": "fault",
+      "outcome": "pass",
+      "detail": "FAULT scenario surfaced as AdapterTransportError UPSTREAM_ERROR (HTTP 503); no fabricated success"
+    },
+    {
+      "adapterId": "nepc",
+      "path": "timeout",
+      "outcome": "pass",
+      "detail": "TIMEOUT scenario tripped the adapter deadline in 10004ms (sandbox hangs 30s); fail closed"
+    },
+    {
+      "adapterId": "nepc",
+      "path": "trust",
+      "outcome": "pass",
+      "responseSha256": "1c06c993685e9d8bb4b1f6bf9d51045505f74ecc684b9267a34410f3ae9353af",
+      "responseKid": "nepc-sandbox-99",
+      "detail": "unknown-kid response rejected with untrusted_kid against the trusted JWKS set; verifies only under the rogue JWKS"
+    },
+    {
+      "adapterId": "nis",
+      "path": "happy",
+      "outcome": "pass",
+      "requestSha256": "a724bce1f3e25453825b63ae3bb36598b3ab83feb19964552782c48bf23ca74d",
+      "responseSha256": "7d71c73bd4e1d50e7b9f094db63fcacbdc1fbfce172b02b576b084658941b567",
+      "responseKid": "nis-sandbox-1",
+      "signatureVerified": true,
+      "detail": "typed receipt status=ACKNOWLEDGED; response envelope JWS verified against sandbox JWKS"
+    },
+    {
+      "adapterId": "nis",
+      "path": "refusal",
+      "outcome": "pass",
+      "requestSha256": "92fb41dd33bf8b7d44274226876b69bd3d9e7712597b99304794cf6dae164c09",
+      "responseSha256": "45f1ba3b1254b3d0b68e096705ca5e64fc0993b7c75558bdb37fc4fd0751b9b2",
+      "responseKid": "nis-sandbox-1",
+      "detail": "typed refusal surfaced: status=REJECTED (signed refusal detail in the response envelope payload)"
+    },
+    {
+      "adapterId": "nis",
+      "path": "fault",
+      "outcome": "pass",
+      "detail": "FAULT scenario surfaced as AdapterTransportError UPSTREAM_ERROR (HTTP 503); no fabricated success"
+    },
+    {
+      "adapterId": "nis",
+      "path": "timeout",
+      "outcome": "pass",
+      "detail": "TIMEOUT scenario tripped the adapter deadline in 10003ms (sandbox hangs 30s); fail closed"
+    },
+    {
+      "adapterId": "nis",
+      "path": "trust",
+      "outcome": "pass",
+      "responseSha256": "345f810d98bb7c012636d3a48c430119cb80b3389086e28673a26f5552ced87a",
+      "responseKid": "nis-sandbox-99",
+      "detail": "unknown-kid response rejected with untrusted_kid against the trusted JWKS set; verifies only under the rogue JWKS"
+    },
+    {
+      "adapterId": "port-health",
+      "path": "happy",
+      "outcome": "pass",
+      "requestSha256": "d5c0b3476d69855a582ee0f6a0858a2a8ec37fb870cda714cf04f7a0c9cf564b",
+      "responseSha256": "eb52dda0944501bc0e999d6b1a3e862e384742437c21e2e2cc76a24385f7ffee",
+      "responseKid": "port-health-sandbox-1",
+      "signatureVerified": true,
+      "detail": "typed receipt status=ACKNOWLEDGED; response envelope JWS verified against sandbox JWKS"
+    },
+    {
+      "adapterId": "port-health",
+      "path": "refusal",
+      "outcome": "pass",
+      "requestSha256": "0a8970d0cc3f5864a64daa845d357933115f0a55e033d48b1f44e3732bed2953",
+      "responseSha256": "a1f2c7f39c0ae8135ad4072ea365b2abec077e597f74d86aefdfd2eb639ad704",
+      "responseKid": "port-health-sandbox-1",
+      "detail": "typed refusal surfaced: status=REJECTED (signed refusal detail in the response envelope payload)"
+    },
+    {
+      "adapterId": "port-health",
+      "path": "fault",
+      "outcome": "pass",
+      "detail": "FAULT scenario surfaced as AdapterTransportError UPSTREAM_ERROR (HTTP 503); no fabricated success"
+    },
+    {
+      "adapterId": "port-health",
+      "path": "timeout",
+      "outcome": "pass",
+      "detail": "TIMEOUT scenario tripped the adapter deadline in 10002ms (sandbox hangs 30s); fail closed"
+    },
+    {
+      "adapterId": "port-health",
+      "path": "trust",
+      "outcome": "pass",
+      "responseSha256": "ea30fceaf1c5a7db210362c06cfbc03f4286274150697f1897fe3e836cedbd7d",
+      "responseKid": "port-health-sandbox-99",
+      "detail": "unknown-kid response rejected with untrusted_kid against the trusted JWKS set; verifies only under the rogue JWKS"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "happy",
+      "outcome": "pass",
+      "requestSha256": "5a7a51dafb8ef0d4297579d55cb7092a77bf220988a0b152acf8f63d520a7bd7",
+      "responseSha256": "4b077af20938cc646c03b808025b8e245e506c378bbd61558df3b9c7960f7bee",
+      "responseKid": "npa-esen-sandbox-1",
+      "signatureVerified": true,
+      "detail": "typed receipt status=REGISTERED; response envelope JWS verified against sandbox JWKS"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "refusal",
+      "outcome": "pass",
+      "requestSha256": "0f91ef2f52b5a785e113a21660bf1e1d9cc10cac93ae9870f3319c0b146bb072",
+      "responseSha256": "892c1d2aaaaf76c668f21eb6f09fb4ca91afa4bd88d2bc30ee0f21bfcc8a9097",
+      "responseKid": "npa-esen-sandbox-1",
+      "detail": "typed refusal surfaced: status=REJECTED (signed refusal detail in the response envelope payload)"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "fault",
+      "outcome": "pass",
+      "detail": "FAULT scenario surfaced as AdapterTransportError UPSTREAM_ERROR (HTTP 503); no fabricated success"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "timeout",
+      "outcome": "pass",
+      "detail": "TIMEOUT scenario tripped the adapter deadline in 10003ms (sandbox hangs 30s); fail closed"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "trust",
+      "outcome": "pass",
+      "responseSha256": "345fcbe969d9371beedb88328d82be0703a4ec5dff9ccdf3e2d45bdf7ed3d14a",
+      "responseKid": "npa-esen-sandbox-99",
+      "detail": "unknown-kid response rejected with untrusted_kid against the trusted JWKS set; verifies only under the rogue JWKS"
+    },
+    {
+      "adapterId": "ncs-bodogwu",
+      "path": "unconfigured",
+      "outcome": "pass",
+      "detail": "ADAPTER_UNCONFIGURED (GAP-OGA-BODOGWU) raised before any network I/O while the sandbox was reachable"
+    },
+    {
+      "adapterId": "cbn-tms",
+      "path": "unconfigured",
+      "outcome": "pass",
+      "detail": "ADAPTER_UNCONFIGURED (GAP-OGA-CBNTMS) raised before any network I/O while the sandbox was reachable"
+    },
+    {
+      "adapterId": "nepc",
+      "path": "unconfigured",
+      "outcome": "pass",
+      "detail": "ADAPTER_UNCONFIGURED (GAP-OGA-NEPC) raised before any network I/O while the sandbox was reachable"
+    },
+    {
+      "adapterId": "nis",
+      "path": "unconfigured",
+      "outcome": "pass",
+      "detail": "ADAPTER_UNCONFIGURED (GAP-MSW-NIS) raised before any network I/O while the sandbox was reachable"
+    },
+    {
+      "adapterId": "port-health",
+      "path": "unconfigured",
+      "outcome": "pass",
+      "detail": "ADAPTER_UNCONFIGURED (GAP-MSW-PH) raised before any network I/O while the sandbox was reachable"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "unconfigured",
+      "outcome": "pass",
+      "detail": "ADAPTER_UNCONFIGURED (GAP-MSW-ESEN) raised before any network I/O while the sandbox was reachable"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "msw-unavailable-unconfigured",
+      "outcome": "pass",
+      "detail": "createVisit with live sandbox but no NPA_ESEN_* env → PORT_CALL_UNAVAILABLE + GAP-MSW-ESEN disclosed; visit honestly unverified"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "msw-verified",
+      "outcome": "pass",
+      "detail": "e-SEN registered in sandbox → createVisit advanced PORT_CALL_UNAVAILABLE → VERIFIED via /v1/port-calls/verify (upstream npa-esen, portCallVerified=true)"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "msw-unverified-mismatch",
+      "outcome": "pass",
+      "detail": "IMO/port with no matching e-SEN → honest PORT_CALL_UNVERIFIED (sandbox verified:false/NOT_FOUND, no error, no fabrication)"
+    },
+    {
+      "adapterId": "npa-esen",
+      "path": "msw-unavailable-sandbox-down",
+      "outcome": "pass",
+      "detail": "e-SEN endpoint unreachable (connection refused) → AdapterTransportError mapped to honest PORT_CALL_UNAVAILABLE; visit still created unverified"
+    }
+  ],
+  "provenance": {
+    "principalId": "blueeconomy-singlewindow-wp2b",
+    "principalRole": "CONFORMANCE_HARNESS",
+    "kid": "blueeconomy-singlewindow-oga-conformance-1",
+    "publicKeyBase64Url": "UCfpucbtOM2xZMdbBBcwsVdpkAschpJJI8SkP7fiz-M",
+    "signature": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJsdWVlY29ub215LXNpbmdsZXdpbmRvdy1vZ2EtY29uZm9ybWFuY2UtMSJ9.eyJldmlkZW5jZUdlbmVyYXRlZEF0IjoiMjAyNi0wOC0zMVQxNTowNzo0NS41MDFaIiwiZ2VuZXJhdGVkQXQiOiIyMDI2LTA4LTMxVDE1OjA3OjUyLjI1OFoiLCJwcm92ZW5hbmNlIjp7ImtpZCI6ImJsdWVlY29ub215LXNpbmdsZXdpbmRvdy1vZ2EtY29uZm9ybWFuY2UtMSIsInByaW5jaXBhbElkIjoiYmx1ZWVjb25vbXktc2luZ2xld2luZG93LXdwMmIiLCJwcmluY2lwYWxSb2xlIjoiQ09ORk9STUFOQ0VfSEFSTkVTUyIsInB1YmxpY0tleUJhc2U2NFVybCI6IlVDZnB1Y2J0T00yeFpNZGJCQmN3c1ZkcGtBc2NocEpKSThTa1A3Zml6LU0ifSwicmVwb3J0VHlwZSI6ImFnZW5jeS1zYW5kYm94LWUyZS1jb25mb3JtYW5jZSIsInJlcG9ydFZlcnNpb24iOiIxLjAiLCJzY2VuYXJpb0NvdW50Ijo0MCwic2NlbmFyaW9zIjpbeyJhZGFwdGVySWQiOiJuY3MtYm9kb2d3dSIsImRldGFpbCI6InR5cGVkIHJlY2VpcHQgc3RhdHVzPUFDQ0VQVEVEOyByZXNwb25zZSBlbnZlbG9wZSBKV1MgdmVyaWZpZWQgYWdhaW5zdCBzYW5kYm94IEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJoYXBweSIsInJlcXVlc3RTaGEyNTYiOiJjYzI0YzQ4NzEyYTBhMzM5MzljNzUyMmY0OWFlNmIyOWMyY2FmMTJjMDNhNGZhZDBlZmQ2NWNiMTE1MzQ0ZTg1IiwicmVzcG9uc2VLaWQiOiJuY3MtYm9kb2d3dS1zYW5kYm94LTEiLCJyZXNwb25zZVNoYTI1NiI6ImJjYmEyODFlNWU3YWQzNmRmMzNjMTRjOTM1NTcxMTc3ZDNhZDZkMWM3MTMxZDJjMTQzODZmOGRhYjdjZWI0MDMiLCJzaWduYXR1cmVWZXJpZmllZCI6dHJ1ZX0seyJhZGFwdGVySWQiOiJuY3MtYm9kb2d3dSIsImRldGFpbCI6InR5cGVkIHJlZnVzYWwgc3VyZmFjZWQ6IHN0YXR1cz1SRUpFQ1RFRCAoc2lnbmVkIHJlZnVzYWwgZGV0YWlsIGluIHRoZSByZXNwb25zZSBlbnZlbG9wZSBwYXlsb2FkKSIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InJlZnVzYWwiLCJyZXF1ZXN0U2hhMjU2IjoiODU5YmJmZGJhMzVjMTMzMTM5ZDU2NWNhZDc3YzA4Mzc0MTg2NjhmMWZhYWJlOWY1YjYyNWQ1OTlhN2M0ZTk1NSIsInJlc3BvbnNlS2lkIjoibmNzLWJvZG9nd3Utc2FuZGJveC0xIiwicmVzcG9uc2VTaGEyNTYiOiJjOGViMTkwZTg3YmZjZTVlZDA1N2JjZGNmMzhhYzZhZDNiMjRjYjY2NmU3M2E2NDIzNjliNGI3OTczY2E5YjNlIn0seyJhZGFwdGVySWQiOiJuY3MtYm9kb2d3dSIsImRldGFpbCI6IkZBVUxUIHNjZW5hcmlvIHN1cmZhY2VkIGFzIEFkYXB0ZXJUcmFuc3BvcnRFcnJvciBVUFNUUkVBTV9FUlJPUiAoSFRUUCA1MDMpOyBubyBmYWJyaWNhdGVkIHN1Y2Nlc3MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJmYXVsdCJ9LHsiYWRhcHRlcklkIjoibmNzLWJvZG9nd3UiLCJkZXRhaWwiOiJUSU1FT1VUIHNjZW5hcmlvIHRyaXBwZWQgdGhlIGFkYXB0ZXIgZGVhZGxpbmUgaW4gMTAwMDRtcyAoc2FuZGJveCBoYW5ncyAzMHMpOyBmYWlsIGNsb3NlZCIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InRpbWVvdXQifSx7ImFkYXB0ZXJJZCI6Im5jcy1ib2RvZ3d1IiwiZGV0YWlsIjoidW5rbm93bi1raWQgcmVzcG9uc2UgcmVqZWN0ZWQgd2l0aCB1bnRydXN0ZWRfa2lkIGFnYWluc3QgdGhlIHRydXN0ZWQgSldLUyBzZXQ7IHZlcmlmaWVzIG9ubHkgdW5kZXIgdGhlIHJvZ3VlIEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJ0cnVzdCIsInJlc3BvbnNlS2lkIjoibmNzLWJvZG9nd3Utc2FuZGJveC05OSIsInJlc3BvbnNlU2hhMjU2IjoiMWE2MzM3YTVkNTMyMWRjY2MyMWNlZDhhODk0YzE2OWUxOTQ3YmE4ZmZjMGE5ZWFmYTc2ZDMyMmVlMzg0NmVmNiJ9LHsiYWRhcHRlcklkIjoiY2JuLXRtcyIsImRldGFpbCI6InR5cGVkIHJlY2VpcHQgc3RhdHVzPVJFR0lTVEVSRUQ7IHJlc3BvbnNlIGVudmVsb3BlIEpXUyB2ZXJpZmllZCBhZ2FpbnN0IHNhbmRib3ggSldLUyIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6ImhhcHB5IiwicmVxdWVzdFNoYTI1NiI6IjEwMTgzNGRlYjMzMGNjZmIxZTM4MDU2NWNlODhiNGFmZjEyZmNmOTRkOWIwZDczMTkxZWYxNWM5ZmQ0Nzc5NWEiLCJyZXNwb25zZUtpZCI6ImNibi10bXMtc2FuZGJveC0xIiwicmVzcG9uc2VTaGEyNTYiOiJiY2RhNWQ2ZTkzM2UyYWRlNTE1ZTI1ZmQ5ZmNmOGJiNzUwZjNmZDBmMWY0YjI0ZDEwMTkwYjdhOGFiNzI2YzM4Iiwic2lnbmF0dXJlVmVyaWZpZWQiOnRydWV9LHsiYWRhcHRlcklkIjoiY2JuLXRtcyIsImRldGFpbCI6InR5cGVkIHJlZnVzYWwgc3VyZmFjZWQ6IHN0YXR1cz1SRUpFQ1RFRCAoc2lnbmVkIHJlZnVzYWwgZGV0YWlsIGluIHRoZSByZXNwb25zZSBlbnZlbG9wZSBwYXlsb2FkKSIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InJlZnVzYWwiLCJyZXF1ZXN0U2hhMjU2IjoiNmQ0NTYwZDhlMDEzYTViYThiMTY1OTYyZDk0NTdiYjRlOTAxZWE2NzNkMWM1M2JkNTYxYTg3M2NhNGJhYmEzMyIsInJlc3BvbnNlS2lkIjoiY2JuLXRtcy1zYW5kYm94LTEiLCJyZXNwb25zZVNoYTI1NiI6IjJjYTExMGU4ZTBjYThhZTk2ZTNiNjAzMzY2YWEyZTNmYWVhYmZjNDQxMTAwN2Q4M2ZlYTUwYzg5NTEzYzFiMmIifSx7ImFkYXB0ZXJJZCI6ImNibi10bXMiLCJkZXRhaWwiOiJGQVVMVCBzY2VuYXJpbyBzdXJmYWNlZCBhcyBBZGFwdGVyVHJhbnNwb3J0RXJyb3IgVVBTVFJFQU1fRVJST1IgKEhUVFAgNTAzKTsgbm8gZmFicmljYXRlZCBzdWNjZXNzIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoiZmF1bHQifSx7ImFkYXB0ZXJJZCI6ImNibi10bXMiLCJkZXRhaWwiOiJUSU1FT1VUIHNjZW5hcmlvIHRyaXBwZWQgdGhlIGFkYXB0ZXIgZGVhZGxpbmUgaW4gMTAwMDNtcyAoc2FuZGJveCBoYW5ncyAzMHMpOyBmYWlsIGNsb3NlZCIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InRpbWVvdXQifSx7ImFkYXB0ZXJJZCI6ImNibi10bXMiLCJkZXRhaWwiOiJ1bmtub3duLWtpZCByZXNwb25zZSByZWplY3RlZCB3aXRoIHVudHJ1c3RlZF9raWQgYWdhaW5zdCB0aGUgdHJ1c3RlZCBKV0tTIHNldDsgdmVyaWZpZXMgb25seSB1bmRlciB0aGUgcm9ndWUgSldLUyIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InRydXN0IiwicmVzcG9uc2VLaWQiOiJjYm4tdG1zLXNhbmRib3gtOTkiLCJyZXNwb25zZVNoYTI1NiI6ImY5YmY3ZjU5ZDQzNDVhNGM1YTA0ZWU3Y2Q5Y2Q4YjBhMTRiM2Q5Mjg3OTNkNGUwNmE3N2VhYTEzYjEyMzY4N2IifSx7ImFkYXB0ZXJJZCI6Im5lcGMiLCJkZXRhaWwiOiJ0eXBlZCByZWNlaXB0IHN0YXR1cz1BQ0NFUFRFRDsgcmVzcG9uc2UgZW52ZWxvcGUgSldTIHZlcmlmaWVkIGFnYWluc3Qgc2FuZGJveCBKV0tTIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoiaGFwcHkiLCJyZXF1ZXN0U2hhMjU2IjoiZTk0MjlmNDBkZThhMjliMDI3NGZhZmJkNDM1MTEyMmU3OTViZGY3YTQ1Yjk4NWU3Njc0ODdjNzI0MzNhYjU2MyIsInJlc3BvbnNlS2lkIjoibmVwYy1zYW5kYm94LTEiLCJyZXNwb25zZVNoYTI1NiI6IjY2NmQzN2QwZjZjYThhNjljYjRmNTQ1OGJlNzZkOWI4ZDFiZTVmMGE2MTE1MjUyZWEyNzE5NWM3NTg0ZTNiNTgiLCJzaWduYXR1cmVWZXJpZmllZCI6dHJ1ZX0seyJhZGFwdGVySWQiOiJuZXBjIiwiZGV0YWlsIjoidHlwZWQgcmVmdXNhbCBzdXJmYWNlZDogc3RhdHVzPVJFSkVDVEVEIChzaWduZWQgcmVmdXNhbCBkZXRhaWwgaW4gdGhlIHJlc3BvbnNlIGVudmVsb3BlIHBheWxvYWQpIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoicmVmdXNhbCIsInJlcXVlc3RTaGEyNTYiOiIyZDhjMDEzMDU2MjZiYjhhZDcyZDI0N2M3NmM1OTM4N2I0NGRjMDcyYmRhODQxMDM0MDEyNDdmNzJmYmMwNWViIiwicmVzcG9uc2VLaWQiOiJuZXBjLXNhbmRib3gtMSIsInJlc3BvbnNlU2hhMjU2IjoiZjM3ZDE2MWUyMWUwOWM3YjliZTAwNDJhNzg0YjcxY2Q2N2Q0ZWY0ZTcwMzRlYzlmYWU4Y2M0MDQwMmU3ODkxZCJ9LHsiYWRhcHRlcklkIjoibmVwYyIsImRldGFpbCI6IkZBVUxUIHNjZW5hcmlvIHN1cmZhY2VkIGFzIEFkYXB0ZXJUcmFuc3BvcnRFcnJvciBVUFNUUkVBTV9FUlJPUiAoSFRUUCA1MDMpOyBubyBmYWJyaWNhdGVkIHN1Y2Nlc3MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJmYXVsdCJ9LHsiYWRhcHRlcklkIjoibmVwYyIsImRldGFpbCI6IlRJTUVPVVQgc2NlbmFyaW8gdHJpcHBlZCB0aGUgYWRhcHRlciBkZWFkbGluZSBpbiAxMDAwNG1zIChzYW5kYm94IGhhbmdzIDMwcyk7IGZhaWwgY2xvc2VkIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidGltZW91dCJ9LHsiYWRhcHRlcklkIjoibmVwYyIsImRldGFpbCI6InVua25vd24ta2lkIHJlc3BvbnNlIHJlamVjdGVkIHdpdGggdW50cnVzdGVkX2tpZCBhZ2FpbnN0IHRoZSB0cnVzdGVkIEpXS1Mgc2V0OyB2ZXJpZmllcyBvbmx5IHVuZGVyIHRoZSByb2d1ZSBKV0tTIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidHJ1c3QiLCJyZXNwb25zZUtpZCI6Im5lcGMtc2FuZGJveC05OSIsInJlc3BvbnNlU2hhMjU2IjoiMWMwNmM5OTM2ODVlOWQ4YmI0YjFmNmJmOWQ1MTA0NTUwNWY3NGVjYzY4NGI5MjY3YTM0NDEwZjNhZTkzNTNhZiJ9LHsiYWRhcHRlcklkIjoibmlzIiwiZGV0YWlsIjoidHlwZWQgcmVjZWlwdCBzdGF0dXM9QUNLTk9XTEVER0VEOyByZXNwb25zZSBlbnZlbG9wZSBKV1MgdmVyaWZpZWQgYWdhaW5zdCBzYW5kYm94IEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJoYXBweSIsInJlcXVlc3RTaGEyNTYiOiJhNzI0YmNlMWYzZTI1NDUzODI1YjYzYWUzYmIzNjU5OGIzYWI4M2ZlYjE5OTY0NTUyNzgyYzQ4YmYyM2NhNzRkIiwicmVzcG9uc2VLaWQiOiJuaXMtc2FuZGJveC0xIiwicmVzcG9uc2VTaGEyNTYiOiI3ZDcxYzczYmQ0ZTFkNTBlN2I5ZjA5NGRiNjNmY2FjYmRjMWZiZmNlMTcyYjAyYjU3NmIwODQ2NTg5NDFiNTY3Iiwic2lnbmF0dXJlVmVyaWZpZWQiOnRydWV9LHsiYWRhcHRlcklkIjoibmlzIiwiZGV0YWlsIjoidHlwZWQgcmVmdXNhbCBzdXJmYWNlZDogc3RhdHVzPVJFSkVDVEVEIChzaWduZWQgcmVmdXNhbCBkZXRhaWwgaW4gdGhlIHJlc3BvbnNlIGVudmVsb3BlIHBheWxvYWQpIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoicmVmdXNhbCIsInJlcXVlc3RTaGEyNTYiOiI5MmZiNDFkZDMzYmY4YjdkNDQyNzQyMjY4NzZiNjliZDNkOWU3NzEyNTk3Yjk5MzA0Nzk0Y2Y2ZGFlMTY0YzA5IiwicmVzcG9uc2VLaWQiOiJuaXMtc2FuZGJveC0xIiwicmVzcG9uc2VTaGEyNTYiOiI0NWYxYmEzYjEyNTRiM2QwYjY4ZTA5NjcwNWNhNWU2NGZjMDk5M2I3Yzc1NTU4YmRiMzdmYzRmZDA3NTFiOWIyIn0seyJhZGFwdGVySWQiOiJuaXMiLCJkZXRhaWwiOiJGQVVMVCBzY2VuYXJpbyBzdXJmYWNlZCBhcyBBZGFwdGVyVHJhbnNwb3J0RXJyb3IgVVBTVFJFQU1fRVJST1IgKEhUVFAgNTAzKTsgbm8gZmFicmljYXRlZCBzdWNjZXNzIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoiZmF1bHQifSx7ImFkYXB0ZXJJZCI6Im5pcyIsImRldGFpbCI6IlRJTUVPVVQgc2NlbmFyaW8gdHJpcHBlZCB0aGUgYWRhcHRlciBkZWFkbGluZSBpbiAxMDAwM21zIChzYW5kYm94IGhhbmdzIDMwcyk7IGZhaWwgY2xvc2VkIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidGltZW91dCJ9LHsiYWRhcHRlcklkIjoibmlzIiwiZGV0YWlsIjoidW5rbm93bi1raWQgcmVzcG9uc2UgcmVqZWN0ZWQgd2l0aCB1bnRydXN0ZWRfa2lkIGFnYWluc3QgdGhlIHRydXN0ZWQgSldLUyBzZXQ7IHZlcmlmaWVzIG9ubHkgdW5kZXIgdGhlIHJvZ3VlIEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJ0cnVzdCIsInJlc3BvbnNlS2lkIjoibmlzLXNhbmRib3gtOTkiLCJyZXNwb25zZVNoYTI1NiI6IjM0NWY4MTBkOThiYjdjMDEyNjM2ZDNhNDhjNDMwMTE5Y2I4MGIzMzg5MDg2ZTI4NjczYTI2ZjU1NTJjZWQ4N2EifSx7ImFkYXB0ZXJJZCI6InBvcnQtaGVhbHRoIiwiZGV0YWlsIjoidHlwZWQgcmVjZWlwdCBzdGF0dXM9QUNLTk9XTEVER0VEOyByZXNwb25zZSBlbnZlbG9wZSBKV1MgdmVyaWZpZWQgYWdhaW5zdCBzYW5kYm94IEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJoYXBweSIsInJlcXVlc3RTaGEyNTYiOiJkNWMwYjM0NzZkNjk4NTVhNTgyZWUwZjZhMDg1OGEyYThlYzM3ZmI4NzBjZGE3MTRjZjA0ZjdhMGM5Y2Y1NjRiIiwicmVzcG9uc2VLaWQiOiJwb3J0LWhlYWx0aC1zYW5kYm94LTEiLCJyZXNwb25zZVNoYTI1NiI6ImViNTJkZGEwOTQ0NTAxYmMwZTk5OWQ2YjFhM2U4NjJlMzg0NzQyNDM3YzIxZTJlMmNjNzZhMjQzODVmN2ZmZWUiLCJzaWduYXR1cmVWZXJpZmllZCI6dHJ1ZX0seyJhZGFwdGVySWQiOiJwb3J0LWhlYWx0aCIsImRldGFpbCI6InR5cGVkIHJlZnVzYWwgc3VyZmFjZWQ6IHN0YXR1cz1SRUpFQ1RFRCAoc2lnbmVkIHJlZnVzYWwgZGV0YWlsIGluIHRoZSByZXNwb25zZSBlbnZlbG9wZSBwYXlsb2FkKSIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InJlZnVzYWwiLCJyZXF1ZXN0U2hhMjU2IjoiMGE4OTcwZDBjYzNmNTg2NGE2NGRhYTg0NWQzNTc5MzMxMTVmMGE1NWUwMzNkNDhiMWY0NGUzNzMyYmVkMjk1MyIsInJlc3BvbnNlS2lkIjoicG9ydC1oZWFsdGgtc2FuZGJveC0xIiwicmVzcG9uc2VTaGEyNTYiOiJhMWYyYzdmMzljMGFlODEzNWFkNDA3MmVhMzY1YjJhYmVjMDc3ZTU5N2Y3NGQ4NmFlZmRmZDJlYjYzOWFkNzA0In0seyJhZGFwdGVySWQiOiJwb3J0LWhlYWx0aCIsImRldGFpbCI6IkZBVUxUIHNjZW5hcmlvIHN1cmZhY2VkIGFzIEFkYXB0ZXJUcmFuc3BvcnRFcnJvciBVUFNUUkVBTV9FUlJPUiAoSFRUUCA1MDMpOyBubyBmYWJyaWNhdGVkIHN1Y2Nlc3MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJmYXVsdCJ9LHsiYWRhcHRlcklkIjoicG9ydC1oZWFsdGgiLCJkZXRhaWwiOiJUSU1FT1VUIHNjZW5hcmlvIHRyaXBwZWQgdGhlIGFkYXB0ZXIgZGVhZGxpbmUgaW4gMTAwMDJtcyAoc2FuZGJveCBoYW5ncyAzMHMpOyBmYWlsIGNsb3NlZCIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InRpbWVvdXQifSx7ImFkYXB0ZXJJZCI6InBvcnQtaGVhbHRoIiwiZGV0YWlsIjoidW5rbm93bi1raWQgcmVzcG9uc2UgcmVqZWN0ZWQgd2l0aCB1bnRydXN0ZWRfa2lkIGFnYWluc3QgdGhlIHRydXN0ZWQgSldLUyBzZXQ7IHZlcmlmaWVzIG9ubHkgdW5kZXIgdGhlIHJvZ3VlIEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJ0cnVzdCIsInJlc3BvbnNlS2lkIjoicG9ydC1oZWFsdGgtc2FuZGJveC05OSIsInJlc3BvbnNlU2hhMjU2IjoiZWEzMGZjZWFmMWM1YTdkYjIxMDM2MmMwNmNmYmMwM2Y0Mjg2Mjc0MTUwNjk3ZjE4OTdmZTNlODM2Y2VkYmQ3ZCJ9LHsiYWRhcHRlcklkIjoibnBhLWVzZW4iLCJkZXRhaWwiOiJ0eXBlZCByZWNlaXB0IHN0YXR1cz1SRUdJU1RFUkVEOyByZXNwb25zZSBlbnZlbG9wZSBKV1MgdmVyaWZpZWQgYWdhaW5zdCBzYW5kYm94IEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJoYXBweSIsInJlcXVlc3RTaGEyNTYiOiI1YTdhNTFkYWZiOGVmMGQ0Mjk3NTc5ZDU1Y2I3MDkyYTc3YmYyMjA5ODhhMGIxNTJhY2Y4ZjYzZDUyMGE3YmQ3IiwicmVzcG9uc2VLaWQiOiJucGEtZXNlbi1zYW5kYm94LTEiLCJyZXNwb25zZVNoYTI1NiI6IjRiMDc3YWYyMDkzOGNjNjQ2YzAzYjgwODAyNWI4ZTI0NWU1MDZjMzc4YmJkNjE1NThkZjNiOWM3OTYwZjdiZWUiLCJzaWduYXR1cmVWZXJpZmllZCI6dHJ1ZX0seyJhZGFwdGVySWQiOiJucGEtZXNlbiIsImRldGFpbCI6InR5cGVkIHJlZnVzYWwgc3VyZmFjZWQ6IHN0YXR1cz1SRUpFQ1RFRCAoc2lnbmVkIHJlZnVzYWwgZGV0YWlsIGluIHRoZSByZXNwb25zZSBlbnZlbG9wZSBwYXlsb2FkKSIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InJlZnVzYWwiLCJyZXF1ZXN0U2hhMjU2IjoiMGY5MWVmMmY1MmI1YTc4NWUxMTNhMjE2NjBiZjFlMWQ5Y2MxMGNhYzkzYWU5ODcwZjMzMTljMGIxNDZiYjA3MiIsInJlc3BvbnNlS2lkIjoibnBhLWVzZW4tc2FuZGJveC0xIiwicmVzcG9uc2VTaGEyNTYiOiI4OTJjMWQyYWFhYWY3NmM2NjhmMjFlYjZmMDlmYjRjYTkxYWZhNGJkODhkMmJjMzBlZTBmMjFiZmNjOGE5MDk3In0seyJhZGFwdGVySWQiOiJucGEtZXNlbiIsImRldGFpbCI6IkZBVUxUIHNjZW5hcmlvIHN1cmZhY2VkIGFzIEFkYXB0ZXJUcmFuc3BvcnRFcnJvciBVUFNUUkVBTV9FUlJPUiAoSFRUUCA1MDMpOyBubyBmYWJyaWNhdGVkIHN1Y2Nlc3MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJmYXVsdCJ9LHsiYWRhcHRlcklkIjoibnBhLWVzZW4iLCJkZXRhaWwiOiJUSU1FT1VUIHNjZW5hcmlvIHRyaXBwZWQgdGhlIGFkYXB0ZXIgZGVhZGxpbmUgaW4gMTAwMDNtcyAoc2FuZGJveCBoYW5ncyAzMHMpOyBmYWlsIGNsb3NlZCIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InRpbWVvdXQifSx7ImFkYXB0ZXJJZCI6Im5wYS1lc2VuIiwiZGV0YWlsIjoidW5rbm93bi1raWQgcmVzcG9uc2UgcmVqZWN0ZWQgd2l0aCB1bnRydXN0ZWRfa2lkIGFnYWluc3QgdGhlIHRydXN0ZWQgSldLUyBzZXQ7IHZlcmlmaWVzIG9ubHkgdW5kZXIgdGhlIHJvZ3VlIEpXS1MiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJ0cnVzdCIsInJlc3BvbnNlS2lkIjoibnBhLWVzZW4tc2FuZGJveC05OSIsInJlc3BvbnNlU2hhMjU2IjoiMzQ1ZmNiZTk2OWQ5MzcxYmVlZGI4ODMyOGQ4MmJlMDcwM2E0ZWM1ZGZmOWNjZGYzZTJkNDViZGY3ZWQzZDE0YSJ9LHsiYWRhcHRlcklkIjoibmNzLWJvZG9nd3UiLCJkZXRhaWwiOiJBREFQVEVSX1VOQ09ORklHVVJFRCAoR0FQLU9HQS1CT0RPR1dVKSByYWlzZWQgYmVmb3JlIGFueSBuZXR3b3JrIEkvTyB3aGlsZSB0aGUgc2FuZGJveCB3YXMgcmVhY2hhYmxlIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidW5jb25maWd1cmVkIn0seyJhZGFwdGVySWQiOiJjYm4tdG1zIiwiZGV0YWlsIjoiQURBUFRFUl9VTkNPTkZJR1VSRUQgKEdBUC1PR0EtQ0JOVE1TKSByYWlzZWQgYmVmb3JlIGFueSBuZXR3b3JrIEkvTyB3aGlsZSB0aGUgc2FuZGJveCB3YXMgcmVhY2hhYmxlIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidW5jb25maWd1cmVkIn0seyJhZGFwdGVySWQiOiJuZXBjIiwiZGV0YWlsIjoiQURBUFRFUl9VTkNPTkZJR1VSRUQgKEdBUC1PR0EtTkVQQykgcmFpc2VkIGJlZm9yZSBhbnkgbmV0d29yayBJL08gd2hpbGUgdGhlIHNhbmRib3ggd2FzIHJlYWNoYWJsZSIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6InVuY29uZmlndXJlZCJ9LHsiYWRhcHRlcklkIjoibmlzIiwiZGV0YWlsIjoiQURBUFRFUl9VTkNPTkZJR1VSRUQgKEdBUC1NU1ctTklTKSByYWlzZWQgYmVmb3JlIGFueSBuZXR3b3JrIEkvTyB3aGlsZSB0aGUgc2FuZGJveCB3YXMgcmVhY2hhYmxlIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidW5jb25maWd1cmVkIn0seyJhZGFwdGVySWQiOiJwb3J0LWhlYWx0aCIsImRldGFpbCI6IkFEQVBURVJfVU5DT05GSUdVUkVEIChHQVAtTVNXLVBIKSByYWlzZWQgYmVmb3JlIGFueSBuZXR3b3JrIEkvTyB3aGlsZSB0aGUgc2FuZGJveCB3YXMgcmVhY2hhYmxlIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoidW5jb25maWd1cmVkIn0seyJhZGFwdGVySWQiOiJucGEtZXNlbiIsImRldGFpbCI6IkFEQVBURVJfVU5DT05GSUdVUkVEIChHQVAtTVNXLUVTRU4pIHJhaXNlZCBiZWZvcmUgYW55IG5ldHdvcmsgSS9PIHdoaWxlIHRoZSBzYW5kYm94IHdhcyByZWFjaGFibGUiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJ1bmNvbmZpZ3VyZWQifSx7ImFkYXB0ZXJJZCI6Im5wYS1lc2VuIiwiZGV0YWlsIjoiY3JlYXRlVmlzaXQgd2l0aCBsaXZlIHNhbmRib3ggYnV0IG5vIE5QQV9FU0VOXyogZW52IOKGkiBQT1JUX0NBTExfVU5BVkFJTEFCTEUgKyBHQVAtTVNXLUVTRU4gZGlzY2xvc2VkOyB2aXNpdCBob25lc3RseSB1bnZlcmlmaWVkIiwib3V0Y29tZSI6InBhc3MiLCJwYXRoIjoibXN3LXVuYXZhaWxhYmxlLXVuY29uZmlndXJlZCJ9LHsiYWRhcHRlcklkIjoibnBhLWVzZW4iLCJkZXRhaWwiOiJlLVNFTiByZWdpc3RlcmVkIGluIHNhbmRib3gg4oaSIGNyZWF0ZVZpc2l0IGFkdmFuY2VkIFBPUlRfQ0FMTF9VTkFWQUlMQUJMRSDihpIgVkVSSUZJRUQgdmlhIC92MS9wb3J0LWNhbGxzL3ZlcmlmeSAodXBzdHJlYW0gbnBhLWVzZW4sIHBvcnRDYWxsVmVyaWZpZWQ9dHJ1ZSkiLCJvdXRjb21lIjoicGFzcyIsInBhdGgiOiJtc3ctdmVyaWZpZWQifSx7ImFkYXB0ZXJJZCI6Im5wYS1lc2VuIiwiZGV0YWlsIjoiSU1PL3BvcnQgd2l0aCBubyBtYXRjaGluZyBlLVNFTiDihpIgaG9uZXN0IFBPUlRfQ0FMTF9VTlZFUklGSUVEIChzYW5kYm94IHZlcmlmaWVkOmZhbHNlL05PVF9GT1VORCwgbm8gZXJyb3IsIG5vIGZhYnJpY2F0aW9uKSIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6Im1zdy11bnZlcmlmaWVkLW1pc21hdGNoIn0seyJhZGFwdGVySWQiOiJucGEtZXNlbiIsImRldGFpbCI6ImUtU0VOIGVuZHBvaW50IHVucmVhY2hhYmxlIChjb25uZWN0aW9uIHJlZnVzZWQpIOKGkiBBZGFwdGVyVHJhbnNwb3J0RXJyb3IgbWFwcGVkIHRvIGhvbmVzdCBQT1JUX0NBTExfVU5BVkFJTEFCTEU7IHZpc2l0IHN0aWxsIGNyZWF0ZWQgdW52ZXJpZmllZCIsIm91dGNvbWUiOiJwYXNzIiwicGF0aCI6Im1zdy11bmF2YWlsYWJsZS1zYW5kYm94LWRvd24ifV0sInNjZW5hcmlvc0RpZ2VzdFNoYTI1NiI6Ijg5Nzk0MjBkNGI0OTUyNTc3MGE1ZGJmZjQ2MzQzMWJlYzNiNmRmZDc3OGJhYmRhZDQ4M2Q3ZGRhYmUxNzhkYWIiLCJzY2VuYXJpb3NQYXNzZWQiOjQwLCJzdWl0ZSI6InNpbmdsZXdpbmRvdyBzZXJ2ZXIvZXh0ZXJuYWxBZGFwdGVycy5lMmUudGVzdC50cyArIHNlcnZlci9tc3dQb3J0Q2FsbC5lMmUudGVzdC50cyAobGl2ZSBibHVlZWNvbm9teS1hZ2VuY3ktc2FuZGJveCkifQ.NDh6Wwcf2xoEoK3V9HyOo7cdrKw2wu1jpWrBHPX5hewlmRzVt97tsUnDCROf3h-rg3juezd1ENDrBj2lbVphBw"
+  }
+}

@@ -63,7 +63,7 @@ import {
   AdapterTransportError,
   AdapterUnconfiguredError,
 } from "./_core/externalAdapters/base";
-import { fetchEsenShipEntryNotice, npaEsenAdapter } from "./_core/externalAdapters/npaEsen";
+import { npaEsenAdapter, verifyEsenPortCall } from "./_core/externalAdapters/npaEsen";
 
 // ─── Reason codes (stable, machine-readable) ─────────────────────────────────
 
@@ -268,11 +268,19 @@ export async function createVisit(
         // With no e-SEN credentials the visit is honestly created unverified
         // and the gap is surfaced — never presented as verified.
         try {
-          const esen = await fetchEsenShipEntryNotice(input.portCallId, {
-            principalId: principalIdOf(principal),
-            principalRole: principal.role,
-          });
+          const esen = await verifyEsenPortCall(
+            {
+              vesselImoNumber: input.vesselImoNumber,
+              portCode: input.portCode,
+              portCallId: input.portCallId,
+            },
+            {
+              principalId: principalIdOf(principal),
+              principalRole: principal.role,
+            }
+          );
           portCallVerified =
+            esen.response.verified === true &&
             esen.response.vesselImoNumber === input.vesselImoNumber &&
             esen.response.portCode === input.portCode;
           portCallVerification = portCallVerified ? "VERIFIED" : "PORT_CALL_UNVERIFIED";
