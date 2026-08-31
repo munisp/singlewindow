@@ -2,6 +2,16 @@
  * cvContainerConsumer.ts — WP-4 consumer for signed blueeconomy-cv-service
  * container OCR reads (Kafka topic cv.container-code.v1).
  *
+ * PRODUCER CONTRACT (phase-10 audit remediation, finding C-1): the producer
+ * for cv.container-code.v1 lives in the blueeconomy-cv-service repo
+ * (src/cvservice/events.py, TOPIC_CONTAINER_CODE) — no producer exists in
+ * THIS repo by design. The signed-envelope wire contract (envelope v1.0,
+ * JWS-EdDSA over RFC 8785 JCS) is specified in
+ * blueeconomy-contracts/docs/envelope-signature.md. This consumer is OFF by
+ * default (CV_CONTAINER_CONSUMER_ENABLED=true to start) and logs honestly at
+ * startup; it is not dead code — it is the singlewindow half of a cross-repo
+ * contract.
+ *
  * Pipeline per record (fail-closed):
  *   1. Verify the envelope v1.0 JWS-EdDSA/JCS signature against the mounted
  *      producer key directory (server/_core/cvEnvelope). Rejected records are

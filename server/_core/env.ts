@@ -25,8 +25,9 @@
 //        → KNOWN COLLISION (deltaLakeSvc deprecated, unassigned).
 //   8095 compose vision-service (OCR) vs PORTS.visionService 8105 — KNOWN
 //        DIVERGENCE: no real service binds 8105 (microservices/vision-service
-//        compose-binds 8095; services/python/vision-service binds 8092 and
-//        itself collides with compose gnn-risk). VISION_SERVICE_URL must be
+//        compose-binds 8095; the legacy services/python/vision-service that
+//        bound 8092 was REMOVED for AGPL compliance — Ultralytics YOLOv8 —
+//        in phase-10 remediation). VISION_SERVICE_URL must be
 //        set explicitly; 8105 stays a fail-closed placeholder.
 // The gateway defaults for the NON-owning services were moved to the
 // deliberately-unassigned 8111-8116 block (see below) — connection-refused
@@ -192,8 +193,9 @@ export const ENV = {
   // the canonical owners (asean-sw-service 8096, profile-service 8097); they
   // now point at the deliberately-unassigned 811x block so a stale consumer
   // fails closed (connection refused) instead of silently hitting the wrong
-  // service. routers/stream.ts still reads FLUVIO_SVC_URL directly with its
-  // own stale 8093 literal — KNOWN STRAGGLER, flagged for the next wave.
+  // service. routers/stream.ts reads FLUVIO_SVC_URL directly — its stale
+  // 8093 literal was removed in phase-10 remediation (empty = unavailable,
+  // fail-closed).
   fluvioSvcUrl: process.env.FLUVIO_SVC_URL ?? "http://localhost:8113",
   fluvioWsUrl: process.env.FLUVIO_WS_URL ?? "ws://localhost:8115",
 
@@ -205,6 +207,13 @@ export const ENV = {
   flinkStreamGrpcAddr: process.env.FLINK_STREAM_GRPC_ADDR ?? "localhost:50099",
 
   // ─── Apache Sedona (Geospatial) ───────────────────────────────────────────
+  // NOTE (phase-10 audit remediation, C-4): the ENV.* wrapper bindings below
+  // have no direct callers, but the underlying env vars DO — geospatial.ts
+  // (SEDONA_SVC_URL), knowledgeGraph.ts (GRAPH_BRIDGE_URL), riskModel.ts
+  // (RISK_SCORER_URL), ledger.ts (PAYMENT_RISK_URL) and grpc-clients.ts
+  // (SEDONA_GEO_GRPC_ADDR) read process.env directly with their own local
+  // literals. The bindings are retained as the canonical defaults; converging
+  // those routers onto ENV is tracked as follow-up hygiene.
   sedonaSvcUrl: process.env.SEDONA_SVC_URL ?? "http://localhost:8100",
   sedonaGeoGrpcAddr: process.env.SEDONA_GEO_GRPC_ADDR ?? "localhost:50100",
 
@@ -221,18 +230,20 @@ export const ENV = {
   // ─── Vision / Document AI ─────────────────────────────────────────────────
   // KNOWN DIVERGENCE (PRA-067): no real service binds PORTS.visionService
   // (8105) — microservices/vision-service compose-binds 8095 (see
-  // visionSvcUrl, used for the vision-ocr health probe) and
-  // services/python/vision-service binds 8092 (itself colliding with compose
-  // gnn-risk). 8105 remains a fail-closed placeholder: set VISION_SERVICE_URL
-  // explicitly to the real NLP/vision endpoint. routers/vision.ts still
-  // hardcodes its own stale 8092 literal — KNOWN STRAGGLER, flagged.
+  // visionSvcUrl, used for the vision-ocr health probe); the legacy
+  // services/python/vision-service (8092, AGPL Ultralytics) was removed in
+  // phase-10 remediation. 8105 remains a fail-closed placeholder: set
+  // VISION_SERVICE_URL explicitly to the real NLP/vision endpoint.
   visionServiceUrl: process.env.VISION_SERVICE_URL ?? "http://localhost:8105",
 
   // ─── Warehouse Service ────────────────────────────────────────────────────
   warehouseServiceUrl: process.env.WAREHOUSE_SERVICE_URL ?? "http://localhost:8106",
 
   // ─── Mojaloop ─────────────────────────────────────────────────────────────
-  mojaloopUrl: process.env.MOJALOOP_URL ?? "http://localhost:3001",
+  // FAIL-CLOSED (phase-10 audit remediation): no deployed mojaloop-hub service
+  // exists; the old localhost:3001 default diverged from router/paymentWorker
+  // literals (3003). Empty default = MOJALOOP_UNCONFIGURED; set explicitly.
+  mojaloopUrl: process.env.MOJALOOP_URL ?? "",
 
   // ─── Tariff Engine (blueeconomy-financial-controls W-FEAT-4) ──────────────
   // PRA-100: authoritative statutory tariff assessment upstream. NO local
@@ -403,8 +414,9 @@ export const ENV = {
   // 8111 — set HS_CLASSIFIER_URL explicitly (compose:
   // http://hs-classifier:8093). A contested default would silently route HS
   // classification to the WCO CEN service or vice versa (duty-relevant).
-  // NOTE: routers/insiderThreat.ts reads HS_CLASSIFIER_URL with its own stale
-  // http://hs-classifier:8090 literal — KNOWN STRAGGLER, flagged.
+  // NOTE: routers/insiderThreat.ts reads HS_CLASSIFIER_URL directly — its
+  // stale http://hs-classifier:8090 literals were removed in phase-10
+  // remediation (empty = HS_CLASSIFIER_UNAVAILABLE, fail-closed).
   hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://localhost:8111",
   riskAiUrl: process.env.RISK_AI_URL ?? "http://localhost:8094",
   visionSvcUrl: process.env.VISION_SVC_URL ?? "http://localhost:8095",

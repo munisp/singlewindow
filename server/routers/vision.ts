@@ -1,8 +1,8 @@
 /**
  * vision.ts — tRPC router for computer vision cargo inspection
  *
- * Routes image analysis through the Python vision-service which uses:
- *   - YOLOv8 for object detection (containers, seals, cargo items)
+ * Routes image analysis through microservices/vision-service which uses:
+ *   - YOLOX-s (ONNX, Apache-2.0) for object detection (containers, seals, cargo items)
  *   - SAM2 (Segment Anything Model 2) for precise segmentation
  *   - Qwen2-VL for visual language understanding and description
  *
@@ -27,11 +27,16 @@ import {
 } from "../db";
 import { storagePut } from "../storage";
 
-const VISION_SERVICE_URL = process.env.VISION_SERVICE_URL || "http://localhost:8092";
+// Fail-closed (phase-10 audit remediation, finding C-3): no silent default —
+// the previous http://localhost:8092 literal collided with gnn-risk and the
+// removed AGPL legacy service. VISION_SERVICE_URL must be set explicitly;
+// when unset the router fails closed with SERVICE_UNAVAILABLE.
+const VISION_SERVICE_URL = process.env.VISION_SERVICE_URL ?? "";
 
 // ─── Vision service client ─────────────────────────────────────────────────
 
 async function visionServiceAvailable(): Promise<boolean> {
+  if (!VISION_SERVICE_URL) return false;
   try {
     const res = await fetch(`${VISION_SERVICE_URL}/health`, {
       signal: AbortSignal.timeout(3_000),
@@ -65,9 +70,6 @@ async function runVisionAnalysis(
 
   return res.json() as Promise<Record<string, unknown>>;
 }
-
-// ─── Mock vision analysis for development ─────────────────────────────────
-
 
 // ─── Router ───────────────────────────────────────────────────────────────
 

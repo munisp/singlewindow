@@ -673,7 +673,7 @@ export const insiderThreatRouter = router({
       description: z.string().max(500).optional(),
     }))
     .mutation(async ({ input }) => {
-      const svcUrl = process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8090";
+      const svcUrl = process.env.HS_CLASSIFIER_URL ?? "";
       try {
         const resp = await fetch(`${svcUrl}/classify`, {
           method: "POST",
@@ -688,20 +688,13 @@ export const insiderThreatRouter = router({
         return await resp.json();
       } catch (err) {
         if (err instanceof TRPCError) throw err;
-        // Offline stub — basic regex validation
-        const code = input.hs_code.replace(/[^0-9]/g, "");
-        const valid = /^\d{6,10}$/.test(code);
-        const chapter = code.slice(0, 2);
-        return {
-          hs_code: input.hs_code,
-          valid,
-          chapter,
-          heading: code.slice(0, 4),
-          subheading: code.slice(0, 6),
-          description: valid ? `Chapter ${chapter} commodity` : "Invalid HS code format",
-          confidence: valid ? 0.6 : 0.0,
-          source: "offline-stub",
-        };
+        // SW-P10: FAIL-CLOSED (phase-10 audit remediation, finding B-3) — the
+        // old offline stub fabricated a regex "classification" presented as
+        // valid on a duty-relevant path. Never invent a classification.
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "HS_CLASSIFIER_UNAVAILABLE: hs-classifier is unreachable or HS_CLASSIFIER_URL is not configured — no classification was performed (fail-closed)",
+        });
       }
     }),
 
@@ -727,7 +720,7 @@ export const insiderThreatRouter = router({
   batchClassifyHSCodes: protectedProcedure
     .input(z.object({ hs_codes: z.array(z.string()).min(1).max(50) }))
     .mutation(async ({ input }) => {
-      const svcUrl = process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8090";
+      const svcUrl = process.env.HS_CLASSIFIER_URL ?? "";
       try {
         const resp = await fetch(`${svcUrl}/batch`, {
           method: "POST",
@@ -759,7 +752,7 @@ export const insiderThreatRouter = router({
    * v76-10: Get full WCO chapter lookup table from Rust GET /chapters
    */
   getHSChapters: protectedProcedure.query(async () => {
-    const svcUrl = process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8090";
+    const svcUrl = process.env.HS_CLASSIFIER_URL ?? "";
     try {
       const resp = await fetch(`${svcUrl}/chapters`, { signal: AbortSignal.timeout(5_000) });
       if (!resp.ok) throw new Error(`hs-classifier chapters returned ${resp.status}`);
@@ -826,8 +819,12 @@ export const insiderThreatRouter = router({
       return await resp.json();
     } catch (err) {
       if (err instanceof TRPCError) throw err;
-      // offline stub
-      return { triggered: true, source: "offline-stub", message: "Token refresh triggered (offline stub)" };
+      // SW-P10: FAIL-CLOSED (phase-10 audit remediation, finding B-3) — never
+      // report a token refresh that was not actually triggered.
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "TOKEN_REFRESH_UNAVAILABLE: notification-dispatcher is unreachable — no token refresh was triggered (fail-closed)",
+      });
     }
   }),
 });

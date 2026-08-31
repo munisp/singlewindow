@@ -53,7 +53,11 @@ import {
   createLedgerEntry,
 } from "../db";
 
-const MOJALOOP_URL = process.env.MOJALOOP_URL || "http://localhost:3003";
+// Fail-closed (phase-10 audit remediation, finding C-3): no deployed
+// mojaloop-hub service exists; the previous localhost:3003 literal diverged
+// from env.ts (3001) and compose. MOJALOOP_URL must be set explicitly or the
+// switch integration reports MOJALOOP_UNCONFIGURED and stays OFFLINE.
+const MOJALOOP_URL = process.env.MOJALOOP_URL ?? "";
 const MOJALOOP_API_KEY = process.env.MOJALOOP_API_KEY || "";
 // Canonical TigerBeetle bridge (Go service, /api/ledger/* dialect).
 const TB_BRIDGE_URL = process.env.TB_BRIDGE_URL || "http://tigerbeetle-bridge:8086";
@@ -85,6 +89,7 @@ const MOJALOOP_WEBHOOK_SECRET = loadWebhookSecret();
 // ─── Mojaloop service client ───────────────────────────────────────────────
 
 async function mojaloopAvailable(): Promise<boolean> {
+  if (!MOJALOOP_URL) return false; // MOJALOOP_UNCONFIGURED — fail closed
   try {
     const res = await fetch(`${MOJALOOP_URL}/health`, {
       signal: AbortSignal.timeout(3_000),
@@ -282,7 +287,10 @@ export const mojaloopRouter = router({
 
   /**
    * Get current exchange rate for duty calculation.
-   * In production, this would query the Bank of Ghana API.
+   * Live rates from the ECB eurofxref-daily feed only — the previous hardcoded
+   * "Bank of Ghana (simulated)" rate table was removed (phase-10 audit
+   * remediation, finding B-4). Fails closed with FX_RATE_UNAVAILABLE when the
+   * live feed is unreachable or does not publish the pair.
    */
   getExchangeRate: protectedProcedure
     .input(z.object({
@@ -290,22 +298,14 @@ export const mojaloopRouter = router({
       toCurrency: z.string().length(3).default("GHS"),
     }))
     .query(async ({ input }) => {
-      const rates: Record<string, number> = {
-        "USD_GHS": 15.42,
-        "EUR_GHS": 16.85,
-        "GBP_GHS": 19.23,
-        "CNY_GHS": 2.12,
-        "JPY_GHS": 0.103,
-        "GHS_GHS": 1.0,
-      };
-
-      const key = `${input.fromCurrency}_${input.toCurrency}`;
-      const rate = rates[key];
-
-      if (!rate) {
+      const { getLiveExchangeRate } = await import("../businessRules");
+      let rate: number;
+      try {
+        rate = await getLiveExchangeRate(input.fromCurrency, input.toCurrency);
+      } catch (err) {
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Exchange rate not available for ${input.fromCurrency}/${input.toCurrency}`,
+          code: "SERVICE_UNAVAILABLE",
+          message: `FX_RATE_UNAVAILABLE: no live exchange rate for ${input.fromCurrency}/${input.toCurrency} (${err instanceof Error ? err.message : String(err)}) — fail-closed, no hardcoded rates are served`,
         });
       }
 
@@ -313,7 +313,7 @@ export const mojaloopRouter = router({
         fromCurrency: input.fromCurrency,
         toCurrency: input.toCurrency,
         rate,
-        source: "Bank of Ghana (simulated)",
+        source: "ECB eurofxref-daily (live)",
         timestamp: Date.now(),
         validUntilMs: Date.now() + 300_000,
       };
@@ -805,8 +805,9 @@ export const mojaloopRouter = router({
 
     return {
       connected: available,
-      mode: available ? "LIVE" : "OFFLINE",
-      switchUrl: MOJALOOP_URL,
+      configured: Boolean(MOJALOOP_URL),
+      mode: available ? "LIVE" : MOJALOOP_URL ? "OFFLINE" : "MOJALOOP_UNCONFIGURED",
+      switchUrl: MOJALOOP_URL || null,
       supportedFSPs: SUPPORTED_FSPS.filter(f => f.active).length,
       ilpVersion: "v4",
       isoStandard: "ISO 20022",

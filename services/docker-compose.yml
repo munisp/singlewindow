@@ -459,18 +459,10 @@ services:
     networks:
       - ngswtp-net
 
-  vision-service:
-    build:
-      context: ./python/vision-service
-      dockerfile: Dockerfile
-    container_name: ngswtp-vision-service
-    restart: unless-stopped
-    ports:
-      - "8096:8096"
-    environment:
-      PORT: "8096"
-    networks:
-      - ngswtp-net
+  # NOTE: the legacy services/python/vision-service (Ultralytics YOLOv8, AGPL-3.0)
+  # was REMOVED for license compliance (phase-10 audit remediation). The deployed
+  # vision service is microservices/vision-service (YOLOX-s ONNX, Apache-2.0),
+  # built by the root docker-compose.yml.
 
   ollama-proxy:
     build:

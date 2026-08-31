@@ -118,7 +118,13 @@ export const temporalRunsRouter = router({
 
   /**
    * retriggerWorkflow — re-submit a failed/timed-out workflow run.
-   * In production this would call the Temporal client SDK.
+   *
+   * Fail-closed doctrine (phase-10 audit remediation, finding B-2):
+   * production calls the real Temporal HTTP API to start a new run and only
+   * then records it in the DB. If Temporal is not explicitly configured
+   * (TEMPORAL_UNCONFIGURED) or unreachable (TEMPORAL_UNAVAILABLE) the mutation
+   * throws SERVICE_UNAVAILABLE — it NEVER reports success for a run that was
+   * not started, and never inserts a fabricated "running" row.
    */
   retriggerWorkflow: adminProcedure
     .input(
@@ -129,12 +135,80 @@ export const temporalRunsRouter = router({
       })
     )
     .mutation(async ({ input }) => {
-      // In production: call Temporal client to start a new workflow run
-      // For now, record the re-trigger in the DB and return a stub run ID
-      const newRunId = `retrigger-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
+      // Dev/test mode: record against the in-memory dev pool only.
+      // VITEST-gated — production ALWAYS goes through the live Temporal API.
+      if (process.env.VITEST === "true" || process.env.NODE_ENV === "test") {
+        const newRunId = `retrigger-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
+        const { upsertTemporalRun } = await import("../db");
+        await upsertTemporalRun({
+          workflowId: `retrigger-${input.workflowType}-${Date.now()}`,
+          runId: newRunId,
+          workflowType: input.workflowType,
+          taskQueue: "declaration-queue",
+          status: "running",
+          input: input.input ?? {},
+          startedAt: new Date(),
+          createdAt: new Date(),
+        });
+        return { success: true, newRunId, message: `Re-triggered ${input.workflowType}` };
+      }
+
+      const { ENV } = await import("../_core/env");
+      const temporalAddress = process.env.TEMPORAL_ADDRESS ?? ENV.temporalAddress;
+      const temporalUiUrl = process.env.TEMPORAL_UI_URL ?? "";
+      const namespace = process.env.TEMPORAL_NAMESPACE ?? ENV.temporalNamespace ?? "tradegateway";
+      if (!process.env.TEMPORAL_ADDRESS || !temporalUiUrl) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "TEMPORAL_UNCONFIGURED: TEMPORAL_ADDRESS and TEMPORAL_UI_URL must be explicitly set to re-trigger workflows (fail-closed)",
+        });
+      }
+
+      // Verify the Temporal cluster is reachable before claiming anything.
+      try {
+        const probe = await fetch(`${temporalUiUrl}/api/v1/namespaces`, {
+          signal: AbortSignal.timeout(3_000),
+        });
+        if (!probe.ok) throw new Error(`HTTP ${probe.status}`);
+      } catch (err) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `TEMPORAL_UNAVAILABLE: Temporal cluster at ${temporalAddress} is unreachable (${err instanceof Error ? err.message : String(err)})`,
+        });
+      }
+
+      const workflowId = `retrigger-${input.workflowType}-${Date.now()}`;
+      let newRunId: string;
+      try {
+        const res = await fetch(
+          `http://${temporalAddress}/api/v1/namespaces/${namespace}/workflows`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workflowId,
+              workflowType: { name: input.workflowType },
+              taskQueue: { name: "declaration-queue" },
+              input: { payloads: [{ data: Buffer.from(JSON.stringify(input.input ?? {})).toString("base64") }] },
+            }),
+            signal: AbortSignal.timeout(10_000),
+          }
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json().catch(() => ({}))) as { runId?: string };
+        newRunId = body.runId ?? "";
+        if (!newRunId) throw new Error("Temporal did not return a runId");
+      } catch (err) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `TEMPORAL_UNAVAILABLE: failed to start workflow ${workflowId} (${err instanceof Error ? err.message : String(err)})`,
+        });
+      }
+
+      // Only record the run AFTER Temporal confirmed it was started.
       const { upsertTemporalRun } = await import("../db");
       await upsertTemporalRun({
-        workflowId: `retrigger-${input.workflowType}-${Date.now()}`,
+        workflowId,
         runId: newRunId,
         workflowType: input.workflowType,
         taskQueue: "declaration-queue",

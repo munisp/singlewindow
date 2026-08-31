@@ -445,29 +445,30 @@ describe("tRPC insiderThreat.classifyHSCode", () => {
   });
 
   it("proxies to Rust hs-classifier POST /classify", () => {
-    expect(routerTs).toContain("hs-classifier:8090");
     expect(routerTs).toContain("/classify");
+    // phase-10 remediation: stale hs-classifier:8090 literal removed
+    expect(routerTs).not.toContain("hs-classifier:8090");
   });
 
-  it("returns offline stub with valid field on service unavailable", () => {
+  it("fails closed on service unavailable (no offline-stub fabrication)", () => {
     const idx = routerTs.indexOf("classifyHSCode:");
     const snippet = routerTs.slice(idx, idx + 1600);
-    expect(snippet).toContain("offline-stub");
-    expect(snippet).toContain("valid");
+    expect(snippet).toContain("HS_CLASSIFIER_UNAVAILABLE");
+    expect(snippet).not.toContain("offline-stub");
   });
 
-  it("offline stub validates 6+ digit codes as valid", async () => {
+  it("throws HS_CLASSIFIER_UNAVAILABLE when classifier is unreachable", async () => {
     const caller = appRouter.createCaller(makeCtx("user"));
-    const result = await caller.insiderThreat.classifyHSCode({ hs_code: "847130" });
-    expect(result).toHaveProperty("valid");
-    expect(result).toHaveProperty("chapter");
-    expect(result).toHaveProperty("source", "offline-stub");
+    await expect(
+      caller.insiderThreat.classifyHSCode({ hs_code: "847130" })
+    ).rejects.toThrow(/HS_CLASSIFIER_UNAVAILABLE/);
   });
 
-  it("offline stub marks 2-digit codes as invalid", async () => {
+  it("never returns a fabricated classification for any code", async () => {
     const caller = appRouter.createCaller(makeCtx("user"));
-    const result = await caller.insiderThreat.classifyHSCode({ hs_code: "84" });
-    expect(result.valid).toBe(false);
+    const result = await caller.insiderThreat.classifyHSCode({ hs_code: "84" }).catch(e => e);
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toContain("HS_CLASSIFIER_UNAVAILABLE");
   });
 });
 

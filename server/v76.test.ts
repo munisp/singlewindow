@@ -448,10 +448,11 @@ describe("tRPC: forceTokenRefresh procedure", () => {
     expect(snippet).toContain("/admin/force-refresh");
   });
 
-  it("returns offline stub when service unavailable", () => {
+  it("fails closed when service unavailable (phase-10 remediation)", () => {
     const idx = routerTs.indexOf("forceTokenRefresh:");
-    const snippet = routerTs.slice(idx, idx + 800);
-    expect(snippet).toContain("offline-stub");
+    const snippet = routerTs.slice(idx, idx + 900);
+    expect(snippet).toContain("TOKEN_REFRESH_UNAVAILABLE");
+    expect(snippet).not.toContain("offline-stub");
   });
 });
 
@@ -554,10 +555,9 @@ describe("tRPC: v76 offline stubs return correct shapes", () => {
     expect(result).toHaveProperty("total");
   });
 
-  it("forceTokenRefresh returns triggered field", async () => {
+  it("forceTokenRefresh fails closed when dispatcher is unreachable (phase-10 remediation)", async () => {
     const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.insiderThreat.forceTokenRefresh();
-    expect(result).toHaveProperty("triggered");
+    await expect(caller.insiderThreat.forceTokenRefresh()).rejects.toThrow(/TOKEN_REFRESH_UNAVAILABLE/);
   });
 });
 
