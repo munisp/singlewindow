@@ -81,12 +81,19 @@ async function requireTenantMembership(tenantId: string, userId: number, userRol
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 export const tenantRouter = router({
-  /** Super-admin: list all tenants */
-  listTenants: adminProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) return [];
-    return db.select().from(tenants).orderBy(desc(tenants.createdAt));
-  }),
+  /** Super-admin: list all tenants (paginated — capped to bound result sets) */
+  listTenants: adminProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(500).default(100),
+      offset: z.number().int().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(tenants).orderBy(desc(tenants.createdAt))
+        .limit(input?.limit ?? 100)
+        .offset(input?.offset ?? 0);
+    }),
 
   /** Super-admin: get a single tenant by ID */
   getTenant: adminProcedure

@@ -27,13 +27,19 @@ import { createUserNotification } from "../db";
 // ─── AEO Renewal Comments (Item 21) ──────────────────────────────────────────
 export const aeoCommentsRouter = router({
   list: protectedProcedure
-    .input(z.object({ renewalId: z.number().int() }))
+    .input(z.object({
+      renewalId: z.number().int(),
+      limit: z.number().int().min(1).max(500).default(200),
+      offset: z.number().int().min(0).default(0),
+    }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(aeoRenewalComments)
         .where(eq(aeoRenewalComments.renewalId, input.renewalId))
-        .orderBy(aeoRenewalComments.createdAt);
+        .orderBy(aeoRenewalComments.createdAt)
+        .limit(input.limit)
+        .offset(input.offset);
     }),
 
   post: protectedProcedure
@@ -88,13 +94,19 @@ export const aeoCommentsRouter = router({
 // ─── Document Version History (Item 14) ──────────────────────────────────────
 export const docVersionsRouter = router({
   list: protectedProcedure
-    .input(z.object({ renewalDocId: z.number().int() }))
+    .input(z.object({
+      renewalDocId: z.number().int(),
+      limit: z.number().int().min(1).max(200).default(50),
+      offset: z.number().int().min(0).default(0),
+    }))
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(aeoDocumentVersions)
         .where(eq(aeoDocumentVersions.renewalDocId, input.renewalDocId))
-        .orderBy(desc(aeoDocumentVersions.uploadedAt));
+        .orderBy(desc(aeoDocumentVersions.uploadedAt))
+        .limit(input.limit)
+        .offset(input.offset);
     }),
 
   add: protectedProcedure
@@ -314,8 +326,8 @@ export const sanctionsEntitiesRouter = router({
     .input(z.object({
       search: z.string().optional(),
       entityType: z.string().optional(),
-      page: z.number().int().default(1),
-      pageSize: z.number().int().default(25),
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(1).max(100).default(25),
     }))
     .query(async ({ input }) => {
       const db = await getDb();

@@ -32,14 +32,21 @@ export const aeoRenewalsRouter = router({
       .orderBy(desc(aeoRenewals.createdAt));
   }),
 
-  /** Admin: list all pending renewals */
-  listPending: adminProcedure.query(async () => {
-    const db = await getDb();
-    if (!db) throw new Error("Database unavailable");
-    return db.select().from(aeoRenewals)
-      .where(eq(aeoRenewals.status, "pending"))
-      .orderBy(aeoRenewals.renewalDueDate);
-  }),
+  /** Admin: list all pending renewals (paginated — capped to bound result sets) */
+  listPending: adminProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(500).default(100),
+      offset: z.number().int().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database unavailable");
+      return db.select().from(aeoRenewals)
+        .where(eq(aeoRenewals.status, "pending"))
+        .orderBy(aeoRenewals.renewalDueDate)
+        .limit(input?.limit ?? 100)
+        .offset(input?.offset ?? 0);
+    }),
 
   /** Trader: submit renewal documents */
   submit: protectedProcedure
