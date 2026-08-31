@@ -37,6 +37,7 @@ const TraderProfile = lazy(() => import("./pages/app/TraderProfile"));
 const TraderAEO = lazy(() => import("./pages/app/TraderAEO"));
 const AeoSelfAssessment = lazy(() => import("./pages/app/AeoSelfAssessment"));
 const PortCongestionForecast = lazy(() => import("./pages/app/PortCongestionForecast"));
+const SecureChain = lazy(() => import("./pages/app/SecureChain"));
 const AdminUsers = lazy(() => import("./pages/app/AdminUsers"));
 const AdminDeclarations = lazy(() => import("./pages/app/AdminDeclarations"));
 const AdminAEO = lazy(() => import("./pages/app/AdminAEO"));
@@ -264,6 +265,9 @@ function Router() {
       <Route path="/app/geo/heatmap" component={PortHeatmap} />
       <Route path="/app/geo/congestion-forecast">
         <Suspense fallback={<LazyFallback />}><PortCongestionForecast /></Suspense>
+      </Route>
+      <Route path="/app/secure-chain">
+        <Suspense fallback={<LazyFallback />}><SecureChain /></Suspense>
       </Route>
 
       {/* Notifications */}

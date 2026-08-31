@@ -53,6 +53,7 @@ import { socRouter } from "./routers/soc";
 import { auditEngineRouter } from "./routers/auditEngine";
 import { bondedWarehouseRouter } from "./routers/bondedWarehouse";
 import { portCongestionRouter } from "./routers/portCongestion";
+import { secureChainRouter } from "./routers/secureChain";
 import { traderScorecardRouter } from "./routers/traderScorecard";
 import { cargoTrackingRouter } from "./routers/cargoTracking";
 import { mswRouter } from "./routers/msw";
@@ -307,6 +308,7 @@ export const appRouter = router({
   auditEngine: auditEngineRouter,
   bondedWarehouse: bondedWarehouseRouter,
   portCongestion: portCongestionRouter,
+  secureChain: secureChainRouter,
   traderScorecard: traderScorecardRouter,
   cargoTracking: cargoTrackingRouter,
   msw: mswRouter,
