@@ -22,8 +22,10 @@ import {
   type UpstreamEndpoint,
 } from "../marketplace/sandboxRouting";
 
-declare module "express-serve-static-core" {
-  interface Request {
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
     apiKeyContext?: {
       keyId: number;
       keyPrefix: string;
@@ -31,6 +33,7 @@ declare module "express-serve-static-core" {
       scopes: string[];
       upstreamHeaders: Record<string, string>;
     };
+    }
   }
 }
 

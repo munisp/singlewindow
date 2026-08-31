@@ -6,7 +6,7 @@
  *   - Day-of-week and time-of-day seasonality factors
  */
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb, getPool } from "../db";
 import { geoServiceFetch } from "../_core/geoServiceClient";
 

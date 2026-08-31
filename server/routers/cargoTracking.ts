@@ -13,7 +13,7 @@
  */
 
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { publishEvent, TOPICS } from "../_core/kafka";
 import { geoServiceConfig } from "../_core/geoServiceClient";
 
