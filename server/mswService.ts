@@ -59,6 +59,11 @@ import {
   PortInteropRejectedError,
   PortInteropUnavailableError,
 } from "./_core/portInteropClient";
+import {
+  AdapterTransportError,
+  AdapterUnconfiguredError,
+} from "./_core/externalAdapters/base";
+import { fetchEsenShipEntryNotice, npaEsenAdapter } from "./_core/externalAdapters/npaEsen";
 
 // ─── Reason codes (stable, machine-readable) ─────────────────────────────────
 
@@ -210,6 +215,9 @@ export interface MswServiceResult<T> {
 
 export type PortCallVerification = "VERIFIED" | "PORT_CALL_UNVERIFIED" | "PORT_CALL_UNAVAILABLE";
 
+/** The upstream actually consulted for port-call verification (honest). */
+export type PortCallUpstream = "port-interop" | "npa-esen" | "none";
+
 export interface CreateVisitInput {
   portCallId?: string;
   vesselImoNumber: string;
@@ -224,7 +232,14 @@ export interface CreateVisitInput {
 export async function createVisit(
   principal: MswPrincipal,
   input: CreateVisitInput
-): Promise<MswServiceResult<MswVisit> & { portCallVerification: PortCallVerification }> {
+): Promise<
+  MswServiceResult<MswVisit> & {
+    portCallVerification: PortCallVerification;
+    portCallUpstream: PortCallUpstream;
+    /** Registered gap id disclosed when verification was unavailable (e.g. GAP-MSW-ESEN). */
+    portCallGapId: string | null;
+  }
+> {
   const db = await requireDb();
   if (!/^[0-9]{7}$/.test(input.vesselImoNumber)) {
     throw new MswServiceError("INVALID_INPUT", "vesselImoNumber must be 7 decimal digits (IMO, no prefix)");
@@ -233,6 +248,7 @@ export async function createVisit(
   // Port-call linkage: verified=true ONLY on a real upstream verification.
   let portCallVerified = false;
   let portCallVerification: PortCallVerification = "PORT_CALL_UNVERIFIED";
+  let portCallUpstream: PortCallUpstream = "none";
   if (input.portCallId) {
     try {
       const client = getPortInteropClient();
@@ -240,16 +256,37 @@ export async function createVisit(
       portCallVerified =
         portCall.vessel_imo === input.vesselImoNumber && portCall.port_code === input.portCode;
       portCallVerification = portCallVerified ? "VERIFIED" : "PORT_CALL_UNVERIFIED";
+      portCallUpstream = "port-interop";
     } catch (err) {
       if (
         err instanceof PortInteropConfigError ||
         err instanceof PortInteropUnavailableError ||
         err instanceof PortInteropRejectedError
       ) {
-        // Honest fail-closed state: the visit is created unverified and the
-        // reason is surfaced — never presented as verified.
-        portCallVerified = false;
-        portCallVerification = "PORT_CALL_UNAVAILABLE";
+        // Designated e-SEN upstream (GAP-MSW-ESEN; Phase 9 WP-D): the
+        // concrete fail-closed implementation behind PORT_CALL_UNAVAILABLE.
+        // With no e-SEN credentials the visit is honestly created unverified
+        // and the gap is surfaced — never presented as verified.
+        try {
+          const esen = await fetchEsenShipEntryNotice(input.portCallId, {
+            principalId: principalIdOf(principal),
+            principalRole: principal.role,
+          });
+          portCallVerified =
+            esen.response.vesselImoNumber === input.vesselImoNumber &&
+            esen.response.portCode === input.portCode;
+          portCallVerification = portCallVerified ? "VERIFIED" : "PORT_CALL_UNVERIFIED";
+          portCallUpstream = "npa-esen";
+        } catch (esenErr) {
+          if (esenErr instanceof AdapterUnconfiguredError || esenErr instanceof AdapterTransportError) {
+            // Honest fail-closed state: the visit is created unverified and
+            // the reason + gap id are surfaced — never fabricated.
+            portCallVerified = false;
+            portCallVerification = "PORT_CALL_UNAVAILABLE";
+          } else {
+            throw esenErr;
+          }
+        }
       } else {
         throw err;
       }
@@ -301,7 +338,14 @@ export async function createVisit(
     correlationId: `corr-${visit.visitId}`,
     occurredAt: now.toISOString(),
   });
-  return { record: visit, event: envelope, eventPublished: published, portCallVerification };
+  return {
+    record: visit,
+    event: envelope,
+    eventPublished: published,
+    portCallVerification,
+    portCallUpstream,
+    portCallGapId: portCallVerification === "PORT_CALL_UNAVAILABLE" ? npaEsenAdapter.gapId : null,
+  };
 }
 
 // ─── nominateAgent ───────────────────────────────────────────────────────────
