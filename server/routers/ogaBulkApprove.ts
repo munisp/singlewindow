@@ -68,8 +68,23 @@ export const ogaBulkApproveRouter = router({
       // SW-28: notify the TRADERS (looked up from their declarations), not the
       // approver; and sync declaration status when all permits are approved.
       const declarationIds = [...new Set(eligible.map((p) => p.declarationId))];
+      // Batch the per-declaration lookups (was 2 queries per declaration — N+1):
+      // one fetch for the declarations, one for all their permits.
+      const declRows = declarationIds.length > 0
+        ? await db.select().from(declarations).where(inArray(declarations.id, declarationIds))
+        : [];
+      const declById = new Map(declRows.map((d) => [d.id, d]));
+      const permitRows = declarationIds.length > 0
+        ? await db.select().from(ogaPermits).where(inArray(ogaPermits.declarationId, declarationIds))
+        : [];
+      const permitsByDeclId = new Map<number, typeof permitRows>();
+      for (const p of permitRows) {
+        const arr = permitsByDeclId.get(p.declarationId) ?? [];
+        arr.push(p);
+        permitsByDeclId.set(p.declarationId, arr);
+      }
       for (const declId of declarationIds) {
-        const [decl] = await db.select().from(declarations).where(eq(declarations.id, declId)).limit(1);
+        const decl = declById.get(declId);
         if (!decl) continue;
         const approvedCount = eligible.filter((p) => p.declarationId === declId).length;
         await createUserNotification({
@@ -81,7 +96,7 @@ export const ogaBulkApproveRouter = router({
 
         // Declaration status sync: mirrors the OGA webhook contract — when ALL
         // permits for the declaration are approved, the declaration clears.
-        const allPermits = await db.select().from(ogaPermits).where(eq(ogaPermits.declarationId, declId));
+        const allPermits = permitsByDeclId.get(declId) ?? [];
         const allApproved = allPermits.length > 0 && allPermits.every((p) => p.status === "approved");
         if (allApproved && decl.status !== "cleared") {
           await db.update(declarations)
