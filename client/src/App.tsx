@@ -75,6 +75,8 @@ const AseanSingleWindow = lazy(() => import('./pages/app/AseanSingleWindow'));
 const WcoCenAlerts = lazy(() => import('./pages/app/WcoCenAlerts'));
 const FreeZoneOps = lazy(() => import('./pages/app/FreeZoneOps'));
 const DeveloperPortal = lazy(() => import('./pages/app/DeveloperPortal'));
+const Marketplace = lazy(() => import('./pages/app/Marketplace'));
+const OperationalKpis = lazy(() => import('./pages/app/OperationalKpis'));
 const ThreatIntelligence = lazy(() => import('./pages/app/ThreatIntelligence'));
 const WazuhSecurityEvents = lazy(() => import('./pages/app/WazuhSecurityEvents'));
 const RiskModelDashboard = lazy(() => import('./pages/app/RiskModelDashboard'));
@@ -404,6 +406,14 @@ function Router() {
       {/* Sprint 41 — Developer Portal */}
       <Route path="/app/developer">
         <Suspense fallback={<LazyFallback />}><DeveloperPortal /></Suspense>
+      </Route>
+      {/* WP-8 — API Marketplace catalogue browser */}
+      <Route path="/app/developer/marketplace">
+        <Suspense fallback={<LazyFallback />}><Marketplace /></Suspense>
+      </Route>
+      {/* WP-8 — Executive operational KPI dashboard (real, provenance-stamped) */}
+      <Route path="/app/executive/kpis">
+        <Suspense fallback={<LazyFallback />}><OperationalKpis /></Suspense>
       </Route>
       <Route path="/app/security/threat-intel">
         <SecurityGuard><Suspense fallback={<LazyFallback />}><ThreatIntelligence /></Suspense></SecurityGuard>

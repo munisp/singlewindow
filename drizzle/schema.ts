@@ -1072,6 +1072,43 @@ export const apiUsageLogs = pgTable("api_usage_logs", {
 export type ApiUsageLog = typeof apiUsageLogs.$inferSelect;
 export type InsertApiUsageLog = typeof apiUsageLogs.$inferInsert;
 
+// ─── WP-8 API MARKETPLACE — DEVELOPER ORGANISATIONS ──────────────────────────
+export const developerOrganisations = pgTable("developer_organisations", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 200 }).notNull(),
+  contactEmail: varchar("contact_email", { length: 320 }).notNull(),
+  // sandbox: keys only reach sandbox upstreams; production: after maker-checker elevation
+  tier: varchar("tier", { length: 20 }).default("sandbox").notNull(), // sandbox | production
+  status: varchar("status", { length: 20 }).default("active").notNull(), // active | suspended
+  registeredBy: integer("registered_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_dev_orgs_registered_by").on(t.registeredBy),
+  index("idx_dev_orgs_tier").on(t.tier),
+]);
+export type DeveloperOrganisation = typeof developerOrganisations.$inferSelect;
+export type InsertDeveloperOrganisation = typeof developerOrganisations.$inferInsert;
+
+// ─── WP-8 API MARKETPLACE — PRODUCTION-TIER ELEVATION (MAKER-CHECKER) ────────
+export const apiKeyElevationRequests = pgTable("api_key_elevation_requests", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => developerOrganisations.id),
+  apiKeyId: integer("api_key_id").notNull().references(() => apiKeys.id),
+  justification: text("justification").notNull(),
+  requestedBy: integer("requested_by").notNull().references(() => users.id), // maker
+  reviewedBy: integer("reviewed_by").references(() => users.id),             // checker (must differ)
+  status: varchar("status", { length: 20 }).default("pending").notNull(),    // pending | approved | rejected
+  reviewNotes: text("review_notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewed_at"),
+}, (t) => [
+  index("idx_elev_req_org").on(t.organisationId),
+  index("idx_elev_req_status").on(t.status),
+]);
+export type ApiKeyElevationRequest = typeof apiKeyElevationRequests.$inferSelect;
+export type InsertApiKeyElevationRequest = typeof apiKeyElevationRequests.$inferInsert;
+
 // ─── MULTI-TENANCY — TENANTS (Sprint 47) ─────────────────────────────────────
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().defaultRandom(),
