@@ -68,6 +68,36 @@ function resolvePostgresUrl(): string | null {
   return null;
 }
 
+/**
+ * Pool sizing/timeout configuration, all via env with documented safe
+ * defaults. No secrets here — credentials come exclusively from DATABASE_URL.
+ *   PG_POOL_MAX             max pool clients (default 10)
+ *   PG_POOL_MIN             min idle clients (default 0)
+ *   PG_IDLE_TIMEOUT_MS      close idle clients after this (default 30000)
+ *   PG_CONN_TIMEOUT_MS      fail connection attempts after this (default 5000)
+ *   PG_MAX_USES             recycle a client after N uses (default 7500)
+ * Invalid (non-numeric / out-of-range) values are ignored so a misconfigured
+ * environment cannot produce an unbounded or zero-sized pool.
+ */
+function envInt(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < min || n > max) return fallback;
+  return n;
+}
+
+function buildPoolConfig(connectionString: string) {
+  return {
+    connectionString,
+    max: envInt("PG_POOL_MAX", 10, 1, 100),
+    min: envInt("PG_POOL_MIN", 0, 0, 100),
+    idleTimeoutMillis: envInt("PG_IDLE_TIMEOUT_MS", 30_000, 1_000, 600_000),
+    connectionTimeoutMillis: envInt("PG_CONN_TIMEOUT_MS", 5_000, 500, 60_000),
+    maxUses: envInt("PG_MAX_USES", 7_500, 0, 1_000_000),
+  };
+}
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb(): Promise<AppDatabase | null> {
   if (_db === undefined) {
@@ -76,7 +106,7 @@ export async function getDb(): Promise<AppDatabase | null> {
       _db = null;
     } else {
       try {
-        _pool = new Pool({ connectionString: url });
+        _pool = new Pool(buildPoolConfig(url));
         _db = drizzle(_pool);
       } catch (error) {
         console.warn("[Database] Failed to connect:", error);
