@@ -1,10 +1,12 @@
 // TradeGateway NGSWTP — Service Worker v3
 // v56: Cache-busting on deployment — SKIP_WAITING message handler + bumped cache version
 
-const CACHE_NAME = 'tradegateway-v3';
+const CACHE_NAME = 'tradegateway-v4';
 const OFFLINE_QUEUE_NAME = 'tradegateway-offline-queue';
 const STATIC_ASSETS = [
   '/manifest.json',
+  '/offline.html',
+  '/icon-192.png',
   // Note: index.html is intentionally excluded — always fetched from network
 ];
 
@@ -62,6 +64,7 @@ self.addEventListener('fetch', (event) => {
         if ('sync' in self.registration) {
           await self.registration.sync.register('trpc-offline-queue');
         }
+        await broadcastQueueCount();
         return new Response(
           JSON.stringify({ error: { message: 'OFFLINE_QUEUED', code: 'OFFLINE' } }),
           { status: 503, headers: { 'Content-Type': 'application/json', 'X-Offline-Queued': 'true' } }
@@ -79,9 +82,8 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate' || url.pathname.endsWith('.html')) {
     event.respondWith(
       fetch(request).catch(() => {
-        // Offline fallback only — serve cached shell if network is unavailable
-        return caches.match('/') || caches.match('/index.html') ||
-          new Response('<h1>TradeGateway — Offline</h1>', { headers: { 'Content-Type': 'text/html' } });
+        // Offline fallback only — serve the honest offline page
+        return caches.match('/offline.html');
       })
     );
     return;
@@ -106,9 +108,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ── Everything else: network-first ────────────────────────────────────────
-  event.respondWith(fetch(request).catch(() => caches.match(request)));
+  // ── Everything else (incl. GET /api/trpc): network-first, stale-flagged cache fallback
+  event.respondWith(
+    fetch(request).catch(async () => {
+      const cached = await caches.match(request);
+      if (!cached) return Response.json(
+        { error: { message: 'OFFLINE', code: 'OFFLINE' } },
+        { status: 503, headers: { 'X-SW-Offline': 'true' } }
+      );
+      // Badge cached data as stale so the UI can disclose it honestly
+      const headers = new Headers(cached.headers);
+      headers.set('X-SW-Stale', 'true');
+      headers.set('X-SW-Stale-Since', cached.headers.get('date') || 'unknown');
+      return new Response(cached.body, { status: cached.status, statusText: cached.statusText, headers });
+    })
+  );
 });
+
+async function broadcastQueueCount() {
+  try {
+    const cache = await caches.open(OFFLINE_QUEUE_NAME);
+    const keys = await cache.keys();
+    const clients = await self.clients.matchAll({ type: 'window' });
+    for (const client of clients) client.postMessage({ type: 'SW_QUEUE_COUNT', count: keys.length });
+  } catch { /* best-effort */ }
+}
 
 // ─── BACKGROUND SYNC ─────────────────────────────────────────────────────────
 self.addEventListener('sync', (event) => {
@@ -139,6 +163,7 @@ async function replayOfflineQueue() {
   }
   const clients = await self.clients.matchAll({ type: 'window' });
   for (const client of clients) client.postMessage({ type: 'OFFLINE_QUEUE_REPLAYED', replayed, failed });
+  await broadcastQueueCount();
 }
 
 // ─── PUSH NOTIFICATIONS ───────────────────────────────────────────────────────

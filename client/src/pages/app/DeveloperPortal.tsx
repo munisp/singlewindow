@@ -70,9 +70,9 @@ export default function DeveloperPortal() {
     setPlaygroundLoading(l => ({ ...l, [endpointId]: true }));
     try {
       const input = JSON.parse(playgroundInput[endpointId] ?? sampleInput);
-      // Simulate a response for demo purposes
-      await new Promise(r => setTimeout(r, 600));
-      const mockResponse = { status: "ok", procedure, input, result: { message: "Playground response (live calls require authentication)", timestamp: new Date().toISOString() } };
+      // No live call is made here — disclose that honestly rather than faking success.
+      await new Promise(r => setTimeout(r, 300));
+      const mockResponse = { status: "simulated", procedure, input, result: { message: "SIMULATED response — no request was sent to the platform. Use a signed API key to make live calls.", timestamp: new Date().toISOString() } };
       setPlaygroundResponse(r => ({ ...r, [endpointId]: JSON.stringify(mockResponse, null, 2) }));
     } catch (err: any) {
       setPlaygroundResponse(r => ({ ...r, [endpointId]: JSON.stringify({ error: err.message }, null, 2) }));

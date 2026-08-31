@@ -523,7 +523,7 @@ function DashboardLayoutContent({
       description: notif.body,
       duration: isDeclarationStatusChange ? 8000 : 5000,
       action: isDeclarationStatusChange
-        ? { label: "View Declarations", onClick: () => handleToastAction("/app/declarations") }
+        ? { label: "View Declarations", onClick: () => handleToastAction("/app/trader/declarations") }
         : { label: "View", onClick: () => handleToastAction("/app/notification-centre") },
     });
   }, [utils, setLocation, isTrader, markAsReadMutation]);

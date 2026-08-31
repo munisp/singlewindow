@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0A1628" />
+  <title>TradeGateway — You are offline</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "DM Sans", system-ui, -apple-system, sans-serif;
+      background: #0A1628;
+      color: #E8E4DA;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      max-width: 520px;
+      width: 100%;
+      background: #101F33;
+      border: 1px solid #24384F;
+      border-radius: 16px;
+      padding: 40px 32px;
+      text-align: center;
+    }
+    .mark {
+      width: 56px; height: 56px;
+      margin: 0 auto 20px;
+      border-radius: 14px;
+      background: #D4A017;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 22px; color: #0A1628;
+    }
+    h1 { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
+    p { color: #A8B4C4; line-height: 1.6; margin-bottom: 16px; font-size: 15px; }
+    .honest {
+      text-align: left;
+      background: #0D1A2B;
+      border: 1px solid #24384F;
+      border-radius: 10px;
+      padding: 16px;
+      margin: 20px 0;
+      font-size: 14px;
+      color: #A8B4C4;
+    }
+    .honest li { margin: 6px 0 6px 18px; }
+    .honest strong { color: #E8E4DA; }
+    button {
+      background: #D4A017;
+      color: #0A1628;
+      border: none;
+      border-radius: 10px;
+      padding: 12px 28px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:focus-visible { outline: 3px solid #E8C554; outline-offset: 2px; }
+    button:hover { background: #E0B23A; }
+    .status { margin-top: 16px; font-size: 13px; color: #7A8798; }
+  </style>
+</head>
+<body>
+  <main class="card" role="alert" aria-live="assertive">
+    <div class="mark" aria-hidden="true">TG</div>
+    <h1>You&rsquo;re offline</h1>
+    <p>TradeGateway can&rsquo;t reach the platform right now. Check your connection and try again.</p>
+    <ul class="honest">
+      <li><strong>Nothing was submitted.</strong> Any form you tried to send has not reached the server.</li>
+      <li><strong>Queued changes</strong> (if any) will replay automatically when you reconnect — you will be notified of the result.</li>
+      <li><strong>Previously viewed data</strong>, if shown, may be out of date and is badged as stale in the app.</li>
+    </ul>
+    <button id="retry" type="button">Retry connection</button>
+    <div class="status" id="status" role="status">Waiting for network&hellip;</div>
+  </main>
+  <script>
+    var status = document.getElementById('status');
+    function go() { window.location.reload(); }
+    document.getElementById('retry').addEventListener('click', function () {
+      status.textContent = 'Checking connection…';
+      fetch('/manifest.json', { cache: 'no-store' })
+        .then(function () { go(); })
+        .catch(function () { status.textContent = 'Still offline. Please try again in a moment.'; });
+    });
+    window.addEventListener('online', go);
+  </script>
+</body>
+</html>
