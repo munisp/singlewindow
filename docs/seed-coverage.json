@@ -1,0 +1,820 @@
+{
+  "generatedAt": "2026-08-31T22:53:28.060Z",
+  "database": "local-demo",
+  "totalTables": 162,
+  "populatedTables": 162,
+  "totalRows": 9217,
+  "exemptions": [],
+  "tables": [
+    {
+      "table": "ab_divergence_log",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "aeo_applications",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "aeo_document_versions",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "aeo_renewal_comments",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "aeo_renewal_documents",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "aeo_renewal_requests",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "aeo_renewals",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "anomaly_detections",
+      "rows": 25,
+      "exempt": false
+    },
+    {
+      "table": "api_changelog",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "api_key_elevation_requests",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "api_keys",
+      "rows": 16,
+      "exempt": false
+    },
+    {
+      "table": "api_usage_logs",
+      "rows": 120,
+      "exempt": false
+    },
+    {
+      "table": "apisix_route_audit",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "asean_sw_messages",
+      "rows": 16,
+      "exempt": false
+    },
+    {
+      "table": "audit_events",
+      "rows": 600,
+      "exempt": false
+    },
+    {
+      "table": "audit_findings",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "audit_tasks",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "batch_validation_errors",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "bills_of_lading",
+      "rows": 160,
+      "exempt": false
+    },
+    {
+      "table": "bond_expiry_alerts",
+      "rows": 15,
+      "exempt": false
+    },
+    {
+      "table": "bonded_inventory",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "bonded_warehouses",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "bulk_exports",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "cen_messages",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "cep_alerts",
+      "rows": 24,
+      "exempt": false
+    },
+    {
+      "table": "cep_patterns",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "cep_suppression_log",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "checklist_templates",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "clearance_certificates",
+      "rows": 120,
+      "exempt": false
+    },
+    {
+      "table": "compliance_email_delivery_log",
+      "rows": 24,
+      "exempt": false
+    },
+    {
+      "table": "compliance_email_schedule",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "container_ocr_reads",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "coraza_waf_rules",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "cost_records",
+      "rows": 100,
+      "exempt": false
+    },
+    {
+      "table": "crf_documents",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "cron_run_logs",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "declaration_amendments",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "declaration_documents",
+      "rows": 800,
+      "exempt": false
+    },
+    {
+      "table": "declaration_risk_history",
+      "rows": 500,
+      "exempt": false
+    },
+    {
+      "table": "declarations",
+      "rows": 500,
+      "exempt": false
+    },
+    {
+      "table": "developer_organisations",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "document_shares",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "document_vault",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "document_versions",
+      "rows": 80,
+      "exempt": false
+    },
+    {
+      "table": "domain_verification_events",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "duty_drawback_claims",
+      "rows": 25,
+      "exempt": false
+    },
+    {
+      "table": "ex_bond_permits",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "export_schedule_deliveries",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "export_schedules",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "fluvio_topic_offsets",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "four_eyes_requests",
+      "rows": 16,
+      "exempt": false
+    },
+    {
+      "table": "fraud_case_evidence",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "fraud_case_links",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "fraud_case_notes",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "fraud_cases",
+      "rows": 15,
+      "exempt": false
+    },
+    {
+      "table": "free_zone_operations",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "freezone_reconciliation_runs",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "geofence_events",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "geofences",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "geoip_cache",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "geoip_seed_jobs",
+      "rows": 4,
+      "exempt": false
+    },
+    {
+      "table": "health_thresholds",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "hs_classification_cache",
+      "rows": 39,
+      "exempt": false
+    },
+    {
+      "table": "insider_threat_events",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "kafka_event_log",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "keycloak_config",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "keycloak_sessions",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "knowledge_graph_edges",
+      "rows": 120,
+      "exempt": false
+    },
+    {
+      "table": "knowledge_graph_nodes",
+      "rows": 80,
+      "exempt": false
+    },
+    {
+      "table": "kpi_targets",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "kyc_documents",
+      "rows": 90,
+      "exempt": false
+    },
+    {
+      "table": "kyc_events",
+      "rows": 90,
+      "exempt": false
+    },
+    {
+      "table": "kyc_verifications",
+      "rows": 45,
+      "exempt": false
+    },
+    {
+      "table": "lakehouse_jobs",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "lpco_records",
+      "rows": 90,
+      "exempt": false
+    },
+    {
+      "table": "manifests",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "mojaloop_payments",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "mojaloop_transactions",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "msw_agent_nominations",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "msw_boardings",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "msw_clearances",
+      "rows": 1,
+      "exempt": false
+    },
+    {
+      "table": "msw_declarations",
+      "rows": 1,
+      "exempt": false
+    },
+    {
+      "table": "msw_foreign_drafts",
+      "rows": 24,
+      "exempt": false
+    },
+    {
+      "table": "msw_pratique",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "msw_visits",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "nl_query_history",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "nl_query_templates",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "notification_channel_preferences",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "notification_digest_settings",
+      "rows": 24,
+      "exempt": false
+    },
+    {
+      "table": "notification_preferences",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "notifications",
+      "rows": 400,
+      "exempt": false
+    },
+    {
+      "table": "officer_workload_snapshots",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "oga_bulk_actions",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "oga_permit_events",
+      "rows": 240,
+      "exempt": false
+    },
+    {
+      "table": "oga_permits",
+      "rows": 240,
+      "exempt": false
+    },
+    {
+      "table": "onboarding_analytics",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "onboarding_progress",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "open_appsec_events",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "origin_certificates",
+      "rows": 80,
+      "exempt": false
+    },
+    {
+      "table": "payment_accounts",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "payment_archival_jobs",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "payment_idempotency_keys",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "payment_queue",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "payment_risk_scores",
+      "rows": 120,
+      "exempt": false
+    },
+    {
+      "table": "payments",
+      "rows": 450,
+      "exempt": false
+    },
+    {
+      "table": "pcs_billing_snapshots",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "pcs_booking_links",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "pcs_consignments",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "pcs_milestones",
+      "rows": 80,
+      "exempt": false
+    },
+    {
+      "table": "permify_audit_log",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "pilot_participants",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "pilot_reports",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "port_congestion_alerts",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "port_congestion_events",
+      "rows": 36,
+      "exempt": false
+    },
+    {
+      "table": "port_locations",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "post_clearance_audit_schedule",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "post_clearance_audits",
+      "rows": 20,
+      "exempt": false
+    },
+    {
+      "table": "privileged_action_approvals",
+      "rows": 16,
+      "exempt": false
+    },
+    {
+      "table": "push_tokens",
+      "rows": 24,
+      "exempt": false
+    },
+    {
+      "table": "risk_model_configs",
+      "rows": 4,
+      "exempt": false
+    },
+    {
+      "table": "risk_scan_results",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "sanctions_batch_conflicts",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "sanctions_batch_jobs",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "sanctions_checks",
+      "rows": 200,
+      "exempt": false
+    },
+    {
+      "table": "sanctions_entities",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "sanctions_watchlist_alerts",
+      "rows": 15,
+      "exempt": false
+    },
+    {
+      "table": "schedule_delivery_stats",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "schedule_dependencies",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "security_alerts",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "session_audit_log",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "settings_audit_log",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "site_settings",
+      "rows": 6,
+      "exempt": false
+    },
+    {
+      "table": "sla_escalations",
+      "rows": 15,
+      "exempt": false
+    },
+    {
+      "table": "soc_incidents",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "stakeholder_profiles",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "stream_events",
+      "rows": 80,
+      "exempt": false
+    },
+    {
+      "table": "system_heartbeat_jobs",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "temporal_workflow_runs",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "temporal_workflows",
+      "rows": 10,
+      "exempt": false
+    },
+    {
+      "table": "tenant_branding",
+      "rows": 4,
+      "exempt": false
+    },
+    {
+      "table": "tenant_keycloak_config",
+      "rows": 5,
+      "exempt": false
+    },
+    {
+      "table": "tenant_users",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "tenants",
+      "rows": 5,
+      "exempt": false
+    },
+    {
+      "table": "threat_intel_feeds",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "threshold_audit_log",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "tigerbeetle_bonds",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "tigerbeetle_ledger_entries",
+      "rows": 1,
+      "exempt": false
+    },
+    {
+      "table": "tigerbeetle_penalties",
+      "rows": 25,
+      "exempt": false
+    },
+    {
+      "table": "tigerbeetle_transit_guarantees",
+      "rows": 1,
+      "exempt": false
+    },
+    {
+      "table": "trade_finance_consent_evidence",
+      "rows": 30,
+      "exempt": false
+    },
+    {
+      "table": "trader_ratings",
+      "rows": 50,
+      "exempt": false
+    },
+    {
+      "table": "ucrs",
+      "rows": 120,
+      "exempt": false
+    },
+    {
+      "table": "user_notifications",
+      "rows": 200,
+      "exempt": false
+    },
+    {
+      "table": "users",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "valuation_references",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "vessel_tracking_events",
+      "rows": 400,
+      "exempt": false
+    },
+    {
+      "table": "vision_analyses",
+      "rows": 16,
+      "exempt": false
+    },
+    {
+      "table": "vision_batch_jobs",
+      "rows": 8,
+      "exempt": false
+    },
+    {
+      "table": "webhook_deliveries",
+      "rows": 60,
+      "exempt": false
+    },
+    {
+      "table": "webhook_receipts",
+      "rows": 40,
+      "exempt": false
+    },
+    {
+      "table": "webhook_subscriptions",
+      "rows": 12,
+      "exempt": false
+    },
+    {
+      "table": "workflow_input_schemas",
+      "rows": 8,
+      "exempt": false
+    }
+  ]
+}
