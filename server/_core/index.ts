@@ -192,7 +192,7 @@ async function runSLABreachScan() {
       red: 72 * 60 * 60 * 1000,
       blue: 48 * 60 * 60 * 1000,
     };
-    const SLA_LABELS: Record<string, number | string> = {
+    const SLA_LABELS: Record<string, string> = {
       green: "4 hours", yellow: "24 hours", red: "72 hours", blue: "48 hours",
     };
 
