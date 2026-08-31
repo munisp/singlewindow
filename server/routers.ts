@@ -55,6 +55,7 @@ import { bondedWarehouseRouter } from "./routers/bondedWarehouse";
 import { portCongestionRouter } from "./routers/portCongestion";
 import { traderScorecardRouter } from "./routers/traderScorecard";
 import { cargoTrackingRouter } from "./routers/cargoTracking";
+import { mswRouter } from "./routers/msw";
 import { onboardingRouter } from "./routers/onboarding";
 import { geofencesRouter } from "./routers/geofences";
 import { webhooksRouter } from "./routers/webhooks";
@@ -308,6 +309,7 @@ export const appRouter = router({
   portCongestion: portCongestionRouter,
   traderScorecard: traderScorecardRouter,
   cargoTracking: cargoTrackingRouter,
+  msw: mswRouter,
   onboarding: onboardingRouter,
   geofences: geofencesRouter,
   webhooks: webhooksRouter,
