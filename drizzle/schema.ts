@@ -2982,6 +2982,33 @@ export const declarationRiskHistory = pgTable("declaration_risk_history", {
 export type DeclarationRiskHistory = typeof declarationRiskHistory.$inferSelect;
 export type InsertDeclarationRiskHistory = typeof declarationRiskHistory.$inferInsert;
 
+// ─── Container OCR Reads (cv.container-code.v1 projection, WP-4) ────────────
+// Signed gate-OCR container reads from blueeconomy-cv-service, projected for
+// cargo/declaration cross-check. matchStatus:
+//   matched      — code matches a declaration's vision-analysis container read
+//   unmatched    — no declaration/vision record declares this container
+//   invalid_code — ISO 6346 check digit invalid (per producer event)
+export const containerOcrReads = pgTable("container_ocr_reads", {
+  id: serial("id").primaryKey(),
+  eventId: varchar("event_id", { length: 128 }).notNull().unique(),
+  cameraId: varchar("camera_id", { length: 64 }).notNull(),
+  containerCode: varchar("container_code", { length: 16 }).notNull(),
+  status: varchar("status", { length: 16 }).notNull(),
+  confidence: decimal("confidence", { precision: 5, scale: 4 }),
+  checkDigitValid: boolean("check_digit_valid").notNull().default(false),
+  modelVersion: varchar("model_version", { length: 128 }),
+  matchStatus: varchar("match_status", { length: 16 }).notNull(),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  occurredAt: timestamp("occurred_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_cor_container_code").on(t.containerCode),
+  index("idx_cor_match_status").on(t.matchStatus),
+  index("idx_cor_declaration").on(t.declarationId),
+]);
+export type ContainerOcrRead = typeof containerOcrReads.$inferSelect;
+export type InsertContainerOcrRead = typeof containerOcrReads.$inferInsert;
+
 // ─── OGA Permit Bulk Actions ──────────────────────────────────────────────────
 export const ogaBulkActions = pgTable("oga_bulk_actions", {
   id: serial("id").primaryKey(),

@@ -52,10 +52,22 @@ KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 PORT = int(os.getenv("PORT", "8094"))
 MODEL_DIR = os.getenv("MODEL_DIR", "/tmp/risk_ai_models")
+# Fail-closed by default: when the XGBoost model is absent the service refuses
+# to score (SCORING_UNAVAILABLE). The rule-based fallback is a separately
+# audited, explicitly-configured degraded mode — OFF unless this is "true".
+ALLOW_RULE_FALLBACK = os.getenv("RISK_AI_ALLOW_RULE_FALLBACK", "false").lower() == "true"
 CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))
 
 # ─── Prometheus Metrics ───────────────────────────────────────────────────────
 REQUESTS_TOTAL = Counter("risk_ai_requests_total", "Total risk AI requests", ["lane"])
+DEGRADED_SCORING_TOTAL = Counter(
+    "risk_ai_degraded_scoring_total",
+    "Scores produced in degraded rule-based fallback mode (audit signal)",
+)
+SCORING_REFUSED_TOTAL = Counter(
+    "risk_ai_scoring_refused_total",
+    "Scoring requests refused fail-closed (SCORING_UNAVAILABLE)",
+)
 SCORING_DURATION = Histogram(
     "risk_ai_scoring_duration_seconds",
     "Risk AI scoring duration",
@@ -110,24 +122,50 @@ def get_redis() -> Optional[redis.Redis]:
 # ─── ML Model ─────────────────────────────────────────────────────────────────
 _xgb_model = None
 _model_version = "0"
+_degraded_mode = False
+
+
+class ScoringUnavailableError(RuntimeError):
+    """Fail-closed: scoring cannot be performed and no audited fallback is
+    configured. Carries the SCORING_UNAVAILABLE reason code."""
+
 
 def load_model():
-    global _xgb_model, _model_version
+    """Load the XGBoost model. Fail closed (SCORING_UNAVAILABLE) when the
+    model is absent/unloadable unless RISK_AI_ALLOW_RULE_FALLBACK=true selects
+    the explicitly-audited degraded rule-based mode."""
+    global _xgb_model, _model_version, _degraded_mode
     model_path = Path(MODEL_DIR) / "xgb_risk.json"
-    if not model_path.exists():
-        logger.warning(f"XGBoost model not found at {model_path}. Using rule-based scoring.")
-        return
+    load_error: Optional[str] = None
 
-    try:
-        import xgboost as xgb
-        _xgb_model = xgb.Booster()
-        _xgb_model.load_model(str(model_path))
-        _model_version = "1.0"
-        logger.info("XGBoost risk model loaded successfully")
-    except ImportError:
-        logger.warning("XGBoost not available. Using rule-based scoring.")
-    except Exception as e:
-        logger.error(f"Failed to load XGBoost model: {e}")
+    if not model_path.exists():
+        load_error = f"model file missing: {model_path}"
+    else:
+        try:
+            import xgboost as xgb
+            _xgb_model = xgb.Booster()
+            _xgb_model.load_model(str(model_path))
+            _model_version = "1.0"
+            _degraded_mode = False
+            logger.info("XGBoost risk model loaded successfully")
+            return
+        except ImportError:
+            load_error = "xgboost package not installed"
+        except Exception as e:
+            load_error = f"model load failed: {e}"
+
+    if not ALLOW_RULE_FALLBACK:
+        raise ScoringUnavailableError(
+            f"SCORING_UNAVAILABLE: {load_error}; refusing to start without the "
+            "XGBoost model (set RISK_AI_ALLOW_RULE_FALLBACK=true to run the "
+            "audited degraded rule-based mode)"
+        )
+    _degraded_mode = True
+    logger.warning(
+        "AUDIT degraded-mode: XGBoost unavailable (%s); rule-based fallback "
+        "enabled via RISK_AI_ALLOW_RULE_FALLBACK — all scores degraded",
+        load_error,
+    )
 
 def build_features(req: RiskAIRequest) -> tuple[np.ndarray, list[str]]:
     """Build feature vector for risk scoring."""
@@ -279,9 +317,11 @@ async def liveness():
 
 @app.get("/readyz")
 async def readiness():
+    ready = _xgb_model is not None or _degraded_mode
     return {
-        "status": "ready",
-        "model": "xgboost" if _xgb_model else "rule_based",
+        "status": "ready" if ready else "unavailable",
+        "model": "xgboost" if _xgb_model else ("rule_based_degraded" if _degraded_mode else "unavailable"),
+        "degraded_mode": _degraded_mode,
         "redis": "ok" if get_redis() else "unavailable",
     }
 
@@ -307,7 +347,8 @@ async def score_declaration(req: RiskAIRequest):
     # Build features
     features, feature_names = build_features(req)
 
-    # Score using XGBoost or rule-based fallback
+    # Score using XGBoost; rule-based fallback only in explicitly-configured
+    # degraded mode, otherwise fail closed (SCORING_UNAVAILABLE).
     shap_values = None
     if _xgb_model:
         try:
@@ -328,14 +369,30 @@ async def score_declaration(req: RiskAIRequest):
             except Exception:
                 pass
         except Exception as e:
-            logger.warning(f"XGBoost scoring failed: {e}. Using rule-based.")
+            if not ALLOW_RULE_FALLBACK:
+                SCORING_REFUSED_TOTAL.inc()
+                logger.error(f"XGBoost scoring failed, refusing (fail closed): {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"SCORING_UNAVAILABLE: model scoring failed ({e})",
+                )
+            DEGRADED_SCORING_TOTAL.inc()
+            logger.warning(f"AUDIT degraded-mode: XGBoost scoring failed ({e}); rule-based fallback used")
             risk_score, lane = rule_based_score(features)
             confidence = 0.75
-            model_version = "rule_based"
-    else:
+            model_version = "rule_based_degraded"
+    elif _degraded_mode:
+        DEGRADED_SCORING_TOTAL.inc()
         risk_score, lane = rule_based_score(features)
         confidence = 0.75
-        model_version = "rule_based"
+        model_version = "rule_based_degraded"
+    else:
+        SCORING_REFUSED_TOTAL.inc()
+        raise HTTPException(
+            status_code=503,
+            detail="SCORING_UNAVAILABLE: XGBoost model not loaded and rule-based "
+                   "fallback is disabled (RISK_AI_ALLOW_RULE_FALLBACK=false)",
+        )
 
     risk_factors = build_risk_factors(req, features, feature_names)
     scoring_ms = (time.perf_counter() - start) * 1000

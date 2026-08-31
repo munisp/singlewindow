@@ -16,7 +16,7 @@ import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
 import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
 import { indexDeclaration, searchDeclarations } from "../_core/opensearch";
-import { scoreDeclarationRisk, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
+import { scoreDeclarationRisk, scoreDeclarationRiskComposite, configuredRiskScorers, ScorerUnavailableError, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
 
 // Generate a unique declaration number: TG-YYYY-XXXXXXXX
 function generateDeclarationNumber(): string {
@@ -45,7 +45,34 @@ async function computeRiskScore(
     traderHistory?: { totalDeclarations: number; rejectionRate: number; amendmentRate: number; isAEO: boolean; monthsActive: number };
   }
 ): Promise<{ score: number; lane: string; explanation: Record<string, unknown> }> {
-  // ── 1. Python ML risk scorer (primary) ──────────────────────────────────────
+  // ── 1. Configured scorer pipeline (fail-closed when a configured scorer is down) ──
+  // When RISK_SCORER_PIPELINE registers additional scorers (e.g. ml-stack),
+  // the composite composition is authoritative: a down scorer aborts scoring
+  // (ScorerUnavailableError) instead of silently degrading to the LLM lane.
+  const scorers = configuredRiskScorers();
+  if (opts?.declarationId && opts?.traderId && scorers.length > 1) {
+    const composite = await scoreDeclarationRiskComposite({
+      declarationId: opts.declarationId,
+      traderId: opts.traderId,
+      declarationType: data.declarationType,
+      countryOfOrigin: data.countryOfOrigin,
+      countryOfDestination: "",
+      totalValue: data.invoiceValue,
+      totalWeight: 0,
+      totalDuty: 0,
+      numberOfPackages: 1,
+      items: [{ hsCode: data.hsCode, description: data.goodsDescription, quantity: 1, unitValue: data.invoiceValue }],
+      documents: [],
+      traderHistory: opts.traderHistory ?? { totalDeclarations: 0, rejectionRate: 0, amendmentRate: 0, isAEO: false, monthsActive: 0 },
+    });
+    return {
+      score: Math.round(composite.combinedScore * 100),
+      lane: composite.lane.toLowerCase(),
+      explanation: { source: "composite", pipeline: scorers, scorers: composite.scorers },
+    };
+  }
+
+  // ── 1b. Python ML risk scorer (primary, single-scorer default) ──────────────
   if (opts?.declarationId && opts?.traderId) {
     try {
       const mlResult = await scoreDeclarationRisk({

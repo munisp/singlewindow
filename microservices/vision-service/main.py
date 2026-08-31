@@ -8,7 +8,7 @@ Role: Next-generation open-source computer vision for customs cargo inspection.
       runs multi-model inference pipelines.
 
 Vision Pipeline:
-  1. YOLOv8 (Ultralytics) — Object detection and classification
+  1. YOLOX-s (ONNX Runtime, Apache-2.0) — Object detection and classification
      - Cargo type identification (electronics, textiles, chemicals, food, vehicles)
      - Container seal detection and status (intact / broken / missing)
      - Prohibited item detection (weapons, contraband indicators)
@@ -64,6 +64,8 @@ from fastapi.responses import JSONResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from onnx_detector import DetectorError, OnnxCargoDetector
+
 # ─── Logging ─────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
@@ -76,7 +78,7 @@ logger = logging.getLogger("vision-service")
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 PORT = int(os.getenv("PORT", "8092"))
-YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/cargo_yolov8n.pt")
+ONNX_MODEL_PATH = os.getenv("VISION_ONNX_MODEL_PATH", "models/cargo_yolox_s.onnx")
 SAM2_CHECKPOINT = os.getenv("SAM2_CHECKPOINT", "models/sam2_hiera_small.pt")
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
 DEVICE = os.getenv("DEVICE", "cpu")  # "cuda" for GPU
@@ -174,106 +176,51 @@ CARGO_CLASSES = {
 PROHIBITED_CLASSES = {13, 14, 15, 16, 17, 18}  # class IDs that trigger RED lane
 
 class YOLODetector:
-    """YOLOv8 object detector for cargo inspection."""
+    """Fail-closed YOLOX-s ONNX detector for cargo inspection.
+
+    No mock path exists: ``load()`` verifies weights and builds the ONNX
+    Runtime session, raising :class:`DetectorError` (WEIGHTS_REQUIRED-style)
+    on any failure; ``detect()`` raises if the model was never loaded. The
+    application lifespan calls ``load()`` and aborts boot on failure.
+    """
 
     def __init__(self):
-        self._model = None
-        self._initialized = False
+        self._detector: Optional[OnnxCargoDetector] = None
 
-    def _lazy_init(self):
-        if self._initialized:
-            return
-        try:
-            from ultralytics import YOLO
-            model_path = YOLO_MODEL_PATH
-            if not Path(model_path).exists():
-                # Fall back to base YOLOv8n (not cargo-specific)
-                logger.warning(
-                    f"Custom model not found at {model_path}. "
-                    "Using base YOLOv8n. For production, train on cargo dataset."
-                )
-                model_path = "yolov8n.pt"
-            self._model = YOLO(model_path)
-            if DEVICE == "cuda":
-                self._model.to("cuda")
-            self._initialized = True
-            logger.info(f"YOLOv8 initialized: {model_path}")
-        except ImportError:
-            logger.warning("Ultralytics not installed. Using mock detections. Install: pip install ultralytics")
-            self._initialized = True
+    def load(self):
+        """Verify weights and build the inference session. Fail closed."""
+        self._detector = OnnxCargoDetector(
+            ONNX_MODEL_PATH,
+            CARGO_CLASSES,
+            conf_threshold=CONFIDENCE_THRESHOLD,
+        )
+        logger.info(f"YOLOX-s ONNX initialized: {self._detector.model_version}")
+
+    @property
+    def ready(self) -> bool:
+        return self._detector is not None
+
+    @property
+    def model_version(self) -> Optional[str]:
+        return self._detector.model_version if self._detector else None
 
     def detect(self, img_array: np.ndarray) -> list[Detection]:
-        self._lazy_init()
-
-        if self._model is None:
-            return self._mock_detections(img_array.shape)
-
-        try:
-            results = self._model(
-                img_array,
-                conf=CONFIDENCE_THRESHOLD,
-                iou=0.45,
-                device=DEVICE,
-                verbose=False,
+        if self._detector is None:
+            raise DetectorError(
+                "WEIGHTS_REQUIRED: detector not initialised — service must boot "
+                "with VISION_ONNX_MODEL_PATH weights present"
             )
-
-            detections = []
-            for result in results:
-                if result.boxes is None:
-                    continue
-                for box in result.boxes:
-                    cls_id = int(box.cls[0])
-                    conf = float(box.conf[0])
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-                    # Use cargo class names if available, else YOLO default
-                    class_name = CARGO_CLASSES.get(
-                        cls_id,
-                        result.names.get(cls_id, f"class_{cls_id}")
-                    )
-
-                    detections.append(Detection(
-                        detection_id=f"det-{uuid.uuid4().hex[:8]}",
-                        class_id=cls_id,
-                        class_name=class_name,
-                        confidence=conf,
-                        bbox=[x1, y1, x2, y2],
-                        area_px=(x2 - x1) * (y2 - y1),
-                    ))
-
-            return detections
-
-        except Exception as e:
-            logger.error(f"YOLO detection failed: {e}", exc_info=True)
-            return self._mock_detections(img_array.shape)
-
-    def _mock_detections(self, shape: tuple) -> list[Detection]:
-        h, w = shape[:2]
+        raw = self._detector.detect(img_array)
         return [
             Detection(
                 detection_id=f"det-{uuid.uuid4().hex[:8]}",
-                class_id=0,
-                class_name="electronics_box",
-                confidence=0.91,
-                bbox=[w * 0.1, h * 0.1, w * 0.4, h * 0.5],
-                area_px=(w * 0.3) * (h * 0.4),
-            ),
-            Detection(
-                detection_id=f"det-{uuid.uuid4().hex[:8]}",
-                class_id=6,
-                class_name="container_seal_intact",
-                confidence=0.88,
-                bbox=[w * 0.7, h * 0.05, w * 0.9, h * 0.2],
-                area_px=(w * 0.2) * (h * 0.15),
-            ),
-            Detection(
-                detection_id=f"det-{uuid.uuid4().hex[:8]}",
-                class_id=9,
-                class_name="pallet",
-                confidence=0.85,
-                bbox=[w * 0.05, h * 0.6, w * 0.95, h * 0.95],
-                area_px=(w * 0.9) * (h * 0.35),
-            ),
+                class_id=r.class_id,
+                class_name=CARGO_CLASSES.get(r.class_id, f"class_{r.class_id}"),
+                confidence=r.score,
+                bbox=[r.x1, r.y1, r.x2, r.y2],
+                area_px=max(0.0, (r.x2 - r.x1) * (r.y2 - r.y1)),
+            )
+            for r in raw
         ]
 
 
@@ -371,8 +318,8 @@ class OpenCVAnalyser:
             except ImportError:
                 pass
 
-            # Mock result for development
-            return "CSQU-305182-3"
+            # No OCR result — fail closed (no fabricated container numbers).
+            return None
 
         except Exception as e:
             logger.warning(f"Container number extraction failed: {e}")
@@ -444,7 +391,7 @@ class VLMCargoDescriber:
         image_bytes: bytes,
         detections: list[Detection],
         declared_description: Optional[str] = None,
-    ) -> str:
+    ) -> Optional[str]:
         """Generate a natural language description of cargo contents."""
         image_b64 = base64.b64encode(image_bytes).decode()
 
@@ -475,12 +422,9 @@ Keep your response under 200 words."""
             resp.raise_for_status()
             return resp.json().get("message", {}).get("content", "")
         except Exception as e:
+            # Fail closed: never fabricate an analysis narrative.
             logger.warning(f"VLM description failed: {e}")
-            return (
-                f"Cargo image analysis complete. Detected: {detection_summary}. "
-                "Visual inspection suggests cargo is consistent with standard commercial goods. "
-                "No obvious anomalies detected."
-            )
+            return None
 
     async def close(self):
         await self._client.aclose()
@@ -609,13 +553,15 @@ def analyse_container(
 # ─── Application Lifespan ───────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan: activates full middleware bundle on startup."""
+    """Fail-closed boot: the detector weights/session MUST initialise or the
+    service refuses to start (WEIGHTS_REQUIRED). No mock detections exist."""
+    yolo.load()  # raises DetectorError -> boot aborts
     async with middleware_lifespan():
         yield
 
 app = FastAPI(
     title="TradeGateway Vision Analysis Service",
-    description="YOLOv8 + SAM2 + OpenCV + Qwen2-VL cargo inspection",
+    description="YOLOX-s (ONNX Runtime) + SAM2 + OpenCV + Qwen2-VL cargo inspection",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -631,12 +577,14 @@ risk_scorer = VisionRiskScorer()
 
 @app.get("/health")
 async def health():
+    ready = yolo.ready
     return {
-        "status": "ok",
+        "status": "ok" if ready else "unavailable",
+        "ready": ready,
         "service": "vision-service",
         "models": {
-            "yolov8": "available" if yolo._model else "mock_mode",
-            "sam2": "available" if sam2._predictor else "mock_mode",
+            "yolox_onnx": yolo.model_version if yolo.ready else "unavailable",
+            "sam2": "available" if sam2._predictor else "disabled",
             "opencv": "available",
             "vlm": "qwen2-vl:7b via Ollama",
         },
@@ -704,7 +652,7 @@ async def analyse(
 
     logger.info(f"[{report_id}] Analysing {analysis_type}: {img.size}")
 
-    # YOLOv8 detection
+    # YOLOX-s ONNX detection
     detections = yolo.detect(img_array)
 
     # SAM2 segmentation (optional, slower)
@@ -774,7 +722,7 @@ async def analyse(
         vlm_description=vlm_description,
         processing_time_ms=total_ms,
         model_versions={
-            "yolov8": "8.3.x",
+            "yolox_onnx": yolo.model_version or "unavailable",
             "sam2": "2.0",
             "opencv": "4.10.x",
             "vlm": "qwen2-vl:7b",
@@ -832,11 +780,7 @@ async def verify_seal(
 
 
 
-if __name__ == "__main__":
-    import uvicorn
-
 # ─── Middleware Integration ───────────────────────────────────────────────────
-import threading as _threading
 try:
     from middleware_integration import setup_middleware, start_consumer_thread, shutdown_middleware, middleware_lifespan
     _MIDDLEWARE_AVAILABLE = True
@@ -849,5 +793,8 @@ except ImportError:
     async def middleware_lifespan():
         yield
 
+
+if __name__ == "__main__":
+    import uvicorn
 
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=False, log_level="info")

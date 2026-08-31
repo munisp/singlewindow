@@ -6,9 +6,9 @@ numpy==2.2.2
 pydantic==2.10.6
 python-multipart==0.0.20
 
-# Computer vision
+# Computer vision (Apache-2.0/MIT stack only — Ultralytics AGPL removed)
 opencv-python-headless==4.10.0.84
-ultralytics==8.3.x  # YOLOv8
+onnxruntime==1.20.1  # MIT — runs YOLOX-s (Apache-2.0) ONNX export
 # sam2 @ git+https://github.com/facebookresearch/sam2.git  # SAM2 (install from source)
 
 # OCR
