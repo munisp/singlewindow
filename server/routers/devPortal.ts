@@ -207,16 +207,9 @@ export const devPortalRouter = router({
           .orderBy(sql`DATE(${apiUsageLogs.createdAt})`);
         return await query;
       } catch {
-        // Return mock data when DB is unavailable
-        const days = input.days;
-        return Array.from({ length: days }, (_, i) => {
-          const d = new Date(Date.now() - (days - 1 - i) * 86_400_000);
-          return {
-            date: d.toISOString().slice(0, 10),
-            count: Math.floor(Math.random() * 200) + 10,
-            endpoint: "/api/trpc/declarations.list",
-          };
-        });
+        // WP-8: no fabricated usage data — return an honest empty series when
+        // the metering store is unavailable; the UI renders an empty state.
+        return [];
       }
     }),
 

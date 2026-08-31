@@ -96,7 +96,7 @@ async function checkOptionalService(
 }
 
 // ─── Full health report ───────────────────────────────────────────────────────
-async function buildHealthReport(): Promise<HealthReport> {
+export async function buildHealthReport(): Promise<HealthReport> {
   const isDemoMode = process.env.DEMO_MODE === "true";
 
   const [database, redis, tigerbeetle, temporal, kafka, aseanSw, cenService, permify] =

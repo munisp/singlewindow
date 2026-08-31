@@ -67,7 +67,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function OverallBanner({ status, uptimePercent }: { status: string; uptimePercent: number }) {
+function OverallBanner({ status, uptimePercent }: { status: string; uptimePercent: number | null }) {
   const isOk = status === "operational";
   const isDegraded = status === "degraded";
 
@@ -98,7 +98,9 @@ function OverallBanner({ status, uptimePercent }: { status: string; uptimePercen
         </h2>
       </div>
       <p className="text-slate-400 text-sm">
-        {uptimePercent.toFixed(2)}% uptime over the last 90 days
+        {typeof uptimePercent === "number"
+          ? `${uptimePercent.toFixed(2)}% uptime over the last 90 days`
+          : "Live status only — historical uptime is not yet collected"}
       </p>
     </div>
   );
@@ -122,25 +124,31 @@ function ComponentRow({ component }: { component: StatusComponent }) {
   );
 }
 
-function UptimeBar({ percent }: { percent: number }) {
-  const days = Array.from({ length: 90 }, (_, i) => {
-    const noise = Math.random() * 2 - 1;
-    const dayPercent = Math.min(100, Math.max(95, percent + noise));
-    return dayPercent;
-  });
-
+// WP-8: no fabricated uptime history. The platform does not yet retain a
+// 90-day uptime store, so instead of drawing random bars we show an honest
+// empty state. When a real uptime time-series store is wired, render it here.
+function UptimeHistoryEmptyState() {
   return (
-    <div className="flex gap-0.5 items-end h-8">
-      {days.map((p, i) => (
-        <div
-          key={i}
-          className={`flex-1 rounded-sm ${p >= 99.5 ? "bg-emerald-500" : p >= 98 ? "bg-amber-500" : "bg-red-500"}`}
-          style={{ height: `${Math.max(20, p - 80) * 5}%` }}
-          title={`Day ${i + 1}: ${p.toFixed(2)}%`}
-        />
-      ))}
+    <div className="h-16 flex flex-col items-center justify-center text-center">
+      <p className="text-xs text-slate-500 font-medium">Historical uptime data is not yet collected</p>
+      <p className="text-[11px] text-slate-600 mt-1">
+        Only live, real-time health is shown above — no synthetic history is displayed.
+      </p>
     </div>
   );
+}
+
+interface PublicStatusFeed {
+  feedId: string;
+  status: "fresh" | "stale" | "no_data";
+  lastEventAt: string | null;
+  ageSeconds: number | null;
+}
+interface PublicStatusPayload {
+  status: "operational" | "degraded" | "down";
+  checkedAt: string;
+  feeds: PublicStatusFeed[];
+  banners: string[];
 }
 
 export default function SystemStatus() {
@@ -151,6 +159,20 @@ export default function SystemStatus() {
     refetchInterval: autoRefresh ? 30_000 : false,
     staleTime: 10_000,
   });
+
+  // WP-8: public status surface (feed staleness + honest degradation banners)
+  const [publicStatus, setPublicStatus] = useState<PublicStatusPayload | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      fetch("/api/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => { if (!cancelled) setPublicStatus(j); })
+        .catch(() => { if (!cancelled) setPublicStatus(null); });
+    load();
+    const t = autoRefresh ? setInterval(load, 30_000) : undefined;
+    return () => { cancelled = true; if (t) clearInterval(t); };
+  }, [autoRefresh]);
 
   useEffect(() => {
     if (data) setLastRefresh(Date.now());
@@ -241,26 +263,52 @@ export default function SystemStatus() {
           </div>
         </section>
 
-        {/* Uptime history */}
+        {/* WP-8: honest degradation banners from the public status surface */}
+        {publicStatus && publicStatus.banners.length > 0 && (
+          <section className="mb-10 space-y-2">
+            {publicStatus.banners.map((b, i) => (
+              <div key={i} className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-xs text-amber-300">
+                {b}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {/* WP-8: integration feed freshness (real event-store staleness) */}
         <section className="mb-10">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest">
-              90-Day Uptime History
-            </h3>
-            <span className="text-xs text-emerald-400 font-medium">
-              {data?.uptimePercent.toFixed(2) ?? "—"}% uptime
-            </span>
-          </div>
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-            {data ? (
-              <UptimeBar percent={data.uptimePercent} />
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">
+            Integration Feeds
+          </h3>
+          <div className="space-y-2">
+            {publicStatus?.feeds?.length ? (
+              publicStatus.feeds.map((f) => (
+                <div key={f.feedId} className="flex items-center justify-between px-5 py-3 rounded-xl border border-slate-700 bg-slate-800/50">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-200">{f.feedId}</p>
+                    <p className="text-xs text-slate-500">
+                      {f.lastEventAt
+                        ? `Last event ${f.ageSeconds != null ? `${f.ageSeconds}s ago` : new Date(f.lastEventAt).toLocaleString()}`
+                        : "No events recorded"}
+                    </p>
+                  </div>
+                  <StatusBadge status={f.status === "fresh" ? "operational" : "degraded"} />
+                </div>
+              ))
             ) : (
-              <div className="h-8 bg-slate-700 rounded animate-pulse" />
+              <div className="px-5 py-4 rounded-xl border border-slate-700/50 bg-slate-800/30 text-xs text-slate-500 text-center">
+                Feed status unavailable — the status endpoint could not be reached.
+              </div>
             )}
-            <div className="flex justify-between text-xs text-slate-600 mt-2">
-              <span>90 days ago</span>
-              <span>Today</span>
-            </div>
+          </div>
+        </section>
+
+        {/* Uptime history — honest empty state (no synthetic bars) */}
+        <section className="mb-10">
+          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">
+            90-Day Uptime History
+          </h3>
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+            <UptimeHistoryEmptyState />
           </div>
         </section>
 

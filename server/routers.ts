@@ -42,6 +42,7 @@ import { aseanSwRouter } from "./routers/aseanSw";
 import { cenRouter } from "./routers/cen";
 import { freeZoneRouter } from "./routers/freeZone";
 import { devPortalRouter } from "./routers/devPortal";
+import { marketplaceRouter } from "./routers/marketplace";
 import { threatIntelRouter } from "./routers/threatIntel";
 import { wazuhRouter } from "./routers/wazuh";
 import { riskModelRouter } from "./routers/riskModel";
@@ -293,6 +294,7 @@ export const appRouter = router({
   cen: cenRouter,
   freeZone: freeZoneRouter,
   devPortal: devPortalRouter,
+  marketplace: marketplaceRouter,
   threatIntel: threatIntelRouter,
   wazuh: wazuhRouter,
   riskModel: riskModelRouter,

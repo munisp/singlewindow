@@ -24,7 +24,7 @@ interface ProcedureMeta {
   responseExample?: Record<string, unknown>;
 }
 
-const ROUTER_CATALOGUE: Record<string, Record<string, ProcedureMeta>> = {
+export const ROUTER_CATALOGUE: Record<string, Record<string, ProcedureMeta>> = {
   "auth.me": {
     me: { type: "query", summary: "Get current user", description: "Returns the authenticated user's profile, or null if not logged in.", tags: ["Authentication"], requiresAuth: false },
     logout: { type: "mutation", summary: "Log out", description: "Clears the session cookie and logs the user out.", tags: ["Authentication"], requiresAuth: false },

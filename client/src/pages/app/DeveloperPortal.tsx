@@ -212,6 +212,7 @@ export default function DeveloperPortal() {
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
             <TabsTrigger value="keys"><Key className="w-3.5 h-3.5 mr-1.5" />API Keys</TabsTrigger>
+            <TabsTrigger value="org"><Globe className="w-3.5 h-3.5 mr-1.5" />Organisation</TabsTrigger>
             <TabsTrigger value="playground"><Play className="w-3.5 h-3.5 mr-1.5" />Playground</TabsTrigger>
             <TabsTrigger value="docs"><BookOpen className="w-3.5 h-3.5 mr-1.5" />API Reference</TabsTrigger>
             <TabsTrigger value="usage"><BarChart2 className="w-3.5 h-3.5 mr-1.5" />Usage</TabsTrigger>
@@ -293,6 +294,10 @@ export default function DeveloperPortal() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="org" className="mt-4">
+            <OrganisationOnboarding />
           </TabsContent>
 
           <TabsContent value="playground" className="mt-4">
@@ -424,5 +429,140 @@ export default function DeveloperPortal() {
         </Tabs>
       </div>
     </DashboardLayout>
+  );
+}
+
+/**
+ * WP-8 — Self-service developer organisation onboarding + production-tier
+ * elevation requests (maker side of the maker-checker control).
+ */
+function OrganisationOnboarding() {
+  const [orgForm, setOrgForm] = useState({ name: "", contactEmail: "" });
+  const [elevForm, setElevForm] = useState({ organisationId: "", apiKeyId: "", justification: "" });
+
+  const { data: orgs, refetch: refetchOrgs } = trpc.marketplace.listMyOrganisations.useQuery();
+  const { data: myKeys } = trpc.devPortal.listApiKeys.useQuery();
+  const { data: elevations, refetch: refetchElev } = trpc.marketplace.listMyElevationRequests.useQuery();
+
+  const registerOrg = trpc.marketplace.registerOrganisation.useMutation({
+    onSuccess: () => { toast.success("Organisation registered (sandbox tier)"); setOrgForm({ name: "", contactEmail: "" }); refetchOrgs(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+  const requestElevation = trpc.marketplace.requestProductionElevation.useMutation({
+    onSuccess: () => { toast.success("Elevation request submitted for review (maker-checker)"); setElevForm({ organisationId: "", apiKeyId: "", justification: "" }); refetchElev(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const sandboxKeys = (myKeys ?? []).filter((k: any) => k.sandboxMode && k.status === "active");
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Register Organisation</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            New organisations start at <b>sandbox tier</b>: keys only reach sandbox-marked
+            upstreams (<code>X-Sandbox: true</code>). Production access requires an approved
+            elevation request reviewed by a second administrator (maker-checker).
+          </p>
+          <div>
+            <Label>Organisation name *</Label>
+            <Input value={orgForm.name} onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <Label>Contact email *</Label>
+            <Input type="email" value={orgForm.contactEmail} onChange={e => setOrgForm(f => ({ ...f, contactEmail: e.target.value }))} />
+          </div>
+          <Button
+            size="sm"
+            disabled={registerOrg.isPending || orgForm.name.length < 3 || !orgForm.contactEmail.includes("@")}
+            onClick={() => registerOrg.mutate(orgForm)}
+          >
+            Register
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">My Organisations</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {(orgs ?? []).length === 0 && (
+            <p className="text-xs text-muted-foreground">No organisations registered yet.</p>
+          )}
+          {(orgs ?? []).map((o: any) => (
+            <div key={o.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
+              <div>
+                <p className="text-sm font-medium">{o.name}</p>
+                <p className="text-xs text-muted-foreground">{o.contactEmail}</p>
+              </div>
+              <Badge variant="outline" className={o.tier === "production" ? "text-emerald-500 border-emerald-500/40" : "text-amber-500 border-amber-500/40"}>
+                {o.tier}
+              </Badge>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Request Production Elevation</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <Label>Organisation</Label>
+            <Select value={elevForm.organisationId} onValueChange={v => setElevForm(f => ({ ...f, organisationId: v }))}>
+              <SelectTrigger><SelectValue placeholder="Select organisation" /></SelectTrigger>
+              <SelectContent>
+                {(orgs ?? []).map((o: any) => (
+                  <SelectItem key={o.id} value={String(o.id)}>{o.name} ({o.tier})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Sandbox API key to elevate</Label>
+            <Select value={elevForm.apiKeyId} onValueChange={v => setElevForm(f => ({ ...f, apiKeyId: v }))}>
+              <SelectTrigger><SelectValue placeholder="Select sandbox key" /></SelectTrigger>
+              <SelectContent>
+                {sandboxKeys.map((k: any) => (
+                  <SelectItem key={k.id} value={String(k.id)}>{k.name} ({k.keyPrefix}…)</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Business justification * (min 20 chars)</Label>
+            <Input value={elevForm.justification} onChange={e => setElevForm(f => ({ ...f, justification: e.target.value }))} />
+          </div>
+          <Button
+            size="sm"
+            disabled={requestElevation.isPending || !elevForm.organisationId || !elevForm.apiKeyId || elevForm.justification.length < 20}
+            onClick={() => requestElevation.mutate({
+              organisationId: Number(elevForm.organisationId),
+              apiKeyId: Number(elevForm.apiKeyId),
+              justification: elevForm.justification,
+            })}
+          >
+            Submit for review
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">My Elevation Requests</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {(elevations ?? []).length === 0 && (
+            <p className="text-xs text-muted-foreground">No elevation requests submitted.</p>
+          )}
+          {(elevations ?? []).map((r: any) => (
+            <div key={r.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
+              <div>
+                <p className="text-sm font-medium">Key #{r.apiKeyId}</p>
+                <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</p>
+              </div>
+              <Badge variant="outline">{r.status}</Badge>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

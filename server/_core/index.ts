@@ -1405,6 +1405,23 @@ async function startServer() {
   // Sprint 79: Public certificate verification endpoint (GET /api/verify/:certNumber)
   const { registerCertVerifyRoute } = await import("../routes/certVerify");
   registerCertVerifyRoute(app);
+  // WP-8: API marketplace public surface (signed catalogue, public KPIs, status)
+  const { registerMarketplacePublicRoutes } = await import("../routes/marketplacePublic");
+  registerMarketplacePublicRoutes(app);
+  // WP-8: external metered API surface for marketplace key holders
+  const { requireApiKey } = await import("../middleware/apiKeyAuth");
+  const { computeOperationalKpis } = await import("../marketplace/kpiService");
+  app.get(
+    "/api/ext/v1/kpis",
+    requireApiKey("reports:read", { id: "kpi-service", sandbox: false }),
+    async (_req, res) => {
+      try {
+        res.json(await computeOperationalKpis(24));
+      } catch (err) {
+        res.status(503).json({ status: "down", error: err instanceof Error ? err.message : "KPIs unavailable" });
+      }
+    }
+  );
   // File upload endpoint — authenticated multipart upload to S3
   const { uploadRouter } = await import("../routes/uploadRoute");
   app.use("/api/upload", uploadRouter);

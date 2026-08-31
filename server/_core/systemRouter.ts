@@ -293,7 +293,10 @@ export const systemRouter = router({
         status: overallStatus,
         components,
         incidents: [] as Array<{ id: string; title: string; status: string; createdAt: number }>,
-        uptimePercent: 99.9,
+        // WP-8: no fabricated uptime — no historical uptime store exists yet,
+        // so report null rather than a made-up percentage.
+        uptimePercent: null as number | null,
+        uptimeNote: "Historical uptime is not yet collected; only live health is reported.",
         checkedAt: Date.now(),
         version: process.env.npm_package_version ?? "1.0.0",
       };
