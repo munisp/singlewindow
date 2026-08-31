@@ -555,10 +555,9 @@ describe("tRPC: v76 offline stubs return correct shapes", () => {
     expect(result).toHaveProperty("total");
   });
 
-  it("forceTokenRefresh returns triggered field", async () => {
+  it("forceTokenRefresh fails closed when dispatcher is unreachable (phase-10 remediation)", async () => {
     const caller = appRouter.createCaller(makeCtx("admin"));
-    const result = await caller.insiderThreat.forceTokenRefresh();
-    expect(result).toHaveProperty("triggered");
+    await expect(caller.insiderThreat.forceTokenRefresh()).rejects.toThrow(/TOKEN_REFRESH_UNAVAILABLE/);
   });
 });
 
