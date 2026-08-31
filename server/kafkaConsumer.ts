@@ -1,9 +1,19 @@
 // TradeGateway NGSWTP — Kafka Consumer for Insider Threat Events
 // Language: TypeScript (Node.js)
 //
-// Subscribes to two Kafka topics:
-//   - insider.threat.detected  — Python anomaly service detected an anomaly
+// Subscribes to three Kafka topics:
+//   - insider.threat.detected  — anomaly-detection pipeline detected an anomaly.
+//       TOPIC-CONTRACT NOTE (phase-10 audit remediation, finding C-2): the
+//       in-repo Python anomaly-detection-svc currently publishes
+//       insider-threat.alerts (a different topic consumed elsewhere); the
+//       insider.threat.detected producer is the anomaly-detection pipeline's
+//       Kafka topic per services/go/shared/kafka/producer.go
+//       (InsiderThreatDetected constant). The subscription is retained
+//       intentionally and the orphan status is logged honestly at startup —
+//       do not remove it silently.
 //   - insider.threat.blocked   — Go RBAC middleware blocked a high-risk action
+//       (produced by services/go/middleware/rbac.go).
+//   - insider.four_eyes        — four-eyes approval workflow events.
 //
 // On each message, emits the parsed event onto the anomalyBus (server/sse.ts)
 // so that all connected SSE clients receive it in real time.
@@ -134,6 +144,7 @@ export async function startInsiderThreatKafkaConsumer(): Promise<void> {
     });
 
     console.log("[KafkaConsumer] Insider threat consumer started — topics: insider.threat.detected, insider.threat.blocked, insider.four_eyes");
+    console.warn("[KafkaConsumer] NOTE: insider.threat.detected currently has no in-repo producer (see header contract note) — subscription retained pending the anomaly-detection pipeline producer");
   } catch (err) {
     // Kafka unavailable in dev/test — log and continue
     console.warn("[KafkaConsumer] Kafka unavailable — SSE will only receive in-process events:", (err as Error).message);

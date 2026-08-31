@@ -193,8 +193,9 @@ export const ENV = {
   // the canonical owners (asean-sw-service 8096, profile-service 8097); they
   // now point at the deliberately-unassigned 811x block so a stale consumer
   // fails closed (connection refused) instead of silently hitting the wrong
-  // service. routers/stream.ts still reads FLUVIO_SVC_URL directly with its
-  // own stale 8093 literal — KNOWN STRAGGLER, flagged for the next wave.
+  // service. routers/stream.ts reads FLUVIO_SVC_URL directly — its stale
+  // 8093 literal was removed in phase-10 remediation (empty = unavailable,
+  // fail-closed).
   fluvioSvcUrl: process.env.FLUVIO_SVC_URL ?? "http://localhost:8113",
   fluvioWsUrl: process.env.FLUVIO_WS_URL ?? "ws://localhost:8115",
 
@@ -206,6 +207,13 @@ export const ENV = {
   flinkStreamGrpcAddr: process.env.FLINK_STREAM_GRPC_ADDR ?? "localhost:50099",
 
   // ─── Apache Sedona (Geospatial) ───────────────────────────────────────────
+  // NOTE (phase-10 audit remediation, C-4): the ENV.* wrapper bindings below
+  // have no direct callers, but the underlying env vars DO — geospatial.ts
+  // (SEDONA_SVC_URL), knowledgeGraph.ts (GRAPH_BRIDGE_URL), riskModel.ts
+  // (RISK_SCORER_URL), ledger.ts (PAYMENT_RISK_URL) and grpc-clients.ts
+  // (SEDONA_GEO_GRPC_ADDR) read process.env directly with their own local
+  // literals. The bindings are retained as the canonical defaults; converging
+  // those routers onto ENV is tracked as follow-up hygiene.
   sedonaSvcUrl: process.env.SEDONA_SVC_URL ?? "http://localhost:8100",
   sedonaGeoGrpcAddr: process.env.SEDONA_GEO_GRPC_ADDR ?? "localhost:50100",
 
@@ -406,8 +414,9 @@ export const ENV = {
   // 8111 — set HS_CLASSIFIER_URL explicitly (compose:
   // http://hs-classifier:8093). A contested default would silently route HS
   // classification to the WCO CEN service or vice versa (duty-relevant).
-  // NOTE: routers/insiderThreat.ts reads HS_CLASSIFIER_URL with its own stale
-  // http://hs-classifier:8090 literal — KNOWN STRAGGLER, flagged.
+  // NOTE: routers/insiderThreat.ts reads HS_CLASSIFIER_URL directly — its
+  // stale http://hs-classifier:8090 literals were removed in phase-10
+  // remediation (empty = HS_CLASSIFIER_UNAVAILABLE, fail-closed).
   hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://localhost:8111",
   riskAiUrl: process.env.RISK_AI_URL ?? "http://localhost:8094",
   visionSvcUrl: process.env.VISION_SVC_URL ?? "http://localhost:8095",
