@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, real, uuid, date
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -521,9 +521,17 @@ export const vesselTrackingEvents = pgTable("vessel_tracking_events", {
   cargoType: varchar("cargo_type", { length: 64 }),
   flagCountry: varchar("flag_country", { length: 3 }),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  // PRA-096 (Phase 9): provenance + idempotency for the geoVesselProjection
+  // consumer (vessels.events, envelope v1.0). NULL for legacy rows; new rows
+  // always carry the verified envelope eventId. Migration 0056.
+  sourceEventId: varchar("source_event_id", { length: 64 }),
+  positionReportId: varchar("position_report_id", { length: 64 }),
+  sourceKid: varchar("source_kid", { length: 96 }),
 }, (t) => [
   index("idx_vte_mmsi").on(t.mmsi),
   index("idx_vte_recorded_at").on(t.recordedAt),
+  // Partial unique index: replays of the same verified envelope are no-ops.
+  uniqueIndex("uq_vte_source_event_id").on(t.sourceEventId).where(sql`"source_event_id" IS NOT NULL`),
 ]);
 
 export type PortLocation = typeof portLocations.$inferSelect;
@@ -1885,7 +1893,10 @@ export const auditTasks = pgTable("audit_tasks", {
   declaredValueUsd: decimal("declared_value_usd", { precision: 18, scale: 2 }).notNull(),
   dutyPaidUsd: decimal("duty_paid_usd", { precision: 18, scale: 2 }).notNull(),
   selectionReason: auditSelectionReasonEnum("selection_reason").notNull(),
-  riskScore: decimal("risk_score", { precision: 5, scale: 4 }).notNull(),
+  // PRA-004: 0-100 risk scores (zod input 0..100; selectForAudit thresholds
+  // 40/70). Was numeric(5,4) — max 9.9999 — so any score >= 10 failed at
+  // insert time (22003). Migration 0055 widens the live column.
+  riskScore: decimal("risk_score", { precision: 7, scale: 4 }).notNull(),
   status: auditTaskStatusEnum("status").default("pending").notNull(),
   assignedOfficerId: varchar("assigned_officer_id", { length: 64 }),
   assignedOfficerName: varchar("assigned_officer_name", { length: 255 }),
