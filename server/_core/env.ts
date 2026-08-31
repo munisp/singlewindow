@@ -148,7 +148,7 @@ export const ENV = {
   // ─── SendGrid ─────────────────────────────────────────────────────────────
   sendgridApiKey: process.env.SENDGRID_API_KEY ?? "",
   sendgridFromEmail: process.env.SENDGRID_FROM_EMAIL ?? "noreply@tradegateway.gov.ng",
-  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway™ NGSWTP",
+  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway\\u2122 NGSWTP",
 
   // ─── Wazuh ────────────────────────────────────────────────────────────────
   wazuhApiUrl: process.env.WAZUH_API_URL ?? "https://localhost:55000",
