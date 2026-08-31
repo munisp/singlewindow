@@ -3370,3 +3370,24 @@ export const lpcoRecords = pgTable("lpco_records", {
 ]);
 export type LPCORecord = typeof lpcoRecords.$inferSelect;
 export type InsertLPCORecord = typeof lpcoRecords.$inferInsert;
+
+// ─── Trade-Finance Consent Evidence (WP-6) ─────────────────────────────────
+// Local digest-evidence mirror of consent lifecycle events executed against
+// the financial-controls trade-finance rail. Rows carry only digests and
+// tokenized references — never raw datasets.
+export const tradeFinanceConsentEvidence = pgTable("trade_finance_consent_evidence", {
+  id: serial("id").primaryKey(),
+  consentId: varchar("consent_id", { length: 128 }).notNull(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id),
+  traderRef: varchar("trader_ref", { length: 256 }).notNull(),
+  bankId: varchar("bank_id", { length: 128 }).notNull(),
+  action: varchar("action", { length: 32 }).notNull(),
+  envelopeDigestSha256: varchar("envelope_digest_sha256", { length: 128 }).notNull(),
+  detail: jsonb("detail"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tfce_trader_user_id").on(t.traderUserId),
+  index("idx_tfce_consent_id").on(t.consentId),
+]);
+export type TradeFinanceConsentEvidence = typeof tradeFinanceConsentEvidence.$inferSelect;
+export type InsertTradeFinanceConsentEvidence = typeof tradeFinanceConsentEvidence.$inferInsert;
