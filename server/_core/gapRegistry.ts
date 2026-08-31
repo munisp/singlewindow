@@ -71,6 +71,44 @@ export const PLATFORM_GAPS = {
     neededUpstream:
       "Migrate session/SSE tokens to Keycloak-issued RS256 (token exchange for SSE tickets), then retire JWT_SECRET signing.",
   },
+  /**
+   * Phase 9 WP-C (MSW): NPA e-SEN (electronic Ship Entry Notice) integration
+   * agreement is an FG must-bring item. The MSW visit surface anchors to
+   * port-interop port calls only; no e-SEN wire compatibility is claimed and
+   * no stub success path exists (PORT_CALL_UNAVAILABLE fail-closed states).
+   */
+  MSW_ESEN: {
+    id: "GAP-MSW-ESEN",
+    summary:
+      "NPA e-SEN (electronic Ship Entry Notice) integration agreement is not in place; MSW visits link only to port-interoperability port calls, and unlinked/unverifiable visits are honestly flagged portCallVerified=false.",
+    affected: "e-SEN-backed pre-arrival verification for MSW ship visits",
+    neededUpstream:
+      "NPA e-SEN integration agreement + adapter configuration on the port-interoperability boundary.",
+  },
+  /** Phase 9 WP-C (MSW): NIS endpoint agreement (FG must-bring). */
+  MSW_NIS: {
+    id: "GAP-MSW-NIS",
+    summary:
+      "Nigeria Immigration Service endpoint agreement is not in place; NIS boarding/clearance events are emitted on maritime.msw.v1 but no NIS-side system integration exists.",
+    affected: "direct NIS system delivery of MSW boarding/clearance decisions",
+    neededUpstream: "NIS endpoint agreement + adapter configuration.",
+  },
+  /** Phase 9 WP-C (MSW): Port Health endpoint agreement (FG must-bring). */
+  MSW_PH: {
+    id: "GAP-MSW-PH",
+    summary:
+      "Port Health Services endpoint agreement is not in place; pratique decisions are recorded in the boundary and emitted on maritime.msw.v1 but no Port Health system integration exists.",
+    affected: "direct Port Health system delivery of pratique decisions and MDOH outcomes",
+    neededUpstream: "Port Health endpoint agreement + adapter configuration.",
+  },
+  /** Phase 9 WP-C (MSW): NCS endpoint agreement (FG must-bring). */
+  MSW_NCS: {
+    id: "GAP-MSW-NCS",
+    summary:
+      "Nigeria Customs Service endpoint agreement is not in place; customs declaration reviews are recorded in the boundary and emitted on maritime.msw.v1 but no NCS-side system integration exists.",
+    affected: "direct NCS system delivery of FAL declaration review decisions",
+    neededUpstream: "NCS endpoint agreement + adapter configuration.",
+  },
 } as const satisfies Record<string, PlatformGap>;
 
 export type PlatformGapId = keyof typeof PLATFORM_GAPS;
