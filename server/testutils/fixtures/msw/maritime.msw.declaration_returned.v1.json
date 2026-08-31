@@ -1,0 +1,36 @@
+{
+  "envelopeVersion": "1.0",
+  "eventId": "evt-msw-000005",
+  "eventType": "maritime.msw.declaration_returned.v1",
+  "occurredAt": "2026-09-02T11:20:00Z",
+  "producer": "blueeconomy-singlewindow-msw",
+  "correlationId": "corr-msw-000001",
+  "fhir": {
+    "resourceType": "Bundle",
+    "type": "message",
+    "bundleId": "bdl-msw-000005",
+    "entry": [
+      {
+        "fullUrl": "urn:uuid:65dc9fcc-84b6-444c-af67-c97b15df1927",
+        "resource": {
+          "@type": "type.googleapis.com/blueeconomy.msw.v1.MswDeclarationReturned",
+          "declarationId": "mswd-000102",
+          "visitId": "mswv-000001",
+          "formType": "FAL2",
+          "version": 1,
+          "reviewingAgency": "NCS",
+          "returnReasonCode": "CARGO_LINE_ITEM_MISMATCH",
+          "reviewNoteDigestSha256": "sha256:53da5fe414dd02739bcd1e9b95684fea134362a15db82f92c9c5b12facfb2814",
+          "decidedAt": "2026-09-02T11:20:00Z"
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "principalId": "78a6d041-1323-4dd1-b6c7-36a5d155c36e",
+    "principalRole": "msw-customs",
+    "ledgerCommitHash": "",
+    "signature": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJsdWVlY29ub215LXNpbmdsZXdpbmRvdy1tc3ctMCJ9.eyJjbGFzc2lmaWNhdGlvbiI6IklOVEVSTkFMIiwiY29ycmVsYXRpb25JZCI6ImNvcnItbXN3LTAwMDAwMSIsImVudmVsb3BlVmVyc2lvbiI6IjEuMCIsImV2ZW50SWQiOiJldnQtbXN3LTAwMDAwNSIsImV2ZW50VHlwZSI6Im1hcml0aW1lLm1zdy5kZWNsYXJhdGlvbl9yZXR1cm5lZC52MSIsImZoaXIiOnsiYnVuZGxlSWQiOiJiZGwtbXN3LTAwMDAwNSIsImVudHJ5IjpbeyJmdWxsVXJsIjoidXJuOnV1aWQ6NjVkYzlmY2MtODRiNi00NDRjLWFmNjctYzk3YjE1ZGYxOTI3IiwicmVzb3VyY2UiOnsiQHR5cGUiOiJ0eXBlLmdvb2dsZWFwaXMuY29tL2JsdWVlY29ub215Lm1zdy52MS5Nc3dEZWNsYXJhdGlvblJldHVybmVkIiwiZGVjaWRlZEF0IjoiMjAyNi0wOS0wMlQxMToyMDowMFoiLCJkZWNsYXJhdGlvbklkIjoibXN3ZC0wMDAxMDIiLCJmb3JtVHlwZSI6IkZBTDIiLCJyZXR1cm5SZWFzb25Db2RlIjoiQ0FSR09fTElORV9JVEVNX01JU01BVENIIiwicmV2aWV3Tm90ZURpZ2VzdFNoYTI1NiI6InNoYTI1Njo1M2RhNWZlNDE0ZGQwMjczOWJjZDFlOWI5NTY4NGZlYTEzNDM2MmExNWRiODJmOTJjOWM1YjEyZmFjZmIyODE0IiwicmV2aWV3aW5nQWdlbmN5IjoiTkNTIiwidmVyc2lvbiI6MSwidmlzaXRJZCI6Im1zd3YtMDAwMDAxIn19XSwicmVzb3VyY2VUeXBlIjoiQnVuZGxlIiwidHlwZSI6Im1lc3NhZ2UifSwib2NjdXJyZWRBdCI6IjIwMjYtMDktMDJUMTE6MjA6MDBaIiwicHJvZHVjZXIiOiJibHVlZWNvbm9teS1zaW5nbGV3aW5kb3ctbXN3IiwicHJvdmVuYW5jZSI6eyJsZWRnZXJDb21taXRIYXNoIjoiIiwicHJpbmNpcGFsSWQiOiI3OGE2ZDA0MS0xMzIzLTRkZDEtYjZjNy0zNmE1ZDE1NWMzNmUiLCJwcmluY2lwYWxSb2xlIjoibXN3LWN1c3RvbXMifX0.NF0nw1YUBz7o6kxhfDLudI0On1a3IgoV1XYG3422JsFYysJXl5Zq5vyvcFXb6hBEEo6Md3XzlCgaxtrh8k1kAw"
+  },
+  "classification": "INTERNAL"
+}
