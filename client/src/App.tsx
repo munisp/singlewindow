@@ -65,6 +65,9 @@ const NotificationCentre = lazy(() => import('./pages/app/NotificationCentre'));
 const SLABreachDashboard = lazy(() => import('./pages/app/SLABreachDashboard'));
 const NotificationPreferences = lazy(() => import('./pages/app/NotificationPreferences'));
 const FinanceLedger = lazy(() => import('./pages/FinanceLedger'));
+const TradeFinanceConsents = lazy(() => import('./pages/TradeFinanceConsents'));
+const TradeFinanceApply = lazy(() => import('./pages/TradeFinanceApply'));
+const TradeFinanceStatus = lazy(() => import('./pages/TradeFinanceStatus'));
 const IdentityProvider = lazy(() => import('./pages/IdentityProvider'));
 const BondedWarehouse = lazy(() => import('./pages/app/BondedWarehouse'));
 const AseanSingleWindow = lazy(() => import('./pages/app/AseanSingleWindow'));
@@ -356,6 +359,17 @@ function Router() {
       {/* Sprint 31 — Finance Ledger (TigerBeetle) */}
       <Route path="/app/finance/ledger">
         <FinanceGuard><Suspense fallback={<LazyFallback />}><FinanceLedger /></Suspense></FinanceGuard>
+      </Route>
+
+      {/* WP-6 — Trade Finance rail (consents, application wizard, status) */}
+      <Route path="/app/finance/trade/consents">
+        <Suspense fallback={<LazyFallback />}><TradeFinanceConsents /></Suspense>
+      </Route>
+      <Route path="/app/finance/trade/apply">
+        <Suspense fallback={<LazyFallback />}><TradeFinanceApply /></Suspense>
+      </Route>
+      <Route path="/app/finance/trade/status">
+        <Suspense fallback={<LazyFallback />}><TradeFinanceStatus /></Suspense>
       </Route>
 
       {/* Sprint 32 — Identity Provider (Keycloak) */}
