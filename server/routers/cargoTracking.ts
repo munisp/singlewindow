@@ -15,6 +15,73 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { publishEvent, TOPICS } from "../_core/kafka";
+import { geoServiceConfig } from "../_core/geoServiceClient";
+
+// ─── WP-10: FEED STATE + STALENESS + DEMO MODE ──────────────────────────────
+// Staleness doctrine: a vessel position older than STALE_AFTER_MS is badged
+// stale:true; the response carries staleCount so the UI can render an honest
+// stale-data banner. Positions are NEVER refreshed synthetically.
+const STALE_AFTER_MS = 15 * 60 * 1000;
+
+export function isStale(lastUpdate: string, nowMs = Date.now()): boolean {
+  const t = Date.parse(lastUpdate);
+  return Number.isNaN(t) || nowMs - t > STALE_AFTER_MS;
+}
+
+/**
+ * resolveFeedState — the honest feed posture:
+ *  - "live":               persisted positions exist in vessel_tracking_events
+ *  - "FEED_UNCONFIGURED":  store is empty AND no AIS/geo feed is wired
+ *                          (GEO_SERVICE_URL/GEO_SERVICE_TOKEN unset)
+ *  - "store_empty":        a feed IS wired but nothing has been ingested yet
+ *  - "TRACKING_STORE_UNAVAILABLE": the store could not be queried at all
+ */
+export type FeedState = "live" | "FEED_UNCONFIGURED" | "store_empty" | "TRACKING_STORE_UNAVAILABLE";
+
+/**
+ * Demo mode is strictly non-production: it requires BOTH the explicit
+ * CARGO_TRACKING_DEMO=true flag AND NODE_ENV != "production". In production
+ * the flag is ignored — demo positions can never leak into a live deployment.
+ * Demo rows are labelled demo:true and the response carries demoBanner so the
+ * UI renders an unmissable banner.
+ */
+export function isDemoMode(): boolean {
+  return process.env.CARGO_TRACKING_DEMO === "true" && process.env.NODE_ENV !== "production";
+}
+
+export const DEMO_BANNER =
+  "DEMO MODE — synthetic positions for demonstration only. Not live AIS data. " +
+  "Disabled automatically in production.";
+
+// Demo fleet (never served in production; only when isDemoMode() and the real
+// store has no data). Clearly fictional names.
+const DEMO_VESSELS = [
+  { mmsi: "000000001", vesselName: "DEMO VESSEL A", imoNumber: "0000001", lat: -4.05, lon: 39.75, speed: 12.4, heading: 235, destinationPort: "MOMBASA", cargoType: "Container", flagCountry: "KEN" },
+  { mmsi: "000000002", vesselName: "DEMO VESSEL B", imoNumber: "0000002", lat: -4.12, lon: 39.68, speed: 0.3, heading: 90, destinationPort: "MOMBASA", cargoType: "Bulk", flagCountry: "TZA" },
+] as const;
+
+function demoVesselRows(nowIso: string) {
+  return DEMO_VESSELS.map(v => ({
+    id: v.mmsi,
+    mmsi: v.mmsi,
+    vesselName: v.vesselName,
+    imoNumber: v.imoNumber,
+    vesselType: null as string | null,
+    lat: v.lat,
+    lon: v.lon,
+    speed: v.speed,
+    heading: v.heading,
+    status: (v.speed < 0.5 ? "moored" : "underway") as "moored" | "underway",
+    destinationPort: v.destinationPort,
+    eta: null,
+    cargoType: v.cargoType,
+    flagCountry: v.flagCountry,
+    riskFlag: "green" as const,
+    lastUpdate: nowIso,
+    stale: false,
+    demo: true as const,
+  }));
+}
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -160,16 +227,57 @@ export const cargoTrackingRouter = router({
         return {
           vessels: [] as ReturnType<typeof mapVesselRow>[],
           totalCount: 0,
+          staleCount: 0,
           lastRefresh: new Date().toISOString(),
           sourceService: "none",
+          feedState: "TRACKING_STORE_UNAVAILABLE" as FeedState,
           unavailable: true,
+          demoMode: false,
           message:
-            "TRACKING_STORE_UNAVAILABLE: no live AIS source is wired. " +
+            "TRACKING_STORE_UNAVAILABLE: the persisted vessel tracking store could not be queried. " +
             "Positions require an AIS ingestion worker (e.g. sedona-svc) writing vessel_tracking_events.",
           coverageArea: "Indian Ocean — East Africa Corridor",
         };
       }
-      const vessels = rows.map(mapVesselRow);
+      const nowIso = new Date().toISOString();
+      const vessels = rows.map(r => ({ ...mapVesselRow(r), stale: isStale(String(r.recorded_at ?? "")) }));
+
+      // WP-10 fail-closed feed posture. No live feed wired and no data:
+      // honest FEED_UNCONFIGURED — unless demo mode (non-production only) is
+      // explicitly enabled, in which case labelled demo rows are served with
+      // a UI banner.
+      if (vessels.length === 0) {
+        const feedConfigured = geoServiceConfig().configured;
+        if (!feedConfigured && isDemoMode()) {
+          const demo = demoVesselRows(nowIso);
+          return {
+            vessels: demo,
+            totalCount: demo.length,
+            staleCount: 0,
+            lastRefresh: nowIso,
+            sourceService: "demo",
+            feedState: "FEED_UNCONFIGURED" as FeedState,
+            unavailable: false,
+            demoMode: true,
+            demoBanner: DEMO_BANNER,
+            coverageArea: "Indian Ocean — East Africa Corridor",
+          };
+        }
+        return {
+          vessels: [] as typeof vessels,
+          totalCount: 0,
+          staleCount: 0,
+          lastRefresh: nowIso,
+          sourceService: "none",
+          feedState: (feedConfigured ? "store_empty" : "FEED_UNCONFIGURED") as FeedState,
+          unavailable: false,
+          demoMode: false,
+          message: feedConfigured
+            ? "NO_TRACKING_DATA: a geo feed is configured but no AIS positions have been ingested yet."
+            : "FEED_UNCONFIGURED: no live AIS/geo feed is wired (GEO_SERVICE_URL/GEO_SERVICE_TOKEN unset) and no persisted positions exist. Positions are never synthesized.",
+          coverageArea: "Indian Ocean — East Africa Corridor",
+        };
+      }
 
       let filtered = vessels;
       if (input.riskFilter !== "all") {
@@ -178,15 +286,19 @@ export const cargoTrackingRouter = router({
       if (input.statusFilter !== "all") {
         filtered = filtered.filter(v => v.status === input.statusFilter);
       }
+      const staleCount = vessels.filter(v => v.stale).length;
 
       return {
         vessels: filtered,
         totalCount: vessels.length,
-        lastRefresh: new Date().toISOString(),
-        sourceService: vessels.length > 0 ? "vessel_tracking_events" : "none",
+        staleCount,
+        lastRefresh: nowIso,
+        sourceService: "vessel_tracking_events",
+        feedState: "live" as FeedState,
         unavailable: false,
-        message: vessels.length === 0
-          ? "NO_TRACKING_DATA: no persisted AIS positions. Live coverage requires an AIS ingestion worker (e.g. sedona-svc) writing vessel_tracking_events."
+        demoMode: false,
+        message: staleCount > 0
+          ? `STALE_DATA: ${staleCount}/${vessels.length} vessels have positions older than 15 minutes (badged stale).`
           : undefined,
         coverageArea: "Indian Ocean — East Africa Corridor",
       };
@@ -415,6 +527,41 @@ export const cargoTrackingRouter = router({
         };
       });
     }),
+  /**
+   * getFeedStatus — honest feed posture for UI banners (WP-10). Reports
+   * whether a live feed is configured, whether the store has data, how stale
+   * the newest position is, and whether demo mode is active.
+   */
+  getFeedStatus: publicProcedure.query(async () => {
+    const feedConfigured = geoServiceConfig().configured;
+    let newest: string | null = null;
+    let storeReachable = true;
+    try {
+      const rows = await pgQuery(
+        `SELECT MAX(recorded_at) AS newest FROM vessel_tracking_events`
+      );
+      newest = rows[0]?.newest ? new Date(rows[0].newest as string).toISOString() : null;
+    } catch {
+      storeReachable = false;
+    }
+    const stale = newest ? isStale(newest) : true;
+    const feedState: FeedState = !storeReachable
+      ? "TRACKING_STORE_UNAVAILABLE"
+      : newest
+        ? "live"
+        : feedConfigured ? "store_empty" : "FEED_UNCONFIGURED";
+    return {
+      feedState,
+      feedConfigured,
+      storeReachable,
+      newestPositionAt: newest,
+      stale,
+      staleAfterMinutes: STALE_AFTER_MS / 60000,
+      demoMode: isDemoMode(),
+      demoBanner: isDemoMode() ? DEMO_BANNER : undefined,
+    };
+  }),
+
   /**
    * v100: Get cargo vessel tracking events as heatmap data points (lat/lng/weight).
    */

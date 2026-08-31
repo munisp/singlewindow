@@ -8,6 +8,18 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb, getPool } from "../db";
+import { geoServiceFetch } from "../_core/geoServiceClient";
+
+// WP-10: the legacy getPortForecast/getAllForecasts procedures below compute
+// a UI-side DOW×HOD seasonality heuristic over real DB aggregates. That
+// heuristic is honestly labelled via forecastModel on every response. The
+// authoritative queue forecast is the geo-service baseline model
+// (seasonal-naive + damped Holt with prediction intervals and backtest
+// metrics) exposed via getQueueForecast — fail-closed: when the geo-service
+// is unconfigured/unreachable or has INSUFFICIENT_HISTORY, the honest state
+// is surfaced and no numbers are invented.
+export const HEURISTIC_MODEL_LABEL =
+  "dow-hod-seasonality heuristic v37 (UI-side, superseded by geo-service baseline)";
 
 async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
   await getDb();
@@ -258,7 +270,50 @@ export const portCongestionRouter = router({
       const profiles = await getPortProfiles();
       const profile = profiles[input.portCode];
       if (!profile) throw new Error(`Unknown port: ${input.portCode}`);
-      return buildPortForecastFromProfile(input.portCode, profile);
+      return { ...buildPortForecastFromProfile(input.portCode, profile), forecastModel: HEURISTIC_MODEL_LABEL };
+    }),
+
+  /**
+   * WP-10: authoritative queue-length forecast from the geo-service baseline
+   * model (seasonal-naive + damped Holt, prediction intervals, backtest
+   * MAE/MAPE on the recorded port_queue_observations series). Fail-closed:
+   * GEO_SERVICE_UNCONFIGURED / FORECAST_UNAVAILABLE / INSUFFICIENT_HISTORY
+   * states are surfaced honestly — never a synthesized forecast.
+   */
+  getQueueForecast: publicProcedure
+    .input(z.object({
+      portCode: z.string().length(5),
+      horizonHours: z.number().int().min(1).max(168).default(24),
+    }))
+    .query(async ({ input }) => {
+      try {
+        const upstream = await geoServiceFetch<Record<string, unknown>>(
+          `/v1/geo/ports/${input.portCode}/congestion/forecast?horizonHours=${input.horizonHours}`
+        );
+        return { available: true as const, ...upstream };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.startsWith("GEO_SERVICE_UNCONFIGURED")) {
+          return {
+            available: false as const,
+            state: "GEO_SERVICE_UNCONFIGURED",
+            message: "GEO_SERVICE_UNCONFIGURED: the baseline queue forecaster requires GEO_SERVICE_URL/GEO_SERVICE_TOKEN. No forecast is served rather than a fabricated one.",
+          };
+        }
+        // Upstream 409 INSUFFICIENT_HISTORY arrives as GEO_SERVICE_UPSTREAM_409.
+        if (message.startsWith("GEO_SERVICE_UPSTREAM_409")) {
+          return {
+            available: false as const,
+            state: "INSUFFICIENT_HISTORY",
+            message: "INSUFFICIENT_HISTORY: the recorded queue series for this port is too short to forecast honestly.",
+          };
+        }
+        return {
+          available: false as const,
+          state: "FORECAST_UNAVAILABLE",
+          message: `FORECAST_UNAVAILABLE: ${message}`,
+        };
+      }
     }),
 
   getAllForecasts: protectedProcedure.query(async () => {
