@@ -148,7 +148,7 @@ export const ENV = {
   // ─── SendGrid ─────────────────────────────────────────────────────────────
   sendgridApiKey: process.env.SENDGRID_API_KEY ?? "",
   sendgridFromEmail: process.env.SENDGRID_FROM_EMAIL ?? "noreply@tradegateway.gov.ng",
-  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway™ NGSWTP",
+  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway\u2122 NGSWTP",
 
   // ─── Wazuh ────────────────────────────────────────────────────────────────
   wazuhApiUrl: process.env.WAZUH_API_URL ?? "https://localhost:55000",
@@ -308,6 +308,40 @@ export const ENV = {
   // fails closed at emit time (no unsigned admission, no placeholder keys).
   mswEnvelopeSigningKey: process.env.MSW_ENVELOPE_SIGNING_KEY ?? "",
   mswEnvelopeKeyId: process.env.MSW_ENVELOPE_KEY_ID ?? "",
+
+  // ─── OGA external adapters (Phase 9 WP-D) ────────────────────────────────
+  // Env-only endpoint + credential config for the fail-closed signed-envelope
+  // egress adapters (server/_core/externalAdapters/). ALL default empty:
+  // an unset endpoint or signing key disables the adapter — every call then
+  // rejects ADAPTER_UNCONFIGURED with the registered GAP id (no stub success
+  // paths, no placeholder credentials). *_URL is the authority endpoint;
+  // *_TOKEN is an optional static bearer; *_SIGNING_KEY is the Ed25519
+  // private key (base64/hex seed or PKCS#8 PEM) and *_KEY_ID the decimal
+  // epoch forming the JWS kid blueeconomy-singlewindow-oga-<adapter>-<epoch>.
+  ncsBodogwuUrl: process.env.NCS_BODOGWU_URL ?? "",
+  ncsBodogwuToken: process.env.NCS_BODOGWU_TOKEN ?? "",
+  ncsBodogwuSigningKey: process.env.NCS_BODOGWU_SIGNING_KEY ?? "",
+  ncsBodogwuKeyId: process.env.NCS_BODOGWU_KEY_ID ?? "",
+  cbnTmsUrl: process.env.CBN_TMS_URL ?? "",
+  cbnTmsToken: process.env.CBN_TMS_TOKEN ?? "",
+  cbnTmsSigningKey: process.env.CBN_TMS_SIGNING_KEY ?? "",
+  cbnTmsKeyId: process.env.CBN_TMS_KEY_ID ?? "",
+  nepcUrl: process.env.NEPC_URL ?? "",
+  nepcToken: process.env.NEPC_TOKEN ?? "",
+  nepcSigningKey: process.env.NEPC_SIGNING_KEY ?? "",
+  nepcKeyId: process.env.NEPC_KEY_ID ?? "",
+  nisUrl: process.env.NIS_URL ?? "",
+  nisToken: process.env.NIS_TOKEN ?? "",
+  nisSigningKey: process.env.NIS_SIGNING_KEY ?? "",
+  nisKeyId: process.env.NIS_KEY_ID ?? "",
+  portHealthUrl: process.env.PORT_HEALTH_URL ?? "",
+  portHealthToken: process.env.PORT_HEALTH_TOKEN ?? "",
+  portHealthSigningKey: process.env.PORT_HEALTH_SIGNING_KEY ?? "",
+  portHealthKeyId: process.env.PORT_HEALTH_KEY_ID ?? "",
+  npaEsenUrl: process.env.NPA_ESEN_URL ?? "",
+  npaEsenToken: process.env.NPA_ESEN_TOKEN ?? "",
+  npaEsenSigningKey: process.env.NPA_ESEN_SIGNING_KEY ?? "",
+  npaEsenKeyId: process.env.NPA_ESEN_KEY_ID ?? "",
 
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
