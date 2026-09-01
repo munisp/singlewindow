@@ -173,7 +173,7 @@ describe("SW-25: vessel route from persisted events only", () => {
     state.poolRows = [];
     const { cargoTrackingRouter } = await import("./cargoTracking");
     const caller = cargoTrackingRouter.createCaller(adminCtx);
-    const result = await caller.getVesselRoute({ mmsi: "000000000" });
+    const result = await caller.getVesselRoute({ mmsi: "636000000" });
     expect(result.waypoints).toEqual([]);
     expect(result.noData).toBe(true);
     expect(String(result.message)).toContain("NO_TRACKING_DATA");

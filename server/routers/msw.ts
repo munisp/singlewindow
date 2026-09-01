@@ -23,6 +23,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
+import { IMO_NUMBER_MESSAGE, isValidImoNumber } from "../_core/vesselIds";
 import {
   MSW_AGENCIES,
   MSW_CLEARANCE_KINDS,
@@ -107,7 +108,8 @@ export const mswRouter = router({
     .input(
       z.object({
         portCallId: z.string().min(1).optional(),
-        vesselImoNumber: z.string().regex(/^[0-9]{7}$/, "IMO is 7 decimal digits, no prefix"),
+        // Phase-11: full IMO check-digit validation (not just shape).
+        vesselImoNumber: z.string().refine(isValidImoNumber, IMO_NUMBER_MESSAGE),
         vesselName: z.string().min(1).max(256),
         vesselFlagCode: z.string().regex(/^[A-Z]{2}$/, "ISO 3166-1 alpha-2"),
         portCode: z.string().regex(/^[A-Z]{2}[A-Z0-9]{3}$/, "UN/LOCODE"),

@@ -16,6 +16,7 @@ import { z } from "zod";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { publishEvent, TOPICS } from "../_core/kafka";
 import { geoServiceConfig } from "../_core/geoServiceClient";
+import { MMSI_MESSAGE, isValidMmsi } from "../_core/vesselIds";
 
 // ─── WP-10: FEED STATE + STALENESS + DEMO MODE ──────────────────────────────
 // Staleness doctrine: a vessel position older than STALE_AFTER_MS is badged
@@ -308,7 +309,9 @@ export const cargoTrackingRouter = router({
    * getVesselRoute — returns historical track (polyline) for a specific vessel
    */
   getVesselRoute: protectedProcedure
-    .input(z.object({ mmsi: z.string() }))
+    // Phase-11: MMSI validated (9 digits, assignable MID) — malformed ids are
+    // a 400 client error, not an empty track.
+    .input(z.object({ mmsi: z.string().refine(isValidMmsi, MMSI_MESSAGE) }))
     .query(async ({ input }) => {
       // SW-25: serve ONLY real persisted AIS tracking events. An empty result is
       // an explicit, labelled no-data state — never synthesized waypoints.
