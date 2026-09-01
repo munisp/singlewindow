@@ -47,6 +47,11 @@ entity declaration {
   permission reject       = customs_officer or org.admin
   permission inspect      = inspector or org.admin
   permission amend        = owner or customs_officer
+  // Clearance (release) and examination hold — asserted by
+  // declarations.updateStatus (routers/declarations.ts). Mirrors
+  // cargo_shipment.release: officer roles via existing relations.
+  permission release      = customs_officer or org.admin
+  permission hold         = customs_officer or inspector or org.admin
   permission export_csv   = org.admin or org.finance or customs_officer
   permission delete       = org.admin
 }
@@ -181,6 +186,8 @@ entity bulk_export {
   permission create       = org.admin or org.finance or requester
   permission view         = requester or org.admin
   permission download     = requester or org.admin
+  // Asserted by bulkExport router (assertCan bulk_export/export)
+  permission export       = requester or org.admin or org.finance
   permission delete       = org.admin
 }
 
