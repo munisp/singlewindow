@@ -159,7 +159,7 @@ export async function runExecDailyDigest(): Promise<ExecDigestResult> {
   const SLA_HOURS: Record<string, number> = {
     green: 4, yellow: 24, red: 72, blue: 48,
   };
-  const processingStatuses = ["submitted", "under_review", "inspection_required", "payment_pending"];
+  const processingStatuses = ["submitted", "under_assessment", "under_examination", "payment_pending"];
   const processingDecls = await db
     .select({
       riskLane: declarations.riskLane,
