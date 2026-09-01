@@ -250,6 +250,16 @@ function applyRulesBaseline(
   };
 }
 
+/**
+ * Platform-plane roles that bypass tenant scoping on officer declaration
+ * lists. MUST stay in sync with is_platform_admin() in
+ * drizzle/migrations/0064_phase11_tenant_rls.sql ('admin'/'superadmin' =
+ * platform operators; 'platform_admin'/'customs_commissioner' = national
+ * customs command with cross-tenant oversight). Everything else is
+ * tenant-plane and sees only its own tenant's declarations.
+ */
+const PLATFORM_WIDE_ROLES = ["platform_admin", "admin", "superadmin", "customs_commissioner"];
+
 export const declarationsRouter = router({
   // Create a new draft declaration
   create: protectedProcedure
@@ -814,12 +824,49 @@ export const declarationsRouter = router({
       dateTo: z.date().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
+      // Tenant-plane officer roles + the platform-plane exception roles
+      // (PLATFORM_WIDE_ROLES) may list declarations; tenant-plane roles are
+      // tenant-scoped below.
+      const allowedRoles = [...PLATFORM_WIDE_ROLES, "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
-        const { desc, and, gte, lte, eq: eqOp, or, ilike, lt } = await import("drizzle-orm");
-        const { declarations: decl, users: usersTable } = await import("../../drizzle/schema");
+        const { desc, and, gte, lte, eq: eqOp, or, ilike, lt, inArray } = await import("drizzle-orm");
+        const { declarations: decl, users: usersTable, tenantUsers: tenantUsersTable } = await import("../../drizzle/schema");
         const conditions: any[] = [];
+
+        // ── Phase-11: tenant scoping for officer declaration lists ──────────
+        // Officers only see declarations filed by traders who belong to one of
+        // the officer's own tenants (tenant_users membership). A declaration's
+        // tenant is the filing trader's tenant.
+        //
+        // PLATFORM-WIDE EXCEPTION: roles in PLATFORM_WIDE_ROLES bypass tenant
+        // restriction. This set intentionally mirrors is_platform_admin() in
+        // drizzle/migrations/0064_phase11_tenant_rls.sql — 'admin' /
+        // 'superadmin' (platform operators) and 'platform_admin' /
+        // 'customs_commissioner' (national customs command) are platform-plane
+        // roles with cross-tenant oversight duties; tenant-plane officer roles
+        // (customs_officer, inspector, finance, oga_officer, security) are
+        // always tenant-scoped. Fail closed: an officer with no tenant
+        // membership sees an empty list.
+        if (!PLATFORM_WIDE_ROLES.includes(ctx.user.role)) {
+          const officerTenants = await db
+            .select({ tenantId: tenantUsersTable.tenantId })
+            .from(tenantUsersTable)
+            .where(eqOp(tenantUsersTable.userId, ctx.user.id));
+          const tenantIds = [...new Set(officerTenants.map((r) => r.tenantId))];
+          if (tenantIds.length === 0) {
+            return { items: [], hasMore: false, nextCursor: undefined };
+          }
+          conditions.push(
+            inArray(
+              decl.traderId,
+              db.select({ id: tenantUsersTable.userId })
+                .from(tenantUsersTable)
+                .where(inArray(tenantUsersTable.tenantId, tenantIds))
+            )
+          );
+        }
+
         if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
         if (input.dateTo) conditions.push(lte(decl.submittedAt, input.dateTo));
         if (input.status && input.status !== "all") conditions.push(eqOp(decl.status, input.status as any));
@@ -930,7 +977,10 @@ export const declarationsRouter = router({
       if (isOfficer && !isOwner) {
         await createNotification({
           userId: decl.traderId,
-          type: "declaration_cancelled",
+          // notification_type enum has no 'declaration_cancelled' value;
+          // 'declaration_status_change' is the honest generic (title/body
+          // carry the specifics).
+          type: "declaration_status_change",
           title: "Declaration Cancelled",
           message: `Your declaration ${decl.declarationNumber} was cancelled by customs. Reason: ${input.reason}`,
           entityType: "declaration",
