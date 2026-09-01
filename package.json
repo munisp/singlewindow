@@ -11,6 +11,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "db:seed": "tsx scripts/seed/seed.ts",
+    "db:seed:coverage": "tsx scripts/seed/coverage.ts",
     "dev:app": "NODE_ENV=development tsx watch server/_core/index.ts",
     "dev:rustfs": "bash scripts/start-rustfs.sh",
     "dev:rustfs-svc": "bash scripts/start-rustfs-svc.sh",
