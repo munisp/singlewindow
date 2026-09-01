@@ -536,3 +536,41 @@ export function emitSecurityEvent(event: Omit<SecurityEvent, "timestamp">): void
 export function getRecentSecurityEvents(limit = 100): SecurityEvent[] {
   return securityEventQueue.slice(-limit).reverse();
 }
+
+// ─── 7. Scheduled-job endpoint authentication (SW-S11-2) ─────────────────────
+//
+// Heartbeat/cron handlers under /api/scheduled/* trigger privileged batch work
+// (notifications, ledger rollups, escalations). Previously any internet caller
+// could invoke them. These endpoints are now fail-closed:
+//   - Production: SCHEDULER_SECRET MUST be configured, or every request is
+//     rejected (503) — an unauthenticated cron trigger is a spam/sabotage
+//     vector and must never be reachable by default.
+//   - Non-production: when SCHEDULER_SECRET is unset, requests are allowed so
+//     local development keeps working.
+// Callers authenticate with `Authorization: Bearer ${SCHEDULER_SECRET}`.
+export function scheduledJobAuth(req: Request, res: Response, next: NextFunction): void {
+  const secret = process.env.SCHEDULER_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      res.status(503).json({ error: "Scheduled endpoints are disabled: SCHEDULER_SECRET is not configured." });
+      return;
+    }
+    next();
+    return;
+  }
+  const header = req.headers["authorization"] ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+  const a = Buffer.from(token, "utf8");
+  const b = Buffer.from(secret, "utf8");
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    emitSecurityEvent({
+      type: "pbac_denied",
+      ip: req.ip ?? "unknown",
+      path: req.path,
+      details: { reason: "scheduled_job_auth_failed" },
+    });
+    res.status(401).json({ error: "Valid scheduler credentials required." });
+    return;
+  }
+  next();
+}

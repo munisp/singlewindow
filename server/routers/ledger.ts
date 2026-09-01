@@ -73,6 +73,25 @@ function assertAllowedAccount(accountId: string): void {
   }
 }
 
+/**
+ * Read-side authorization (SW-S11-1, IDOR fix): ledger account reads must be
+ * scoped exactly like mutations are allowlisted. Privileged finance roles may
+ * read any well-formed account; traders may ONLY read their own per-trader
+ * accounts (`trader-<ownUserId>-*`). Platform revenue accounts and other
+ * traders' accounts are never readable by ordinary users.
+ */
+const FINANCE_READ_ROLES = ["admin", "finance", "customs_officer"] as const;
+
+function assertCanReadAccount(ctx: { user: { id: number; role: string } }, accountId: string): void {
+  assertAllowedAccount(accountId);
+  if ((FINANCE_READ_ROLES as readonly string[]).includes(ctx.user.role)) return;
+  if (accountId.startsWith(`trader-${ctx.user.id}-`)) return;
+  throw new TRPCError({
+    code: "FORBIDDEN",
+    message: "You may only read your own ledger accounts",
+  });
+}
+
 /** Exact decimal → integer minor units (no float money math). */
 export function toMinorUnits(amount: string | number): number {
   const s = String(amount).trim();
@@ -138,7 +157,8 @@ export const ledgerRouter = router({
    */
   getAccount: protectedProcedure
     .input(z.object({ accountId: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertCanReadAccount(ctx, input.accountId);
       const available = await tbBridgeAvailable();
       if (!available) {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
@@ -151,7 +171,8 @@ export const ledgerRouter = router({
    */
   getBalance: protectedProcedure
     .input(z.object({ accountId: z.string().min(1) }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      assertCanReadAccount(ctx, input.accountId);
       const available = await tbBridgeAvailable();
       if (!available) {
         throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "TigerBeetle bridge is unavailable" });
