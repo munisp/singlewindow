@@ -169,8 +169,12 @@ export async function getAiRiskScorerHealth(): Promise<{
 //
 // The ml-stack declaration-fraud model is registered as a first-class scorer
 // in the risk pipeline. The service is fail-closed: it returns
-// status=SCORING_UNAVAILABLE (never a fabricated score) and publishes signed
-// InferenceEvents to Kafka topic ml.inference.v1.
+// status=SCORING_UNAVAILABLE (never a fabricated score) and, when
+// BEML_INFERENCE_EVENTS_ENABLED=true with Kafka + an Ed25519 signing key
+// configured, publishes signed InferenceEvents (envelope v1.0, JWS-EdDSA
+// over RFC 8785 JCS) to Kafka topic ml.inference.v1 — publisher:
+// blueeconomy-ml-stack inference/events.py (InferenceEventPublisher),
+// invoked from inference/service.py after each completed score call.
 
 const ML_STACK_URL = process.env.ML_STACK_HTTP_URL ?? "http://localhost:8100";
 
@@ -194,34 +198,172 @@ export interface MlStackScoreResult {
 }
 
 /**
- * Feature vector for the ml-stack declaration-fraud model. Mirrors the
- * feature contract of microservices/risk-ai/build_features (10 features,
- * order matters): value_norm, hs_risk, origin_risk, value_per_kg_norm,
- * trader_risk, violations_norm, aeo_status, declaration_count_norm,
- * packages_norm, controlled_goods.
+ * Feature contract of the ml-stack declaration-fraud model
+ * (blueeconomy-ml-stack, model declaration-fraud-mlp 0.1.0).
+ *
+ * SOURCE OF TRUTH: blueeconomy-ml-stack `synthetic/declarations.py`
+ * `FEATURE_COLUMNS` (11 features, order matters — the ONNX input is a
+ * positional float vector) and `models/MODEL_CARDS.md`. The ml-stack scorer
+ * fails closed (SCORING_UNAVAILABLE) on any feature-count mismatch, so this
+ * list MUST stay in lockstep with FEATURE_COLUMNS.
+ *
+ * Port/origin encodings are the categorical index maps from
+ * `synthetic/declarations.py` PORTS (line 24) and ORIGINS (line 48) — the
+ * exact code lists the model was trained with. An origin/port outside those
+ * lists has no trained encoding: we fail closed (scorer unavailable for
+ * that call) rather than invent an index.
  */
-export function buildDeclarationFraudFeatures(req: RiskScoreRequest): number[] {
-  const HIGH_RISK_HS = new Set(["93", "28", "36", "30", "22", "24", "61", "62", "64", "85"]);
-  const CONTROLLED_HS = new Set(["93", "28", "36"]);
-  const HIGH_RISK_COUNTRIES = new Set(["KP", "IR", "MM", "AF", "SY", "YE", "LY", "SD", "SO", "VE", "PK"]);
-  const MEDIUM_RISK_COUNTRIES = new Set(["CN", "NG", "GH", "CI", "SN", "ML", "BF"]);
+export const ML_STACK_FEATURE_NAMES = [
+  "price_ratio_vs_reference",
+  "log_cif_usd",
+  "duty_rate_applied",
+  "log_weight_kg",
+  "consignee_is_shell",
+  "declarant_is_established",
+  "declarant_prior_declarations",
+  "night_filing",
+  "hs_mismatch",
+  "port_enc",
+  "origin_enc",
+] as const;
 
+/** PORTS — duplicated from blueeconomy-ml-stack synthetic/declarations.py:24. */
+export const ML_STACK_PORTS = ["NGAPP", "NGTIN", "NGONN", "NGCBQ", "NGLOS", "NGKOK"] as const;
+
+/** ORIGINS — duplicated from blueeconomy-ml-stack synthetic/declarations.py:48. */
+export const ML_STACK_ORIGINS = [
+  "CN", "IN", "TR", "BR", "TH", "VN", "GB", "US", "ZA", "AE", "NL", "KR",
+] as const;
+
+/**
+ * Real data the declaration risk request contract does NOT carry but the
+ * model's features honestly require. Callers supply these from their actual
+ * sources (valuation reference DB, consignee registry, assessment records,
+ * declaration filing timestamp, port of discharge). Any feature whose
+ * source data is absent makes the score unavailable for that call — never
+ * a fabricated value.
+ */
+export interface MlStackFeatureEnrichment {
+  /** Valuation reference price (USD/kg) for the declared HS line. */
+  referenceUnitPriceUsdPerKg?: number;
+  /** Shell-company flag from the consignee registry. */
+  consigneeIsShell?: boolean;
+  /** Declaration filing timestamp (ISO string or Date); night = 00:00–05:59. */
+  filedAt?: string | Date;
+  /** Assessed/true HS code from valuation/assessment, when one exists. */
+  assessedHsCode?: string;
+  /** UN/LOCODE of the (destination) port, e.g. "NGAPP". */
+  portCode?: string;
+}
+
+/**
+ * Build the ml-stack declaration-fraud feature vector: exactly the 11
+ * features of ML_STACK_FEATURE_NAMES, in order, each honestly derived from
+ * real declaration data:
+ *
+ *   price_ratio_vs_reference   (totalValue/totalWeight) /
+ *                              enrichment.referenceUnitPriceUsdPerKg — the
+ *                              declared USD/kg unit value over the valuation
+ *                              reference price (synthetic source:
+ *                              unit_value / ref_price, declarations.py:150)
+ *   log_cif_usd                log1p(totalValue) — totalValue is the
+ *                              declaration CIF value in USD
+ *   duty_rate_applied          totalDuty / totalValue — effective declared
+ *                              duty rate, both fields carried by the request
+ *   log_weight_kg              log1p(totalWeight)
+ *   consignee_is_shell         enrichment.consigneeIsShell (registry flag)
+ *   declarant_is_established   traderHistory.monthsActive >= 12 — DOCUMENTED
+ *                              PROXY: the synthetic source is an
+ *                              established-broker boolean; monthsActive is
+ *                              the closest real field in this contract
+ *   declarant_prior_declarations traderHistory.totalDeclarations
+ *   night_filing               enrichment.filedAt hour in [0,6) ? 1 : 0
+ *   hs_mismatch                items[0].hsCode !== enrichment.assessedHsCode
+ *   port_enc                   index of enrichment.portCode in ML_STACK_PORTS
+ *   origin_enc                 index of countryOfOrigin in ML_STACK_ORIGINS
+ *
+ * FAIL-CLOSED: throws ScorerUnavailableError listing every feature whose
+ * source data is missing or out-of-domain — the call is scored by the
+ * deterministic rules engine instead, never by a fabricated vector.
+ */
+export function buildDeclarationFraudFeatures(
+  req: RiskScoreRequest,
+  enrichment: MlStackFeatureEnrichment = {}
+): number[] {
+  const missing: string[] = [];
   const declaredValue = req.totalValue || 0;
-  const valueNorm = Math.min(Math.log1p(declaredValue) / Math.log1p(10_000_000), 1);
-  const hsChapter = (req.items?.[0]?.hsCode ?? "").slice(0, 2);
-  const hsRisk = HIGH_RISK_HS.has(hsChapter) ? 0.9 : 0.2;
-  const origin = req.countryOfOrigin ?? "";
-  const originRisk = HIGH_RISK_COUNTRIES.has(origin) ? 0.85 : MEDIUM_RISK_COUNTRIES.has(origin) ? 0.5 : 0.15;
   const weight = req.totalWeight || 0;
-  const valuePerKg = weight > 0 ? declaredValue / Math.max(weight, 0.1) : 0;
-  const valuePerKgNorm = Math.min(valuePerKg / 10_000, 1);
-  const traderRisk = Math.min(Math.max(req.traderHistory?.rejectionRate ?? 0.3, 0), 1);
-  const violationsNorm = 0; // violations count not carried by this request contract
-  const aeo = req.traderHistory?.isAEO ? 1 : 0;
-  const declCountNorm = Math.min((req.traderHistory?.totalDeclarations ?? 0) / 1000, 1);
-  const packagesNorm = (req.numberOfPackages || 1) / 1000;
-  const controlled = CONTROLLED_HS.has(hsChapter) ? 1 : 0;
-  return [valueNorm, hsRisk, originRisk, valuePerKgNorm, traderRisk, violationsNorm, aeo, declCountNorm, packagesNorm, controlled];
+
+  let priceRatio: number | null = null;
+  if (
+    declaredValue > 0 && weight > 0 &&
+    typeof enrichment.referenceUnitPriceUsdPerKg === "number" &&
+    enrichment.referenceUnitPriceUsdPerKg > 0
+  ) {
+    priceRatio = declaredValue / weight / enrichment.referenceUnitPriceUsdPerKg;
+  } else {
+    missing.push("price_ratio_vs_reference(referenceUnitPriceUsdPerKg)");
+  }
+
+  const logCif = declaredValue > 0 ? Math.log1p(declaredValue) : null;
+  if (logCif === null) missing.push("log_cif_usd(totalValue)");
+
+  const dutyRate = declaredValue > 0 ? (req.totalDuty || 0) / declaredValue : null;
+  if (dutyRate === null) missing.push("duty_rate_applied(totalValue)");
+
+  const logWeight = weight > 0 ? Math.log1p(weight) : null;
+  if (logWeight === null) missing.push("log_weight_kg(totalWeight)");
+
+  const consigneeIsShell =
+    typeof enrichment.consigneeIsShell === "boolean"
+      ? enrichment.consigneeIsShell ? 1 : 0
+      : null;
+  if (consigneeIsShell === null) missing.push("consignee_is_shell(consigneeIsShell)");
+
+  const declarantEstablished = (req.traderHistory?.monthsActive ?? 0) >= 12 ? 1 : 0;
+  const priorDeclarations = Math.max(req.traderHistory?.totalDeclarations ?? 0, 0);
+
+  let nightFiling: number | null = null;
+  if (enrichment.filedAt !== undefined) {
+    const filed = new Date(enrichment.filedAt);
+    if (Number.isNaN(filed.getTime())) {
+      missing.push("night_filing(filedAt unparseable)");
+    } else {
+      nightFiling = filed.getUTCHours() < 6 ? 1 : 0;
+    }
+  } else {
+    missing.push("night_filing(filedAt)");
+  }
+
+  let hsMismatch: number | null = null;
+  const declaredHs = req.items?.[0]?.hsCode ?? "";
+  if (enrichment.assessedHsCode) {
+    hsMismatch = declaredHs && declaredHs !== enrichment.assessedHsCode ? 1 : 0;
+  } else {
+    missing.push("hs_mismatch(assessedHsCode)");
+  }
+
+  const portEnc = enrichment.portCode
+    ? ML_STACK_PORTS.indexOf(enrichment.portCode as (typeof ML_STACK_PORTS)[number])
+    : -1;
+  if (portEnc < 0) missing.push("port_enc(portCode not in ml-stack PORTS)");
+
+  const originEnc = ML_STACK_ORIGINS.indexOf(
+    (req.countryOfOrigin ?? "") as (typeof ML_STACK_ORIGINS)[number]
+  );
+  if (originEnc < 0) missing.push("origin_enc(countryOfOrigin not in ml-stack ORIGINS)");
+
+  if (missing.length > 0) {
+    throw new ScorerUnavailableError(
+      "ml-stack",
+      `feature source data unavailable: ${missing.join(", ")}`
+    );
+  }
+  return [
+    priceRatio!, logCif!, dutyRate!, logWeight!, consigneeIsShell!,
+    declarantEstablished, priorDeclarations, nightFiling!, hsMismatch!,
+    portEnc, originEnc,
+  ];
 }
 
 /**
@@ -230,8 +372,12 @@ export function buildDeclarationFraudFeatures(req: RiskScoreRequest): number[] {
  * SCORING_UNAVAILABLE response — callers must not silently degrade.
  */
 export async function scoreDeclarationFraudWithMlStack(
-  request: RiskScoreRequest
+  request: RiskScoreRequest,
+  enrichment: MlStackFeatureEnrichment = {}
 ): Promise<MlStackScoreResult> {
+  // Feature construction is fail-closed: throws ScorerUnavailableError when
+  // any of the 11 model features lacks real source data.
+  const features = buildDeclarationFraudFeatures(request, enrichment);
   let res: Response;
   try {
     res = await fetchWithTimeout(`${ML_STACK_URL}/score/declaration-fraud`, {
@@ -239,7 +385,7 @@ export async function scoreDeclarationFraudWithMlStack(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         entity_id: request.declarationId,
-        features: buildDeclarationFraudFeatures(request),
+        features,
       }),
     });
   } catch (err) {
@@ -313,7 +459,8 @@ function normalizeScore(score: number): number {
 }
 
 export async function scoreDeclarationRiskComposite(
-  request: RiskScoreRequest
+  request: RiskScoreRequest,
+  enrichment: MlStackFeatureEnrichment = {}
 ): Promise<CompositeRiskResult> {
   const scorers = configuredRiskScorers();
   const results: CompositeRiskResult["scorers"] = {};
@@ -326,7 +473,7 @@ export async function scoreDeclarationRiskComposite(
       results["ai-risk-scorer"] = { score: r.riskScore, modelVersion: r.modelVersion };
       combined = Math.max(combined, normalizeScore(r.riskScore));
     } else {
-      const r = await scoreDeclarationFraudWithMlStack(request);
+      const r = await scoreDeclarationFraudWithMlStack(request, enrichment);
       results["ml-stack"] = { score: r.score!, modelVersion: r.modelVersion };
       combined = Math.max(combined, normalizeScore(r.score!));
     }
