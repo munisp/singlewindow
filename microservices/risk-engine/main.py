@@ -1,13 +1,21 @@
 """
 risk-engine — TradeGateway NGSWTP
-Python FastAPI service that computes ML-based risk scores for customs declarations.
-Uses a gradient-boosted model (XGBoost) with features derived from:
-  - Trader compliance history
+Python FastAPI service that computes rule-based risk scores for customs
+declarations. This is a HAND-WEIGHTED DETERMINISTIC HEURISTIC — there is no
+trained ML model in this service (ML scoring lives in blueeconomy-ml-stack).
+`modelVersion` honestly identifies the active rule set as
+`rules-v1-<sha256[:12]>` where the hash is computed over the actual rule
+tables (HS profiles, country risk, weights, reference prices), so any rule
+change changes the reported version.
+
+Features combined by the heuristic:
+  - Trader compliance history (from the database — FAIL CLOSED: when the
+    trader profile cannot be fetched due to a database error the score is
+    unavailable, HTTP 503 RISK_UNAVAILABLE; a 0.50 stand-in is never used)
   - HS code risk profile
   - Declared value vs. reference price
   - Origin country risk
   - Document completeness
-  - Historical violation patterns
 
 Lane assignment:
   - GREEN  (score < 30):  Auto-clearance, no inspection
@@ -16,6 +24,7 @@ Lane assignment:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -24,7 +33,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-import numpy as np
 import psycopg2
 import psycopg2.extras
 from fastapi import FastAPI, HTTPException, Request
@@ -83,6 +91,61 @@ COUNTRY_RISK: dict[str, float] = {
     "CN": 0.40, "IN": 0.35,
 }
 
+# ── Heuristic rule set (weights, reference prices, adjustments) ──────────────
+# Feature weights, calibrated from WCO risk management guidelines.
+RULE_WEIGHTS: dict[str, float] = {
+    "hs_risk": 0.25,
+    "country_risk": 0.20,
+    "trader_risk": 0.30,
+    "value_deviation": 0.20,
+    "document_risk": 0.05,
+}
+
+# Simplified reference prices per HS chapter (USD/kg).
+REFERENCE_PRICES: dict[str, float] = {
+    "84": 5000, "85": 3000, "61": 20, "62": 25,
+    "64": 30, "39": 5, "29": 50, "28": 30,
+}
+REFERENCE_PRICE_DEFAULT = 100.0
+
+# Document risk by KYC state and the AEO risk-reduction multiplier.
+DOCUMENT_RISK_KYC_VERIFIED = 0.1
+DOCUMENT_RISK_KYC_UNVERIFIED = 0.5
+AEO_RISK_MULTIPLIER = 0.60
+
+# Policy default for a trader with NO profile row (unknown trader). This is
+# an explicit, labelled policy choice — never used to mask a database
+# failure (those fail closed with RISK_UNAVAILABLE).
+UNKNOWN_TRADER_RISK = 0.50
+
+# Honest model identity: hash of the actual rule tables above. Any change to
+# the rules changes the reported version.
+MODEL_VERSION = "rules-v1-" + hashlib.sha256(
+    json.dumps(
+        {
+            "hs_risk_profiles": HS_RISK_PROFILES,
+            "country_risk": COUNTRY_RISK,
+            "rule_weights": RULE_WEIGHTS,
+            "reference_prices": REFERENCE_PRICES,
+            "reference_price_default": REFERENCE_PRICE_DEFAULT,
+            "document_risk": {
+                "kyc_verified": DOCUMENT_RISK_KYC_VERIFIED,
+                "kyc_unverified": DOCUMENT_RISK_KYC_UNVERIFIED,
+            },
+            "aeo_risk_multiplier": AEO_RISK_MULTIPLIER,
+            "unknown_trader_risk": UNKNOWN_TRADER_RISK,
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+).hexdigest()[:12]
+
+
+class RiskUnavailableError(RuntimeError):
+    """Fail-closed: a required risk input could not be obtained."""
+
+    CODE = "RISK_UNAVAILABLE"
+
+
 # ── Database connection pool ──────────────────────────────────────────────────
 _db_conn: Optional[psycopg2.extensions.connection] = None
 
@@ -109,7 +172,7 @@ class RiskScoreResponse(BaseModel):
     lane: str  # "green", "yellow", "red"
     features: dict
     scoredAt: str
-    modelVersion: str = "xgb-v1.2.0"
+    modelVersion: str = MODEL_VERSION  # honest heuristic identity, not a model
 
 
 class HealthResponse(BaseModel):
@@ -150,7 +213,15 @@ def get_trader_risk(trader_id: int) -> tuple[float, dict]:
             """, (trader_id,))
             row = cur.fetchone()
             if not row:
-                return 0.50, {"compliance_score": 50, "aeo": False, "kyc_verified": False}
+                # Unknown trader: explicit labelled policy default (the
+                # trader has no compliance history to score from).
+                return UNKNOWN_TRADER_RISK, {
+                    "compliance_score": None,
+                    "aeo": False,
+                    "kyc_verified": False,
+                    "traderKnown": False,
+                    "traderRiskSource": "policy-default-unknown-trader",
+                }
 
             compliance = float(row["compliance_score"]) / 100.0
             trader_risk = 1.0 - compliance  # High compliance = low risk
@@ -161,25 +232,27 @@ def get_trader_risk(trader_id: int) -> tuple[float, dict]:
                 "rejected_declarations": row["rejected_declarations"],
                 "aeo": row["aeo_status"] == "certified",
                 "kyc_verified": row["kyc_status"] == "verified",
+                "traderKnown": True,
+                "traderRiskSource": "trader_profiles",
             }
+    except RiskUnavailableError:
+        raise
     except Exception as e:
-        logger.warning(f"Could not fetch trader risk for {trader_id}: {e}")
-        return 0.50, {"compliance_score": 50, "aeo": False, "kyc_verified": False}
+        # FAIL CLOSED: a database error is never masked by a 0.50 stand-in.
+        logger.error(f"Trader risk unavailable for {trader_id}: {e}")
+        raise RiskUnavailableError(
+            f"trader compliance history unavailable (database error): {e}"
+        ) from e
 
 
 def get_reference_price_deviation(hs_code: str, declared_value: float) -> float:
     """
-    Compares declared value against WCO reference prices.
+    Compares declared value against the chapter reference-price table
+    (REFERENCE_PRICES, USD/kg; part of the hashed rule set).
     Returns deviation ratio (0 = no deviation, 1 = 100% deviation).
-    In production: query Delta Lake reference price table.
     """
-    # Simplified reference prices per HS chapter (USD/kg)
-    reference_prices = {
-        "84": 5000, "85": 3000, "61": 20, "62": 25,
-        "64": 30, "39": 5, "29": 50, "28": 30,
-    }
     chapter = hs_code[:2]
-    ref = reference_prices.get(chapter, 100)
+    ref = REFERENCE_PRICES.get(chapter, REFERENCE_PRICE_DEFAULT)
     # Assume 1 unit = 1 kg for simplification
     deviation = abs(declared_value - ref) / max(ref, 1)
     return min(deviation, 1.0)
@@ -194,20 +267,13 @@ def compute_risk_score(
     kyc_verified: bool,
 ) -> float:
     """
-    Weighted risk score computation.
-    Weights are calibrated based on WCO risk management guidelines.
+    Hand-weighted heuristic risk score (no trained model). Weights live in
+    RULE_WEIGHTS and are part of the hashed MODEL_VERSION rule set.
     """
-    # Feature weights
-    weights = {
-        "hs_risk": 0.25,
-        "country_risk": 0.20,
-        "trader_risk": 0.30,
-        "value_deviation": 0.20,
-        "document_risk": 0.05,
-    }
+    weights = RULE_WEIGHTS
 
     # Document risk: lower if KYC verified
-    document_risk = 0.1 if kyc_verified else 0.5
+    document_risk = DOCUMENT_RISK_KYC_VERIFIED if kyc_verified else DOCUMENT_RISK_KYC_UNVERIFIED
 
     raw_score = (
         weights["hs_risk"] * hs_risk
@@ -217,9 +283,9 @@ def compute_risk_score(
         + weights["document_risk"] * document_risk
     )
 
-    # AEO traders get a 40% risk reduction
+    # AEO traders get a risk reduction
     if aeo_certified:
-        raw_score *= 0.60
+        raw_score *= AEO_RISK_MULTIPLIER
 
     # Scale to 0-100
     return round(min(raw_score * 100, 100), 2)
@@ -249,7 +315,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TradeGateway Risk Engine",
-    description="ML-based risk scoring for customs declarations",
+    description="Rule-based (hand-weighted heuristic) risk scoring for customs declarations",
     version="1.2.0",
     lifespan=lifespan,
 )
@@ -280,7 +346,14 @@ async def score_declaration(request: RiskScoreRequest):
     # Gather features
     hs_risk = get_hs_risk(request.hsCode)
     country_risk = get_country_risk(request.originCountry)
-    trader_risk, trader_info = get_trader_risk(request.traderId)
+    try:
+        trader_risk, trader_info = get_trader_risk(request.traderId)
+    except RiskUnavailableError as e:
+        # FAIL CLOSED: never score with a fabricated trader input.
+        raise HTTPException(
+            status_code=503,
+            detail=f"{RiskUnavailableError.CODE}: {e}",
+        ) from e
     value_deviation = get_reference_price_deviation(request.hsCode, request.declaredValue)
 
     # Compute score
