@@ -140,12 +140,19 @@ export const webhooksRouter = router({
     }));
   }),
 
-  /** Admin: list all subscriptions */
-  adminList: adminProcedure.query(async () => {
-    const db = await requireDb();
-    const rows = await db.select().from(webhookSubscriptions).orderBy(desc(webhookSubscriptions.createdAt));
-    return rows.map(r => ({ ...r, secret: `${r.secret.slice(0, 8)}${"*".repeat(24)}` }));
-  }),
+  /** Admin: list all subscriptions (paginated — capped to bound result sets) */
+  adminList: adminProcedure
+    .input(z.object({
+      limit: z.number().int().min(1).max(500).default(100),
+      offset: z.number().int().min(0).default(0),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const rows = await db.select().from(webhookSubscriptions).orderBy(desc(webhookSubscriptions.createdAt))
+        .limit(input?.limit ?? 100)
+        .offset(input?.offset ?? 0);
+      return rows.map(r => ({ ...r, secret: `${r.secret.slice(0, 8)}${"*".repeat(24)}` }));
+    }),
 
   /** Admin: get delivery stats */
   stats: adminProcedure.query(async () => {

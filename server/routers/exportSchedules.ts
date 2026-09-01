@@ -5,7 +5,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import { exportSchedules, exportScheduleDeliveries } from "../../drizzle/schema";
-import { eq, and, lte, desc } from "drizzle-orm";
+import { eq, and, lte, desc, inArray } from "drizzle-orm";
 
 const CADENCE_DAYS: Record<string, number> = { daily: 1, weekly: 7, monthly: 30 };
 
@@ -74,8 +74,13 @@ export const exportSchedulesRouter = router({
   listDue: protectedProcedure.query(async () => {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
+    // Batch-bounded: the heartbeat processes due schedules in chunks rather
+    // than loading the entire due set at once. Partial index candidate:
+    // (is_active, next_run_at) is covered by idx_export_schedules_next_run.
     return db.select().from(exportSchedules)
-      .where(and(eq(exportSchedules.isActive, true), lte(exportSchedules.nextRunAt, new Date())));
+      .where(and(eq(exportSchedules.isActive, true), lte(exportSchedules.nextRunAt, new Date())))
+      .orderBy(exportSchedules.nextRunAt)
+      .limit(500);
   }),
 
   /** List delivery receipts for a specific schedule */
@@ -100,13 +105,17 @@ export const exportSchedulesRouter = router({
     if (!db) throw new Error("Database unavailable");
     const schedules = await db.select().from(exportSchedules)
       .where(eq(exportSchedules.userId, ctx.user.id));
+    // Batch the per-schedule "latest delivery" lookup into a single DISTINCT ON
+    // query (previously one query per schedule — classic N+1).
     const result: Record<number, typeof exportScheduleDeliveries.$inferSelect | null> = {};
-    for (const s of schedules) {
-      const [last] = await db.select().from(exportScheduleDeliveries)
-        .where(eq(exportScheduleDeliveries.scheduleId, s.id))
-        .orderBy(desc(exportScheduleDeliveries.deliveredAt))
-        .limit(1);
-      result[s.id] = last ?? null;
+    for (const s of schedules) result[s.id] = null;
+    if (schedules.length > 0) {
+      const ids = schedules.map((s) => s.id);
+      const latest = await db.selectDistinctOn([exportScheduleDeliveries.scheduleId])
+        .from(exportScheduleDeliveries)
+        .where(inArray(exportScheduleDeliveries.scheduleId, ids))
+        .orderBy(exportScheduleDeliveries.scheduleId, desc(exportScheduleDeliveries.deliveredAt));
+      for (const row of latest) result[row.scheduleId] = row;
     }
     return result;
   }),

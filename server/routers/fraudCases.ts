@@ -486,10 +486,18 @@ export const fraudCasesRouter = router({
               eq(fraudCaseLinks.linkedCaseId, input.caseId),
             ));
 
+          // Batch-fetch all linked cases in one query instead of one query per
+          // link (N+1).
+          const otherIds = [...new Set(links.map((link) =>
+            link.caseId === input.caseId ? link.linkedCaseId : link.caseId))];
+          const linkedCases = otherIds.length > 0
+            ? await db.select().from(fraudCases).where(inArray(fraudCases.id, otherIds))
+            : [];
+          const linkedById = new Map(linkedCases.map((c) => [c.id, c]));
+
           for (const link of links) {
             const otherId = link.caseId === input.caseId ? link.linkedCaseId : link.caseId;
-            const [otherCase] = await db.select().from(fraudCases)
-              .where(eq(fraudCases.id, otherId)).limit(1);
+            const otherCase = linkedById.get(otherId);
             if (otherCase) {
               const otherNodeId = `case-${otherCase.id}`;
               if (!seen.has(otherNodeId)) {

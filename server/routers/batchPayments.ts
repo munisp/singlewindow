@@ -16,7 +16,7 @@ import {
   paymentArchivalJobs,
   payments,
 } from "../../drizzle/schema";
-import { eq, desc, and, count, gte, lt } from "drizzle-orm";
+import { eq, desc, and, count, gte, lt, inArray } from "drizzle-orm";
 
 export async function sha256ForEnqueue(input: string): Promise<string> {
   return sha256(input);
@@ -71,10 +71,12 @@ export const batchPaymentsRouter = router({
     if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
     const statuses = ["queued", "processing", "committed", "failed", "dead_letter"] as const;
     const results: Record<string, number> = {};
-    for (const status of statuses) {
-      const [{ total }] = await db.select({ total: count() }).from(paymentQueue).where(eq(paymentQueue.status, status));
-      results[status] = Number(total);
-    }
+    // Single GROUP BY scan instead of one COUNT per status.
+    const grouped = await db.select({ status: paymentQueue.status, total: count() })
+      .from(paymentQueue)
+      .where(inArray(paymentQueue.status, [...statuses]))
+      .groupBy(paymentQueue.status);
+    for (const row of grouped) results[row.status] = Number(row.total);
     const [{ idempotencyCount }] = await db.select({ idempotencyCount: count() }).from(paymentIdempotencyKeys).where(gte(paymentIdempotencyKeys.expiresAt, new Date()));
     const [{ archivalCount }] = await db.select({ archivalCount: count() }).from(paymentArchivalJobs);
     return {
@@ -101,9 +103,8 @@ export const batchPaymentsRouter = router({
       const oneHourAgo = new Date(Date.now() - 3_600_000);
       const deadItems = await db.select({ id: paymentQueue.id, transferId: paymentQueue.transferId }).from(paymentQueue).where(and(eq(paymentQueue.status, "dead_letter"), lt(paymentQueue.deadLetteredAt, oneHourAgo))).limit(input.limit);
       if (deadItems.length === 0) return { retried: 0, transferIds: [] };
-      for (const item of deadItems) {
-        await db.update(paymentQueue).set({ status: "queued", attemptCount: 0, lastError: null, nextRetryAt: new Date(), deadLetteredAt: null, updatedAt: new Date() }).where(eq(paymentQueue.id, item.id));
-      }
+      // Single batch UPDATE instead of one UPDATE per dead-letter item.
+      await db.update(paymentQueue).set({ status: "queued", attemptCount: 0, lastError: null, nextRetryAt: new Date(), deadLetteredAt: null, updatedAt: new Date() }).where(inArray(paymentQueue.id, deadItems.map((i) => i.id)));
       return { retried: deadItems.length, transferIds: deadItems.map((i) => i.transferId) };
     }),
 

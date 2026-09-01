@@ -2,7 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import { sanctionsBatchJobs, sanctionsBatchConflicts, sanctionsChecks } from "../../drizzle/schema";
-import { eq, desc, and, isNull } from "drizzle-orm";
+import { eq, desc, and, isNull, inArray } from "drizzle-orm";
 import { storagePut } from "../storage";
 
 export const sanctionsBatchRouter = router({
@@ -55,10 +55,19 @@ export const sanctionsBatchRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database unavailable");
       const conflicts: Array<typeof sanctionsBatchConflicts.$inferInsert> = [];
+      // Batch the existence lookups (was one query per row — N+1). When
+      // multiple checks share a name, the first match wins, mirroring the
+      // previous LIMIT 1 semantics (no ordering was specified).
+      const names = [...new Set(input.rows.map((r) => r.entityName))];
+      const existingRows = names.length > 0
+        ? await db.select().from(sanctionsChecks).where(inArray(sanctionsChecks.entityName, names))
+        : [];
+      const existingByName = new Map<string, (typeof existingRows)[number]>();
+      for (const e of existingRows) {
+        if (!existingByName.has(e.entityName)) existingByName.set(e.entityName, e);
+      }
       for (const row of input.rows) {
-        const [existing] = await db.select().from(sanctionsChecks)
-          .where(eq(sanctionsChecks.entityName, row.entityName))
-          .limit(1);
+        const existing = existingByName.get(row.entityName);
         if (existing) {
           conflicts.push({
             batchId: input.batchId,
