@@ -70,7 +70,7 @@ export const officerWorkloadRouter = router({
         .where(
           and(
             isNotNull(declarations.assignedOfficerId),
-            sql`${declarations.status} IN ('submitted', 'under_review', 'pending_payment')`
+            sql`${declarations.status} IN ('submitted', 'under_assessment', 'payment_pending')`
           )
         )
         .groupBy(declarations.assignedOfficerId);
@@ -217,7 +217,7 @@ export const officerWorkloadRouter = router({
         .where(
           and(
             eq(declarations.assignedOfficerId, ctx.user.id),
-            sql`${declarations.status} IN ('submitted', 'under_review', 'pending_payment')`
+            sql`${declarations.status} IN ('submitted', 'under_assessment', 'payment_pending')`
           )
         );
 
