@@ -50,10 +50,10 @@ describe("Permify assertCan wire-up in tRPC routers", () => {
       path.join(projectRoot, "server/routers/oga.ts"),
       "utf8"
     );
-    // assertCan must appear before the updateOgaPermit call in the approve mutation
+    // assertCan must appear before the transitionOgaPermit call in the approve mutation
     const approveIdx = src.indexOf("approve: protectedProcedure");
     const assertCanIdx = src.indexOf("assertCan", approveIdx);
-    const updateIdx = src.indexOf("updateOgaPermit", approveIdx);
+    const updateIdx = src.indexOf("transitionOgaPermit", approveIdx);
     expect(assertCanIdx).toBeGreaterThan(approveIdx);
     expect(assertCanIdx).toBeLessThan(updateIdx);
   });
@@ -65,7 +65,7 @@ describe("Permify assertCan wire-up in tRPC routers", () => {
     );
     const rejectIdx = src.indexOf("reject: protectedProcedure");
     const assertCanIdx = src.indexOf("assertCan", rejectIdx);
-    const updateIdx = src.indexOf("updateOgaPermit", rejectIdx);
+    const updateIdx = src.indexOf("transitionOgaPermit", rejectIdx);
     expect(assertCanIdx).toBeGreaterThan(rejectIdx);
     expect(assertCanIdx).toBeLessThan(updateIdx);
   });

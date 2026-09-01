@@ -918,6 +918,37 @@ export const declarationsRouter = router({
             message: "Risk assessment is a non-model (LLM heuristic) output — manual review must be recorded before clearance",
           });
         }
+        // Phase-11 (mirrors Go store.go:352-355): clearance hard-blocks when
+        // any OGA permit raised for this declaration is not approved, or is
+        // approved but expired. Permits are terminal-state — a rejected
+        // permit must be re-applied as a new request and approved first.
+        const clearancePermits = await getPermitsByDeclaration(input.id);
+        for (const permit of clearancePermits) {
+          if (permit.status === "not_required") continue;
+          if (permit.status !== "approved") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PERMIT_NOT_APPROVED: ${permit.agencyName} permit #${permit.id} is '${permit.status}' — clearance requires all OGA permits approved`,
+            });
+          }
+          if (!permit.permitNumber || !permit.expiresAt) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PERMIT_INVALID: approved ${permit.agencyName} permit #${permit.id} lacks a permit number or expiry`,
+            });
+          }
+          const validity = checkPermitValidity({
+            permitNumber: permit.permitNumber,
+            expiryDate: new Date(permit.expiresAt),
+            issuingAgency: permit.agencyName,
+          });
+          if (!validity.valid) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PERMIT_EXPIRED: ${validity.error}`,
+            });
+          }
+        }
       }
 
       // Permify: assert officer can assess this declaration
