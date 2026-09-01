@@ -81,7 +81,25 @@ vi.mock("./db", async (importOriginal) => {
         },
         apply: () => chain,
       });
-      return { select: () => chain, insert: () => chain, update: () => chain, delete: () => chain };
+      // Tx-chain whose awaited inserts resolve a full payment row (the
+      // Phase-11 transactional create in payments.initiate destructures it).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const txChain: any = new Proxy(function () {}, {
+        get: (_t, prop) => {
+          if (prop === "then")
+            return (resolve: (v: unknown) => void) =>
+              resolve([{ id: 1, status: "pending", reference: "PAY-NEW-001" }]);
+          return () => txChain;
+        },
+        apply: () => txChain,
+      });
+      return {
+        select: () => chain, insert: () => chain, update: () => chain, delete: () => chain,
+        // Phase-11: payments.initiate wraps payment create + declaration
+        // status change in a transaction — hand the tx chain to the callback.
+        transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+          fn({ insert: () => txChain, update: () => txChain }),
+      };
     }),
   };
 });
