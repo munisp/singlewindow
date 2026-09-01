@@ -456,6 +456,20 @@
       "when": 1784257184373,
       "tag": "0064_phase11_tenant_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1784257184374,
+      "tag": "0065_phase12_crm_cases",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1784257184375,
+      "tag": "0066_phase12_marketplace_tiers",
+      "breakpoints": true
     }
   ]
 }

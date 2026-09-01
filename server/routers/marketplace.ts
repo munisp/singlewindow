@@ -17,6 +17,13 @@ import { protectedProcedure, adminProcedure, publicProcedure, router } from "../
 import { getDb } from "../db";
 import { apiKeys, apiKeyElevationRequests, developerOrganisations } from "../../drizzle/schema";
 import { buildSignedCatalogue } from "../marketplace/apiCatalogue";
+import {
+  bindKeyToTier,
+  buildUsageInvoice,
+  listTiers as listMarketplaceTiers,
+  MarketplaceBillingError,
+  usageSeriesForKey,
+} from "../marketplace/tiers";
 
 export const marketplaceRouter = router({
   /** Signed API catalogue for the marketplace browse UI (public metadata). */
@@ -188,5 +195,83 @@ export const marketplaceRouter = router({
           .where(eq(developerOrganisations.id, request.organisationId));
       }
       return updated;
+    }),
+
+  // ── Phase 12: monetization tiers ────────────────────────────────────────────
+
+  /** Tier catalogue (public commercial metadata). */
+  listTiers: publicProcedure.query(async () => listMarketplaceTiers()),
+
+  /** Admin: bind one of the platform's keys to a tier. */
+  bindKeyToTier: adminProcedure
+    .input(z.object({ apiKeyId: z.number().int().positive(), tierCode: z.enum(["free", "builder", "enterprise"]) }))
+    .mutation(async ({ input }) => {
+      try {
+        return await bindKeyToTier(input.apiKeyId, input.tierCode);
+      } catch (err) {
+        if (err instanceof MarketplaceBillingError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  /** Self-service: bind MY key to a tier (upgrade path). */
+  bindMyKeyToTier: protectedProcedure
+    .input(z.object({ apiKeyId: z.number().int().positive(), tierCode: z.enum(["free", "builder", "enterprise"]) }))
+    .mutation(async ({ input, ctx }) => {
+      const db = (await getDb())!;
+      const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, input.apiKeyId)).limit(1);
+      if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "API key not found" });
+      if (key.userId !== ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your API key" });
+      }
+      try {
+        return await bindKeyToTier(input.apiKeyId, input.tierCode);
+      } catch (err) {
+        if (err instanceof MarketplaceBillingError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  /** Itemized, period-bounded usage invoice for one of MY keys. */
+  usageInvoice: protectedProcedure
+    .input(
+      z.object({
+        apiKeyId: z.number().int().positive(),
+        from: z.string().min(4).max(40),
+        to: z.string().min(4).max(40),
+      })
+    )
+    .query(async ({ input, ctx }) => {
+      const db = (await getDb())!;
+      const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, input.apiKeyId)).limit(1);
+      if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "API key not found" });
+      if (key.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your API key" });
+      }
+      try {
+        return await buildUsageInvoice(input.apiKeyId, input.from, input.to);
+      } catch (err) {
+        if (err instanceof MarketplaceBillingError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  /** Per-day usage series for the portal charts (own keys only). */
+  usageSeries: protectedProcedure
+    .input(z.object({ apiKeyId: z.number().int().positive(), days: z.number().int().min(1).max(92).default(30) }))
+    .query(async ({ input, ctx }) => {
+      const db = (await getDb())!;
+      const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, input.apiKeyId)).limit(1);
+      if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "API key not found" });
+      if (key.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Not your API key" });
+      }
+      return usageSeriesForKey(input.apiKeyId, input.days);
     }),
 });

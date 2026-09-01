@@ -1504,6 +1504,12 @@ async function startServer() {
   // WP-8: API marketplace public surface (signed catalogue, public KPIs, status)
   const { registerMarketplacePublicRoutes } = await import("../routes/marketplacePublic");
   registerMarketplacePublicRoutes(app);
+  // Phase 12: stakeholder-360 CRM + marketplace monetization REST surface
+  const { registerCrmMarketplaceApiRoutes } = await import("../routes/crmMarketplaceApi");
+  registerCrmMarketplaceApiRoutes(app);
+  // Phase 12 Mission C: executive/analytics/briefing REST surface
+  const { registerExecutiveApiRoutes } = await import("../routes/executiveApi");
+  registerExecutiveApiRoutes(app);
   // WP-8: external metered API surface for marketplace key holders
   const { requireApiKey } = await import("../middleware/apiKeyAuth");
   const { computeOperationalKpis } = await import("../marketplace/kpiService");

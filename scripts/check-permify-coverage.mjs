@@ -71,6 +71,8 @@ const DOMAIN_ENTITY_MAP = {
   fraudCases: "fraud_case",
   profiles: "stakeholder_profile",
   onboarding: "stakeholder_profile",
+  stakeholders: "stakeholder_profile",
+  cases: "stakeholder_profile",
   tradeFinance: "trade_finance_facility",
   ucr: "declaration",
   crf: "declaration",

@@ -43,6 +43,8 @@ import { cenRouter } from "./routers/cen";
 import { freeZoneRouter } from "./routers/freeZone";
 import { devPortalRouter } from "./routers/devPortal";
 import { marketplaceRouter } from "./routers/marketplace";
+import { stakeholdersRouter } from "./routers/stakeholders";
+import { casesRouter } from "./routers/cases";
 import { threatIntelRouter } from "./routers/threatIntel";
 import { wazuhRouter } from "./routers/wazuh";
 import { riskModelRouter } from "./routers/riskModel";
@@ -300,6 +302,8 @@ export const appRouter = router({
   freeZone: freeZoneRouter,
   devPortal: devPortalRouter,
   marketplace: marketplaceRouter,
+  stakeholders: stakeholdersRouter,
+  cases: casesRouter,
   threatIntel: threatIntelRouter,
   wazuh: wazuhRouter,
   riskModel: riskModelRouter,

@@ -6,7 +6,7 @@ const RISK_SCORER_URL = process.env.RISK_SCORER_URL ?? "http://ray-risk-scorer:8
 
 // ─── Ray ML service caller ────────────────────────────────────────────────────
 
-async function callRiskScorer<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+export async function callRiskScorer<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const res = await fetch(`${RISK_SCORER_URL}${path}`, {
     method,
     headers: { "Content-Type": "application/json" },
