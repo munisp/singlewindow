@@ -76,6 +76,11 @@ const WcoCenAlerts = lazy(() => import('./pages/app/WcoCenAlerts'));
 const FreeZoneOps = lazy(() => import('./pages/app/FreeZoneOps'));
 const DeveloperPortal = lazy(() => import('./pages/app/DeveloperPortal'));
 const Marketplace = lazy(() => import('./pages/app/Marketplace'));
+// Phase 12 — Stakeholder-360 CRM + marketplace monetization
+const Stakeholder360 = lazy(() => import('./pages/app/Stakeholder360'));
+const CaseList = lazy(() => import('./pages/app/CaseList'));
+const CaseDetail = lazy(() => import('./pages/app/CaseDetail'));
+const MarketplacePortal = lazy(() => import('./pages/app/MarketplacePortal'));
 const OperationalKpis = lazy(() => import('./pages/app/OperationalKpis'));
 const ThreatIntelligence = lazy(() => import('./pages/app/ThreatIntelligence'));
 const WazuhSecurityEvents = lazy(() => import('./pages/app/WazuhSecurityEvents'));
@@ -410,6 +415,20 @@ function Router() {
       {/* WP-8 — API Marketplace catalogue browser */}
       <Route path="/app/developer/marketplace">
         <Suspense fallback={<LazyFallback />}><Marketplace /></Suspense>
+      </Route>
+      {/* Phase 12 — Marketplace monetization portal (tiers, usage, invoices) */}
+      <Route path="/app/developer/marketplace-portal">
+        <Suspense fallback={<LazyFallback />}><MarketplacePortal /></Suspense>
+      </Route>
+      {/* Phase 12 — Stakeholder-360 CRM */}
+      <Route path="/app/customs/stakeholders">
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><Stakeholder360 /></Suspense></CustomsGuard>
+      </Route>
+      <Route path="/app/crm/cases">
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><CaseList /></Suspense></CustomsGuard>
+      </Route>
+      <Route path="/app/crm/cases/:id">
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><CaseDetail /></Suspense></CustomsGuard>
       </Route>
       {/* WP-8 — Executive operational KPI dashboard (real, provenance-stamped) */}
       <Route path="/app/executive/kpis">

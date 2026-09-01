@@ -1044,6 +1044,8 @@ export const apiKeys = pgTable("api_keys", {
   rateLimit: integer("rate_limit").default(100).notNull(),
   sandboxMode: boolean("sandbox_mode").default(false).notNull(),
   status: varchar("status", { length: 20 }).default("active").notNull(), // active | revoked | expired
+  // Phase 12 — marketplace monetization: key → tier binding (0066).
+  tierId: integer("tier_id"),
   expiresAt: timestamp("expires_at"),
   lastUsedAt: timestamp("last_used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -3860,3 +3862,68 @@ export const mswForeignDrafts = pgTable("msw_foreign_drafts", {
 ]);
 export type MswForeignDraft = typeof mswForeignDrafts.$inferSelect;
 export type InsertMswForeignDraft = typeof mswForeignDrafts.$inferInsert;
+
+// ─── Phase 12 — Stakeholder-360 CRM: case/ticket workflow (migration 0065) ──
+// State machine enforced app-level (server/crm/cases.ts):
+//   open → triaged → in_progress → resolved → closed
+// Dispute-type cases require maker-checker resolution approval before close.
+export const crmCases = pgTable("crm_cases", {
+  id: serial("id").primaryKey(),
+  caseNumber: varchar("case_number", { length: 24 }).notNull().unique(),
+  subject: varchar("subject", { length: 240 }).notNull(),
+  description: text("description"),
+  caseType: varchar("case_type", { length: 32 }).default("general").notNull(), // general | declaration | payment | verification | dispute
+  priority: varchar("priority", { length: 16 }).default("medium").notNull(),   // low | medium | high | critical
+  status: varchar("status", { length: 20 }).default("open").notNull(),         // open | triaged | in_progress | resolved | closed
+  stakeholderProfileId: integer("stakeholder_profile_id").references(() => stakeholderProfiles.id),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  tenantId: uuid("tenant_id").references(() => tenants.id),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  assignedTo: integer("assigned_to").references(() => users.id),
+  resolutionSummary: text("resolution_summary"),
+  resolvedBy: integer("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at"),
+  resolutionApprovedBy: integer("resolution_approved_by").references(() => users.id),
+  resolutionApprovedAt: timestamp("resolution_approved_at"),
+  slaTriageDue: timestamp("sla_triage_due"),
+  slaResolutionDue: timestamp("sla_resolution_due"),
+  triagedAt: timestamp("triaged_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_crm_cases_status").on(t.status),
+  index("idx_crm_cases_stakeholder").on(t.stakeholderProfileId),
+  index("idx_crm_cases_assigned").on(t.assignedTo),
+  index("idx_crm_cases_tenant").on(t.tenantId),
+  index("idx_crm_cases_created_by").on(t.createdBy),
+  index("idx_crm_cases_created_at").on(t.createdAt),
+]);
+export type CrmCase = typeof crmCases.$inferSelect;
+export type InsertCrmCase = typeof crmCases.$inferInsert;
+
+export const crmCaseEvents = pgTable("crm_case_events", {
+  id: serial("id").primaryKey(),
+  caseId: integer("case_id").notNull().references(() => crmCases.id, { onDelete: "cascade" }),
+  eventType: varchar("event_type", { length: 40 }).notNull(), // created | assigned | transition | resolution | resolution_approved | closed | note
+  fromStatus: varchar("from_status", { length: 20 }),
+  toStatus: varchar("to_status", { length: 20 }),
+  actorId: integer("actor_id").notNull().references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_crm_case_events_case").on(t.caseId)]);
+export type CrmCaseEvent = typeof crmCaseEvents.$inferSelect;
+
+// ─── Phase 12 — Marketplace monetization tiers (migration 0066) ─────────────
+export const marketplaceTiers = pgTable("marketplace_tiers", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 20 }).notNull().unique(), // free | builder | enterprise
+  name: varchar("name", { length: 80 }).notNull(),
+  rateLimitPerMinute: integer("rate_limit_per_minute").notNull(),
+  monthlyCallQuota: integer("monthly_call_quota"),           // NULL = unmetered
+  pricePerCallUsd: decimal("price_per_call_usd", { precision: 10, scale: 6 }).default("0").notNull(),
+  monthlyFeeUsd: decimal("monthly_fee_usd", { precision: 10, scale: 2 }).default("0").notNull(),
+  features: json("features"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type MarketplaceTier = typeof marketplaceTiers.$inferSelect;
