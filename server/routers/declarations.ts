@@ -6,7 +6,7 @@ import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
-  getLatestKYCVerification, withRlsContext, getDb
+  getLatestKYCVerification, withRlsContext, getDb, getPermitsByDeclaration
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
@@ -205,6 +205,51 @@ Green: 0-30 (auto-clear), Yellow: 31-60 (doc review), Red: 61-100 (physical insp
   });
 }
 
+// ── Phase-11: deterministic rules baseline (assignRiskLane wiring) ──────────
+// assignRiskLane is the deterministic, explainable baseline lane computed from
+// business rules (sanctions, high-risk origin, controlled HS, value, AEO).
+// It is ALWAYS applied:
+//  - as a floor under any model lane (a model may escalate, never downgrade a
+//    rules-red — sanctioned parties stay red), and
+//  - as the authoritative lane when no scorer is reachable, labelled
+//    source:"rules" and modelScore:false so the SW-18 clearance gate still
+//    requires recorded manual review (rules lanes can never auto-clear:
+//    green is clamped to yellow, exactly like the LLM fallback).
+const LANE_SEVERITY: Record<string, number> = { green: 0, blue: 0, yellow: 1, red: 2 };
+
+function moreSevereLane(a: string, b: string): string {
+  return (LANE_SEVERITY[a] ?? 1) >= (LANE_SEVERITY[b] ?? 1) ? a : b;
+}
+
+function clampNonModelLane(lane: string): string {
+  return lane === "green" || lane === "blue" ? "yellow" : lane;
+}
+
+interface RulesBaseline {
+  lane: string;
+  score: number;
+  reasons: string[];
+}
+
+function applyRulesBaseline(
+  risk: { score: number; lane: string; explanation: Record<string, unknown> },
+  baseline: RulesBaseline
+): { score: number; lane: string; explanation: Record<string, unknown> } {
+  const modelLane = risk.lane.toLowerCase();
+  const finalLane = moreSevereLane(modelLane, baseline.lane);
+  return {
+    score: risk.score,
+    lane: finalLane,
+    explanation: {
+      ...risk.explanation,
+      rulesBaseline: { lane: baseline.lane, score: baseline.score, reasons: baseline.reasons },
+      ...(finalLane !== modelLane
+        ? { laneOverride: `rules baseline ${baseline.lane.toUpperCase()} floor applied over model lane ${modelLane.toUpperCase()}` }
+        : {}),
+    },
+  };
+}
+
 export const declarationsRouter = router({
   // Create a new draft declaration
   create: protectedProcedure
@@ -281,23 +326,82 @@ export const declarationsRouter = router({
         });
       }
 
-      // Run AI risk scoring — Python ML scorer (primary) with LLM fallback
-      const risk = await computeRiskScore(
-        {
-          hsCode: decl.hsCode ?? "",
-          countryOfOrigin: decl.countryOfOrigin ?? "",
-          invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
-          goodsDescription: decl.goodsDescription ?? "",
-          declarationType: decl.declarationType,
-        },
-        {
-          declarationId: String(input.id),
-          traderId: String(ctx.user.id),
+      // Phase-11 (Permit Expiry Enforcement): every permit already issued for
+      // this declaration must be valid at submission — fail CLOSED on expired
+      // or malformed approvals. Pending permit requests carry no expiry yet
+      // and are validated at clearance (see updateStatus) instead.
+      const existingPermits = await getPermitsByDeclaration(input.id);
+      for (const permit of existingPermits) {
+        if (permit.status !== "approved") continue;
+        if (!permit.permitNumber || !permit.expiresAt) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `PERMIT_INVALID: approved ${permit.agencyName} permit #${permit.id} lacks a permit number or expiry — resubmit the permit request before submitting this declaration`,
+          });
         }
-      );
+        const validity = checkPermitValidity({
+          permitNumber: permit.permitNumber,
+          expiryDate: new Date(permit.expiresAt),
+          issuingAgency: permit.agencyName,
+        });
+        if (!validity.valid) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `PERMIT_EXPIRED: ${validity.error}`,
+          });
+        }
+      }
 
-      // Compute duties (flat-rate ESTIMATE: 10% duty + 15% VAT on CIF value).
-      // SW-17: exact integer minor-unit arithmetic — no float money math.
+      // Phase-11: deterministic rules baseline lane (assignRiskLane), always
+      // computed BEFORE model scoring. Model lanes may escalate beyond it but
+      // never downgrade it; when no scorer is reachable it is the lane.
+      const profile = await getProfileByUserId(ctx.user.id);
+      const baseline = assignRiskLane({
+        riskScore: 0,
+        isAeo: profile?.aeoStatus === "certified",
+        isSanctioned: Array.isArray(decl.sanctionsFlags) && (decl.sanctionsFlags as unknown[]).length > 0,
+        invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
+        countryOfOrigin: decl.countryOfOrigin ?? "",
+        hsCodeCategory: decl.hsCode ?? undefined,
+      });
+
+      // Run AI risk scoring — Python ML scorer (primary) with LLM fallback;
+      // deterministic rules lane when no scorer is reachable.
+      let risk: { score: number; lane: string; explanation: Record<string, unknown> };
+      try {
+        const modelRisk = await computeRiskScore(
+          {
+            hsCode: decl.hsCode ?? "",
+            countryOfOrigin: decl.countryOfOrigin ?? "",
+            invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
+            goodsDescription: decl.goodsDescription ?? "",
+            declarationType: decl.declarationType,
+          },
+          {
+            declarationId: String(input.id),
+            traderId: String(ctx.user.id),
+          }
+        );
+        risk = applyRulesBaseline(modelRisk, baseline);
+      } catch (e) {
+        // Only a scoring outage falls through to the deterministic rules
+        // lane; any other error (validation etc.) propagates unchanged.
+        if (!(e instanceof TRPCError) || e.code !== "SERVICE_UNAVAILABLE") throw e;
+        risk = {
+          score: baseline.score,
+          lane: clampNonModelLane(baseline.lane),
+          explanation: {
+            source: "rules",
+            modelScore: false,
+            reasons: baseline.reasons,
+            warning: "SCORING_UNAVAILABLE: no ML/LLM scorer reachable — deterministic business-rules lane applied. Manual review required; auto-clearance prohibited.",
+          },
+        };
+      }
+
+      // Compute duties (flat-rate ESTIMATE: 10% duty + 15% VAT on CIF value)
+      // via the shared business-rule CIF computation (calculateDuty — integer
+      // minor units, half-up rounding; SW-17).
       // This is NOT an authoritative tariff assessment: it is labelled
       // ESTIMATE_UNVERIFIED and payment initiation against it is blocked in
       // production (see payments.initiate / mojaloop.initiatePayment).
@@ -307,20 +411,20 @@ export const declarationsRouter = router({
       // record does not carry vessel/voyage particulars, so the engine call
       // cannot be made implicitly here without fabricating vesselGrt —
       // assessDuty takes those particulars as explicit input instead.
-      const cifMinor = (() => {
-        const s = String(decl.invoiceValue ?? "").trim();
-        if (!/^\d+(\.\d{1,2})?$/.test(s)) {
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid invoice value '${s}' — cannot compute duties` });
-        }
-        const [maj, frac = ""] = s.split(".");
-        return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
-      })();
-      const dutyMinor = Math.round(cifMinor * 0.10);
-      const vatMinor = Math.round((cifMinor + dutyMinor) * 0.15);
-      const totalMinor = dutyMinor + vatMinor;
-      const duty = dutyMinor / 100;
-      const vat = vatMinor / 100;
-      const total = totalMinor / 100;
+      const invoiceRaw = String(decl.invoiceValue ?? "").trim();
+      if (!/^\d+(\.\d{1,2})?$/.test(invoiceRaw)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid invoice value '${invoiceRaw}' — cannot compute duties` });
+      }
+      const estimate = calculateDuty({
+        invoiceValue: parseFloat(invoiceRaw), // CIF basis: no separate freight/insurance on the declaration record
+        freightCost: 0,
+        insuranceCost: 0,
+        tariffRate: 10,
+        vatRate: 15,
+      });
+      const duty = estimate.customsDuty;
+      const vat = estimate.vat;
+      const total = estimate.totalDuties;
       const dutyEstimateExplanation = {
         ...risk.explanation,
         dutyAssessment: "ESTIMATE_UNVERIFIED",

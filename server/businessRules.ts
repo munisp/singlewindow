@@ -293,6 +293,26 @@ export interface DutyCalculationInput {
   exciseRate?: number;         // For excisable goods
 }
 
+// SW-17/Phase-11: exact integer minor-unit arithmetic — no float money math.
+// USD inputs are converted to minor units (cents) and percentage rates to
+// basis points; every multiplication rounds half-up at the minor unit.
+function toMinorUnits(usd: number, field: string): number {
+  if (!Number.isFinite(usd) || usd < 0) {
+    throw new Error(`${field} must be a non-negative finite number, got ${usd}`);
+  }
+  return Math.round((usd + Number.EPSILON) * 100);
+}
+function toBasisPoints(ratePct: number, field: string): number {
+  if (!Number.isFinite(ratePct) || ratePct < 0 || ratePct > 100) {
+    throw new Error(`${field} must be a percentage in [0, 100], got ${ratePct}`);
+  }
+  return Math.round(ratePct * 100);
+}
+function applyBps(minorUnits: number, bps: number): number {
+  // half-up rounding for non-negative integers
+  return Math.round((minorUnits * bps) / 10_000);
+}
+
 export function calculateDuty(input: DutyCalculationInput): {
   cifValue: number;
   customsDuty: number;
@@ -302,14 +322,29 @@ export function calculateDuty(input: DutyCalculationInput): {
   totalDuties: number;
   breakdown: Record<string, number>;
 } {
-  const cifValue = input.invoiceValue + input.freightCost + input.insuranceCost;
-  const customsDuty = (cifValue * input.tariffRate) / 100;
-  const levy = (cifValue * (input.levyRate ?? 0)) / 100;
-  const excise = (cifValue * (input.exciseRate ?? 0)) / 100;
+  const invoiceMinor = toMinorUnits(input.invoiceValue, "invoiceValue");
+  const freightMinor = toMinorUnits(input.freightCost, "freightCost");
+  const insuranceMinor = toMinorUnits(input.insuranceCost, "insuranceCost");
+  const tariffBps = toBasisPoints(input.tariffRate, "tariffRate");
+  const vatBps = toBasisPoints(input.vatRate, "vatRate");
+  const levyBps = toBasisPoints(input.levyRate ?? 0, "levyRate");
+  const exciseBps = toBasisPoints(input.exciseRate ?? 0, "exciseRate");
+
+  const cifMinor = invoiceMinor + freightMinor + insuranceMinor;
+  const dutyMinor = applyBps(cifMinor, tariffBps);
+  const levyMinor = applyBps(cifMinor, levyBps);
+  const exciseMinor = applyBps(cifMinor, exciseBps);
   // VAT is applied on CIF + customs duty + levy + excise (Ghana standard)
-  const vatBase = cifValue + customsDuty + levy + excise;
-  const vat = (vatBase * input.vatRate) / 100;
-  const totalDuties = customsDuty + vat + levy + excise;
+  const vatBaseMinor = cifMinor + dutyMinor + levyMinor + exciseMinor;
+  const vatMinor = applyBps(vatBaseMinor, vatBps);
+  const totalMinor = dutyMinor + vatMinor + levyMinor + exciseMinor;
+
+  const cifValue = cifMinor / 100;
+  const customsDuty = dutyMinor / 100;
+  const levy = levyMinor / 100;
+  const excise = exciseMinor / 100;
+  const vat = vatMinor / 100;
+  const totalDuties = totalMinor / 100;
 
   return {
     cifValue,
