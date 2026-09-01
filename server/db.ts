@@ -1324,7 +1324,7 @@ export function getPool(): Pool | null {
  *   });
  */
 export async function withRlsContext<T>(
-  user: { id: number; role: string },
+  user: { id: number; role: string; tenantId?: string | null },
   callback: (db: NonNullable<Awaited<ReturnType<typeof getDb>>>) => Promise<T>
 ): Promise<T> {
   const db = await getDb();
@@ -1349,6 +1349,10 @@ export async function withRlsContext<T>(
     await client.query("SELECT set_config('app.current_user_id', $1, true)", [String(user.id)]);
     await client.query("SELECT set_config('app.current_role', $1, true)", [user.role]);
     await client.query("SELECT set_config('app.current_trader_id', $1, true)", [String(user.id)]);
+    // Phase-11: tenant-scoped policies (drizzle/migrations/0064) read this GUC.
+    // Empty string = no tenant context → tenant tables default-deny unless the
+    // role is platform admin.
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [user.tenantId ?? ""]);
     // Create a Drizzle instance bound to this specific client
     const txDb = drizzle(client as any);
     const result = await callback(txDb as any);
