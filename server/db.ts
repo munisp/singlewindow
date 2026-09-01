@@ -415,10 +415,38 @@ export async function createOgaPermit(data: typeof ogaPermits.$inferInsert) {
   return result[0];
 }
 
+export async function getOgaPermitById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(ogaPermits).where(eq(ogaPermits.id, id));
+  return result[0];
+}
+
 export async function getPermitsByDeclaration(declarationId: number) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(ogaPermits).where(eq(ogaPermits.declarationId, declarationId));
+}
+
+/**
+ * transitionOgaPermit — atomic permit state-machine transition.
+ * Applies `data` only when the permit's CURRENT status is one of
+ * `fromStatuses`; returns undefined otherwise (illegal transition) or when
+ * the permit does not exist. The status guard is enforced in the UPDATE's
+ * WHERE clause so concurrent approve/reject races cannot both succeed.
+ */
+export async function transitionOgaPermit(
+  id: number,
+  fromStatuses: ReadonlyArray<"pending" | "under_review" | "approved" | "rejected" | "not_required">,
+  data: Partial<typeof ogaPermits.$inferInsert>
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.update(ogaPermits)
+    .set({ ...data, updatedAt: new Date() })
+    .where(and(eq(ogaPermits.id, id), inArray(ogaPermits.status, [...fromStatuses])))
+    .returning();
+  return result[0];
 }
 
 export async function updateOgaPermit(id: number, data: Partial<typeof ogaPermits.$inferInsert>) {
@@ -1296,7 +1324,7 @@ export function getPool(): Pool | null {
  *   });
  */
 export async function withRlsContext<T>(
-  user: { id: number; role: string },
+  user: { id: number; role: string; tenantId?: string | null },
   callback: (db: NonNullable<Awaited<ReturnType<typeof getDb>>>) => Promise<T>
 ): Promise<T> {
   const db = await getDb();
@@ -1321,6 +1349,10 @@ export async function withRlsContext<T>(
     await client.query("SELECT set_config('app.current_user_id', $1, true)", [String(user.id)]);
     await client.query("SELECT set_config('app.current_role', $1, true)", [user.role]);
     await client.query("SELECT set_config('app.current_trader_id', $1, true)", [String(user.id)]);
+    // Phase-11: tenant-scoped policies (drizzle/migrations/0064) read this GUC.
+    // Empty string = no tenant context → tenant tables default-deny unless the
+    // role is platform admin.
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [user.tenantId ?? ""]);
     // Create a Drizzle instance bound to this specific client
     const txDb = drizzle(client as any);
     const result = await callback(txDb as any);

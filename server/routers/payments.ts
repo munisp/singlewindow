@@ -89,29 +89,11 @@ export const paymentsRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Declaration is not ready for payment." });
       }
 
-      // R4 FIX: Ensure per-trader payment account exists before enqueuing
-      const traderAccountId = await getOrProvisionTraderAccount(ctx.user.id, decl.invoiceCurrency ?? 'USD');
-
-      const reference = `PAY-${nanoid(12).toUpperCase()}`;
-      const payment = await createPayment({
-        declarationId: input.declarationId,
-        traderId: ctx.user.id,
-        amount: decl.totalDue ?? "0",
-        currency: decl.invoiceCurrency ?? "USD",
-        paymentMethod: input.paymentMethod,
-        status: "pending",
-        reference,
-      });
-
-      if (payment) {
-        await setOwner("payment", payment.id, ctx.user.id);
-      }
-
-      await updateDeclaration(input.declarationId, { status: "payment_pending" });
-
       // SW-17: an unverified flat-rate estimate is not a payable amount in production.
       // PRA-100: the authoritative path is declarations.assessDuty (tariff engine);
       // a TARIFF_ENGINE_VERIFIED assessment clears this gate.
+      // Phase-11: this gate runs BEFORE any mutation — a rejected initiation
+      // must leave no payment row and no declaration status change behind.
       const explanation = (decl as { aiExplanation?: unknown }).aiExplanation;
       if (IS_PRODUCTION && explanation && typeof explanation === "object" &&
           (explanation as Record<string, unknown>).dutyAssessment === "ESTIMATE_UNVERIFIED") {
@@ -119,6 +101,34 @@ export const paymentsRouter = router({
           code: "PRECONDITION_FAILED",
           message: "Duty amount is an unverified estimate. Run declarations.assessDuty to obtain an authoritative tariff-engine assessment before payment.",
         });
+      }
+
+      // R4 FIX: Ensure per-trader payment account exists before enqueuing
+      const traderAccountId = await getOrProvisionTraderAccount(ctx.user.id, decl.invoiceCurrency ?? 'USD');
+
+      const reference = `PAY-${nanoid(12).toUpperCase()}`;
+      // Phase-11: payment row creation and the declaration transition to
+      // payment_pending are atomic — no partial state if either write fails.
+      const dbTx = await getDb();
+      if (!dbTx) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const payment = await dbTx.transaction(async (tx) => {
+        const [row] = await tx.insert(payments).values({
+          declarationId: input.declarationId,
+          traderId: ctx.user.id,
+          amount: decl.totalDue ?? "0",
+          currency: decl.invoiceCurrency ?? "USD",
+          paymentMethod: input.paymentMethod,
+          status: "pending",
+          reference,
+        }).returning();
+        await tx.update(declarations)
+          .set({ status: "payment_pending", updatedAt: new Date() })
+          .where(eq(declarations.id, input.declarationId));
+        return row;
+      });
+
+      if (payment) {
+        await setOwner("payment", payment.id, ctx.user.id);
       }
 
       // Enqueue into batchPayments for async Mojaloop ILP processing.

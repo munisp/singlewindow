@@ -15,6 +15,9 @@ import {
 import { portCongestionAlerts } from "../../drizzle/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { vesselTrackingEvents } from "../../drizzle/schema";
+import {
+  IMO_NUMBER_MESSAGE, MMSI_MESSAGE, isValidImoNumber, isValidMmsi,
+} from "../_core/vesselIds";
 
 // ─── SEED DATA (28 African + key global ports, UN LOCODE coordinates) ─────────
 const SEED_PORTS = [
@@ -150,9 +153,10 @@ export const geospatialRouter = router({
    */
   recordVesselPosition: protectedProcedure
     .input(z.object({
-      mmsi: z.string().min(9).max(16),
+      // Phase-11: MMSI (9 digits, MID 200-799) + optional IMO check-digit validation
+      mmsi: z.string().refine(isValidMmsi, MMSI_MESSAGE),
       vesselName: z.string().optional(),
-      imoNumber: z.string().optional(),
+      imoNumber: z.string().refine(isValidImoNumber, IMO_NUMBER_MESSAGE).optional(),
       latitude: z.number().min(-90).max(90),
       longitude: z.number().min(-180).max(180),
       speed: z.number().min(0).max(50).optional(),
@@ -293,8 +297,10 @@ export const geospatialRouter = router({
   getVesselTrack: protectedProcedure
     .input(z.object({
       portCode: z.string().optional(),
-      mmsi: z.string().optional(),
-      imoNumber: z.string().optional(),
+      // Phase-11: identifier filters are validated too — a malformed MMSI/IMO
+      // is a client error (400), never a silent empty result set.
+      mmsi: z.string().refine(isValidMmsi, MMSI_MESSAGE).optional(),
+      imoNumber: z.string().refine(isValidImoNumber, IMO_NUMBER_MESSAGE).optional(),
       fromDate: z.date().optional(),
       toDate: z.date().optional(),
       limit: z.number().min(1).max(500).default(100),

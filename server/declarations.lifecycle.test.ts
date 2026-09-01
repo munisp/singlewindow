@@ -16,6 +16,7 @@ vi.mock("./db", () => ({
   getLatestKYCVerification: vi.fn(),
   withRlsContext: vi.fn(),
   getDb: vi.fn(),
+  getPermitsByDeclaration: vi.fn(async () => []),
 }));
 
 vi.mock("./_core/llm", () => ({ invokeLLM: vi.fn() }));
@@ -40,6 +41,8 @@ vi.mock("./_core/opensearch", () => ({
 }));
 vi.mock("./_core/polyglotClients", () => ({
   scoreDeclarationRisk: vi.fn(),
+  scoreDeclarationRiskComposite: vi.fn(),
+  configuredRiskScorers: vi.fn(() => ["python-ml"]),
   validateDeclarationWithEngine: vi.fn(),
   getCargoPosition: vi.fn(),
 }));
@@ -306,18 +309,25 @@ describe("declarations lifecycle — KYC gate and risk assessment", () => {
     }));
   });
 
-  it("fails closed (no pseudo-score) when both upstream scoring strategies fail", async () => {
+  it("applies the deterministic rules lane (source:'rules', never auto-clearing) when both upstream scoring strategies fail", async () => {
     vi.mocked(scoreDeclarationRisk).mockRejectedValueOnce(new Error("ML unavailable"));
     vi.mocked(invokeLLM).mockResolvedValueOnce({ choices: [{ message: { content: "not-json" } }] } as any);
 
-    // SW-18: the deterministic HS-charcode pseudo-score was REMOVED — when
-    // neither the ML scorer nor the LLM is available, scoring is UNAVAILABLE
-    // and the declaration stays in draft for manual review. No risk lane is
-    // ever fabricated, and the declaration is NOT transitioned.
-    await expect(
-      declarationsRouter.createCaller(createContext()).submit({ id: 77 })
-    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
-    expect(updateDeclaration).not.toHaveBeenCalled();
+    // Phase-11: no scorer reachable → the deterministic business-rules lane
+    // (assignRiskLane) applies, labelled source:"rules" and modelScore:false.
+    // No model score is fabricated; a non-model green is clamped to yellow so
+    // the SW-18 clearance gate still requires recorded manual review.
+    await declarationsRouter.createCaller(createContext()).submit({ id: 77 });
+
+    expect(updateDeclaration).toHaveBeenCalledWith(77, expect.objectContaining({
+      status: "under_assessment",
+      riskLane: "yellow", // rules baseline green clamped — never auto-clear on non-model output
+      aiExplanation: expect.objectContaining({
+        source: "rules",
+        modelScore: false,
+        dutyAssessment: "ESTIMATE_UNVERIFIED",
+      }),
+    }));
   });
 });
 

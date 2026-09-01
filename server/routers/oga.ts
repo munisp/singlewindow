@@ -2,9 +2,9 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import {
-  createOgaPermit, getPermitsByDeclaration, updateOgaPermit,
+  createOgaPermit, getPermitsByDeclaration,
   getPermitsByOfficer, getDeclarationById, logAuditEvent, createNotification,
-  getDb, withRlsContext
+  getDb, withRlsContext, getOgaPermitById, transitionOgaPermit
 } from "../db";
 import { assertCan, setOwner } from "../_core/permify";
 import { broadcastNotification } from "../_core/wsServer";
@@ -58,6 +58,24 @@ function getRequiredOGAs(hsCode: string): typeof OGA_AGENCIES {
   // Deduplicate
   const seen = new Map(required.map(a => [a.code, a]));
   return Array.from(seen.values());
+}
+
+// ─── OGA PERMIT STATE MACHINE (Phase-11) ─────────────────────────────────────
+// Legal transitions: pending|under_review → approved|rejected. approved and
+// rejected are TERMINAL: no re-approve (a re-approval would silently mint a
+// new permit number + fresh 1-year expiry), no rejected→approved. A trader
+// re-applies by creating a NEW permit request row (createForDeclaration).
+const PERMIT_DECIDABLE_STATES = ["pending", "under_review"] as const;
+type PermitStatus = "pending" | "under_review" | "approved" | "rejected" | "not_required";
+
+function assertPermitDecidable(current: PermitStatus, action: "approve" | "reject") {
+  if (!(PERMIT_DECIDABLE_STATES as readonly string[]).includes(current)) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `ILLEGAL_PERMIT_TRANSITION: cannot ${action} a permit in status '${current}'. ` +
+        `Approved and rejected are terminal — submit a new permit request to re-apply.`,
+    });
+  }
 }
 
 export const ogaRouter = router({
@@ -139,7 +157,11 @@ export const ogaRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Permify: assert OGA officer can approve this permit
       await assertCan(String(ctx.user.id), "permit", String(input.permitId), "approve");
-      const updated = await updateOgaPermit(input.permitId, {
+      // State machine: only pending|under_review → approved (atomic guard)
+      const existing = await getOgaPermitById(input.permitId);
+      if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      assertPermitDecidable(existing.status as PermitStatus, "approve");
+      const updated = await transitionOgaPermit(input.permitId, PERMIT_DECIDABLE_STATES, {
         status: "approved",
         assignedOfficerId: ctx.user.id,
         reviewNotes: input.notes,
@@ -147,7 +169,7 @@ export const ogaRouter = router({
         respondedAt: new Date(),
         expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
       });
-      if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!updated) throw new TRPCError({ code: "CONFLICT", message: "ILLEGAL_PERMIT_TRANSITION: permit status changed concurrently" });
 
       await logAuditEvent({
         entityType: "permit",
@@ -216,13 +238,17 @@ export const ogaRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Permify: assert OGA officer can reject (approve permission covers both actions)
       await assertCan(String(ctx.user.id), "permit", String(input.permitId), "approve");
-      const updated = await updateOgaPermit(input.permitId, {
+      // State machine: only pending|under_review → rejected (atomic guard)
+      const existingReject = await getOgaPermitById(input.permitId);
+      if (!existingReject) throw new TRPCError({ code: "NOT_FOUND" });
+      assertPermitDecidable(existingReject.status as PermitStatus, "reject");
+      const updated = await transitionOgaPermit(input.permitId, PERMIT_DECIDABLE_STATES, {
         status: "rejected",
         assignedOfficerId: ctx.user.id,
         reviewNotes: input.reason,
         respondedAt: new Date(),
       });
-      if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!updated) throw new TRPCError({ code: "CONFLICT", message: "ILLEGAL_PERMIT_TRANSITION: permit status changed concurrently" });
 
       const decl = await getDeclarationById(updated.declarationId);
       if (decl) {
@@ -260,7 +286,7 @@ export const ogaRouter = router({
         action: "permit_rejected",
         actorId: ctx.user.id,
         actorType: "oga_officer",
-        previousState: { status: "under_review" },
+        previousState: { status: existingReject.status },
         newState: { status: "rejected", reason: input.reason },
       });
 

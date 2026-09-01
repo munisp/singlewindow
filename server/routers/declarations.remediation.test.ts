@@ -41,6 +41,7 @@ vi.mock("../db", () => ({
   createUserNotification: vi.fn(async () => ({ id: 1 })),
   getProfileByUserId: vi.fn(async () => ({ status: "approved" })),
   getLatestKYCVerification: vi.fn(async () => ({ status: "APPROVED" })),
+  getPermitsByDeclaration: vi.fn(async () => []),
   withRlsContext: vi.fn(async (_c: unknown, fn: (db: unknown) => unknown) => fn(null)),
 }));
 
@@ -63,6 +64,8 @@ vi.mock("../_core/polyglotClients", () => ({
     if (state.mlFails) throw new Error("ML scorer down");
     return { riskScore: 20, lane: "GREEN", mlScore: 20, ruleScore: 0, anomalyScore: 0, triggeredRules: [], shapExplanation: {}, modelVersion: "t", processingMs: 1 };
   }),
+  scoreDeclarationRiskComposite: vi.fn(async () => { throw new Error("composite not configured"); }),
+  configuredRiskScorers: vi.fn(() => ["python-ml"]),
   validateDeclarationWithEngine: vi.fn(async () => ({})),
   getCargoPosition: vi.fn(async () => ({})),
 }));
@@ -134,12 +137,20 @@ describe("SW-18: risk scoring fails closed", () => {
     };
   });
 
-  it("ML+LLM outage → SCORING_UNAVAILABLE, no pseudo-score written", async () => {
+  it("ML+LLM outage → deterministic rules lane (source:'rules'), no pseudo-score written", async () => {
     state.mlFails = true; state.llmFails = true;
     const caller = appRouter.createCaller(makeCtx());
-    await expect(caller.declarations.submit({ id: 5 }))
-      .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
-    expect(state.updates).toHaveLength(0);
+    await caller.declarations.submit({ id: 5 });
+    // Phase-11: scorer outage no longer strands the declaration in draft —
+    // the deterministic assignRiskLane baseline applies, honestly labelled.
+    expect(state.updates).toHaveLength(1);
+    const expl = state.updates[0].aiExplanation as any;
+    expect(expl.source).toBe("rules");
+    expect(expl.modelScore).toBe(false);
+    expect(expl.warning).toContain("SCORING_UNAVAILABLE");
+    // GH origin, USD 1000.33, HS 01012100 → baseline green, clamped to
+    // yellow because non-model outputs never auto-clear.
+    expect(state.updates[0].riskLane).toBe("yellow");
   });
 
   it("LLM fallback lane is labelled and green is clamped to yellow", async () => {

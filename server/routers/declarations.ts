@@ -6,7 +6,7 @@ import {
   createDeclaration, getDeclarationById, getDeclarationsByTrader,
   getAllDeclarations, updateDeclaration, getDeclarationStats, getDeclarationStatsByTrader,
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
-  getLatestKYCVerification, withRlsContext, getDb
+  getLatestKYCVerification, withRlsContext, getDb, getPermitsByDeclaration
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
 import { eq, desc, and, inArray } from "drizzle-orm";
@@ -205,6 +205,61 @@ Green: 0-30 (auto-clear), Yellow: 31-60 (doc review), Red: 61-100 (physical insp
   });
 }
 
+// ── Phase-11: deterministic rules baseline (assignRiskLane wiring) ──────────
+// assignRiskLane is the deterministic, explainable baseline lane computed from
+// business rules (sanctions, high-risk origin, controlled HS, value, AEO).
+// It is ALWAYS applied:
+//  - as a floor under any model lane (a model may escalate, never downgrade a
+//    rules-red — sanctioned parties stay red), and
+//  - as the authoritative lane when no scorer is reachable, labelled
+//    source:"rules" and modelScore:false so the SW-18 clearance gate still
+//    requires recorded manual review (rules lanes can never auto-clear:
+//    green is clamped to yellow, exactly like the LLM fallback).
+const LANE_SEVERITY: Record<string, number> = { green: 0, blue: 0, yellow: 1, red: 2 };
+
+function moreSevereLane(a: string, b: string): string {
+  return (LANE_SEVERITY[a] ?? 1) >= (LANE_SEVERITY[b] ?? 1) ? a : b;
+}
+
+function clampNonModelLane(lane: string): string {
+  return lane === "green" || lane === "blue" ? "yellow" : lane;
+}
+
+interface RulesBaseline {
+  lane: string;
+  score: number;
+  reasons: string[];
+}
+
+function applyRulesBaseline(
+  risk: { score: number; lane: string; explanation: Record<string, unknown> },
+  baseline: RulesBaseline
+): { score: number; lane: string; explanation: Record<string, unknown> } {
+  const modelLane = risk.lane.toLowerCase();
+  const finalLane = moreSevereLane(modelLane, baseline.lane);
+  return {
+    score: risk.score,
+    lane: finalLane,
+    explanation: {
+      ...risk.explanation,
+      rulesBaseline: { lane: baseline.lane, score: baseline.score, reasons: baseline.reasons },
+      ...(finalLane !== modelLane
+        ? { laneOverride: `rules baseline ${baseline.lane.toUpperCase()} floor applied over model lane ${modelLane.toUpperCase()}` }
+        : {}),
+    },
+  };
+}
+
+/**
+ * Platform-plane roles that bypass tenant scoping on officer declaration
+ * lists. MUST stay in sync with is_platform_admin() in
+ * drizzle/migrations/0064_phase11_tenant_rls.sql ('admin'/'superadmin' =
+ * platform operators; 'platform_admin'/'customs_commissioner' = national
+ * customs command with cross-tenant oversight). Everything else is
+ * tenant-plane and sees only its own tenant's declarations.
+ */
+const PLATFORM_WIDE_ROLES = ["platform_admin", "admin", "superadmin", "customs_commissioner"];
+
 export const declarationsRouter = router({
   // Create a new draft declaration
   create: protectedProcedure
@@ -281,23 +336,82 @@ export const declarationsRouter = router({
         });
       }
 
-      // Run AI risk scoring — Python ML scorer (primary) with LLM fallback
-      const risk = await computeRiskScore(
-        {
-          hsCode: decl.hsCode ?? "",
-          countryOfOrigin: decl.countryOfOrigin ?? "",
-          invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
-          goodsDescription: decl.goodsDescription ?? "",
-          declarationType: decl.declarationType,
-        },
-        {
-          declarationId: String(input.id),
-          traderId: String(ctx.user.id),
+      // Phase-11 (Permit Expiry Enforcement): every permit already issued for
+      // this declaration must be valid at submission — fail CLOSED on expired
+      // or malformed approvals. Pending permit requests carry no expiry yet
+      // and are validated at clearance (see updateStatus) instead.
+      const existingPermits = await getPermitsByDeclaration(input.id);
+      for (const permit of existingPermits) {
+        if (permit.status !== "approved") continue;
+        if (!permit.permitNumber || !permit.expiresAt) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `PERMIT_INVALID: approved ${permit.agencyName} permit #${permit.id} lacks a permit number or expiry — resubmit the permit request before submitting this declaration`,
+          });
         }
-      );
+        const validity = checkPermitValidity({
+          permitNumber: permit.permitNumber,
+          expiryDate: new Date(permit.expiresAt),
+          issuingAgency: permit.agencyName,
+        });
+        if (!validity.valid) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `PERMIT_EXPIRED: ${validity.error}`,
+          });
+        }
+      }
 
-      // Compute duties (flat-rate ESTIMATE: 10% duty + 15% VAT on CIF value).
-      // SW-17: exact integer minor-unit arithmetic — no float money math.
+      // Phase-11: deterministic rules baseline lane (assignRiskLane), always
+      // computed BEFORE model scoring. Model lanes may escalate beyond it but
+      // never downgrade it; when no scorer is reachable it is the lane.
+      const profile = await getProfileByUserId(ctx.user.id);
+      const baseline = assignRiskLane({
+        riskScore: 0,
+        isAeo: profile?.aeoStatus === "certified",
+        isSanctioned: Array.isArray(decl.sanctionsFlags) && (decl.sanctionsFlags as unknown[]).length > 0,
+        invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
+        countryOfOrigin: decl.countryOfOrigin ?? "",
+        hsCodeCategory: decl.hsCode ?? undefined,
+      });
+
+      // Run AI risk scoring — Python ML scorer (primary) with LLM fallback;
+      // deterministic rules lane when no scorer is reachable.
+      let risk: { score: number; lane: string; explanation: Record<string, unknown> };
+      try {
+        const modelRisk = await computeRiskScore(
+          {
+            hsCode: decl.hsCode ?? "",
+            countryOfOrigin: decl.countryOfOrigin ?? "",
+            invoiceValue: parseFloat(decl.invoiceValue ?? "0"),
+            goodsDescription: decl.goodsDescription ?? "",
+            declarationType: decl.declarationType,
+          },
+          {
+            declarationId: String(input.id),
+            traderId: String(ctx.user.id),
+          }
+        );
+        risk = applyRulesBaseline(modelRisk, baseline);
+      } catch (e) {
+        // Only a scoring outage falls through to the deterministic rules
+        // lane; any other error (validation etc.) propagates unchanged.
+        if (!(e instanceof TRPCError) || e.code !== "SERVICE_UNAVAILABLE") throw e;
+        risk = {
+          score: baseline.score,
+          lane: clampNonModelLane(baseline.lane),
+          explanation: {
+            source: "rules",
+            modelScore: false,
+            reasons: baseline.reasons,
+            warning: "SCORING_UNAVAILABLE: no ML/LLM scorer reachable — deterministic business-rules lane applied. Manual review required; auto-clearance prohibited.",
+          },
+        };
+      }
+
+      // Compute duties (flat-rate ESTIMATE: 10% duty + 15% VAT on CIF value)
+      // via the shared business-rule CIF computation (calculateDuty — integer
+      // minor units, half-up rounding; SW-17).
       // This is NOT an authoritative tariff assessment: it is labelled
       // ESTIMATE_UNVERIFIED and payment initiation against it is blocked in
       // production (see payments.initiate / mojaloop.initiatePayment).
@@ -307,20 +421,20 @@ export const declarationsRouter = router({
       // record does not carry vessel/voyage particulars, so the engine call
       // cannot be made implicitly here without fabricating vesselGrt —
       // assessDuty takes those particulars as explicit input instead.
-      const cifMinor = (() => {
-        const s = String(decl.invoiceValue ?? "").trim();
-        if (!/^\d+(\.\d{1,2})?$/.test(s)) {
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid invoice value '${s}' — cannot compute duties` });
-        }
-        const [maj, frac = ""] = s.split(".");
-        return Number(BigInt(maj) * 100n + BigInt((frac + "00").slice(0, 2)));
-      })();
-      const dutyMinor = Math.round(cifMinor * 0.10);
-      const vatMinor = Math.round((cifMinor + dutyMinor) * 0.15);
-      const totalMinor = dutyMinor + vatMinor;
-      const duty = dutyMinor / 100;
-      const vat = vatMinor / 100;
-      const total = totalMinor / 100;
+      const invoiceRaw = String(decl.invoiceValue ?? "").trim();
+      if (!/^\d+(\.\d{1,2})?$/.test(invoiceRaw)) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Invalid invoice value '${invoiceRaw}' — cannot compute duties` });
+      }
+      const estimate = calculateDuty({
+        invoiceValue: parseFloat(invoiceRaw), // CIF basis: no separate freight/insurance on the declaration record
+        freightCost: 0,
+        insuranceCost: 0,
+        tariffRate: 10,
+        vatRate: 15,
+      });
+      const duty = estimate.customsDuty;
+      const vat = estimate.vat;
+      const total = estimate.totalDuties;
       const dutyEstimateExplanation = {
         ...risk.explanation,
         dutyAssessment: "ESTIMATE_UNVERIFIED",
@@ -710,12 +824,49 @@ export const declarationsRouter = router({
       dateTo: z.date().optional(),
     }))
     .query(async ({ ctx, input }) => {
-      const allowedRoles = ["admin", "customs_officer", "inspector", "finance", "oga_officer", "security"];
+      // Tenant-plane officer roles + the platform-plane exception roles
+      // (PLATFORM_WIDE_ROLES) may list declarations; tenant-plane roles are
+      // tenant-scoped below.
+      const allowedRoles = [...PLATFORM_WIDE_ROLES, "customs_officer", "inspector", "finance", "oga_officer", "security"];
       if (!allowedRoles.includes(ctx.user.role)) throw new TRPCError({ code: "FORBIDDEN" });
       return withRlsContext({ id: ctx.user.id, role: ctx.user.role }, async (db) => {
-        const { desc, and, gte, lte, eq: eqOp, or, ilike, lt } = await import("drizzle-orm");
-        const { declarations: decl, users: usersTable } = await import("../../drizzle/schema");
+        const { desc, and, gte, lte, eq: eqOp, or, ilike, lt, inArray } = await import("drizzle-orm");
+        const { declarations: decl, users: usersTable, tenantUsers: tenantUsersTable } = await import("../../drizzle/schema");
         const conditions: any[] = [];
+
+        // ── Phase-11: tenant scoping for officer declaration lists ──────────
+        // Officers only see declarations filed by traders who belong to one of
+        // the officer's own tenants (tenant_users membership). A declaration's
+        // tenant is the filing trader's tenant.
+        //
+        // PLATFORM-WIDE EXCEPTION: roles in PLATFORM_WIDE_ROLES bypass tenant
+        // restriction. This set intentionally mirrors is_platform_admin() in
+        // drizzle/migrations/0064_phase11_tenant_rls.sql — 'admin' /
+        // 'superadmin' (platform operators) and 'platform_admin' /
+        // 'customs_commissioner' (national customs command) are platform-plane
+        // roles with cross-tenant oversight duties; tenant-plane officer roles
+        // (customs_officer, inspector, finance, oga_officer, security) are
+        // always tenant-scoped. Fail closed: an officer with no tenant
+        // membership sees an empty list.
+        if (!PLATFORM_WIDE_ROLES.includes(ctx.user.role)) {
+          const officerTenants = await db
+            .select({ tenantId: tenantUsersTable.tenantId })
+            .from(tenantUsersTable)
+            .where(eqOp(tenantUsersTable.userId, ctx.user.id));
+          const tenantIds = [...new Set(officerTenants.map((r) => r.tenantId))];
+          if (tenantIds.length === 0) {
+            return { items: [], hasMore: false, nextCursor: undefined };
+          }
+          conditions.push(
+            inArray(
+              decl.traderId,
+              db.select({ id: tenantUsersTable.userId })
+                .from(tenantUsersTable)
+                .where(inArray(tenantUsersTable.tenantId, tenantIds))
+            )
+          );
+        }
+
         if (input.dateFrom) conditions.push(gte(decl.submittedAt, input.dateFrom));
         if (input.dateTo) conditions.push(lte(decl.submittedAt, input.dateTo));
         if (input.status && input.status !== "all") conditions.push(eqOp(decl.status, input.status as any));
@@ -774,6 +925,86 @@ export const declarationsRouter = router({
       });
     }),
 
+  /**
+   * Cancel a declaration (Phase-11: makes the previously unreachable
+   * 'cancelled' state honestly reachable).
+   * - Trader: may cancel their OWN declaration, only while it is in a
+   *   cancellable pre-payment state (draft / submitted / docs_required /
+   *   rejected per VALID_TRANSITIONS).
+   * - Officer (customs_officer): may cancel an in-assessment declaration
+   *   and MUST provide a reason; admin may cancel wherever the transition
+   *   table allows. Terminal states (cleared/cancelled) reject.
+   */
+  cancel: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      reason: z.string().min(5).max(1000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.id);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+      const isOwner = decl.traderId === ctx.user.id;
+      const isOfficer = ["customs_officer", "admin"].includes(ctx.user.role);
+      if (!isOwner && !isOfficer) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You may only cancel your own declarations." });
+      }
+      // Officer cancellation of someone else's declaration requires a reason.
+      if (isOfficer && !isOwner && !input.reason) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A reason is required when an officer cancels a declaration." });
+      }
+      // State machine enforcement (WCO RKC 6.1) — rejects terminal states and
+      // role-inappropriate transitions (e.g. trader cancelling under_assessment).
+      assertValidTransition(
+        (decl.status ?? "draft") as DeclarationStatus,
+        "cancelled",
+        isOfficer ? ctx.user.role : "user"
+      );
+
+      const updated = await updateDeclaration(input.id, { status: "cancelled" } as any);
+
+      await logAuditEvent({
+        entityType: "declaration",
+        entityId: input.id,
+        action: "cancelled",
+        actorId: ctx.user.id,
+        actorType: isOfficer ? "customs_officer" : "trader",
+        previousState: { status: decl.status },
+        newState: { status: "cancelled" },
+        metadata: { reason: input.reason ?? null, cancelledBy: isOfficer ? "officer" : "trader" },
+      });
+
+      // Notify the trader when an officer cancels their declaration
+      if (isOfficer && !isOwner) {
+        await createNotification({
+          userId: decl.traderId,
+          // notification_type enum has no 'declaration_cancelled' value;
+          // 'declaration_status_change' is the honest generic (title/body
+          // carry the specifics).
+          type: "declaration_status_change",
+          title: "Declaration Cancelled",
+          message: `Your declaration ${decl.declarationNumber} was cancelled by customs. Reason: ${input.reason}`,
+          entityType: "declaration",
+          entityId: input.id,
+        });
+      }
+
+      publishEvent(TOPICS.DECLARATION_UPDATED ?? TOPICS.DECLARATION_SUBMITTED, {
+        eventType: "declaration.cancelled",
+        aggregateId: String(input.id),
+        payload: {
+          declarationId: input.id,
+          declarationNumber: decl.declarationNumber,
+          traderId: decl.traderId,
+          previousStatus: decl.status,
+          cancelledBy: isOfficer ? "officer" : "trader",
+          reason: input.reason ?? null,
+        },
+        metadata: { userId: String(ctx.user.id) },
+      }).catch(() => { /* non-blocking */ });
+
+      return updated;
+    }),
+
   // Update declaration status (customs officer action)
   updateStatus: protectedProcedure
     .input(z.object({
@@ -813,6 +1044,37 @@ export const declarationsRouter = router({
             code: "PRECONDITION_FAILED",
             message: "Risk assessment is a non-model (LLM heuristic) output — manual review must be recorded before clearance",
           });
+        }
+        // Phase-11 (mirrors Go store.go:352-355): clearance hard-blocks when
+        // any OGA permit raised for this declaration is not approved, or is
+        // approved but expired. Permits are terminal-state — a rejected
+        // permit must be re-applied as a new request and approved first.
+        const clearancePermits = await getPermitsByDeclaration(input.id);
+        for (const permit of clearancePermits) {
+          if (permit.status === "not_required") continue;
+          if (permit.status !== "approved") {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PERMIT_NOT_APPROVED: ${permit.agencyName} permit #${permit.id} is '${permit.status}' — clearance requires all OGA permits approved`,
+            });
+          }
+          if (!permit.permitNumber || !permit.expiresAt) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PERMIT_INVALID: approved ${permit.agencyName} permit #${permit.id} lacks a permit number or expiry`,
+            });
+          }
+          const validity = checkPermitValidity({
+            permitNumber: permit.permitNumber,
+            expiryDate: new Date(permit.expiresAt),
+            issuingAgency: permit.agencyName,
+          });
+          if (!validity.valid) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PERMIT_EXPIRED: ${validity.error}`,
+            });
+          }
         }
       }
 
