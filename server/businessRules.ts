@@ -43,8 +43,8 @@ export const VALID_TRANSITIONS: Record<DeclarationStatus, DeclarationStatus[]> =
   draft: ["submitted", "under_assessment", "cancelled"],
   // SW-M13: "cleared" is NOT reachable from submitted/under_assessment —
   // clearance requires payment_confirmed (or examination_complete after a hold).
-  submitted: ["under_assessment", "docs_required", "payment_pending", "under_examination", "rejected"],
-  under_assessment: ["docs_required", "payment_pending", "under_examination", "rejected"],
+  submitted: ["under_assessment", "docs_required", "payment_pending", "under_examination", "rejected", "cancelled"],
+  under_assessment: ["docs_required", "payment_pending", "under_examination", "rejected", "cancelled"],
   docs_required: ["submitted", "under_assessment", "rejected", "cancelled"],
   // payment_confirmed is written by the payment confirmation workflow; retain the
   // legacy direct paths from payment_pending while permitting the normal path.
@@ -72,6 +72,11 @@ export const TRANSITION_ROLES: Record<string, string[]> = {
   "submitted→payment_pending": ["customs_officer", "admin"],
   "submitted→under_examination": ["customs_officer", "inspector", "admin"],
   "submitted→rejected": ["customs_officer", "admin"],
+  // Trader may withdraw their own declaration while it is still pre-payment;
+  // officer cancellation of an in-assessment declaration requires a reason
+  // (enforced in declarations.cancel).
+  "submitted→cancelled": ["user", "admin"],
+  "under_assessment→cancelled": ["customs_officer", "admin"],
   "under_assessment→docs_required": ["customs_officer", "admin"],
   "under_assessment→payment_pending": ["customs_officer", "admin"],
   "under_assessment→under_examination": ["customs_officer", "inspector", "admin"],

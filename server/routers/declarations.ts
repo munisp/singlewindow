@@ -878,6 +878,83 @@ export const declarationsRouter = router({
       });
     }),
 
+  /**
+   * Cancel a declaration (Phase-11: makes the previously unreachable
+   * 'cancelled' state honestly reachable).
+   * - Trader: may cancel their OWN declaration, only while it is in a
+   *   cancellable pre-payment state (draft / submitted / docs_required /
+   *   rejected per VALID_TRANSITIONS).
+   * - Officer (customs_officer): may cancel an in-assessment declaration
+   *   and MUST provide a reason; admin may cancel wherever the transition
+   *   table allows. Terminal states (cleared/cancelled) reject.
+   */
+  cancel: protectedProcedure
+    .input(z.object({
+      id: z.number(),
+      reason: z.string().min(5).max(1000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const decl = await getDeclarationById(input.id);
+      if (!decl) throw new TRPCError({ code: "NOT_FOUND" });
+      const isOwner = decl.traderId === ctx.user.id;
+      const isOfficer = ["customs_officer", "admin"].includes(ctx.user.role);
+      if (!isOwner && !isOfficer) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You may only cancel your own declarations." });
+      }
+      // Officer cancellation of someone else's declaration requires a reason.
+      if (isOfficer && !isOwner && !input.reason) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "A reason is required when an officer cancels a declaration." });
+      }
+      // State machine enforcement (WCO RKC 6.1) — rejects terminal states and
+      // role-inappropriate transitions (e.g. trader cancelling under_assessment).
+      assertValidTransition(
+        (decl.status ?? "draft") as DeclarationStatus,
+        "cancelled",
+        isOfficer ? ctx.user.role : "user"
+      );
+
+      const updated = await updateDeclaration(input.id, { status: "cancelled" } as any);
+
+      await logAuditEvent({
+        entityType: "declaration",
+        entityId: input.id,
+        action: "cancelled",
+        actorId: ctx.user.id,
+        actorType: isOfficer ? "customs_officer" : "trader",
+        previousState: { status: decl.status },
+        newState: { status: "cancelled" },
+        metadata: { reason: input.reason ?? null, cancelledBy: isOfficer ? "officer" : "trader" },
+      });
+
+      // Notify the trader when an officer cancels their declaration
+      if (isOfficer && !isOwner) {
+        await createNotification({
+          userId: decl.traderId,
+          type: "declaration_cancelled",
+          title: "Declaration Cancelled",
+          message: `Your declaration ${decl.declarationNumber} was cancelled by customs. Reason: ${input.reason}`,
+          entityType: "declaration",
+          entityId: input.id,
+        });
+      }
+
+      publishEvent(TOPICS.DECLARATION_UPDATED ?? TOPICS.DECLARATION_SUBMITTED, {
+        eventType: "declaration.cancelled",
+        aggregateId: String(input.id),
+        payload: {
+          declarationId: input.id,
+          declarationNumber: decl.declarationNumber,
+          traderId: decl.traderId,
+          previousStatus: decl.status,
+          cancelledBy: isOfficer ? "officer" : "trader",
+          reason: input.reason ?? null,
+        },
+        metadata: { userId: String(ctx.user.id) },
+      }).catch(() => { /* non-blocking */ });
+
+      return updated;
+    }),
+
   // Update declaration status (customs officer action)
   updateStatus: protectedProcedure
     .input(z.object({

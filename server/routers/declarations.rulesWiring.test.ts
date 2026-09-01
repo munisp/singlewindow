@@ -178,3 +178,62 @@ describe("submit: deterministic rules baseline (assignRiskLane)", () => {
     expect(state.updates[0].riskLane).toBe("yellow");
   });
 });
+
+describe("declarations.cancel — 'cancelled' is reachable and honestly gated", () => {
+  it("trader cancels their own draft declaration", async () => {
+    state.decl = draftDecl({ status: "draft" });
+    const res = await appRouter.createCaller(makeCtx()).declarations.cancel({ id: 5 });
+    expect(res.status).toBe("cancelled");
+  });
+
+  it("trader cancels their own submitted declaration", async () => {
+    state.decl = draftDecl({ status: "submitted" });
+    await expect(appRouter.createCaller(makeCtx()).declarations.cancel({ id: 5 }))
+      .resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("trader cannot cancel a declaration they do not own", async () => {
+    state.decl = draftDecl({ traderId: 999, status: "draft" });
+    await expect(appRouter.createCaller(makeCtx()).declarations.cancel({ id: 5 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(state.updates).toHaveLength(0);
+  });
+
+  it("trader cannot cancel an under_assessment declaration (officer-only)", async () => {
+    state.decl = draftDecl({ status: "under_assessment" });
+    await expect(appRouter.createCaller(makeCtx()).declarations.cancel({ id: 5 }))
+      .rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(state.updates).toHaveLength(0);
+  });
+
+  it("officer cancels an under_assessment declaration with a reason (audit + notification)", async () => {
+    state.decl = draftDecl({ status: "under_assessment" });
+    const res = await appRouter.createCaller(makeCtx("customs_officer", 8))
+      .declarations.cancel({ id: 5, reason: "duplicate submission of the same consignment" });
+    expect(res.status).toBe("cancelled");
+  });
+
+  it("officer cancel without a reason is rejected", async () => {
+    state.decl = draftDecl({ status: "under_assessment" });
+    await expect(appRouter.createCaller(makeCtx("customs_officer", 8)).declarations.cancel({ id: 5 }))
+      .rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(state.updates).toHaveLength(0);
+  });
+
+  it("customs_officer cannot cancel in states outside their role grant (e.g. draft)", async () => {
+    state.decl = draftDecl({ traderId: 999, status: "draft" });
+    await expect(
+      appRouter.createCaller(makeCtx("customs_officer", 8)).declarations.cancel({ id: 5, reason: "officer cleanup action" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("cleared and cancelled are terminal — cancellation is rejected", async () => {
+    for (const status of ["cleared", "cancelled", "payment_confirmed"]) {
+      state.updates = [];
+      state.decl = draftDecl({ status });
+      await expect(appRouter.createCaller(makeCtx()).declarations.cancel({ id: 5 }))
+        .rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(state.updates).toHaveLength(0);
+    }
+  });
+});
