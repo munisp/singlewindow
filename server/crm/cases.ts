@@ -158,7 +158,7 @@ export async function createCase(input: CreateCaseInput): Promise<CaseMutationRe
       actorId: input.actorId,
       note: input.subject,
     });
-    const eventPublished = await publishCaseEvent("crm.case.created.v1", c, input);
+    const eventPublished = await publishCaseEvent("crm.case.created.v1", c, { id: input.actorId, role: input.actorRole });
     return { case: c, eventPublished };
   });
 }
@@ -278,7 +278,7 @@ export async function transitionCase(input: TransitionInput): Promise<CaseMutati
     actorId: input.actor.id,
     note: input.note ?? null,
   });
-  const eventPublished = await publishCaseEvent(eventType, c, actor, {
+  const eventPublished = await publishCaseEvent(eventType, c, input.actor, {
     fromStatus: existing.status,
     toStatus: input.toStatus,
   });

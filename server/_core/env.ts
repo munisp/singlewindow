@@ -320,6 +320,16 @@ export const ENV = {
   mswEnvelopeSigningKey: process.env.MSW_ENVELOPE_SIGNING_KEY ?? "",
   mswEnvelopeKeyId: process.env.MSW_ENVELOPE_KEY_ID ?? "",
 
+  // ─── Phase 12: CRM case events + ministerial briefing ────────────────────
+  // CRM_ENVELOPE_SIGNING_KEY / CRM_ENVELOPE_KEY_ID sign crm.case.v1 envelope
+  // v1.0 events (Ed25519, kid blueeconomy-singlewindow-crm-<epoch>). NO
+  // defaults: unset → signing fails closed at emit time.
+  crmEnvelopeSigningKey: process.env.CRM_ENVELOPE_SIGNING_KEY ?? "",
+  crmEnvelopeKeyId: process.env.CRM_ENVELOPE_KEY_ID ?? "",
+  // BRIEFING_KEY_ID: decimal epoch forming the JWS kid singlewindow-<epoch>
+  // for the weekly signed PDF briefing (defaults to epoch 0 in code).
+  briefingKeyId: process.env.BRIEFING_KEY_ID ?? "",
+
   // ─── OGA external adapters (Phase 9 WP-D) ────────────────────────────────
   // Env-only endpoint + credential config for the fail-closed signed-envelope
   // egress adapters (server/_core/externalAdapters/). ALL default empty:

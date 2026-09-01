@@ -12,7 +12,8 @@ import { registerCrmMarketplaceApiRoutes } from "./routes/crmMarketplaceApi";
 import { SLA_BREACH_MAX_PAGE } from "./executive/kpiPack";
 
 function registeredPaths(app: express.Express): string[] {
-  const stack = (app as any)._router?.stack ?? [];
+  // Express 4 exposes app._router; Express 5 exposes app.router.
+  const stack = ((app as any)._router ?? (app as any).router)?.stack ?? [];
   const paths: string[] = [];
   for (const layer of stack) {
     if (layer.route?.path) paths.push(`${Object.keys(layer.route.methods)[0]?.toUpperCase()} ${layer.route.path}`);
