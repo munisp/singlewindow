@@ -117,7 +117,14 @@ export async function getStakeholder360(profileId: number) {
       .select({
         total: sql<number>`count(*)::int`,
         cleared: sql<number>`count(*) filter (where ${declarations.status} = 'cleared')::int`,
-        pending: sql<number>`count(*) filter (where ${declarations.status} in ('submitted','under_review','assessed'))::int`,
+        // "Active pipeline" = every declaration_status enum value that is
+        // neither terminal (cleared/rejected/cancelled) nor pre-submission
+        // (draft). NOTE: the declaration_status enum has no 'under_review'
+        // or 'assessed' values — the real in-flight values are
+        // under_assessment / docs_required / payment_pending /
+        // payment_confirmed / under_examination / examination_complete /
+        // held_sanctions (see drizzle/schema.ts declarationStatusEnum).
+        pending: sql<number>`count(*) filter (where ${declarations.status} in ('submitted','under_assessment','docs_required','payment_pending','payment_confirmed','under_examination','examination_complete','held_sanctions'))::int`,
         totalDuty: sql<string>`coalesce(sum(${declarations.dutyAmount}), 0)::text`,
       })
       .from(declarations)
