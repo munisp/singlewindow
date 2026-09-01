@@ -444,7 +444,7 @@ export async function transitionOgaPermit(
   if (!db) throw new Error("Database unavailable");
   const result = await db.update(ogaPermits)
     .set({ ...data, updatedAt: new Date() })
-    .where(and(eq(ogaPermits.id, id), inArray(ogaPermits.status, fromStatuses as string[])))
+    .where(and(eq(ogaPermits.id, id), inArray(ogaPermits.status, [...fromStatuses])))
     .returning();
   return result[0];
 }
