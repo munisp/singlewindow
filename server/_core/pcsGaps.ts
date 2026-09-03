@@ -46,19 +46,6 @@ export const PCS_INTEGRATION_GAPS = {
     neededUpstream: "A published port tariff endpoint on port-interop.",
   },
   /**
-   * Product-decision gate (spec §9 + EXTERNAL): booking INITIATION (the R3
-   * write path) is disabled by default. The mutation is wired and routed to
-   * port-interop, but refuses with this disclosure until the product owner
-   * enables PCS_BOOKING_INITIATION_ENABLED. Never a fake success.
-   */
-  BOOKING_INITIATION: {
-    id: "GAP-PCS-BOOKING-INITIATION",
-    summary:
-      "Booking initiation is disabled pending a product decision (spec §9). The portal is read-only: existing bookings are shown read-through from the port system, but no new booking can be initiated here.",
-    affected: "pcs.bookings.request (write path)",
-    neededUpstream: "Product approval for the booking-initiation write path, then PCS_BOOKING_INITIATION_ENABLED=true.",
-  },
-  /**
    * Port-call linkage: port-interop exposes no list-by-declaration port-call
    * endpoint, so vessel visits are shown only for consignments whose
    * port_call_id was established by an authority event.

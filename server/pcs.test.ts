@@ -5,9 +5,10 @@
  * port — tariffClient.test.ts precedent; no fetch mocks). The database is the
  * only mocked boundary, through the dbPcs helper seam (db-helper mock pattern
  * per tariffAssessment.test.ts). Covers: down-vs-empty taxonomy, ownership
- * regression (trader A cannot read trader B's consignment/booking), the
- * product-gated booking-initiation disclosure, provenance honesty (every
- * rendered milestone carries source_event_id), and billing lag labelling.
+ * regression (trader A cannot read trader B's consignment/booking), live
+ * booking initiation (success, idempotent replay, upstream 4xx/5xx mapping,
+ * unconfigured fail-closed), provenance honesty (every rendered milestone
+ * carries source_event_id), and billing lag labelling.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -166,7 +167,6 @@ const savedEnv = {
   keycloakTokenUrl: ENV.keycloakTokenUrl,
   portInteropClientId: ENV.portInteropClientId,
   portInteropClientSecret: ENV.portInteropClientSecret,
-  pcsBookingInitiationEnabled: ENV.pcsBookingInitiationEnabled,
 };
 
 beforeEach(() => {
@@ -189,7 +189,6 @@ beforeEach(() => {
   ENV.keycloakTokenUrl = "";
   ENV.portInteropClientId = "";
   ENV.portInteropClientSecret = "";
-  ENV.pcsBookingInitiationEnabled = false;
 });
 
 afterAll(() => {
@@ -198,7 +197,6 @@ afterAll(() => {
   ENV.keycloakTokenUrl = savedEnv.keycloakTokenUrl;
   ENV.portInteropClientId = savedEnv.portInteropClientId;
   ENV.portInteropClientSecret = savedEnv.portInteropClientSecret;
-  ENV.pcsBookingInitiationEnabled = savedEnv.pcsBookingInitiationEnabled;
 });
 
 // ─── Context factories ───────────────────────────────────────────────────────
@@ -415,7 +413,7 @@ describe("pcs.bookings", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.data.bookings).toEqual([]);
-    expect(result.gaps.map((g) => g.id)).toContain("GAP-PCS-BOOKING-INITIATION");
+    expect(result.gaps).toEqual([]); // booking initiation is LIVE — no gap disclosure
   });
 
   it("list read-throughs linked bookings from port-interop", async () => {
@@ -465,7 +463,9 @@ describe("pcs.bookings", () => {
     expect(result.data.observerUnavailable).toBeTruthy(); // labelled, never fabricated
   });
 
-  it("request is product-gated: disabled by default with the typed gap disclosure", async () => {
+  it("request fails CLOSED with a typed UNCONFIGURED error when port-interop is not configured", async () => {
+    ENV.portInteropUrl = "";
+    ENV.portInteropToken = "";
     const caller = appRouter.createCaller(makeCtx());
     await expect(
       caller.pcs.bookings.request({
@@ -475,22 +475,12 @@ describe("pcs.bookings", () => {
         truckerMsisdn: "+2348012345678",
         amountKobo: 4500000,
       })
-    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
-    await expect(
-      caller.pcs.bookings.request({
-        terminalId: "TIN-CT1",
-        slotWindow: { startsAt: "2026-09-02T08:00:00.000Z", endsAt: "2026-09-03T08:00:00.000Z" },
-        truckPlate: "KJA-1234",
-        truckerMsisdn: "+2348012345678",
-        amountKobo: 4500000,
-      })
-    ).rejects.toThrow(/GAP-PCS-BOOKING-INITIATION/);
-    expect(captured).toHaveLength(0); // no upstream call when disabled
+    ).rejects.toThrow(/PORT_INTEROP_UNCONFIGURED/);
+    expect(captured).toHaveLength(0); // no upstream call when unconfigured
     expect(state.insertedLinks).toHaveLength(0);
   });
 
-  it("request (when enabled) routes to port-interop with a server idempotency key and records the link", async () => {
-    ENV.pcsBookingInitiationEnabled = true;
+  it("request routes to port-interop with a server idempotency key and records the link", async () => {
     handler = (req, res) => {
       if (req.url === "/v1/bookings" && req.method === "POST") {
         return json(res, 201, sampleBooking("bk-new"));
@@ -516,8 +506,7 @@ describe("pcs.bookings", () => {
     ]);
   });
 
-  it("request (when enabled) surfaces upstream 4xx verbatim as BAD_REQUEST", async () => {
-    ENV.pcsBookingInitiationEnabled = true;
+  it("request surfaces upstream 4xx verbatim as BAD_REQUEST", async () => {
     handler = (_req, res) => json(res, 409, { error: "request id conflicts with a retained booking" });
     const caller = appRouter.createCaller(makeCtx());
     await expect(
@@ -530,6 +519,51 @@ describe("pcs.bookings", () => {
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(state.insertedLinks).toHaveLength(0);
+  });
+
+  it("request maps upstream 5xx to SERVICE_UNAVAILABLE (never a fake booking)", async () => {
+    handler = (_req, res) => json(res, 502, { error: "bad gateway" });
+    const caller = appRouter.createCaller(makeCtx());
+    await expect(
+      caller.pcs.bookings.request({
+        terminalId: "TIN-CT1",
+        slotWindow: { startsAt: "2026-09-02T08:00:00.000Z", endsAt: "2026-09-03T08:00:00.000Z" },
+        truckPlate: "KJA-1234",
+        truckerMsisdn: "+2348012345678",
+        amountKobo: 4500000,
+      })
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(state.insertedLinks).toHaveLength(0);
+  });
+
+  it("idempotent replay: an exact retry carries the same request_id and replays to the same booking", async () => {
+    const seen = new Map<string, string>();
+    handler = (req, res) => {
+      if (req.url === "/v1/bookings" && req.method === "POST") {
+        const body = JSON.parse(req.body);
+        // Emulate the port-interop idempotency contract: replay on request_id.
+        if (!seen.has(body.request_id)) seen.set(body.request_id, `bk-${seen.size + 1}`);
+        const booking = sampleBooking(seen.get(body.request_id)!);
+        booking.request_id = body.request_id;
+        return json(res, 200, booking);
+      }
+      json(res, 404, {});
+    };
+    const caller = appRouter.createCaller(makeCtx());
+    const input = {
+      terminalId: "TIN-CT1",
+      slotWindow: { startsAt: "2026-09-02T08:00:00.000Z", endsAt: "2026-09-03T08:00:00.000Z" },
+      truckPlate: "KJA-1234",
+      truckerMsisdn: "+2348012345678",
+      amountKobo: 4500000,
+    };
+    const first = await caller.pcs.bookings.request(input);
+    const second = await caller.pcs.bookings.request(input);
+    expect(second.requestId).toBe(first.requestId);
+    expect(second.booking.booking_id).toBe(first.booking.booking_id); // replay → same booking
+    const posts = captured.filter((r) => r.url === "/v1/bookings" && r.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(JSON.parse(posts[0].body).request_id).toBe(JSON.parse(posts[1].body).request_id);
   });
 });
 
