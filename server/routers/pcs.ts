@@ -9,10 +9,11 @@
  * the simulated AIS map (server/routers/cargoTracking.ts is a seeded
  * simulation and is NEVER a data source here — spec §5.1).
  *
- * MVP surface: read-only + honest gaps. The single write path
- * (pcs.bookings.request, spec R3) is product-gated
- * (PCS_BOOKING_INITIATION_ENABLED, default off) and returns a typed
- * INTEGRATION_GAPS disclosure when disabled — never a fake success.
+ * The single write path (pcs.bookings.request, spec R3) is LIVE against the
+ * port-interop eCallUp booking backend (Temporal workflow, slot capacity,
+ * payment intents) with a server-side idempotency key; unconfigured upstream
+ * fails closed with a typed PORT_INTEROP_UNCONFIGURED error — never a fake
+ * success.
  *
  * Down-vs-empty taxonomy (ministry-portal api-state.tsx precedent): every
  * procedure returns a discriminated result — { status: "ok", data, gaps }
@@ -36,7 +37,6 @@ import {
   type PortInteropObserverState,
   type PortInteropUnavailableReason,
 } from "../_core/portInteropClient";
-import { ENV } from "../_core/env";
 import { pcsGap, type PcsGapId, type PcsIntegrationGap } from "../_core/pcsGaps";
 import { uploadVaultDocument } from "./documentVault";
 import { orderMilestones } from "../pcsProjection";
@@ -270,7 +270,7 @@ export const pcsRouter = router({
       if (linksRes.down) return unavailable("database_unavailable", "PostgreSQL read model is not available in this environment");
       if (linksRes.value.length === 0) {
         // Truthful empty: the trader has no associated bookings.
-        return ok({ bookings: [] }, ["BOOKING_INITIATION"]);
+        return ok({ bookings: [] }, []);
       }
       let client;
       try {
@@ -299,7 +299,7 @@ export const pcsRouter = router({
         // Everything failed for an availability reason → DOWN, not empty.
         return lastFailure as PcsResult<{ bookings: unknown[] }>;
       }
-      return ok({ bookings }, ["BOOKING_INITIATION"]);
+      return ok({ bookings }, []);
     }),
 
     detail: protectedProcedure
@@ -342,11 +342,12 @@ export const pcsRouter = router({
       }),
 
     /**
-     * Booking INITIATION (spec R3 write path) — product-gated. MVP is
-     * read-only: unless PCS_BOOKING_INITIATION_ENABLED=true this refuses with
-     * the typed GAP-PCS-BOOKING-INITIATION disclosure. When enabled, the
-     * request is routed to port-interop with a server-generated idempotency
-     * key (request_id) and the trader↔booking link is recorded.
+     * Booking INITIATION (spec R3 write path) — LIVE. Routed to port-interop
+     * (the eCallUp system of record: Temporal booking workflow, slot capacity,
+     * payment intents) with a server-generated idempotency key (request_id);
+     * the trader↔booking link is recorded on success. Fail-closed: an
+     * unconfigured upstream is a typed PORT_INTEROP_UNCONFIGURED error, an
+     * unreachable upstream is 503, an upstream 4xx is surfaced verbatim.
      */
     request: protectedProcedure
       .input(z.object({
@@ -363,13 +364,6 @@ export const pcsRouter = router({
         cargoDeclarationRef: z.string().regex(/^[A-Z0-9][A-Z0-9/-]{3,63}$/).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        if (!ENV.pcsBookingInitiationEnabled) {
-          try {
-            pcsBookingRequestsTotal.inc({ outcome: "disabled_gap" });
-          } catch { /* metrics never break the request path */ }
-          const gap = pcsGap("BOOKING_INITIATION");
-          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `${gap.id}: ${gap.summary}` });
-        }
         try {
           pcsBookingRequestsTotal.inc({ outcome: "attempted" });
         } catch { /* metrics never break the request path */ }
@@ -387,6 +381,18 @@ export const pcsRouter = router({
         try {
           client = getPortInteropClient();
         } catch (err) {
+          if (err instanceof PortInteropConfigError) {
+            // Typed UNCONFIGURED (never a gap code): the capability exists —
+            // this deployment is missing PORT_INTEROP_URL / service credential
+            // (env-only secrets policy). Fail closed; no booking is created.
+            try {
+              pcsBookingRequestsTotal.inc({ outcome: "unconfigured" });
+            } catch { /* ignore */ }
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `PORT_INTEROP_UNCONFIGURED: ${err.message}`,
+            });
+          }
           const failure = upstreamFailure<never>(err);
           throw new TRPCError({
             code: "SERVICE_UNAVAILABLE",

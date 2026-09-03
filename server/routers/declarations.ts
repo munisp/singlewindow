@@ -9,6 +9,7 @@ import {
   getLatestKYCVerification, withRlsContext, getDb, getPermitsByDeclaration
 } from "../db";
 import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
+import { renderClearanceCertificatePdf } from "../clearanceCertificatePdf";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { assertCan, setOwner } from "../_core/permify";
@@ -1406,172 +1407,55 @@ export const declarationsRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      // Build PDF content using a simple HTML template
       const clearedDate = decl.clearedAt
         ? new Date(decl.clearedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })
         : new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
 
-      const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 40px; color: #1a1a2e; }
-    .header { text-align: center; border-bottom: 3px solid #D4A017; padding-bottom: 20px; margin-bottom: 30px; }
-    .header h1 { font-size: 28px; color: #0A1628; margin: 0 0 4px; letter-spacing: 1px; }
-    .header h2 { font-size: 16px; color: #D4A017; margin: 0; font-weight: 500; }
-    .cert-number { text-align: center; font-size: 13px; color: #666; margin-bottom: 30px; }
-    .section { margin-bottom: 24px; }
-    .section-title { font-size: 11px; font-weight: 700; color: #D4A017; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; margin-bottom: 12px; }
-    .row { display: flex; margin-bottom: 8px; }
-    .label { font-size: 12px; color: #6b7280; width: 200px; flex-shrink: 0; }
-    .value { font-size: 12px; color: #1a1a2e; font-weight: 600; }
-    .clearance-box { background: #f0fdf4; border: 2px solid #16a34a; border-radius: 8px; padding: 20px; text-align: center; margin: 30px 0; }
-    .clearance-box h3 { color: #16a34a; font-size: 20px; margin: 0 0 8px; }
-    .clearance-box p { color: #374151; font-size: 13px; margin: 0; }
-    .signature { display: flex; justify-content: space-between; margin-top: 60px; padding-top: 20px; }
-    .sig-block { text-align: center; width: 200px; }
-    .sig-line { border-top: 1px solid #374151; padding-top: 8px; font-size: 11px; color: #6b7280; }
-    .footer { text-align: center; font-size: 10px; color: #9ca3af; margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 16px; }
-    .watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%) rotate(-45deg); font-size: 80px; color: rgba(212,160,23,0.08); font-weight: 900; letter-spacing: 8px; pointer-events: none; }
-  </style>
-</head>
-<body>
-  <div class="watermark">CLEARED</div>
-  <div class="header">
-    <h1>NATIONAL TRADE GATEWAY</h1>
-    <h2>CUSTOMS CLEARANCE CERTIFICATE</h2>
-  </div>
-  <div class="cert-number">Certificate No: CERT-${decl.declarationNumber} &nbsp;|&nbsp; Issued: ${clearedDate}</div>
+      // Render a real in-process PDF (pdfkit — server/executive/briefing.ts
+      // pattern). FAIL-CLOSED: no shell-out chain, no HTML fallback — any
+      // render failure rejects and no certificate is issued.
+      const pdfBuffer = await renderClearanceCertificatePdf(decl, clearedDate);
 
-  <div class="clearance-box">
-    <h3>✓ GOODS RELEASED FOR COLLECTION</h3>
-    <p>This certificate confirms that the goods described below have been assessed, duties paid, and released by Customs Authority.</p>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Declaration Details</div>
-    <div class="row"><span class="label">Declaration Number</span><span class="value">${decl.declarationNumber}</span></div>
-    <div class="row"><span class="label">Unique Consignment Reference</span><span class="value">${decl.ucr ?? "N/A"}</span></div>
-    <div class="row"><span class="label">Declaration Type</span><span class="value">${(decl.declarationType ?? "").replace(/_/g, " ").toUpperCase()}</span></div>
-    <div class="row"><span class="label">Date Submitted</span><span class="value">${decl.submittedAt ? new Date(decl.submittedAt).toLocaleDateString("en-GB") : "N/A"}</span></div>
-    <div class="row"><span class="label">Date Cleared</span><span class="value">${clearedDate}</span></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Goods Information</div>
-    <div class="row"><span class="label">Goods Description</span><span class="value">${decl.goodsDescription ?? "N/A"}</span></div>
-    <div class="row"><span class="label">HS Code</span><span class="value">${decl.hsCode ?? "N/A"}</span></div>
-    <div class="row"><span class="label">Country of Origin</span><span class="value">${decl.countryOfOrigin ?? "N/A"}</span></div>
-    <div class="row"><span class="label">Port of Entry</span><span class="value">${decl.portOfEntry ?? "N/A"}</span></div>
-    <div class="row"><span class="label">Number of Packages</span><span class="value">${decl.numberOfPackages ?? "N/A"}</span></div>
-    <div class="row"><span class="label">Gross Weight</span><span class="value">${decl.grossWeight ? `${decl.grossWeight} kg` : "N/A"}</span></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Duties & Taxes</div>
-    <div class="row"><span class="label">Invoice Value</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.invoiceValue ?? "N/A"}</span></div>
-    <div class="row"><span class="label">Duty Amount</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.dutyAmount ?? "0.00"}</span></div>
-    <div class="row"><span class="label">VAT Amount</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.vatAmount ?? "0.00"}</span></div>
-    <div class="row"><span class="label">Total Paid</span><span class="value">${decl.invoiceCurrency ?? "USD"} ${decl.totalDue ?? "0.00"}</span></div>
-  </div>
-
-  <div class="signature">
-    <div class="sig-block">
-      <div style="height:50px"></div>
-      <div class="sig-line">Customs Officer<br>National Trade Gateway</div>
-    </div>
-    <div class="sig-block">
-      <div style="height:50px"></div>
-      <div class="sig-line">Commissioner of Customs<br>National Trade Authority</div>
-    </div>
-    <div class="sig-block">
-      <div style="height:50px"></div>
-      <div class="sig-line">Official Stamp<br>&nbsp;</div>
-    </div>
-  </div>
-
-  <div class="footer">
-    This certificate is issued electronically by the National Trade Gateway Single Window Platform.<br>
-    Verify authenticity at: tradegateway.gov | Certificate No: CERT-${decl.declarationNumber}
-  </div>
-</body>
-</html>`;
-
-      // Convert HTML to PDF buffer using puppeteer-free approach: store HTML as PDF via weasyprint-style
-      // We'll use the built-in node approach: write to temp file, convert, upload to S3
-      const { storagePut } = await import("../storage");
+      const { storagePut, storageDelete } = await import("../storage");
       const { nanoid: nanoId } = await import("nanoid");
-      const { execSync } = await import("child_process");
-      const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
-      const { tmpdir } = await import("os");
-      const { join } = await import("path");
+      const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.pdf`;
+      const { url } = await storagePut(fileKey, pdfBuffer, "application/pdf");
 
-      const tmpHtml = join(tmpdir(), `cert-${nanoId(8)}.html`);
-      const tmpPdf = join(tmpdir(), `cert-${nanoId(8)}.pdf`);
-
-      try {
-        writeFileSync(tmpHtml, htmlContent, "utf-8");
-        execSync(`manus-md-to-pdf "${tmpHtml}" "${tmpPdf}" 2>/dev/null || wkhtmltopdf "${tmpHtml}" "${tmpPdf}" 2>/dev/null || chromium-browser --headless --no-sandbox --print-to-pdf="${tmpPdf}" "${tmpHtml}" 2>/dev/null || true`, { timeout: 30_000 });
-
-        let pdfBuffer: Buffer;
-        try {
-          pdfBuffer = readFileSync(tmpPdf);
-        } catch {
-          // Fallback: return the HTML as a downloadable file if PDF conversion fails
-          const htmlBuffer = readFileSync(tmpHtml);
-          const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.html`;
-          const { url } = await storagePut(fileKey, htmlBuffer, "text/html");
-
-          // Persist certificate record to DB (HTML fallback)
-          try {
-            const { getDb } = await import("../db");
-            const db = await getDb();
-            if (!db) throw new Error("no db");
-            await db.insert(clearanceCertificates).values({
-              declarationId: decl.id,
-              traderId: decl.traderId,
-              fileKey,
-              fileUrl: url,
-              declarationRef: decl.declarationNumber,
-              goodsDescription: decl.goodsDescription ?? null,
-              totalDutyPaid: decl.totalDue ? String(decl.totalDue) : null,
-              currency: decl.invoiceCurrency ?? "USD",
-              clearedAt: decl.clearedAt ? new Date(decl.clearedAt) : new Date(),
-              generatedBy: ctx.user.id,
-            });
-          } catch { /* Non-fatal */ }
-
-          return { url, format: "html" as const, declarationNumber: decl.declarationNumber };
-        }
-
-        const fileKey = `clearance-certificates/${decl.declarationNumber}-${nanoId(6)}.pdf`;
-        const { url } = await storagePut(fileKey, pdfBuffer, "application/pdf");
-
-        // Persist certificate record to DB
-        try {
-          const { getDb } = await import("../db");
-          const db = await getDb();
-          if (!db) throw new Error("no db");
-          await db.insert(clearanceCertificates).values({
-            declarationId: decl.id,
-            traderId: decl.traderId,
-            fileKey,
-            fileUrl: url,
-            declarationRef: decl.declarationNumber,
-            goodsDescription: decl.goodsDescription ?? null,
-            totalDutyPaid: decl.totalDue ? String(decl.totalDue) : null,
-            currency: decl.invoiceCurrency ?? "USD",
-            clearedAt: decl.clearedAt ? new Date(decl.clearedAt) : new Date(),
-            generatedBy: ctx.user.id,
-          });
-        } catch { /* Non-fatal: certificate still returned even if DB write fails */ }
-
-        return { url, format: "pdf" as const, declarationNumber: decl.declarationNumber };
-      } finally {
-        try { unlinkSync(tmpHtml); } catch { /* ignore */ }
-        try { unlinkSync(tmpPdf); } catch { /* ignore */ }
+      // Persist the certificate record transactionally with the download: if
+      // the insert fails the certificate is NOT delivered — the uploaded
+      // object is deleted best-effort and the request hard-fails (500).
+      const { getDb } = await import("../db");
+      const db = await getDb();
+      if (!db) {
+        try { await storageDelete(fileKey); } catch { /* best-effort cleanup */ }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Database unavailable — clearance certificate was not issued",
+        });
       }
+      try {
+        await db.insert(clearanceCertificates).values({
+          declarationId: decl.id,
+          traderId: decl.traderId,
+          fileKey,
+          fileUrl: url,
+          declarationRef: decl.declarationNumber,
+          goodsDescription: decl.goodsDescription ?? null,
+          totalDutyPaid: decl.totalDue ? String(decl.totalDue) : null,
+          currency: decl.invoiceCurrency ?? "USD",
+          clearedAt: decl.clearedAt ? new Date(decl.clearedAt) : new Date(),
+          generatedBy: ctx.user.id,
+        });
+      } catch (err) {
+        try { await storageDelete(fileKey); } catch { /* best-effort cleanup */ }
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to persist the clearance certificate record — certificate not issued",
+          cause: err,
+        });
+      }
+
+      return { url, format: "pdf" as const, declarationNumber: decl.declarationNumber };
     }),
 
   /** Export declarations as CSV with optional date/status filters */

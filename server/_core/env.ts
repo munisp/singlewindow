@@ -286,12 +286,10 @@ export const ENV = {
   portInteropToken: process.env.PORT_INTEROP_TOKEN ?? "",
   portInteropClientId: process.env.PORT_INTEROP_CLIENT_ID ?? "",
   portInteropClientSecret: process.env.PORT_INTEROP_CLIENT_SECRET ?? "",
-  // Booking INITIATION (spec R3 write path) is gated on an EXTERNAL product
-  // decision. The portal is read-only unless operators explicitly opt in;
-  // when disabled the mutation returns a typed INTEGRATION_GAPS disclosure,
-  // never a fake success.
-  pcsBookingInitiationEnabled:
-    (process.env.PCS_BOOKING_INITIATION_ENABLED ?? "").trim().toLowerCase() === "true",
+  // Booking INITIATION (spec R3 write path) is LIVE: pcs.bookings.request
+  // routes to the port-interop eCallUp booking backend and fails closed with
+  // a typed PORT_INTEROP_UNCONFIGURED error when PORT_INTEROP_URL / the
+  // service credential are unset.
   // Trusted Ed25519 public keys for the envelope v1.0 provenance JWS on
   // ports.*.v1 Kafka events: a JSON object mapping the JWS kid
   // ("port-interoperability-<epoch>") to the base64/hex public key. Unset or
