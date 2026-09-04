@@ -100,14 +100,26 @@ function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label:
   );
 }
 
+/** Decode a (possibly) double-encoded path param exactly once for display. React text rendering only — never innerHTML. */
+function decodeOnceForDisplay(v: string): string {
+  try {
+    const decoded = decodeURIComponent(v);
+    return decoded;
+  } catch {
+    return v;
+  }
+}
+
 export default function CertVerify() {
   const params = useParams<{ certNumber: string }>();
   const certNumber = params.certNumber;
+  const displayCertNumber = certNumber ? decodeOnceForDisplay(certNumber) : "";
   const [, navigate] = useLocation();
 
   const [result, setResult] = useState<CertVerifyResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   // Search bar state
   const [searchInput, setSearchInput] = useState("");
@@ -115,19 +127,36 @@ export default function CertVerify() {
 
   useEffect(() => {
     if (!certNumber) return;
+    let cancelled = false;
     setLoading(true);
     setFetchError(null);
     setResult(null);
     fetch(`/api/verify/${encodeURIComponent(certNumber)}`)
       .then(async (res) => {
-        const data = await res.json();
-        setResult(data);
+        if (res.status === 404) {
+          if (!cancelled) {
+            setResult({ valid: false, certNumber, verifiedAt: new Date().toISOString(), error: "Certificate not found" });
+          }
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(`Verification request failed (HTTP ${res.status})`);
+        }
+        const data = (await res.json()) as CertVerifyResult;
+        if (!cancelled) {
+          // valid:false without a specific error means the number is unknown to the registry
+          if (!data.valid && !data.error && !data.isExpired) {
+            data.error = "Certificate not found";
+          }
+          setResult(data);
+        }
       })
       .catch((err) => {
-        setFetchError(err.message ?? "Network error");
+        if (!cancelled) setFetchError(err.message ?? "Network error");
       })
-      .finally(() => setLoading(false));
-  }, [certNumber]);
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [certNumber, retryTick]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +198,7 @@ export default function CertVerify() {
         <div className="text-center">
           <h1 className="text-white font-semibold text-lg">Certificate of Origin Verification</h1>
           <p className="text-slate-400 text-sm mt-0.5">
-            Verifying: <span className="font-mono text-amber-300">{certNumber}</span>
+            Verifying: <span className="font-mono text-amber-300">{displayCertNumber}</span>
           </p>
         </div>
       </div>
@@ -192,10 +221,18 @@ export default function CertVerify() {
             <CardContent className="p-6">
               <div className="flex items-center gap-3">
                 <XCircle className="h-6 w-6 text-red-400 shrink-0" />
-                <div>
+                <div className="flex-1">
                   <p className="font-semibold text-red-300">Verification service unavailable</p>
                   <p className="text-red-400 text-sm mt-0.5">{fetchError}</p>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-700 text-red-300 hover:bg-red-900/40 shrink-0"
+                  onClick={() => setRetryTick(t => t + 1)}
+                >
+                  Retry
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -222,7 +259,7 @@ export default function CertVerify() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-1 gap-3">
-                    <InfoRow icon={FileText} label="Certificate Number" value={result.certNumber} />
+                    <InfoRow icon={FileText} label="Certificate Number" value={decodeOnceForDisplay(result.certNumber)} />
                     <InfoRow icon={FileText} label="Certificate Type" value={result.certType?.replace(/_/g, " ").toUpperCase()} />
                     <InfoRow icon={FileText} label="Invoice Number" value={result.invoiceNumber} />
                   </div>

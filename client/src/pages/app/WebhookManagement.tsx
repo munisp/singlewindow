@@ -5,6 +5,7 @@
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+import { extractFieldErrors, friendlyErrorMessage } from "@/lib/errors";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,14 +37,21 @@ function CreateWebhookDialog({ onSuccess }: { onSuccess: () => void }) {
   const [url, setUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>(["declaration.submitted", "declaration.approved"]);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const createMutation = trpc.webhooks.create.useMutation({
     onSuccess: (data) => {
+      setFieldErrors({});
       setCreatedSecret(data.secret);
       toast.success("Webhook created");
       onSuccess();
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => {
+      // Field-level errors inline where the server provided them; friendly toast otherwise.
+      const fields = extractFieldErrors(err);
+      setFieldErrors(fields ?? {});
+      toast.error(friendlyErrorMessage(err, "Could not create webhook"));
+    },
   });
 
   const toggleEvent = (event: string) => {
@@ -99,10 +107,12 @@ function CreateWebhookDialog({ onSuccess }: { onSuccess: () => void }) {
           <div className="space-y-2">
             <Label>Name *</Label>
             <Input value={name} onChange={e => setName(e.target.value)} placeholder="My Webhook" />
+            {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
           </div>
           <div className="space-y-2">
             <Label>Endpoint URL *</Label>
             <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://api.example.com/webhooks" type="url" />
+            {fieldErrors.url && <p className="text-xs text-destructive">{fieldErrors.url}</p>}
           </div>
           <div className="space-y-3">
             <Label>Events to Subscribe</Label>
@@ -160,12 +170,12 @@ export default function WebhookManagement() {
 
   const deleteMutation = trpc.webhooks.delete.useMutation({
     onSuccess: () => { toast.success("Webhook deleted"); utils.webhooks.list.invalidate(); },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => toast.error(friendlyErrorMessage(err)),
   });
 
   const toggleMutation = trpc.webhooks.update.useMutation({
     onSuccess: () => utils.webhooks.list.invalidate(),
-    onError: (err) => toast.error(err.message),
+    onError: (err) => toast.error(friendlyErrorMessage(err)),
   });
 
   const rotateMutation = trpc.webhooks.rotateSecret.useMutation({
@@ -174,7 +184,7 @@ export default function WebhookManagement() {
       toast.success("Secret rotated and copied to clipboard");
       utils.webhooks.list.invalidate();
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err) => toast.error(friendlyErrorMessage(err)),
   });
 
   return (

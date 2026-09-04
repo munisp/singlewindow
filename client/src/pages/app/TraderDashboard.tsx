@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
+import { humanizeLabel } from "@/lib/formatters";
 import {
   AlertTriangle,
   Anchor,
@@ -31,8 +32,8 @@ function StatusBadge({ status }: { status: string }) {
     rejected: { label: "Rejected", variant: "destructive" },
     held: { label: "Held", variant: "destructive" },
   };
-  const cfg = map[status] ?? { label: status, variant: "secondary" };
-  return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
+  const cfg = map[status] ?? { label: humanizeLabel(status), variant: "secondary" as const };
+  return <Badge variant={cfg.variant} title={status}>{cfg.label}</Badge>;
 }
 
 export default function TraderDashboard() {
@@ -70,7 +71,7 @@ export default function TraderDashboard() {
           <div className="flex items-center gap-3 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900">
             <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
             <div className="flex-1">
-              <p className="font-medium text-sm">Profile {profile.status === "pending" ? "pending approval" : profile.status}</p>
+              <p className="font-medium text-sm">Profile {profile.status === "pending" ? "pending approval" : humanizeLabel(profile.status)}</p>
               <p className="text-xs text-amber-700 mt-0.5">
                 Your trader profile must be approved before you can submit declarations.
               </p>

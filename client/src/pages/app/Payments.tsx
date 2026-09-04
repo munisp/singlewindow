@@ -4,6 +4,7 @@
  */
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
+import { humanizeLabel } from "@/lib/formatters";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,7 +40,7 @@ const METHOD_ICONS: Record<string, React.ReactNode> = {
   bond: <Shield className="w-4 h-4" />,
 };
 
-function formatCurrency(amount: string | number, currency = "USD") {
+function formatCurrency(amount: string | number, currency = "NGN") {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n || 0);
 }
@@ -188,14 +189,23 @@ export default function Payments() {
   // ── Filtered list ─────────────────────────────────────────────────────────────
   const rawList: any[] = isAdmin ? (allPayments?.transactions ?? []) : (historyData?.transactions ?? []);
   const filtered = useMemo(() => {
+    // B11: the date-range preset now also filters the visible list (not just exports).
+    const { startDate, endDate } = getPresetDates(exportPreset);
+    const startMs = startDate ? Date.parse(startDate) : null;
+    const endMs = endDate ? Date.parse(endDate) : null;
     return rawList.filter((p) => {
       const matchSearch = !search ||
         p.reference?.toLowerCase().includes(search.toLowerCase()) ||
         String(p.declarationId).includes(search);
       const matchStatus = statusFilter === "all" || p.status === statusFilter;
-      return matchSearch && matchStatus;
+      let matchDate = true;
+      if (startMs != null) {
+        const ts = Date.parse(p.createdAt ?? p.initiatedAt ?? p.paidAt ?? p.updatedAt ?? "");
+        matchDate = !Number.isNaN(ts) && ts >= startMs && (endMs == null || ts <= endMs);
+      }
+      return matchSearch && matchStatus && matchDate;
     });
-  }, [rawList, search, statusFilter]);
+  }, [rawList, search, statusFilter, exportPreset]);
 
   const totalAmount = filtered.reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
   const completedCount = filtered.filter((p) => p.status === "completed").length;
@@ -384,12 +394,12 @@ export default function Payments() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 text-muted-foreground">
                           {METHOD_ICONS[p.paymentMethod] ?? <CreditCard className="w-4 h-4" />}
-                          <span className="capitalize text-xs">{p.paymentMethod?.replace("_", " ")}</span>
+                          <span className="text-xs" title={p.paymentMethod}>{humanizeLabel(p.paymentMethod)}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge className={`text-xs border ${STATUS_COLORS[p.status] ?? ""}`}>
-                          {p.status}
+                        <Badge className={`text-xs border ${STATUS_COLORS[p.status] ?? ""}`} title={p.status}>
+                          {humanizeLabel(p.status)}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">

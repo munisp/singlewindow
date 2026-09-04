@@ -189,7 +189,7 @@ function UploadDialog({
     if (!isProcessing) setQueue(prev => prev.filter(item => item.id !== id));
   };
 
-  const uploadSingle = async (item: QueueItem): Promise<void> => {
+  const uploadSingle = async (item: QueueItem): Promise<boolean> => {
     setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "uploading" } : q));
     try {
       const arrayBuffer = await item.file.arrayBuffer();
@@ -208,9 +208,11 @@ function UploadDialog({
         declarationId: linkedDeclarationId !== "none" ? Number(linkedDeclarationId) : undefined,
       });
       setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "done" } : q));
+      return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Upload failed";
       setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "error", error: msg } : q));
+      return false;
     }
   };
 
@@ -218,16 +220,17 @@ function UploadDialog({
     const toUpload = queue.filter(q => q.status === "pending" || q.status === "error");
     if (toUpload.length === 0) return;
     setIsProcessing(true);
+    // Track per-file results directly — React state updates are async, so the
+    // queue snapshot here would still show pre-upload statuses (B14).
+    const results = new Map<string, boolean>();
     for (const item of toUpload) {
-      await uploadSingle(item);
+      results.set(item.id, await uploadSingle(item));
     }
     setIsProcessing(false);
-    const finalQueue = queue.map(q =>
-      toUpload.find(t => t.id === q.id) ? { ...q, status: q.status } : q
-    );
-    const successCount = finalQueue.filter(q => q.status === "done").length;
-    const failCount = finalQueue.filter(q => q.status === "error").length;
-    onSuccess();
+    const successCount = toUpload.filter(t => results.get(t.id)).length +
+      queue.filter(q => q.status === "done" && !toUpload.find(t => t.id === q.id)).length;
+    const failCount = toUpload.filter(t => results.get(t.id) === false).length;
+    if (successCount > 0) onSuccess();
     if (failCount === 0) {
       toast.success(`${successCount} document${successCount > 1 ? "s" : ""} uploaded`, {
         description: "All files stored in RustFS.",
@@ -237,8 +240,11 @@ function UploadDialog({
       setDescription("");
       setLinkedDeclarationId("none");
     } else {
-      toast.info(`${successCount} uploaded, ${failCount} failed`, {
-        description: "Review errors in the queue below.",
+      // Keep the dialog open; durable error toast naming the failed files.
+      const failedNames = toUpload.filter(t => results.get(t.id) === false).map(t => t.file.name).join(", ");
+      toast.error(`${failCount} of ${toUpload.length} upload${toUpload.length > 1 ? "s" : ""} failed`, {
+        description: `Not uploaded: ${failedNames}. Fix the issue and press Upload again — the dialog stays open.`,
+        duration: Infinity,
       });
     }
   };

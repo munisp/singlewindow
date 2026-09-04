@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
+import { humanizeLabel } from "@/lib/formatters";
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, Clock, FileText,
   Globe, Package, ShieldCheck, TrendingUp, Truck, XCircle,
@@ -101,6 +102,13 @@ const LANE_CONFIG: Record<string, { label: string; color: string; description: s
 };
 
 // ─── TRANSPORT ICON ───────────────────────────────────────────────────────────
+
+/** Invalid-date-safe locale date formatting (wave-2A amendment dates). */
+function formatSafeDate(value: unknown): string {
+  if (value == null) return "—";
+  const d = new Date(value as string | number | Date);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
+}
 
 function TransportIcon({ mode }: { mode: string }) {
   switch (mode?.toLowerCase()) {
@@ -1098,7 +1106,7 @@ function KycHistoryPanel({ declarationId }: { declarationId: number }) {
                 <div className="flex-1 min-w-0 border rounded-lg p-3 bg-muted/20">
                   <div className="flex flex-wrap items-center gap-2 mb-1">
                     <span className="text-sm font-semibold capitalize">
-                      {(evt.documentType ?? "Unknown").replace(/_/g, " ")}
+                      {humanizeLabel(evt.documentType, "Unknown")}
                     </span>
                     {evt.riskLevel && (
                       <Badge variant="outline" className={`text-xs ${RISK_LEVEL_COLORS[evt.riskLevel] ?? ""}`}>
@@ -1107,7 +1115,7 @@ function KycHistoryPanel({ declarationId }: { declarationId: number }) {
                     )}
                     {evt.status && (
                       <Badge variant="outline" className={`text-xs ${KYC_STATUS_COLORS[evt.status] ?? ""}`}>
-                        {evt.status.replace(/_/g, " ")}
+                        {humanizeLabel(evt.status)}
                       </Badge>
                     )}
                     {evt.riskScore != null && (
@@ -1254,12 +1262,12 @@ function DeclarationAmendmentsPanel({ declarationId, declarationStatus, isOffice
                       a.status === "approved" ? "text-emerald-700 border-emerald-300 bg-emerald-50" :
                       a.status === "rejected" ? "text-red-700 border-red-300 bg-red-50" :
                       "text-amber-700 border-amber-300 bg-amber-50"
-                    }>{a.status}</Badge>
+                    } title={a.status}>{humanizeLabel(a.status)}</Badge>
                     <span className="font-mono text-xs font-semibold">{a.fieldName}</span>
                     <span className="text-muted-foreground text-xs">→</span>
                     <span className="font-medium text-xs">{a.newValue}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{new Date(a.requestedAt).toLocaleDateString()}</span>
+                  <span className="text-xs text-muted-foreground">{formatSafeDate(a.requestedAt ?? a.createdAt)}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{a.reason}</p>
                 {a.reviewNotes && <p className="text-xs text-muted-foreground mt-1 italic">Review: {a.reviewNotes}</p>}

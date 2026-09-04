@@ -76,7 +76,7 @@
 
 /// <reference types="@types/google.maps" />
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePersistFn } from "@/hooks/usePersistFn";
 import { cn } from "@/lib/utils";
 
@@ -86,24 +86,32 @@ declare global {
   }
 }
 
-const API_KEY = import.meta.env.VITE_FRONTEND_FORGE_API_KEY;
+const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY ?? import.meta.env.VITE_FRONTEND_FORGE_API_KEY;
 const FORGE_BASE_URL =
   import.meta.env.VITE_FRONTEND_FORGE_API_URL ||
   "https://forge.butterfly-effect.dev";
 const MAPS_PROXY_URL = `${FORGE_BASE_URL}/v1/maps/proxy`;
 
-function loadMapScript() {
-  return new Promise(resolve => {
+function loadMapScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Fail fast: without an API key the script would 401 and the map would
+    // silently never initialise.
+    if (!API_KEY) {
+      reject(new Error("Map unavailable: VITE_GOOGLE_MAPS_KEY is not configured"));
+      return;
+    }
     const script = document.createElement("script");
     script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
     script.async = true;
     script.crossOrigin = "anonymous";
     script.onload = () => {
-      resolve(null);
+      resolve();
       script.remove(); // Clean up immediately
     };
+    // Reject on script load failure (e.g. CSP block) so callers can render a
+    // fallback instead of hanging forever.
     script.onerror = () => {
-      console.error("Failed to load Google Maps script");
+      reject(new Error("Map unavailable: failed to load the maps script"));
     };
     document.head.appendChild(script);
   });
@@ -124,9 +132,15 @@ export function MapView({
 }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<google.maps.Map | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const init = usePersistFn(async () => {
-    await loadMapScript();
+    try {
+      await loadMapScript();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Map unavailable");
+      return;
+    }
     if (!mapContainer.current) {
       console.error("Map container not found");
       return;
@@ -148,6 +162,15 @@ export function MapView({
   useEffect(() => {
     init();
   }, [init]);
+
+  if (loadError) {
+    return (
+      <div className={cn("w-full h-[500px] flex flex-col items-center justify-center gap-2 rounded-lg border border-border bg-muted/30 text-center p-6", className)}>
+        <p className="text-sm font-semibold text-muted-foreground">Map unavailable</p>
+        <p className="text-xs text-muted-foreground/80 max-w-sm">{loadError}</p>
+      </div>
+    );
+  }
 
   return (
     <div ref={mapContainer} className={cn("w-full h-[500px]", className)} />

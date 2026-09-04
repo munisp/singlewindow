@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { countryName, humanizeLabel } from "@/lib/formatters";
 
 const STATUS_BADGE: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
   pending: { label: "Pending Review", className: "bg-amber-100 text-amber-700 border-amber-200", icon: <Clock className="h-3 w-3" /> },
@@ -89,7 +90,7 @@ function NinVerificationCard() {
                 <span className="font-semibold text-amber-700">Identity Not Verified</span>
                 {ninStatus?.status && ninStatus.status !== "not_started" && ninStatus.status !== "unknown" && (
                   <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-xs capitalize">
-                    {String(ninStatus.status).replace(/_/g, " ")}
+                    <span title={String(ninStatus.status)}>{humanizeLabel(String(ninStatus.status))}</span>
                   </Badge>
                 )}
               </div>
@@ -277,8 +278,8 @@ export default function TraderProfile() {
                   ["Organization Code", data?.organizationCode],
                   ["License #", data?.licenseNumber],
                   ["Tax ID", data?.taxId],
-                  ["Stakeholder Type", data?.stakeholderType?.replace(/_/g, " ")],
-                  ["Country", data?.country],
+                  ["Stakeholder Type", humanizeLabel(data?.stakeholderType)],
+                  ["Country", countryName(data?.country, data?.country ?? "—")],
                   ["Phone", data?.phone],
                   ["Status", data?.status],
                 ].map(([label, value]) => (

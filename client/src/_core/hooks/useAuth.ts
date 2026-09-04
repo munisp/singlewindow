@@ -1,5 +1,10 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
+import {
+  attemptSessionRefresh,
+  scheduleSessionRefresh,
+  teardownSessionRefresh,
+} from "@/lib/sessionRefresh";
 import { TRPCClientError } from "@trpc/client";
 import { useCallback, useEffect, useMemo } from "react";
 
@@ -36,6 +41,7 @@ export function useAuth(options?: UseAuthOptions) {
       }
       throw error;
     } finally {
+      teardownSessionRefresh();
       utils.auth.me.setData(undefined, null);
       await utils.auth.me.invalidate();
     }
@@ -59,6 +65,27 @@ export function useAuth(options?: UseAuthOptions) {
     logoutMutation.error,
     logoutMutation.isPending,
   ]);
+
+  // Silent session renewal: when a Keycloak token set is stored, keep it
+  // refreshed (expiresAt − 60s). No-op when the cookie-based flow is active.
+  useEffect(() => {
+    if (state.user) scheduleSessionRefresh();
+  }, [state.user]);
+
+  // Session drop: attempt an imperative silent refresh before falling back
+  // to the SSO redirect.
+  useEffect(() => {
+    const err = meQuery.error;
+    if (
+      err instanceof TRPCClientError &&
+      err.data?.code === "UNAUTHORIZED"
+    ) {
+      void attemptSessionRefresh().then((renewed) => {
+        if (renewed) void meQuery.refetch();
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meQuery.error]);
 
   useEffect(() => {
     if (!redirectOnUnauthenticated) return;
