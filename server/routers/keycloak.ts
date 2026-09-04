@@ -19,7 +19,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { protectedProcedure, keycloakAdminProcedure, router } from "../_core/trpc";
+import { protectedProcedure, keycloakAdminProcedure, publicProcedure, router } from "../_core/trpc";
 import { getKeycloakConfig, upsertKeycloakConfig, logAuditEvent } from "../db";
 import {
   getJwksStatus,
@@ -251,6 +251,84 @@ export const keycloakRouter = router({
     }),
 
   /**
+   * Refresh an SSO session via the Keycloak refresh_token grant.
+   *
+   * A8 remediation: access tokens expire (realm "Access Token Lifespan",
+   * typically minutes) while the Keycloak SSO session remains valid. Without
+   * a server-side refresh path, users were bounced to "Sign in to continue"
+   * mid-use roughly every token lifetime. This endpoint lets the SPA silently
+   * renew tokens using the refresh token it received from exchangeCode.
+   * It is intentionally NOT behind protectedProcedure: the caller's access
+   * token may already be expired — the refresh token itself is the credential
+   * and is validated by Keycloak (fail-closed: Keycloak rejects invalid or
+   * revoked refresh tokens and we surface an error).
+   */
+  refreshSession: publicProcedure
+    .input(z.object({
+      refreshToken: z.string().min(10),
+    }))
+    .mutation(async ({ input }) => {
+      const keycloakRealmUrl =
+        process.env.KEYCLOAK_REALM_URL || "http://keycloak:8080/realms/tradegateway";
+      const clientId =
+        process.env.KEYCLOAK_CLIENT_ID || "tradegateway-backend";
+      const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET || "";
+
+      const tokenUrl = `${keycloakRealmUrl}/protocol/openid-connect/token`;
+
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: input.refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+      });
+
+      let res: Response;
+      try {
+        res = await fetch(tokenUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "Identity provider is currently unavailable; please sign in again.",
+        });
+      }
+
+      if (!res.ok) {
+        // Invalid/expired/revoked refresh token — client must re-authenticate.
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Session refresh failed; please sign in again.",
+        });
+      }
+
+      const tokens = await res.json() as {
+        access_token: string;
+        refresh_token?: string;
+        id_token?: string;
+        expires_in: number;
+        token_type: string;
+      };
+
+      const user = await validateKeycloakToken(tokens.access_token).catch(() => null);
+
+      return {
+        accessToken: tokens.access_token,
+        // Keycloak rotates refresh tokens when "Revoke Refresh Token" is on;
+        // always return the newest one (fall back to the caller's if omitted).
+        refreshToken: tokens.refresh_token ?? input.refreshToken,
+        idToken: tokens.id_token ?? null,
+        expiresIn: tokens.expires_in,
+        tokenType: tokens.token_type,
+        user,
+      };
+    }),
+
+  /**
    * Introspect a Keycloak token via the introspection endpoint.
    * Returns active status, expiry, and claims.
    * Admin only.
@@ -331,11 +409,11 @@ export const keycloakRouter = router({
   /**
    * Get the health and status of the keycloak-svc Go microservice.
    */
-  getServiceStatus: protectedProcedure.query(async () => {
+  getServiceStatus: keycloakAdminProcedure.query(async () => {
     const available = await keycloakSvcAvailable();
     return {
       available,
-      serviceUrl: KEYCLOAK_SVC_URL,
+      // Never disclose internal service URLs/hostnames in client-visible payloads.
       checkedAt: new Date().toISOString(),
     };
   }),

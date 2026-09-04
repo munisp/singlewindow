@@ -2,13 +2,14 @@
  * apisixAuditRouter — v89: APISIX route change audit trail.
  */
 import { z } from "zod";
-import { router, keycloakAdminProcedure, protectedProcedure } from "../_core/trpc";
+import { router, keycloakAdminProcedure } from "../_core/trpc";
 
 export const apisixAuditRouter = router({
   /**
    * v89: Get APISIX route audit log entries.
+   * Admin-only: gateway route configuration is internal infrastructure detail.
    */
-  getRouteAudit: protectedProcedure
+  getRouteAudit: keycloakAdminProcedure
     .input(z.object({ routeId: z.string().optional(), limit: z.number().int().min(1).max(500).default(100) }))
     .query(async ({ input }) => {
       const { getApisixRouteAuditLog } = await import("../db");
@@ -41,7 +42,7 @@ export const apisixAuditRouter = router({
   /**
    * v89: Get distinct route IDs for filter dropdown.
    */
-  getRouteIds: protectedProcedure.query(async () => {
+  getRouteIds: keycloakAdminProcedure.query(async () => {
     const { getApisixRouteAuditLog } = await import("../db");
     const rows = await getApisixRouteAuditLog({ limit: 500 });
     const ids = [...new Set(rows.map(r => r.routeId))].sort();

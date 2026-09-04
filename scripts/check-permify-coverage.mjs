@@ -112,6 +112,10 @@ const EXEMPT_ROUTERS = new Set([
   "knowledgeGraph", "riskModel", "ai", "traderRatings", "traderScorecard",
   // Infra jobs + streams (no domain resource):
   "lakehouse", "stream", "apiChangelog",
+  // Caller-scoped self-service and signed-protocol exchange surfaces (no
+  // shared domain resource — callers manage only their own records, same
+  // posture as the exempt webhooks router):
+  "marketplace", "mswExchange", "secureChain",
 ]);
 
 function parseSchema(src) {

@@ -50,11 +50,12 @@ async function getPortProfiles(): Promise<Record<string, typeof PORT_PROFILES[st
     const result: Record<string, typeof PORT_PROFILES[string]> = {};
     for (const p of dbPorts) {
       result[p.port_code] = {
-        name: p.port_name,
-        country: p.country,
-        baseVessels: Math.round(Number(p.avg_vessels)),
-        baseDwellHours: Math.round(Number(p.avg_wait)),
-        baseDeclarations: Math.round(Number(p.avg_backlog)),
+        name: String(p.port_name ?? p.port_code),
+        country: normalizeCountryCode(p.country),
+        // Guard against NaN/non-numeric aggregates — never propagate NaN.
+        baseVessels: Math.round(toFiniteNumber(p.avg_vessels, 12)),
+        baseDwellHours: Math.round(toFiniteNumber(p.avg_wait, 8)),
+        baseDeclarations: Math.round(toFiniteNumber(p.avg_backlog, 100)),
         slaThreshold: 70,
       };
     }
@@ -104,6 +105,43 @@ export type SlaBreachAlert = {
   message: string;
   createdAt: string;
 };
+
+// ─── DATA-QUALITY GUARDS (A7 remediation) ────────────────────────────────────
+// DB aggregates can surface NaN (Postgres real/numeric columns may store 'NaN')
+// or non-numeric strings. Every numeric shaping path must go through these
+// helpers so junk never reaches the client as "NaN%".
+
+/** Coerce a value to a finite number; non-finite input yields `fallback`. */
+export function toFiniteNumber(v: unknown, fallback = 0): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Normalize a country value to ISO-3166 alpha-3 uppercase.
+ * Handles alpha-2 codes, already-valid alpha-3 codes, and known
+ * truncations/names produced by bad upstream mappings (e.g. "Nig" from a
+ * varchar(3) truncation of "Nigeria"). Unknown values are returned
+ * uppercased unchanged (never fabricated).
+ */
+const COUNTRY_ALIASES: Record<string, string> = {
+  NG: "NGA", NIG: "NGA", NIGERIA: "NGA",
+  GH: "GHA", GHANA: "GHA",
+  KE: "KEN", KENYA: "KEN",
+  RW: "RWA", RWANDA: "RWA",
+  SG: "SGP", SINGAPORE: "SGP",
+  TZ: "TZA", TANZANIA: "TZA",
+  BJ: "BEN", BENIN: "BEN",
+  TG: "TGO", TOGO: "TGO",
+  CI: "CIV", CAMEROON: "CMR", CM: "CMR",
+  ZA: "ZAF", "SOUTH AFRICA": "ZAF",
+};
+export function normalizeCountryCode(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const up = s.toUpperCase();
+  return COUNTRY_ALIASES[up] ?? up;
+}
 
 // ─── PREDICTION ENGINE ────────────────────────────────────────────────────────
 
@@ -156,13 +194,24 @@ export function predictCongestionScore(params: {
   const pendingDeclarations = Math.round(baseDeclarations * seasonality * (1 + noise));
 
   // Score formula: weighted combination of vessel density, dwell time, and declaration backlog
-  const vesselNorm = Math.min(vesselCount / (baseVessels * 1.5), 1);
-  const dwellNorm = Math.min(avgDwellHours / (baseDwellHours * 1.5), 1);
-  const declNorm = Math.min(pendingDeclarations / (baseDeclarations * 1.5), 1);
+  // Guard every denominator: a zero/NaN base must not produce NaN scores.
+  const safeNorm = (value: number, base: number) => {
+    const denom = base * 1.5;
+    if (!Number.isFinite(value) || !Number.isFinite(denom) || denom <= 0) return 0;
+    return Math.min(value / denom, 1);
+  };
+  const vesselNorm = safeNorm(vesselCount, baseVessels);
+  const dwellNorm = safeNorm(avgDwellHours, baseDwellHours);
+  const declNorm = safeNorm(pendingDeclarations, baseDeclarations);
 
   const score = Math.round((vesselNorm * 0.40 + dwellNorm * 0.35 + declNorm * 0.25) * 100);
 
-  return { score: Math.min(100, Math.max(0, score)), vesselCount, avgDwellHours, pendingDeclarations };
+  return {
+    score: Math.min(100, Math.max(0, toFiniteNumber(score, 0))),
+    vesselCount: Math.max(0, toFiniteNumber(vesselCount, 0)),
+    avgDwellHours: Math.max(0, toFiniteNumber(avgDwellHours, 0)),
+    pendingDeclarations: Math.max(0, toFiniteNumber(pendingDeclarations, 0)),
+  };
 }
 
 export function scoreToLevel(score: number): CongestionLevel {
@@ -353,9 +402,18 @@ export const portCongestionRouter = router({
     const profiles = await getPortProfiles();
     const forecasts = Object.entries(profiles).map(([code, profile]) => buildPortForecastFromProfile(code, profile));
     const totalAlerts = forecasts.reduce((sum, f) => sum + f.slaBreachAlerts.length, 0);
-    const criticalPorts = forecasts.filter((f) => f.currentLevel === "critical").length;
+    // A port counts as critical when it is critically congested now OR has a
+    // critical-severity SLA breach alert in the forecast window — keeps this
+    // count consistent with the alert list (never "0 critical" alongside
+    // critical alerts).
+    const criticalPorts = forecasts.filter(
+      (f) => f.currentLevel === "critical" || f.slaBreachAlerts.some((a) => a.severity === "critical")
+    ).length;
     const congestedPorts = forecasts.filter((f) => f.currentLevel === "congested").length;
-    const avgScore = Math.round(forecasts.reduce((sum, f) => sum + f.currentScore, 0) / forecasts.length);
+    const finiteScores = forecasts.map((f) => f.currentScore).filter(Number.isFinite);
+    const avgScore = finiteScores.length > 0
+      ? Math.round(finiteScores.reduce((sum, s) => sum + s, 0) / finiteScores.length)
+      : 0;
     return {
       totalPorts: forecasts.length,
       criticalPorts,

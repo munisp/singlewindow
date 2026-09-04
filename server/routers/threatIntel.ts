@@ -5,22 +5,33 @@ import { TRPCError } from "@trpc/server";
 const OPENCTI_SVC_URL = process.env.OPENCTI_SVC_URL ?? "http://opencti-svc:8099";
 
 async function callOpenCTI<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const res = await fetch(`${OPENCTI_SVC_URL}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(10_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${OPENCTI_SVC_URL}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    // Honest degraded mode: upstream threat-intel service unreachable — typed
+    // error with a clear message, never a raw "fetch failed" stack.
+    const timeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: `Threat intelligence service is currently unavailable (${timeout ? "timeout" : "connection failed"}). Try again later.`,
+    });
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "unknown error");
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `opencti-svc error: ${text}` });
+    throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: `Threat intelligence service returned an error (HTTP ${res.status}).`, cause: text });
   }
   return res.json() as Promise<T>;
 }
 
 export const threatIntelRouter = router({
   // Get all STIX indicators
-  getIndicators: protectedProcedure.query(async () => {
+  getIndicators: adminProcedure.query(async () => {
     return callOpenCTI<{
       indicators: unknown[];
       count: number;
@@ -128,7 +139,7 @@ export const threatIntelRouter = router({
     }),
 
   // Get threat intelligence statistics
-  getStats: protectedProcedure.query(async () => {
+  getStats: adminProcedure.query(async () => {
     return callOpenCTI<{
       total_indicators: number;
       total_actors: number;

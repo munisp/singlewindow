@@ -169,6 +169,35 @@ async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown
 const HIGH_RISK_FLAGS = ["IRN","PRK","SYR","RUS","BLR"];
 const MED_RISK_FLAGS = ["LBY","SOM","SDN","YEM","MMR"];
 
+// ─── DATA-QUALITY GUARDS (A7 remediation) ────────────────────────────────────
+/** Cargo/vessel speeds above this are physically implausible sensor junk. */
+export const MAX_PLAUSIBLE_SPEED_KN = 30;
+
+/**
+ * Clamp an AIS speed to a physically plausible range. NaN/non-numeric or
+ * negative readings become 0 (stationary); readings above the plausible max
+ * are clamped rather than displayed as impossible values.
+ */
+export function clampVesselSpeedKn(v: unknown): number {
+  const n = typeof v === "number" ? v : Number(v ?? 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, MAX_PLAUSIBLE_SPEED_KN);
+}
+
+/**
+ * Sanitize an ETA timestamp. Invalid dates become null. A past ETA for a
+ * vessel that is still underway is stale/contradictory upstream data — it is
+ * reported honestly as unknown (null) rather than implying "Arrived" while
+ * the vessel moves.
+ */
+export function sanitizeEta(eta: unknown, status: string, now: Date = new Date()): string | null {
+  if (eta === null || eta === undefined || eta === "") return null;
+  const d = new Date(eta as string);
+  if (Number.isNaN(d.getTime())) return null;
+  if (status === "underway" && d.getTime() < now.getTime()) return null;
+  return d.toISOString();
+}
+
 async function latestVesselRows(limit = 200) {
   return pgQuery(
     `SELECT DISTINCT ON (mmsi) mmsi, vessel_name, imo_number, latitude, longitude,
@@ -181,8 +210,9 @@ async function latestVesselRows(limit = 200) {
 
 function mapVesselRow(r: any) {
   const flag = String(r.flag_country ?? "");
-  const speed = Number(r.speed ?? 0);
+  const speed = clampVesselSpeedKn(r.speed);
   const mmsi = String(r.mmsi);
+  const status = (speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway") as "moored" | "anchored" | "underway";
   return {
     id: mmsi,
     mmsi,
@@ -193,9 +223,9 @@ function mapVesselRow(r: any) {
     lon: Number(r.longitude),
     speed,
     heading: Number(r.heading ?? 0),
-    status: (speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway") as "moored" | "anchored" | "underway",
+    status,
     destinationPort: String(r.destination_port ?? ""),
-    eta: r.eta ? new Date(r.eta).toISOString() : null,
+    eta: sanitizeEta(r.eta, status),
     cargoType: String(r.cargo_type ?? "General"),
     flagCountry: flag,
     riskFlag: (HIGH_RISK_FLAGS.includes(flag) ? "red" : MED_RISK_FLAGS.includes(flag) ? "amber" : "green") as "green" | "amber" | "red",
@@ -333,7 +363,10 @@ export const cargoTrackingRouter = router({
           message: "TRACKING_STORE_UNAVAILABLE: persisted vessel tracking events could not be queried.",
         };
       }
-      const waypoints = rows as unknown as RouteWaypoint[];
+      const waypoints = (rows as unknown as RouteWaypoint[]).map((w) => ({
+        ...w,
+        speed: clampVesselSpeedKn((w as { speed?: unknown }).speed),
+      }));
       return {
         waypoints,
         vessel: null,
@@ -511,7 +544,8 @@ export const cargoTrackingRouter = router({
       const medRisk = ["LBY","SOM","SDN","YEM","MMR"];
       return rows.map((r: any) => {
         const flag = String(r.flag_country ?? "");
-        const speed = Number(r.speed ?? 0);
+        const speed = clampVesselSpeedKn(r.speed);
+        const status = speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway";
         return {
           mmsi: String(r.mmsi),
           vesselName: String(r.vessel_name),
@@ -520,9 +554,9 @@ export const cargoTrackingRouter = router({
           lon: Number(r.longitude),
           speed,
           heading: Number(r.heading ?? 0),
-          status: speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway",
+          status,
           destinationPort: String(r.destination_port ?? ""),
-          eta: r.eta ? new Date(r.eta).toISOString() : null,
+          eta: sanitizeEta(r.eta, status),
           cargoType: String(r.cargo_type ?? "General"),
           flagCountry: flag,
           riskFlag: highRisk.includes(flag) ? "red" : medRisk.includes(flag) ? "amber" : "green",
@@ -633,7 +667,8 @@ async function _refreshVesselCache(): Promise<void> {
       const medRisk = ["RU", "BY", "VE", "MM", "RUS", "BLR", "MMR"];
       _vesselCache = rows.map((r: any) => {
         const flag = String(r.flag_country ?? "");
-        const speed = Number(r.speed ?? 0);
+        const speed = clampVesselSpeedKn(r.speed);
+        const status = speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway";
         return {
           mmsi: String(r.mmsi),
           vesselName: String(r.vessel_name),
@@ -642,9 +677,9 @@ async function _refreshVesselCache(): Promise<void> {
           lon: Number(r.longitude),
           speed,
           heading: Number(r.heading ?? 0),
-          status: speed < 0.5 ? "moored" : speed < 2 ? "anchored" : "underway",
+          status,
           destinationPort: String(r.destination_port ?? ""),
-          eta: r.eta ? new Date(r.eta as string).toISOString() : null,
+          eta: sanitizeEta(r.eta, status),
           cargoType: String(r.cargo_type ?? "General"),
           flagCountry: flag,
           riskFlag: highRisk.includes(flag) ? "red" : medRisk.includes(flag) ? "amber" : "green",

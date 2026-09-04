@@ -342,7 +342,7 @@ function stringValue(col: Column, ctx: GenContext, name: string, key: string): s
   if (/company|organisation|organization|operator|importer|exporter|consignee|shipper|agent_name|carrier/.test(name))
     return companyName(rng);
   if (/vessel|ship_?name/.test(name)) return VESSEL_REGISTRY[fnv1a(`${table}.${rowIndex}`) % VESSEL_REGISTRY.length].name;
-  if (/(^|_)(first_?name|last_?name|full_?name|officer_?name|contact_?name|created_?by_?name)/.test(name) || name === "name" || name.endsWith("_name") && !/file|user_?name|table|column|event|workflow|feed|queue|topic|rule|template|job|type|method|channel/.test(name))
+  if (/(^|_)(first_?name|last_?name|full_?name|officer_?name|contact_?name|created_?by_?name)/.test(name) || name === "name" || name.endsWith("_name") && !/file|user_?name|table|column|event|workflow|feed|queue|topic|rule|template|job|type|method|channel|port|terminal|berth|vessel/.test(name))
     return personName(rng);
   if (/phone|msisdn/.test(name)) return `+234${rng.pick(["803", "805", "807", "809", "810", "813", "816", "903"])}${String(rng.int(1000000, 9999999))}`;
   if (/imo/.test(name)) return VESSEL_REGISTRY[fnv1a(`${table}.${rowIndex}`) % VESSEL_REGISTRY.length].imo;
@@ -356,7 +356,14 @@ function stringValue(col: Column, ctx: GenContext, name: string, key: string): s
   if (/bank/.test(name) && col.dataType === "string") return rng.pick(BANKS_NG);
   if (/insur/.test(name) && col.dataType === "string") return rng.pick(INSURERS_NG);
   if (/currency/.test(name)) return "NGN";
-  if (/country/.test(name)) return name.includes("code") ? (col.columnType === "PgVarchar" && (col as any).length === 2 ? "NG" : "NGA") : "Nigeria";
+  if (/country/.test(name)) {
+    // ISO-3166 codes must respect the column length: alpha-2 for varchar(2),
+    // alpha-3 for varchar(3) (prevents junk like "Nig" from truncation).
+    const len = col.columnType === "PgVarchar" ? ((col as any).length as number | undefined) : undefined;
+    if (len === 2) return "NG";
+    if (len !== undefined && len <= 3) return "NGA";
+    return name.includes("code") ? "NGA" : "Nigeria";
+  }
   if (/cargo|commodity|goods_?desc/.test(name)) return rng.pick(CARGO_DESC);
   if (/latitude|^lat$/.test(name)) return (4 + rng.float() * 10).toFixed(6);
   if (/longitude|^lng$|^lon$/.test(name)) return (2.5 + rng.float() * 12).toFixed(6);
@@ -415,6 +422,8 @@ function typedValue(col: Column, ctx: GenContext, name: string, key: string): un
       return col.columnType === "PgBigInt64" ? kobo : Number(kobo);
     }
     case "PgReal":
+      // AIS speed columns: physically plausible vessel speeds only (0–22 kn).
+      if (/speed|sog|velocity/.test(name)) return Number((rng.float() * 22).toFixed(1));
       return Number((rng.float() * 100).toFixed(3));
     case "PgNumeric": {
       if (/lat|long|lng|lon/.test(name)) return (4 + rng.float() * 10).toFixed(6);
@@ -431,7 +440,7 @@ function typedValue(col: Column, ctx: GenContext, name: string, key: string): un
       return (rng.float() * 10000).toFixed(4);
     }
     case "PgTimestamp": {
-      const d = /expir|valid_?until|due|end/.test(name)
+      const d = /expir|valid_?until|due|end|^eta$|_eta$/.test(name)
         ? daysAfter(rng, new Date(SEED_EPOCH), 1, 180)
         : daysBeforeEpoch(rng, 90);
       // timestamp(mode:'string') expects an ISO string driver value.
