@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+import { countryName, humanizeLabel } from "@/lib/formatters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -244,9 +245,9 @@ export default function TraderDeclarations() {
                           <td className="p-3 font-mono text-xs text-muted-foreground">{d.ucr ?? "—"}</td>
                           <td className="p-3 text-xs capitalize">{d.declarationType}</td>
                           <td className="p-3 font-mono text-xs">{d.hsCode}</td>
-                          <td className="p-3 text-xs">{d.countryOfOrigin}</td>
+                          <td className="p-3 text-xs" title={d.countryOfOrigin}>{countryName(d.countryOfOrigin)}</td>
                           <td className="p-3 font-semibold">{Number(d.invoiceValue ?? 0).toLocaleString()}</td>
-                          <td className="p-3"><Badge variant="outline" className={STATUS_STYLES[d.status] ?? ""}>{d.status?.replace(/_/g, " ")}</Badge></td>
+                          <td className="p-3"><Badge variant="outline" className={STATUS_STYLES[d.status] ?? ""} title={d.status}>{humanizeLabel(d.status)}</Badge></td>
                           <td className="p-3">{d.riskLane ? <Badge variant="outline" className={LANE_STYLES[d.riskLane] ?? ""}>{d.riskLane.toUpperCase()}</Badge> : "—"}</td>
                           <td className="p-3 text-xs text-muted-foreground">{d.createdAt ? new Date(d.createdAt).toLocaleDateString() : "—"}</td>
                         </tr>
@@ -267,7 +268,7 @@ export default function TraderDeclarations() {
                         <span className="font-mono text-xs font-semibold">{d.declarationNumber}</span>
                         <div className="flex gap-1.5 shrink-0">
                           <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${STATUS_STYLES[d.status] ?? ""}`}>
-                            {d.status?.replace(/_/g, " ")}
+                            {humanizeLabel(d.status)}
                           </Badge>
                           {d.riskLane && (
                             <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${LANE_STYLES[d.riskLane] ?? ""}`}>
@@ -278,7 +279,7 @@ export default function TraderDeclarations() {
                       </div>
                       <p className="text-xs text-muted-foreground truncate">{d.goodsDescription || d.hsCode}</p>
                       <div className="flex items-center justify-between mt-1.5">
-                        <span className="text-xs text-muted-foreground">{d.countryOfOrigin} · {d.portOfEntry}</span>
+                        <span className="text-xs text-muted-foreground" title={d.countryOfOrigin}>{countryName(d.countryOfOrigin)} · {d.portOfEntry}</span>
                         <span className="text-xs font-medium">${Number(d.invoiceValue ?? 0).toLocaleString()}</span>
                       </div>
                     </div>
@@ -345,7 +346,7 @@ function AmendmentHistoryCard() {
                 <div key={a.id} className="px-4 py-3 flex items-start gap-3">
                   <Badge variant="outline" className={`text-[10px] px-1.5 py-0.5 flex items-center gap-1 shrink-0 ${AMENDMENT_STATUS_STYLES[a.status] ?? ""}`}>
                     {AMENDMENT_STATUS_ICONS[a.status]}
-                    {a.status}
+                    <span title={a.status}>{humanizeLabel(a.status)}</span>
                   </Badge>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium">Declaration #{a.declarationId} — {a.reason}</p>

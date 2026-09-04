@@ -242,9 +242,9 @@ function Router() {
       </Route>
 
       {/* OGA Portal */}
-      <Route path="/app/oga" component={OGAPortal} />
+      <Route path="/app/oga">{() => <OGAGuard><OGAPortal /></OGAGuard>}</Route>
       <Route path="/app/nl-query">{() => <Suspense fallback={<LazyFallback />}><NLFinancialQuery /></Suspense>}</Route>
-      <Route path="/app/oga/expiry-calendar" component={OGAExpiryCalendar} />
+      <Route path="/app/oga/expiry-calendar">{() => <OGAGuard><OGAExpiryCalendar /></OGAGuard>}</Route>
 
       {/* Admin Console — B9: AdminGuard wraps all /app/admin routes */}
       <Route path="/app/admin"><AdminGuard><AdminConsole /></AdminGuard></Route>
@@ -326,15 +326,24 @@ function Router() {
 
       {/* Fraud Network Visualisation */}
       <Route path="/app/admin/fraud-network">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><FraudNetwork /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Fraud Cases & Risk Alerts */}
       <Route path="/app/admin/fraud-cases">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><FraudCases /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/risk-alerts">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><RiskAlerts /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Trader Certificate Archive */}
@@ -344,7 +353,10 @@ function Router() {
 
       {/* Officer Workload Dashboard */}
       <Route path="/app/admin/officer-workload">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><OfficerWorkload /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Notification Centre (Sprint 15) */}
@@ -359,7 +371,10 @@ function Router() {
 
       {/* SLA Breach Escalation (Sprint 15) */}
       <Route path="/app/admin/sla-breach">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><SLABreachDashboard /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* AI Assistant */}
@@ -385,17 +400,26 @@ function Router() {
 
       {/* Sprint 32 — Identity Provider (Keycloak) */}
       <Route path="/app/admin/identity-provider">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><IdentityProvider /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Sprint 37 — Bonded Warehouse Management */}
       <Route path="/app/port/bonded-warehouse">
+        <CustomsGuard>
         <Suspense fallback={<LazyFallback />}><BondedWarehouse /></Suspense>
+      
+        </CustomsGuard>
       </Route>
 
       {/* Sprint 38 — ASEAN Single Window G2G */}
       <Route path="/app/admin/asean-sw">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><AseanSingleWindow /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Sprint 39 — WCO CEN Alerts */}
@@ -447,7 +471,10 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><TradeAnalytics /></Suspense>
       </Route>
       <Route path="/app/admin/tenants">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><TenantPortal /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Phase 8 — PCS Trader Portal */}
@@ -476,7 +503,10 @@ function Router() {
 
       {/* Sprint 49 — Kubecost Cost Management */}
       <Route path="/app/admin/costs">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><CostManagement /></Suspense>
+      
+        </AdminGuard>
       </Route>
 
       {/* Sprint 54 — Wazuh SOC Dashboard */}
@@ -491,7 +521,10 @@ function Router() {
 
       {/* Sprint 56 — Bonded Warehouse Management */}
       <Route path="/app/port/bonded-warehouse-mgmt">
+        <CustomsGuard>
         <Suspense fallback={<LazyFallback />}><BondedWarehouseManagement /></Suspense>
+      
+        </CustomsGuard>
       </Route>
 
       {/* Sprint 66 — Cargo Tracking Real-Time Map */}
@@ -514,23 +547,38 @@ function Router() {
 
       {/* Sprint 72-74 — Onboarding Analytics, Geofence Management, Webhook Management, API Changelog */}
       <Route path="/app/admin/onboarding-analytics">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><OnboardingAnalyticsDashboard /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/geofences">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><GeofenceManagement /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/webhooks">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><WebhookManagement /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/developer/changelog">
         <Suspense fallback={<LazyFallback />}><ApiChangelog /></Suspense>
       </Route>
       {/* Sprint 78 — Rules of Origin, Pilot Dashboard, Executive Dashboard */}
       <Route path="/app/oga/rules-of-origin">
+        <OGAGuard>
         <Suspense fallback={<LazyFallback />}><RulesOfOrigin /></Suspense>
+      
+        </OGAGuard>
       </Route>
       <Route path="/app/admin/pilot-dashboard">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><PilotDashboard /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/executive/dashboard">
         <ExecutiveGuard><Suspense fallback={<LazyFallback />}><ExecutiveDashboard /></Suspense></ExecutiveGuard>
@@ -540,27 +588,48 @@ function Router() {
       </Route>
       {/* Sprint 86 — Compliance Email Settings */}
       <Route path="/app/admin/compliance-email-settings">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><ComplianceEmailSettings /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/go-live-checklist">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><GoLiveChecklist /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/service-health">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><ServiceHealth /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/audit-log">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><AuditLog /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/settings">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><AdminSettings /></Suspense>
+      
+        </AdminGuard>
       </Route>
       {/* Sprint 83/84 — Certificate Revocation Audit Log */}
       <Route path="/app/admin/cert-revocations">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><CertRevocationLog /></Suspense>
+      
+        </AdminGuard>
       </Route>
       {/* Production Readiness Checklist */}
       <Route path="/app/admin/production-checklist">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><AdminProductionChecklist /></Suspense>
+      
+        </AdminGuard>
       </Route>
       {/* v31 — New production pages */}
       <Route path="/app/payments">
@@ -573,7 +642,10 @@ function Router() {
         <Suspense fallback={<LazyFallback />}><AEOApplications /></Suspense>
       </Route>
       <Route path="/app/admin/bulk-export">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><BulkExport /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/developer/webhooks">
         <Suspense fallback={<LazyFallback />}><WebhookLogs /></Suspense>
@@ -582,7 +654,10 @@ function Router() {
         <SecurityGuard><Suspense fallback={<LazyFallback />}><SecurityAlerts /></Suspense></SecurityGuard>
       </Route>
       <Route path="/app/admin/tenants-mgmt">
+        <AdminGuard>
         <Suspense fallback={<LazyFallback />}><TenantManagement /></Suspense>
+      
+        </AdminGuard>
       </Route>
       <Route path="/app/admin/tenant-branding">
         <AdminGuard><Suspense fallback={<LazyFallback />}><TenantBranding /></Suspense></AdminGuard>
@@ -690,7 +765,9 @@ function Router() {
         <Route path="/app/ucr">{() => <Suspense fallback={<LazyFallback />}><UCRManagement /></Suspense>}</Route>
         <Route path="/app/manifests">{() => <Suspense fallback={<LazyFallback />}><ManifestManagement /></Suspense>}</Route>
         <Route path="/app/trade-analytics">{() => <Suspense fallback={<LazyFallback />}><TradeAnalyticsDashboard /></Suspense>}</Route>
-        <Route path="/app/ncs-nrs">{() => <Suspense fallback={<LazyFallback />}><NCSNRSDashboard /></Suspense>}</Route>
+        <Route path="/app/ncs-nrs">
+        {() => <ExecutiveGuard><Suspense fallback={<LazyFallback />}><NCSNRSDashboard /></Suspense></ExecutiveGuard>}
+      </Route>
         <Route component={NotFound} />
     </Switch>
   );

@@ -31,6 +31,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import { humanizeLabel } from "@/lib/formatters";
 
 const WINDOWS = [
   { label: "Next 30 days", value: 30 },
@@ -288,7 +289,7 @@ export default function OGAExpiryCalendar() {
                             {p.declarationNumber}
                           </td>
                           <td className="p-3 text-xs text-muted-foreground">
-                            {p.permitType ?? "Standard"}
+                            <span title={p.permitType ?? undefined}>{humanizeLabel(p.permitType, "Standard")}</span>
                           </td>
                           <td className="p-3">
                             <Badge

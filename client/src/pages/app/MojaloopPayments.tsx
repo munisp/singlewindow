@@ -4,6 +4,7 @@
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { trpc } from "@/lib/trpc";
+import QueryErrorState from "@/components/QueryErrorState";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,10 +49,10 @@ export default function MojaloopPayments() {
   const { data: mojaStatus } = trpc.mojaloop.getIntegrationStatus.useQuery();
   const { data: fsps } = trpc.mojaloop.getSupportedFSPs.useQuery();
   const fspList = fsps ? [...(fsps as readonly any[])] : [];
-  const { data, isLoading, refetch, isError } = trpc.payments.listAll.useQuery({
+  const { data, isLoading, refetch, isError, error } = trpc.payments.listAll.useQuery({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
-  });
+  }, { retry: 1 });
 
   const initiateMutation = trpc.mojaloop.initiatePayment.useMutation({
     onSuccess: (r) => {
@@ -86,8 +87,11 @@ export default function MojaloopPayments() {
   return (
     <DashboardLayout title="Payment Flows">
       {isError && (
-        <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-          Failed to load data. Please refresh the page.
+        <div className="mx-6 mt-4">
+          <QueryErrorState
+            error={error ?? new Error("Failed to load payment data")}
+            onRetry={() => refetch()}
+          />
         </div>
       )}
       <div className="space-y-6 max-w-6xl">

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { fromSelectValue, normalizeSelectOptions, SELECT_ALL_VALUE, toSelectValue } from "@/lib/normalizeSelectOptions";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { RefreshCw, MapPin, Ship, AlertTriangle, TrendingUp, Anchor, Wifi, WifiOff, Navigation, Flag, Radio, Zap } from "lucide-react";
@@ -225,14 +226,14 @@ function VesselTrackingPanel({ selectedPort }: { selectedPort: string | null }) 
             onChange={e => setSearch(e.target.value)}
             className="h-8 text-sm"
           />
-          <Select value={portFilter} onValueChange={setPortFilter}>
+          <Select value={toSelectValue(portFilter)} onValueChange={v => setPortFilter(fromSelectValue(v))}>
             <SelectTrigger className="h-8 w-48 text-sm">
               <SelectValue placeholder="All ports" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All ports</SelectItem>
-              {(portList ?? []).map(p => (
-                <SelectItem key={p.portCode} value={p.portCode}>{p.portCode} — {p.portName}</SelectItem>
+              <SelectItem value={SELECT_ALL_VALUE}>All ports</SelectItem>
+              {normalizeSelectOptions(portList ?? [], p => p.portCode, p => `${p.portCode} — ${p.portName}`).map(o => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>

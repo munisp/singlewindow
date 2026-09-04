@@ -6,6 +6,7 @@
  */
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
+import { humanizeLabel } from "@/lib/formatters";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Badge } from "@/components/ui/badge";
@@ -304,7 +305,7 @@ function FinancePaymentQueue() {
                   <SelectContent>
                     {["all", "hot", "warm", "cold"].map((t) => (
                       <SelectItem key={t} value={t}>
-                        {t === "all" ? "All Tiers" : t.charAt(0).toUpperCase() + t.slice(1)}
+                        {t === "all" ? "All Tiers" : humanizeLabel(t)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -341,7 +342,7 @@ function FinancePaymentQueue() {
                         <td className="px-4 py-2.5 font-mono text-xs">{job.jobId}</td>
                         <td className="px-4 py-2.5">
                           <span className={`px-2 py-0.5 rounded-full text-xs border font-medium ${TIER_COLORS[job.tier]}`}>
-                            {job.tier.toUpperCase()}
+                            <span title={job.tier}>{humanizeLabel(job.tier)}</span>
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-muted-foreground text-xs">

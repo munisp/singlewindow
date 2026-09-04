@@ -241,8 +241,8 @@ export default function BondedWarehouse() {
                       <TableCell className="font-mono text-xs">{w.licence_number}</TableCell>
                       <TableCell className="font-medium">{w.name}</TableCell>
                       <TableCell>{w.port_code}</TableCell>
-                      <TableCell>{w.max_capacity_m3.toLocaleString()}</TableCell>
-                      <TableCell>{w.used_capacity_m3.toLocaleString()}</TableCell>
+                      <TableCell>{(w.max_capacity_m3 ?? 0).toLocaleString()}</TableCell>
+                      <TableCell>{(w.used_capacity_m3 ?? 0).toLocaleString()}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={statusColor(w.status)}>{w.status}</Badge>
                       </TableCell>
@@ -285,7 +285,7 @@ export default function BondedWarehouse() {
                       <TableCell>{item.hs_code}</TableCell>
                       <TableCell className="max-w-[180px] truncate">{item.description}</TableCell>
                       <TableCell>{item.volume_m3}</TableCell>
-                      <TableCell className="font-medium text-amber-400">${item.duty_owed.toLocaleString()}</TableCell>
+                      <TableCell className="font-medium text-amber-400">${(item.duty_owed ?? 0).toLocaleString()}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={statusColor(item.status)}>{item.status}</Badge>
                       </TableCell>
@@ -384,7 +384,7 @@ export default function BondedWarehouse() {
             <div className="space-y-3">
               <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
                 <div className="flex justify-between"><span className="text-muted-foreground">UCR</span><span className="font-mono">{selectedItem.ucr}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Duty Owed</span><span className="font-medium text-amber-400">${selectedItem.duty_owed.toLocaleString()}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Duty Owed</span><span className="font-medium text-amber-400">${(selectedItem.duty_owed ?? 0).toLocaleString()}</span></div>
               </div>
               <div><Label>Duty Paid (USD)</Label><Input type="number" value={relDutyPaid} onChange={(e) => setRelDutyPaid(e.target.value)} /></div>
               <div><Label>Payment Reference</Label><Input value={relPaymentRef} onChange={(e) => setRelPaymentRef(e.target.value)} placeholder="MOJ-2024-XXXXX" /></div>

@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import { humanizeLabel } from "@/lib/formatters";
 
 const formatNGN = (v: number) =>
   v >= 1_000_000_000 ? `₦${(v / 1_000_000_000).toFixed(2)}B`
@@ -283,12 +284,12 @@ export default function NCSNRSDashboard() {
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                         EXCEPTION_BADGE[ex.exception_type] ?? "bg-gray-100 text-gray-700"
                       }`}>
-                        {ex.exception_type}
+                        <span title={ex.exception_type}>{humanizeLabel(ex.exception_type)}</span>
                       </span>
                     </td>
                     <td className="px-3 py-2">
                       <span className={`text-xs ${SEVERITY_CLASSES[ex.severity] ?? "text-gray-500"}`}>
-                        {ex.severity}
+                        <span title={ex.severity}>{humanizeLabel(ex.severity)}</span>
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-700 max-w-xs truncate">{ex.description}</td>

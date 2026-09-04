@@ -469,7 +469,7 @@ export default function BondedWarehouseManagement() {
                           <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground">Utilisation</span>
                             <span className={utilPct >= 90 ? "text-red-600 font-medium" : utilPct >= 70 ? "text-amber-600 font-medium" : "text-green-700"}>
-                              {wh.usedCbm.toLocaleString()} / {wh.capacityCbm.toLocaleString()} m³ ({utilPct}%)
+                              {(wh.usedCbm ?? 0).toLocaleString()} / {(wh.capacityCbm ?? 0).toLocaleString()} m³ ({utilPct}%)
                             </span>
                           </div>
                           <Progress
@@ -478,7 +478,7 @@ export default function BondedWarehouseManagement() {
                           />
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">Bond</span>
-                          <span>${wh.bondAmountUsd.toLocaleString()} · expires {new Date(wh.bondExpiry).toLocaleDateString()}</span>
+                          <span>${(wh.bondAmountUsd ?? 0).toLocaleString()} · expires {new Date(wh.bondExpiry).toLocaleDateString()}</span>
                         </div>
                         {/* Inventory status summary chips */}
                         {(() => {
@@ -574,7 +574,7 @@ export default function BondedWarehouseManagement() {
                       <span>{item.warehouseName}</span>
                       <span>Qty: {item.quantity} {item.unit}</span>
                       <span>{item.weightKg}kg / {item.volumeCbm}m³</span>
-                      <span>Value: ${item.valueUsd.toLocaleString()}</span>
+                      <span>Value: ${(item.valueUsd ?? 0).toLocaleString()}</span>
                     </div>
                     <div className="mt-1 text-xs flex gap-3 flex-wrap">
                       <span className="text-muted-foreground">Entry: {new Date(item.entryDate).toLocaleDateString()}</span>
@@ -770,15 +770,15 @@ export default function BondedWarehouseManagement() {
                       <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                         <div>
                           <div className="text-muted-foreground">Bond Amount</div>
-                          <div className="font-medium">${g.bondAmountUsd.toLocaleString()}</div>
+                          <div className="font-medium">${(g.bondAmountUsd ?? 0).toLocaleString()}</div>
                         </div>
                         <div>
                           <div className="text-muted-foreground">Required (110%)</div>
-                          <div className={`font-medium ${!g.isSufficient ? "text-red-600" : ""}`}>${g.requiredBondUsd.toLocaleString()}</div>
+                          <div className={`font-medium ${!g.isSufficient ? "text-red-600" : ""}`}>${(g.requiredBondUsd ?? 0).toLocaleString()}</div>
                         </div>
                         <div>
                           <div className="text-muted-foreground">Inventory Value</div>
-                          <div className="font-medium">${g.inventoryValueUsd.toLocaleString()}</div>
+                          <div className="font-medium">${(g.inventoryValueUsd ?? 0).toLocaleString()}</div>
                         </div>
                         <div>
                           <div className="text-muted-foreground">Bond Expiry</div>

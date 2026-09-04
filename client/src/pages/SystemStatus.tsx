@@ -151,6 +151,52 @@ interface PublicStatusPayload {
   banners: string[];
 }
 
+/** Real /api/health payload (see server/routes/health.ts). */
+interface HealthComponentHealth {
+  status: "ok" | "degraded" | "down";
+  latencyMs?: number;
+  message?: string;
+  optional?: boolean;
+}
+interface HealthReport {
+  status: "ok" | "degraded" | "down";
+  version: string;
+  uptime: number;
+  timestamp: string;
+  components: Record<string, HealthComponentHealth>;
+}
+
+const HEALTH_COMPONENT_LABELS: Record<string, string> = {
+  database: "Database",
+  redis: "Cache",
+  tigerbeetle: "Financial Ledger",
+  temporal: "Workflow Engine",
+  kafka: "Event Bus",
+  aseanSw: "ASEAN SW Gateway",
+  cenService: "WCO CEN Service",
+  permify: "Authorization Service",
+};
+
+function mapHealthStatus(c: HealthComponentHealth): ComponentStatus {
+  if (c.status === "ok") return "operational";
+  if (c.status === "degraded") return "degraded";
+  return c.optional ? "partial_outage" : "major_outage";
+}
+
+function healthReportToComponents(report: HealthReport): StatusComponent[] {
+  return Object.entries(report.components ?? {}).map(([key, c]) => ({
+    name: HEALTH_COMPONENT_LABELS[key] ?? key,
+    status: mapHealthStatus(c),
+    description:
+      c.message ??
+      (typeof c.latencyMs === "number" ? `Responding in ${c.latencyMs}ms` : "Live health probe"),
+  }));
+}
+
+function healthOverallStatus(report: HealthReport): string {
+  return report.status === "ok" ? "operational" : report.status === "degraded" ? "degraded" : "major_outage";
+}
+
 export default function SystemStatus() {
   const [lastRefresh, setLastRefresh] = useState(Date.now());
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -160,15 +206,26 @@ export default function SystemStatus() {
     staleTime: 10_000,
   });
 
+  // Real component health from the public /api/health deep-probe endpoint.
+  const [health, setHealth] = useState<HealthReport | null>(null);
+  const [healthUnavailable, setHealthUnavailable] = useState(false);
+
   // WP-8: public status surface (feed staleness + honest degradation banners)
   const [publicStatus, setPublicStatus] = useState<PublicStatusPayload | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
+    const load = () => {
       fetch("/api/status")
         .then((r) => (r.ok ? r.json() : null))
         .then((j) => { if (!cancelled) setPublicStatus(j); })
         .catch(() => { if (!cancelled) setPublicStatus(null); });
+      fetch("/api/health")
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((j: HealthReport) => {
+          if (!cancelled) { setHealth(j); setHealthUnavailable(false); }
+        })
+        .catch(() => { if (!cancelled) { setHealth(null); setHealthUnavailable(true); } });
+    };
     load();
     const t = autoRefresh ? setInterval(load, 30_000) : undefined;
     return () => { cancelled = true; if (t) clearInterval(t); };
@@ -184,6 +241,10 @@ export default function SystemStatus() {
   };
 
   const timeSinceRefresh = Math.floor((Date.now() - lastRefresh) / 1000);
+
+  // Primary: real /api/health probes. Fallback: tRPC system.systemStatus.
+  const healthComponents = health ? healthReportToComponents(health) : null;
+  const overallStatus = health ? healthOverallStatus(health) : data?.status ?? null;
 
   return (
     <div className="min-h-screen bg-[#0A1628] text-slate-100">
@@ -230,22 +291,30 @@ export default function SystemStatus() {
               ? "Checking status..."
               : `Last updated ${timeSinceRefresh < 5 ? "just now" : `${timeSinceRefresh}s ago`}`}
           </span>
-          {data && (
+          {(data?.version || health?.version) && (
             <span className="text-slate-600">
-              · v{data.version}
+              · v{data?.version ?? health?.version}
             </span>
           )}
         </div>
 
         {/* Overall banner */}
-        {isLoading ? (
+        {isLoading && !health ? (
           <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-8 mb-8 text-center animate-pulse">
             <div className="h-10 w-10 rounded-full bg-slate-700 mx-auto mb-3" />
             <div className="h-6 w-64 bg-slate-700 rounded mx-auto" />
           </div>
-        ) : data ? (
-          <OverallBanner status={data.status} uptimePercent={data.uptimePercent} />
-        ) : null}
+        ) : overallStatus ? (
+          <OverallBanner status={overallStatus} uptimePercent={data?.uptimePercent ?? null} />
+        ) : (
+          <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-8 mb-8 text-center">
+            <AlertTriangle className="w-10 h-10 text-slate-500 mx-auto mb-3" />
+            <h2 className="text-xl font-bold text-slate-300">Status Unavailable</h2>
+            <p className="text-slate-500 text-sm mt-1">
+              The health endpoint could not be reached. Try refreshing.
+            </p>
+          </div>
+        )}
 
         {/* Component status */}
         <section className="mb-10">
@@ -253,13 +322,24 @@ export default function SystemStatus() {
             Platform Components
           </h3>
           <div className="space-y-2">
-            {isLoading
+            {isLoading && !health
               ? Array.from({ length: 8 }).map((_, i) => (
                   <div key={i} className="h-16 rounded-xl bg-slate-800/50 animate-pulse border border-slate-700" />
                 ))
-              : data?.components.map((component) => (
-                  <ComponentRow key={component.name} component={component} />
-                ))}
+              : healthComponents ? (
+                  healthComponents.map((component) => (
+                    <ComponentRow key={component.name} component={component} />
+                  ))
+                )
+              : data?.components?.length ? (
+                  data.components.map((component) => (
+                    <ComponentRow key={component.name} component={component} />
+                  ))
+                ) : (
+                  <div className="px-5 py-4 rounded-xl border border-slate-700/50 bg-slate-800/30 text-xs text-slate-500 text-center">
+                    Component health unavailable{healthUnavailable ? " — /api/health could not be reached" : ""}.
+                  </div>
+                )}
           </div>
         </section>
 

@@ -7,6 +7,8 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { extractFieldErrors } from "@/lib/errors";
+import { humanizeLabel } from "@/lib/formatters";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -746,6 +748,7 @@ export default function TraderOnboarding() {
   const [completedSteps, setCompletedSteps] = useState<StepId[]>([]);
   const [stepData, setStepData] = useState<Record<string, Record<string, unknown>>>({});
   const [isComplete, setIsComplete] = useState(false);
+  const [stepFieldErrors, setStepFieldErrors] = useState<Record<string, string> | null>(null);
 
   const { data: progress } = trpc.onboarding.getProgress.useQuery();
   const saveStepMutation = trpc.onboarding.saveStep.useMutation();
@@ -771,9 +774,18 @@ export default function TraderOnboarding() {
 
     try {
       await saveStepMutation.mutateAsync({ step, data });
-    } catch {
-      // Fail-closed: progress was NOT persisted — tell the user honestly
-      toast.error("Your progress could not be saved to the platform. It is kept only on this screen and will be lost if you leave. Please retry.");
+      setStepFieldErrors(null);
+    } catch (err) {
+      // Fail-closed: progress was NOT persisted — tell the user honestly.
+      // Show field-level errors inline when the server provided them.
+      const fields = extractFieldErrors(err);
+      setStepFieldErrors(fields);
+      toast.error(
+        fields
+          ? "Some fields need attention — see the highlighted errors below."
+          : "Your progress could not be saved to the platform. It is kept only on this screen and will be lost if you leave. Please retry."
+      );
+      return;
     }
 
     if (isLast) {
@@ -876,6 +888,18 @@ export default function TraderOnboarding() {
           </CardHeader>
           <Separator />
           <CardContent className="pt-4">
+            {stepFieldErrors && (
+              <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 p-3" role="alert">
+                <p className="text-sm font-semibold text-destructive mb-1">Please fix the following:</p>
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {Object.entries(stepFieldErrors).map(([field, msg]) => (
+                    <li key={field} className="text-xs text-destructive/90">
+                      <span className="font-medium">{humanizeLabel(field)}</span>: {msg}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {currentStep === "company_profile" && (
               <CompanyProfileStep
                 onNext={d => handleStepComplete("company_profile", d)}

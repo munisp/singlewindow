@@ -125,6 +125,9 @@ export default function AdminProductionChecklist() {
   const total = checks.length;
   const score = Math.round((passed / total) * 100);
   const overallStatus = failed > 0 ? "fail" : warned > 2 ? "warn" : "pass";
+  // B10: "production-ready" claim only when every check passed, none failed,
+  // and nothing is still loading. Anything else gets honest warn/fail copy.
+  const isProductionReady = score === 100 && failed === 0 && !isLoading;
   const categories = Array.from(new Set(checks.map(c => c.category)));
 
   return (
@@ -141,16 +144,16 @@ export default function AdminProductionChecklist() {
       </div>
 
       <Card className={cn("border-2",
-        overallStatus === "pass" ? "border-emerald-300 bg-emerald-50/50" :
-        overallStatus === "warn" ? "border-amber-300 bg-amber-50/50" : "border-red-300 bg-red-50/50"
+        isProductionReady ? "border-emerald-300 bg-emerald-50/50" :
+        overallStatus !== "fail" ? "border-amber-300 bg-amber-50/50" : "border-red-300 bg-red-50/50"
       )}>
         <CardContent className="pt-6">
           <div className="flex items-center gap-6">
             <div
               className="flex flex-col items-center justify-center w-20 h-20 rounded-full border-4"
               style={{
-                borderColor: overallStatus === "pass" ? "#059669" : overallStatus === "warn" ? "#d97706" : "#dc2626",
-                color: overallStatus === "pass" ? "#059669" : overallStatus === "warn" ? "#d97706" : "#dc2626",
+                borderColor: isProductionReady ? "#059669" : overallStatus !== "fail" ? "#d97706" : "#dc2626",
+                color: isProductionReady ? "#059669" : overallStatus !== "fail" ? "#d97706" : "#dc2626",
               }}
             >
               <span className="text-2xl font-bold">{score}%</span>
@@ -170,9 +173,10 @@ export default function AdminProductionChecklist() {
               </div>
               <Progress value={score} className="h-2" />
               <p className="text-sm font-semibold">
-                {overallStatus === "pass" ? "✅ System is production-ready" :
-                 overallStatus === "warn" ? "⚠️ Non-critical warnings — review before go-live" :
-                 "❌ Critical issues — do not go live"}
+                {isLoading ? "⏳ Checks still running — readiness not yet determined" :
+                 isProductionReady ? "✅ System is production-ready" :
+                 failed > 0 ? "❌ Critical issues — do not go live" :
+                 "⚠️ Not production-ready — resolve failing/warning checks before go-live"}
               </p>
             </div>
           </div>

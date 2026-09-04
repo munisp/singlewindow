@@ -1,9 +1,31 @@
 import react from "@vitejs/plugin-react";
 import path from "node:path";
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 
-const plugins = [react(), tailwindcss()];
+// B15: only ship the umami analytics tag when VITE_ANALYTICS_ENDPOINT is a real
+// http(s) URL; otherwise strip the %VITE_ANALYTICS_*% placeholders from the HTML.
+const analyticsEndpoint = process.env.VITE_ANALYTICS_ENDPOINT ?? "";
+const analyticsWebsiteId = process.env.VITE_ANALYTICS_WEBSITE_ID ?? "";
+const analyticsEnabled = /^https?:\/\/.+/.test(analyticsEndpoint) && analyticsWebsiteId.length > 0;
+
+const analyticsPlugin: PluginOption = {
+  name: "analytics-tag",
+  transformIndexHtml(html) {
+    if (analyticsEnabled) {
+      return html
+        .replaceAll("%VITE_ANALYTICS_ENDPOINT%", analyticsEndpoint.replace(/\/+$/, ""))
+        .replaceAll("%VITE_ANALYTICS_WEBSITE_ID%", analyticsWebsiteId);
+    }
+    // Remove the placeholder script tag entirely so no broken src is shipped.
+    return html.replace(
+      /\s*<script[^>]*src="%VITE_ANALYTICS_ENDPOINT%[^"]*"[^>]*><\/script>/,
+      ""
+    );
+  },
+};
+
+const plugins: PluginOption[] = [react(), tailwindcss(), analyticsPlugin];
 
 export default defineConfig({
   plugins,

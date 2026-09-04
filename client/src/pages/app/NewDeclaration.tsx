@@ -41,7 +41,7 @@ const schema = z.object({
   portOfLoading: z.string().min(2),
   countryOfOrigin: z.string().min(2),
   countryOfDestination: z.string().min(2),
-  hsCode: z.string().min(6),
+  hsCode: z.string().regex(/^\d{6,10}$/, "HS code must be 6–10 digits"),
   goodsDescription: z.string().min(10),
   grossWeight: z.number().positive(),
   netWeight: z.number().positive(),
@@ -63,6 +63,20 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 const STEPS = ["Parties", "Goods", "Transport", "Financial", "Review"];
+
+/** Fields validated at each wizard step before allowing "Next". */
+const STEP_FIELDS: (keyof FormData)[][] = [
+  ["declarationType", "importerName", "importerTin", "exporterName", "exporterCountry"],
+  ["hsCode", "countryOfOrigin", "countryOfDestination", "numberOfPackages", "grossWeight", "netWeight", "packageType", "goodsDescription"],
+  ["modeOfTransport", "portOfEntry", "portOfLoading"],
+  ["invoiceValue", "invoiceCurrency", "freightCost", "insuranceCost", "incoterms"],
+  [],
+];
+
+/** NaN-safe number formatting for the Review step. */
+function fmtReviewNumber(n: unknown): string {
+  return typeof n === "number" && Number.isFinite(n) ? n.toLocaleString() : "—";
+}
 
 // ─── RISK RESULT PANEL ───────────────────────────────────────────────────────
 
@@ -218,8 +232,9 @@ export default function NewDeclaration() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hsCodeInput]);
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, watch, setValue, trigger, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
+    mode: "onTouched",
     defaultValues: {
       declarationType: "import",
       modeOfTransport: "sea",
@@ -243,8 +258,11 @@ export default function NewDeclaration() {
     },
   });
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const createMutation = trpc.declarations.create.useMutation({
     onSuccess: (data) => {
+      setSubmitError(null);
       utils.declarations.myDeclarations.invalidate();
       toast.success("Declaration submitted successfully", {
         description: `Reference: ${data.declarationNumber}`,
@@ -264,6 +282,8 @@ export default function NewDeclaration() {
       });
     },
     onError: (err) => {
+      // Durable banner (rendered on the Review step) + toast; keep the server reason visible.
+      setSubmitError(err.message || "The declaration could not be submitted. Please try again.");
       toast.error("Failed to submit declaration", { description: err.message });
     },
   });
@@ -466,6 +486,7 @@ export default function NewDeclaration() {
                     <div className="grid gap-2">
                       <Label>Country of Destination *</Label>
                       <Input {...register("countryOfDestination")} placeholder="e.g. GH" />
+                      {errors.countryOfDestination && <p className="text-xs text-destructive">{errors.countryOfDestination.message}</p>}
                     </div>
                     <div className="grid gap-2">
                       <Label>Number of Packages *</Label>
@@ -480,10 +501,12 @@ export default function NewDeclaration() {
                     <div className="grid gap-2">
                       <Label>Net Weight (kg) *</Label>
                       <Input type="number" step="0.01" {...register("netWeight", { valueAsNumber: true })} />
+                      {errors.netWeight && <p className="text-xs text-destructive">{errors.netWeight.message}</p>}
                     </div>
                     <div className="grid gap-2">
                       <Label>Package Type *</Label>
                       <Input {...register("packageType")} placeholder="e.g. Cartons, Pallets" />
+                      {errors.packageType && <p className="text-xs text-destructive">{errors.packageType.message}</p>}
                     </div>
                   </div>
                   <div className="grid gap-2">
@@ -553,14 +576,17 @@ export default function NewDeclaration() {
                     <div className="grid gap-2">
                       <Label>Currency *</Label>
                       <Input {...register("invoiceCurrency")} placeholder="USD" maxLength={3} />
+                      {errors.invoiceCurrency && <p className="text-xs text-destructive">{errors.invoiceCurrency.message}</p>}
                     </div>
                     <div className="grid gap-2">
                       <Label>Freight Cost</Label>
                       <Input type="number" step="0.01" {...register("freightCost", { valueAsNumber: true })} />
+                      {errors.freightCost && <p className="text-xs text-destructive">{errors.freightCost.message}</p>}
                     </div>
                     <div className="grid gap-2">
                       <Label>Insurance Cost</Label>
                       <Input type="number" step="0.01" {...register("insuranceCost", { valueAsNumber: true })} />
+                      {errors.insuranceCost && <p className="text-xs text-destructive">{errors.insuranceCost.message}</p>}
                     </div>
                     <div className="grid gap-2">
                       <Label>Incoterms *</Label>
@@ -589,8 +615,8 @@ export default function NewDeclaration() {
                       ["Exporter", `${watch("exporterName")} (${watch("exporterCountry")})`],
                       ["HS Code", watch("hsCode")],
                       ["Goods", watch("goodsDescription")],
-                      ["Weight", `${watch("grossWeight")} kg gross / ${watch("netWeight")} kg net`],
-                      ["Invoice Value", `${watch("invoiceCurrency")} ${watch("invoiceValue")?.toLocaleString()}`],
+                      ["Weight", `${fmtReviewNumber(watch("grossWeight"))} kg gross / ${fmtReviewNumber(watch("netWeight"))} kg net`],
+                      ["Invoice Value", `${watch("invoiceCurrency") ?? ""} ${fmtReviewNumber(watch("invoiceValue"))}`.trim()],
                       ["Port of Entry", watch("portOfEntry")],
                       ["Transport", watch("modeOfTransport")?.toUpperCase()],
                     ].map(([label, value]) => (
@@ -612,6 +638,29 @@ export default function NewDeclaration() {
             </CardContent>
           </Card>
 
+          {/* Durable submit error banner with server reason + Retry */}
+          {step === STEPS.length - 1 && submitError && (
+            <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4" role="alert">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-semibold text-destructive">Submission failed</p>
+                <p className="text-sm text-destructive/90 break-words">{submitError}</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={createMutation.isPending}
+                onClick={() => {
+                  setSubmitError(null);
+                  handleSubmit(onSubmit)();
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+
           {/* Navigation buttons */}
           <div className="flex justify-between mt-4">
             <Button
@@ -623,15 +672,22 @@ export default function NewDeclaration() {
               <ArrowLeft className="h-4 w-4" /> {step === 0 ? "Cancel" : "Back"}
             </Button>
             {step < STEPS.length - 1 ? (
-              <Button type="button" onClick={() => setStep(s => s + 1)} className="gap-2">
+              <Button
+                type="button"
+                onClick={async () => {
+                  const ok = await trigger(STEP_FIELDS[step], { shouldFocus: true });
+                  if (ok) setStep(s => s + 1);
+                }}
+                className="gap-2"
+              >
                 Next <ArrowRight className="h-4 w-4" />
               </Button>
             ) : (
               <Button
                 type="submit"
-                disabled={createMutation.isPending || (hsValidation !== null && (!hsValidation.valid || hsValidation.confidence < 0.5))}
+                disabled={createMutation.isPending || Object.keys(errors).length > 0 || (hsValidation !== null && (!hsValidation.valid || hsValidation.confidence < 0.5))}
                 className="gap-2"
-                title={hsValidation && (!hsValidation.valid || hsValidation.confidence < 0.5) ? "Fix the HS code before submitting" : undefined}
+                title={Object.keys(errors).length > 0 ? "Fix the validation errors before submitting" : hsValidation && (!hsValidation.valid || hsValidation.confidence < 0.5) ? "Fix the HS code before submitting" : undefined}
               >
                 {createMutation.isPending ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Submitting...</>
