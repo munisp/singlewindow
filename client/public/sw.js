@@ -1,7 +1,7 @@
 // TradeGateway NGSWTP — Service Worker v3
 // v56: Cache-busting on deployment — SKIP_WAITING message handler + bumped cache version
 
-const CACHE_NAME = 'tradegateway-v4';
+const CACHE_NAME = 'tradegateway-v5';
 const OFFLINE_QUEUE_NAME = 'tradegateway-offline-queue';
 const STATIC_ASSETS = [
   '/manifest.json',
@@ -76,6 +76,13 @@ self.addEventListener('fetch', (event) => {
 
   // Skip non-GET requests from here
   if (request.method !== 'GET') return;
+
+  // ── Never intercept API/auth traffic ──────────────────────────────────────
+  // /api/* GET requests — including /api/auth/* login/callback navigations
+  // (edge-handled via Caddy forward-auth) — must always go to the network.
+  // Without this, a failed fetch during an auth redirect resolves to the
+  // cached offline page and breaks the login flow.
+  if (url.pathname.startsWith('/api/')) return;
 
   // ── HTML navigation: always network-first, never serve stale HTML ─────────
   // This is the core cache-busting behaviour — HTML is never cached by the SW

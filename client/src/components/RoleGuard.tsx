@@ -19,6 +19,11 @@ import { getLoginUrl } from "@/const";
 import { Redirect } from "wouter";
 import { Shield, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import QueryErrorState from "@/components/QueryErrorState";
+import { useEffect, useState } from "react";
+
+/** Max time to wait for the auth query before surfacing an error state. */
+const AUTH_LOADING_TIMEOUT_MS = 15_000;
 
 export type PlatformRole =
   | "admin"
@@ -47,7 +52,37 @@ interface RoleGuardProps {
  * - Correct role: renders children
  */
 export default function RoleGuard({ allowedRoles, children, redirectTo }: RoleGuardProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, error, refresh } = useAuth();
+
+  // Loading timeout — never spin forever on a stalled auth request
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => setTimedOut(true), AUTH_LOADING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  // Auth query failed (401/403/network/timeout) — show an explicit,
+  // retryable error state instead of an infinite spinner or redirect loop.
+  if (error || timedOut) {
+    const code = (error as { data?: { code?: string } } | null)?.data?.code;
+    const isAuthz = code === "UNAUTHORIZED" || code === "FORBIDDEN";
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <QueryErrorState
+          accessDenied={isAuthz}
+          error={timedOut && !error ? new Error("Authentication request timed out. Please retry.") : error}
+          onRetry={() => {
+            setTimedOut(false);
+            refresh();
+          }}
+        />
+      </div>
+    );
+  }
 
   // While auth state is loading, render nothing to avoid flash of protected content
   if (loading) {

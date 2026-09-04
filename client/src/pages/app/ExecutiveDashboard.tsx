@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import DashboardLayout from "@/components/DashboardLayout";
+import QueryErrorState from "@/components/QueryErrorState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -41,7 +42,7 @@ export default function ExecutiveDashboard() {
     onError: (err) => toast.error("Failed to update target", { description: err.message }),
   });
 
-  const { data: revenue, isLoading, isError, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
+  const { data: revenue, isLoading, isError, error: revenueQueryError, refetch: refetchRevenue } = trpc.executiveDashboard.getRevenueCounter.useQuery();
   const { data: kpi, refetch: refetchKpi } = trpc.executiveDashboard.getKpiSummary.useQuery();
   const { data: ratingStats } = trpc.traderRatings.getStats.useQuery(undefined, { enabled: isAdmin });
   const { data: ratingTrend } = trpc.traderRatings.getTrend.useQuery({ days: 30 }, { enabled: isAdmin });
@@ -161,9 +162,14 @@ export default function ExecutiveDashboard() {
     <DashboardLayout>
       <div className="p-6 space-y-6">
         {isError && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-            Failed to load executive data. Please refresh the page.
-          </div>
+          <QueryErrorState
+            title="Executive dashboard unavailable"
+            error={revenueQueryError}
+            onRetry={() => {
+              refetchRevenue();
+              refetchKpi();
+            }}
+          />
         )}
         {/* Patterns in Breach Banner — admin only */}
         {isAdmin && patternsInBreach && patternsInBreach.length > 0 && !breachBannerDismissed && (

@@ -21,18 +21,27 @@ import crypto from "crypto";
 // ─── 1. DDoS / Volumetric Attack Protection ──────────────────────────────────
 
 /**
- * Global slow-down: adds 500 ms delay per request after 50 requests/15 min.
- * Applied to all /api/* routes. Gracefully degrades instead of hard-blocking.
+ * Global slow-down: adds a small incremental delay per request after a
+ * generous per-window grace allowance. Applied to all /api/* routes.
+ * Gracefully degrades instead of hard-blocking.
  */
+/**
+ * Skip predicate for ddosSlowDown (exported for unit tests).
+ * PITFALL: the middleware is mounted via app.use("/api", ddosSlowDown), so
+ * Express strips the mount prefix — req.path is mount-RELATIVE
+ * ("/health/live", NOT "/api/health/live"). Comparing against the full
+ * "/api/..." path silently never matches and delays every API request.
+ */
+export function ddosSlowDownSkip(req: Request): boolean {
+  return req.path.startsWith("/health");
+}
+
 export const ddosSlowDown = slowDown({
   windowMs: 15 * 60 * 1000,       // 15 minutes
-  delayAfter: 50,                   // allow 50 req/window without delay
-  delayMs: (used) => (used - 50) * 500, // 500 ms per req above threshold
-  maxDelayMs: 20_000,              // cap at 20 s delay
-  skip: (req) => {
-    // Skip health checks and metrics from slow-down
-    return req.path === "/api/health/live" || req.path === "/api/health/ready";
-  },
+  delayAfter: 200,                  // allow 200 req/window without delay
+  delayMs: (used) => (used - 200) * 100, // 100 ms per req above threshold
+  maxDelayMs: 2_000,               // cap at 2 s delay (was 20 s — pinned every request)
+  skip: ddosSlowDownSkip,
 });
 
 /**

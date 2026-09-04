@@ -1,5 +1,6 @@
 import { useState } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
+import QueryErrorState from "@/components/QueryErrorState";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -78,8 +79,10 @@ export default function RiskModelDashboard() {
   const [createForm, setCreateForm] = useState({ championVersion: "", challengerVersion: "", trafficSplitPct: "10" });
   const [concludeDialog, setConcludeDialog] = useState<{ testId: string; autoPromote: boolean } | null>(null);
 
-  const { data: modelStats, isLoading: loadingStats } = trpc.riskModel.getModelStats.useQuery();
-  const { data: featureImportance, isLoading: loadingFeatures } = trpc.riskModel.getFeatureImportance.useQuery();
+  const statsQuery = trpc.riskModel.getModelStats.useQuery();
+  const featuresQuery = trpc.riskModel.getFeatureImportance.useQuery();
+  const { data: modelStats, isLoading: loadingStats } = statsQuery;
+  const { data: featureImportance, isLoading: loadingFeatures } = featuresQuery;
   const { data: abTests, isLoading: loadingAbTests, refetch: refetchAbTests } = trpc.riskModel.getAbTests.useQuery();
   const { data: abTestResults, isLoading: loadingAbTestResults, refetch: refetchAbTestResults } = trpc.riskModel.getAbTestResults.useQuery();
 
@@ -175,6 +178,18 @@ export default function RiskModelDashboard() {
             XGBoost gradient-boosted ML risk scorer with AEO-aware feature engineering and A/B testing
           </p>
         </div>
+
+        {/* Query failure — explicit error state with retry instead of an endless spinner */}
+        {(statsQuery.error || featuresQuery.error) && (
+          <QueryErrorState
+            title="Risk model data unavailable"
+            error={statsQuery.error ?? featuresQuery.error}
+            onRetry={() => {
+              if (statsQuery.error) statsQuery.refetch();
+              if (featuresQuery.error) featuresQuery.refetch();
+            }}
+          />
+        )}
 
         {/* Model Stats */}
         {!loadingStats && stats && (

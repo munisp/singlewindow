@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import viteConfig from "../../vite.config";
+import { apiNotFound } from "./apiNotFound";
 
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
@@ -21,6 +22,7 @@ export async function setupVite(app: Express, server: Server) {
   });
 
   app.use(vite.middlewares);
+  apiNotFound(app);
   app.use("/{*splat}", async (req, res, next) => {
     const url = req.originalUrl;
 
@@ -84,6 +86,9 @@ export function serveStatic(app: Express) {
       },
     })
   );
+
+  // Unknown /api/* routes must never fall through to the SPA fallback
+  apiNotFound(app);
 
   // SPA fallback — serve index.html with strict no-cache headers
   app.use("/{*splat}", (_req, res) => {
