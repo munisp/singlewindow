@@ -48,7 +48,9 @@ const trpcRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests. Please slow down and try again in a minute." },
   skip: (req) => {
-    // Skip rate limiting for health checks and static assets
+    // Skip rate limiting for health checks and static assets.
+    // PITFALL: this limiter is mounted via app.use("/api/trpc", trpcRateLimit),
+    // so req.path is mount-relative; the full "/api/..." path never matches.
     return req.path === "/health" || req.path === "/ping";
   },
 });
@@ -1629,6 +1631,58 @@ async function startServer() {
       createContext,
     })
   );
+  // ── CEP Suppression Log CSV export (admin-only) ───────────────────────────
+  // NOTE: must be registered BEFORE the SPA fallback/apiNotFound (serveStatic/
+  // setupVite below) — anything mounted after the /api 404 handler is unreachable.
+  app.get("/api/cep/suppression-log.csv", async (req, res) => {
+    try {
+      const user = await sdk.authenticateRequest(req as any).catch(() => null);
+      if (!user || user.role !== "admin") {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    } catch {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    try {
+      const { getPool } = await import("../db");
+      const pool = getPool();
+      if (!pool) { res.status(500).json({ error: "DB unavailable" }); return; }
+      const { rows } = await pool.query(`
+        SELECT
+          sl.id,
+          sl.alert_id,
+          sl.pattern_id,
+          sl.suppressed_by,
+          u.name AS suppressed_by_name,
+          sl.hours,
+          sl.suppressed_until,
+          sl.created_at
+        FROM cep_suppression_log sl
+        LEFT JOIN users u ON u.id = sl.suppressed_by
+        ORDER BY sl.created_at DESC
+      `);
+      const header = "id,alert_id,pattern_id,suppressed_by,suppressed_by_name,hours,suppressed_until,created_at\n";
+      const csvRows = (rows as Record<string, unknown>[]).map((r) =>
+        [
+          r.id, r.alert_id, r.pattern_id, r.suppressed_by,
+          `"${String(r.suppressed_by_name ?? "").replace(/"/g, '""')}"`,
+          r.hours,
+          r.suppressed_until ? new Date(r.suppressed_until as string).toISOString() : "",
+          r.created_at ? new Date(r.created_at as string).toISOString() : "",
+        ].join(",")
+      );
+      const csv = header + csvRows.join("\n");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="suppression-log.csv"');
+      res.send(csv);
+    } catch (err) {
+      console.error("[CSV] suppression-log export error:", err);
+      res.status(500).json({ error: "Export failed" });
+    }
+  });
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -1701,56 +1755,6 @@ async function startServer() {
     // Run once at startup, then every 30 minutes
     checkThresholdBreaches();
     setInterval(checkThresholdBreaches, 30 * 60 * 1000);
-  });
-
-  // ── CEP Suppression Log CSV export (admin-only) ───────────────────────────────────
-  app.get("/api/cep/suppression-log.csv", async (req, res) => {
-    try {
-      const user = await sdk.authenticateRequest(req as any).catch(() => null);
-      if (!user || user.role !== "admin") {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
-    } catch {
-      res.status(403).json({ error: "Forbidden" });
-      return;
-    }
-    try {
-      const { getPool } = await import("../db");
-      const pool = getPool();
-      if (!pool) { res.status(500).json({ error: "DB unavailable" }); return; }
-      const { rows } = await pool.query(`
-        SELECT
-          sl.id,
-          sl.alert_id,
-          sl.pattern_id,
-          sl.suppressed_by,
-          u.name AS suppressed_by_name,
-          sl.hours,
-          sl.suppressed_until,
-          sl.created_at
-        FROM cep_suppression_log sl
-        LEFT JOIN users u ON u.id = sl.suppressed_by
-        ORDER BY sl.created_at DESC
-      `);
-      const header = "id,alert_id,pattern_id,suppressed_by,suppressed_by_name,hours,suppressed_until,created_at\n";
-      const csvRows = (rows as Record<string, unknown>[]).map((r) =>
-        [
-          r.id, r.alert_id, r.pattern_id, r.suppressed_by,
-          `"${String(r.suppressed_by_name ?? "").replace(/"/g, '""')}"`,
-          r.hours,
-          r.suppressed_until ? new Date(r.suppressed_until as string).toISOString() : "",
-          r.created_at ? new Date(r.created_at as string).toISOString() : "",
-        ].join(",")
-      );
-      const csv = header + csvRows.join("\n");
-      res.setHeader("Content-Type", "text/csv");
-      res.setHeader("Content-Disposition", 'attachment; filename="suppression-log.csv"');
-      res.send(csv);
-    } catch (err) {
-      console.error("[CSV] suppression-log export error:", err);
-      res.status(500).json({ error: "Export failed" });
-    }
   });
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────

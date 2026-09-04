@@ -43,11 +43,26 @@ export default function CaseList() {
           </Select>
         </div>
 
+        {list.isLoading && (
+          <Card>
+            <CardContent className="space-y-3 p-6">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-14 rounded border bg-muted/40 animate-pulse" />
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {list.error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Case board unavailable</AlertTitle>
-            <AlertDescription>{list.error.message}</AlertDescription>
+            <AlertDescription className="flex items-center justify-between gap-4">
+              <span>{list.error.message}</span>
+              <Button variant="outline" size="sm" onClick={() => list.refetch()}>
+                Retry
+              </Button>
+            </AlertDescription>
           </Alert>
         )}
 

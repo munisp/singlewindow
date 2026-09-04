@@ -78,8 +78,42 @@ function validateCsrf(ctx: TrpcContext): void {
   }
 }
 
+const isProduction = process.env.NODE_ENV === "production";
+
+/**
+ * Production error formatter (exported for unit tests).
+ * Strips stack traces and internal fields from the client-facing payload —
+ * tRPC's default shape serialises error.stack (absolute server paths like
+ * /app/dist/index.js) when isDev is true. data.code is preserved because
+ * client code (e.g. useAuth) branches on it. Evaluates NODE_ENV per call so
+ * tests can stub the environment.
+ */
+export function productionErrorFormatter(
+  shape: { message: string; code: number; data: Record<string, unknown> },
+  error: { code: string }
+) {
+  if (process.env.NODE_ENV !== "production") return shape;
+  const data = (shape.data ?? {}) as Record<string, unknown>;
+  const safeData: Record<string, unknown> = {
+    code: data.code,
+    httpStatus: data.httpStatus,
+  };
+  if (typeof data.path === "string") safeData.path = data.path;
+  return {
+    ...shape,
+    message:
+      error.code === "INTERNAL_SERVER_ERROR"
+        ? "Internal server error"
+        : shape.message,
+    data: safeData,
+  };
+}
+
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
+  // Never enable dev error shaping in production.
+  isDev: !isProduction,
+  errorFormatter: ({ shape, error }) => productionErrorFormatter(shape as any, error),
 });
 
 export const router = t.router;
