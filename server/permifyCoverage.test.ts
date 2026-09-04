@@ -14,6 +14,6 @@ describe("Permify authorization coverage gate (PRA-109)", () => {
       encoding: "utf8",
     });
     expect(out).toContain("PERMIFY COVERAGE GATE: PASS");
-    expect(out).toMatch(/Coverage: 63\/63 protected domains covered/);
+    expect(out).toMatch(/Coverage: 65\/65 protected domains covered/);
   });
 });

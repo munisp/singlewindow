@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import { securityAlerts } from "../../drizzle/schema";
@@ -143,7 +143,7 @@ export const wazuhRouter = router({
 
   // Get overall platform security score — live from wazuh-svc; DB-derived
   // fallback is computed from real unresolved alerts and disclosed via source.
-  getSecurityScore: protectedProcedure.query(async () => {
+  getSecurityScore: adminProcedure.query(async () => {
     try {
       const live = await callWazuh<{
         score: number; grade: string; unresolved_alerts: number; total_agents: number; computed_at: string;

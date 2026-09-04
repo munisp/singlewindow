@@ -5,7 +5,7 @@
  * Tables: bonded_warehouses, bonded_inventory, ex_bond_permits
  */
 import { z } from "zod";
-import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
+import { adminProcedure, keycloakCustomsOfficerProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { getDb, getPool } from "../db";
 import { publishEvent, TOPICS } from "../_core/kafka";
@@ -51,7 +51,7 @@ async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown
 
 export const bondedWarehouseRouter = router({
 
-  listWarehouses: protectedProcedure
+  listWarehouses: keycloakCustomsOfficerProcedure
     .input(z.object({
       status: z.enum(["active", "suspended", "revoked", "pending_renewal"]).optional(),
       portCode: z.string().optional(),
@@ -80,7 +80,7 @@ export const bondedWarehouseRouter = router({
       return { warehouses: rows, total: parseInt(total, 10) };
     }),
 
-  registerWarehouse: protectedProcedure
+  registerWarehouse: keycloakCustomsOfficerProcedure
     .input(z.object({
       name: z.string().min(3).max(200),
       operatorName: z.string().min(2).max(200),
@@ -107,7 +107,7 @@ export const bondedWarehouseRouter = router({
       return { success: true, warehouse: rows[0], licenseNo };
     }),
 
-  getInventory: protectedProcedure
+  getInventory: keycloakCustomsOfficerProcedure
     .input(z.object({
       warehouseId: z.number().optional(),
       status: z.enum(["in_bond", "ex_bonded", "re_exported", "destroyed", "seized"]).optional(),
@@ -131,7 +131,7 @@ export const bondedWarehouseRouter = router({
       );
     }),
 
-  recordEntry: protectedProcedure
+  recordEntry: keycloakCustomsOfficerProcedure
     .input(z.object({
       warehouseId: z.number(),
       declarationId: z.number().optional(),
@@ -185,7 +185,7 @@ export const bondedWarehouseRouter = router({
       return { success: true, dutyLiabilityUsd, expiryDate };
     }),
 
-  recordExit: protectedProcedure
+  recordExit: keycloakCustomsOfficerProcedure
     .input(z.object({
       inventoryId: z.number(),
       exitReason: z.enum(["ex_bonded", "re_exported", "destroyed", "seized"]).default("ex_bonded"),
@@ -217,7 +217,7 @@ export const bondedWarehouseRouter = router({
       return { success: true, status: input.exitReason };
     }),
 
-  issueExBondPermit: protectedProcedure
+  issueExBondPermit: keycloakCustomsOfficerProcedure
     .input(z.object({
       inventoryId: z.number(),
       quantityKg: z.number().min(1),
@@ -249,7 +249,7 @@ export const bondedWarehouseRouter = router({
       return { success: true, permitNo, expiresAt };
     }),
 
-  listPermits: protectedProcedure
+  listPermits: keycloakCustomsOfficerProcedure
     .input(z.object({
       warehouseId: z.number().optional(),
       status: z.enum(["active", "used", "expired", "cancelled"]).optional(),
@@ -274,7 +274,7 @@ export const bondedWarehouseRouter = router({
       );
     }),
 
-  getBondGuarantees: protectedProcedure.query(async () => {
+  getBondGuarantees: keycloakCustomsOfficerProcedure.query(async () => {
     const rows = await pgQuery<{
       bond_amount_usd: number;
       total_inventory_value_usd: number;
@@ -295,7 +295,7 @@ export const bondedWarehouseRouter = router({
     }));
   }),
 
-  getExpiryAlerts: protectedProcedure.query(async () => {
+  getExpiryAlerts: keycloakCustomsOfficerProcedure.query(async () => {
     const thirtyDays = new Date(Date.now() + 30 * 86400_000);
     const [invExpiry, bondExpiry, permitExpiry] = await Promise.all([
       pgQuery(
@@ -344,7 +344,7 @@ export const bondedWarehouseRouter = router({
       return { success: true };
     }),
 
-  getDashboardStats: protectedProcedure.query(async () => {
+  getDashboardStats: keycloakCustomsOfficerProcedure.query(async () => {
     const [stats] = await pgQuery(
       `SELECT
         COUNT(DISTINCT bw.id) AS total_warehouses,
@@ -451,7 +451,7 @@ export const bondedWarehouseRouter = router({
   /**
    * v98: Send SMS/notification alerts for bonds expiring within N days.
    */
-  sendBondExpiryAlerts: protectedProcedure
+  sendBondExpiryAlerts: keycloakCustomsOfficerProcedure
     .input(z.object({ daysAhead: z.number().int().min(1).max(90).default(30) }))
     .mutation(async ({ ctx }) => {
       const isAdmin = ["admin", "customs_officer", "finance"].includes(ctx.user.role);

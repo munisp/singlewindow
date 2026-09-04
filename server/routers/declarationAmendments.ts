@@ -44,6 +44,26 @@ const AMENDMENT_ALLOWED_FIELDS = new Set([
  */
 const RISK_SENSITIVE_FIELDS = new Set(["hsCode", "declaredValue", "originCountry"]);
 
+/**
+ * Shape an amendment row for clients: timestamps as ISO strings (or null),
+ * plus a `createdAt` alias of `requestedAt` for legacy client rendering
+ * (A10 fix — clients displayed "Invalid Date" when the field was absent).
+ */
+export function shapeAmendment<T extends { requestedAt?: Date | string | null; reviewedAt?: Date | string | null }>(row: T) {
+  const toIso = (v: Date | string | null | undefined): string | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  };
+  const requestedAt = toIso(row.requestedAt);
+  return {
+    ...row,
+    requestedAt,
+    reviewedAt: toIso(row.reviewedAt),
+    createdAt: requestedAt,
+  };
+}
+
 export const declarationAmendmentsRouter = router({
   // Trader: request an amendment on a cleared declaration
   requestAmendment: protectedProcedure
@@ -106,7 +126,7 @@ export const declarationAmendmentsRouter = router({
         newState: { fieldName: input.fieldName, newValue: input.newValue, reason: input.reason },
       });
 
-      return amendment;
+      return shapeAmendment(amendment);
     }),
 
   // List amendments for a declaration
@@ -129,11 +149,12 @@ export const declarationAmendmentsRouter = router({
         throw new TRPCError({ code: "FORBIDDEN" });
       }
 
-      return db
+      const rows = await db
         .select()
         .from(declarationAmendments)
         .where(eq(declarationAmendments.declarationId, input.declarationId))
         .orderBy(desc(declarationAmendments.requestedAt));
+      return rows.map(shapeAmendment);
     }),
 
   // List pending amendments (admin/officer)
@@ -145,12 +166,13 @@ export const declarationAmendmentsRouter = router({
       const db = await getDb();
       if (!db) return [];
 
-      return db
+      const rows = await db
         .select()
         .from(declarationAmendments)
         .where(eq(declarationAmendments.status, "pending"))
         .orderBy(desc(declarationAmendments.requestedAt))
         .limit(100);
+      return rows.map(shapeAmendment);
     }),
 
   // Trader: list their own amendment requests
@@ -158,12 +180,13 @@ export const declarationAmendmentsRouter = router({
     .query(async ({ ctx }) => {
       const db = await getDb();
       if (!db) return [];
-      return db
+      const rows = await db
         .select()
         .from(declarationAmendments)
         .where(eq(declarationAmendments.requestedBy, ctx.user.id))
         .orderBy(desc(declarationAmendments.requestedAt))
         .limit(50);
+      return rows.map(shapeAmendment);
     }),
 
   // Admin/officer: review (approve or reject) an amendment
@@ -259,6 +282,6 @@ export const declarationAmendmentsRouter = router({
         entityId: amendment.declarationId,
       });
 
-      return updated;
+      return updated ? shapeAmendment(updated) : updated;
     }),
 });

@@ -548,6 +548,32 @@ export const ENV = {
   workflowServiceUrl: process.env.WORKFLOW_SERVICE_URL ?? "",
   wtoValuationServiceUrl: process.env.WTO_VALUATION_SERVICE_URL ?? "",
   praTestDatabaseUrl: process.env.PRA_TEST_DATABASE_URL ?? "postgres://postgres@127.0.0.1:5432/postgres",
+
+  // ─── Wave-2A sweep registrations (PRA-068) ────────────────────────────────
+  // Central registry entries for env reads that live in focused modules.
+  geoServiceUrl: process.env.GEO_SERVICE_URL ?? "",
+  geoServiceTenant: process.env.GEO_SERVICE_TENANT ?? "",
+  geoServiceToken: process.env.GEO_SERVICE_TOKEN ?? "",
+  corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS ?? "",
+  mswExchangePeerJwksUrl: process.env.MSW_EXCHANGE_PEER_JWKS_URL ?? "",
+  mswExchangePeerJwksJson: process.env.MSW_EXCHANGE_PEER_JWKS_JSON ?? "",
+  mswExchangePeerJwksPin: process.env.MSW_EXCHANGE_PEER_JWKS_PIN ?? "",
+  mswExchangePeerAllowedKids: process.env.MSW_EXCHANGE_PEER_ALLOWED_KIDS ?? "",
+  mswExchangePeerTrustKeys: process.env.MSW_EXCHANGE_PEER_TRUST_KEYS ?? "",
+  mswExchangePeerProducer: process.env.MSW_EXCHANGE_PEER_PRODUCER ?? "",
+  mswExchangePeerKidPrefix: process.env.MSW_EXCHANGE_PEER_KID_PREFIX ?? "",
+  mswExchangeSender: process.env.MSW_EXCHANGE_SENDER ?? "",
+  mswExchangePeerUrl: process.env.MSW_EXCHANGE_PEER_URL ?? "",
+  mlStackHttpUrl: process.env.ML_STACK_HTTP_URL ?? "",
+  riskScorerPipeline: process.env.RISK_SCORER_PIPELINE ?? "",
+  schedulerSecret: process.env.SCHEDULER_SECRET ?? "",
+  cvContainerConsumerEnabled: process.env.CV_CONTAINER_CONSUMER_ENABLED ?? "",
+  marketplaceSigningPrivateKey: process.env.MARKETPLACE_SIGNING_PRIVATE_KEY ?? "",
+  cargoTrackingDemo: process.env.CARGO_TRACKING_DEMO ?? "",
+  secureChainGatewayKey: process.env.SECURE_CHAIN_GATEWAY_KEY ?? "",
+  secureChainGatewayIss: process.env.SECURE_CHAIN_GATEWAY_ISS ?? "",
+  secureChainGatewayAud: process.env.SECURE_CHAIN_GATEWAY_AUD ?? "",
+  portInteropTenantId: process.env.PORT_INTEROP_TENANT_ID ?? "",
 };
 
 // ─── Production validation — fail closed on unsafe configuration ─────────────

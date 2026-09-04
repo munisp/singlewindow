@@ -21,10 +21,12 @@ async function checkHttpHealth(url: string, timeoutMs = 3000): Promise<boolean> 
 
 export const systemRouter = router({
   /**
-   * Lightweight liveness probe — checks DB and Redis connectivity.
-   * Used by Kubernetes liveness/readiness probes at /api/trpc/system.health.
+   * Liveness/health summary — checks DB and Redis connectivity.
+   * Admin-only: component health details are internal operational state and
+   * must not be disclosed to unauthenticated or trader callers. External
+   * probes should use the public systemStatus aggregate instead.
    */
-  health: publicProcedure
+  health: adminProcedure
     .input(
       z.object({
         timestamp: z.number().min(0, "timestamp cannot be negative"),

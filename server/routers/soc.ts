@@ -8,18 +8,33 @@
  */
 
 import { z } from "zod";
-import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { adminProcedure, router } from "../_core/trpc";
 
 const WAZUH_SVC = process.env.WAZUH_SVC_URL ?? "http://localhost:8108";
 
 async function callWazuh<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${WAZUH_SVC}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${WAZUH_SVC}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10_000),
+      ...options,
+    });
+  } catch (err) {
+    // Honest degraded mode: upstream SIEM unreachable — typed error, no stack/raw fetch failure.
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: `Security operations service is currently unavailable (${err instanceof Error && err.name === "TimeoutError" || err instanceof Error && err.name === "AbortError" ? "timeout" : "connection failed"}). Try again later.`,
+    });
+  }
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`wazuh-svc error ${res.status}: ${text}`);
+    const text = await res.text().catch(() => "");
+    throw new TRPCError({
+      code: "SERVICE_UNAVAILABLE",
+      message: `Security operations service returned an error (HTTP ${res.status}).`,
+      cause: text,
+    });
   }
   return res.json() as Promise<T>;
 }
@@ -27,7 +42,7 @@ async function callWazuh<T>(path: string, options?: RequestInit): Promise<T> {
 export const socRouter = router({
   // ─── Alerts ────────────────────────────────────────────────────────────────
 
-  getAlerts: protectedProcedure
+  getAlerts: adminProcedure
     .input(
       z.object({
         severity: z.enum(["low", "medium", "high", "critical"]).optional(),
@@ -90,7 +105,7 @@ export const socRouter = router({
 
   // ─── Incidents ─────────────────────────────────────────────────────────────
 
-  getIncidents: protectedProcedure
+  getIncidents: adminProcedure
     .input(
       z.object({
         status: z.enum(["open", "investigating", "contained", "resolved"]).optional(),
@@ -106,7 +121,7 @@ export const socRouter = router({
       return callWazuh<{ total: number; incidents: unknown[] }>(`/incidents?${params}`);
     }),
 
-  getIncident: protectedProcedure
+  getIncident: adminProcedure
     .input(z.object({ incidentId: z.string().min(1).max(128) }))
     .query(async ({ input }) => {
       return callWazuh(`/incidents/${input.incidentId}`);
@@ -162,7 +177,7 @@ export const socRouter = router({
 
   // ─── Correlation ───────────────────────────────────────────────────────────
 
-  correlateDeclaration: protectedProcedure
+  correlateDeclaration: adminProcedure
     .input(z.object({ declarationId: z.string().min(1).max(128) }))
     .query(async ({ input }) => {
       return callWazuh(`/correlate/declaration/${input.declarationId}`);

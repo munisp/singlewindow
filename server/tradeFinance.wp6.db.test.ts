@@ -3,7 +3,7 @@
  * evidence mirror. Runs only when DATABASE_URL points at a real PostgreSQL;
  * otherwise the suite skips (singlewindow DB-gated convention).
  *
- * Verifies: migration 0051 applies, evidence rows persist with digest
+ * Verifies: migration 0061 applies, evidence rows persist with digest
  * evidence, per-trader isolation holds (a trader sees ONLY its own evidence)
  * and FK integrity to users is enforced.
  */
@@ -19,7 +19,7 @@ const DATABASE_URL = process.env.DATABASE_URL ?? "";
 const DB_GATED = DATABASE_URL.startsWith("postgres");
 
 const MIGRATION = readFileSync(
-  path.resolve(import.meta.dirname, "../drizzle/migrations/0051_trade_finance_consent_evidence.sql"),
+  path.resolve(import.meta.dirname, "../drizzle/migrations/0061_trade_finance_consent_evidence.sql"),
   "utf8"
 );
 
