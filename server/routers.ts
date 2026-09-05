@@ -157,6 +157,22 @@ export const appRouter = router({
         return { ...user, hasCompletedOnboarding: false };
       }
     }),
+    /**
+     * Wave 3: report the expiry of the credential that authenticated this
+     * request so the SPA can schedule a PROACTIVE silent renewal (refresh
+     * token grant or silent SSO round-trip) instead of bouncing on a 401.
+     * Returns null when unauthenticated or when expiry is undeterminable.
+     */
+    sessionInfo: publicProcedure.query(async ({ ctx }) => {
+      if (!ctx.user) return null;
+      const { resolveSessionExpiry } = await import("./_core/sessionInfo");
+      const expiry = await resolveSessionExpiry(ctx.req);
+      if (!expiry) return null;
+      return {
+        expiresAt: expiry.expiresAt,
+        source: expiry.source,
+      } as const;
+    }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
 
