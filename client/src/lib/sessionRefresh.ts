@@ -178,4 +178,211 @@ export async function refreshBeforeSsoRedirect(): Promise<boolean> {
 export function teardownSessionRefresh(): void {
   cancelScheduledRefresh();
   clearSessionTokens();
+  teardownEdgeSessionRenewal();
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Wave 3: edge (oauth2-proxy / session-cookie) proactive renewal.
+ *
+ * Evidence from the deployment topology (infra/caddy/Caddyfile.prod,
+ * server/_core/context.ts, server/_core/sdk.ts): browser portals authenticate
+ * at the edge via Caddy forward_auth → oauth2-proxy → Keycloak. Keycloak
+ * tokens NEVER reach the SPA, so the refresh_token path above stays inert for
+ * browser sessions (it remains the active path for API clients that DO hold
+ * tokens). For browser sessions we instead:
+ *   1. Ask the server (auth.sessionInfo) when the current credential expires.
+ *   2. Schedule a renewal at exp − 60s.
+ *   3. Renew silently via a hidden iframe through /oauth2/start: with a live
+ *      Keycloak SSO session the oauth2-proxy → Keycloak → callback round-trip
+ *      completes without user interaction and refreshes the session cookie.
+ *   4. Verify success by re-reading auth.sessionInfo (fail-closed).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** sessionStorage marker: epoch ms at which the edge session expires. */
+const EDGE_EXPIRY_KEY = "tg-edge-session-expiry";
+
+/** Renew this many milliseconds before the edge credential expires. */
+const EDGE_RENEW_LEEWAY_MS = 60_000;
+
+/** Upper bound for one silent iframe round-trip before we declare failure. */
+const EDGE_RENEW_TIMEOUT_MS = 15_000;
+
+interface SessionInfoResponse {
+  expiresAt: number;
+  source: "keycloak-bearer" | "edge-proxy" | "session-cookie";
+}
+
+/** Fetch the current session's expiry from the server (superjson wire format). */
+export async function fetchSessionExpiry(): Promise<SessionInfoResponse | null> {
+  try {
+    const res = await fetch("/api/trpc/auth.sessionInfo?batch=1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ "0": { json: null } }),
+    });
+    if (!res.ok) return null;
+    const payload = await res.json();
+    const first = Array.isArray(payload) ? payload[0] : payload;
+    const data = first?.result?.data;
+    const json = data?.json ?? data;
+    if (!json || typeof json.expiresAt !== "number") return null;
+    return json as SessionInfoResponse;
+  } catch {
+    return null;
+  }
+}
+
+export function storeEdgeSessionExpiry(expiresAt: number): void {
+  try {
+    sessionStorage.setItem(EDGE_EXPIRY_KEY, String(expiresAt));
+  } catch {
+    /* sessionStorage unavailable — renewal becomes a no-op */
+  }
+}
+
+export function loadEdgeSessionExpiry(): number | null {
+  try {
+    const raw = sessionStorage.getItem(EDGE_EXPIRY_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearEdgeSessionExpiry(): void {
+  try {
+    sessionStorage.removeItem(EDGE_EXPIRY_KEY);
+  } catch {
+    /* no-op */
+  }
+}
+
+/**
+ * Attempt one silent edge-session renewal via a hidden iframe round-trip
+ * through oauth2-proxy (/oauth2/start). With a live Keycloak SSO session this
+ * completes without user interaction and refreshes the session cookie.
+ *
+ * Success criterion (fail-closed): after the iframe settles, the server must
+ * report a session expiry LATER than the one we knew about. A Keycloak login
+ * page inside the iframe (SSO session dead) never advances the expiry, so we
+ * correctly report failure and let the caller fall back to interactive login.
+ */
+export function attemptSilentEdgeRenewal(
+  timeoutMs: number = EDGE_RENEW_TIMEOUT_MS,
+): Promise<boolean> {
+  if (typeof document === "undefined") return Promise.resolve(false);
+  const knownExpiry = loadEdgeSessionExpiry();
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        iframe.remove();
+      } catch {
+        /* already removed */
+      }
+      resolve(ok);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    const iframe = document.createElement("iframe");
+    iframe.style.display = "none";
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.tabIndex = -1;
+
+    iframe.addEventListener("load", () => {
+      // The iframe completed a navigation. It may still be mid-flow (Keycloak
+      // hop), so verify with the server after a short settle delay.
+      setTimeout(() => {
+        void fetchSessionExpiry().then((info) => {
+          if (!info) return finish(false);
+          const previous = knownExpiry ?? 0;
+          if (info.expiresAt > previous || info.expiresAt - EDGE_RENEW_LEEWAY_MS > Date.now()) {
+            storeEdgeSessionExpiry(info.expiresAt);
+            finish(true);
+          } else {
+            finish(false);
+          }
+        });
+      }, 500);
+    });
+    iframe.addEventListener("error", () => finish(false));
+
+    // rd points at a lightweight same-origin asset; the proxy sets the fresh
+    // cookie on /oauth2/callback BEFORE redirecting to rd.
+    iframe.src = `/oauth2/start?rd=${encodeURIComponent("/favicon.ico")}`;
+    document.body.appendChild(iframe);
+  });
+}
+
+let edgeRenewTimer: ReturnType<typeof setTimeout> | null = null;
+let edgeRenewInFlight: Promise<boolean> | null = null;
+
+/** Stop any scheduled edge renewal (e.g. on logout). */
+export function cancelEdgeSessionRenewal(): void {
+  if (edgeRenewTimer !== null) {
+    clearTimeout(edgeRenewTimer);
+    edgeRenewTimer = null;
+  }
+}
+
+/**
+ * One silent renewal attempt regardless of flow: refresh_token grant when
+ * tokens are stored, otherwise the edge iframe round-trip. Deduplicates
+ * concurrent callers.
+ */
+export function renewSessionOnce(): Promise<boolean> {
+  if (hasValidSessionTokens()) return attemptSessionRefresh();
+  if (edgeRenewInFlight) return edgeRenewInFlight;
+  edgeRenewInFlight = attemptSilentEdgeRenewal().finally(() => {
+    edgeRenewInFlight = null;
+  });
+  return edgeRenewInFlight;
+}
+
+/**
+ * Schedule a proactive silent renewal of the edge session at expiresAt − 60s.
+ * Safe to call repeatedly; the latest call wins. No-op without a known expiry.
+ */
+export function scheduleEdgeSessionRenewal(expiresAt?: number): void {
+  cancelEdgeSessionRenewal();
+  const expiry = expiresAt ?? loadEdgeSessionExpiry();
+  if (!expiry) return;
+  storeEdgeSessionExpiry(expiry);
+  const delay = Math.max(0, expiry - EDGE_RENEW_LEEWAY_MS - Date.now());
+  edgeRenewTimer = setTimeout(() => {
+    void renewSessionOnce().then((renewed) => {
+      if (renewed) {
+        // Reschedule against the freshly reported expiry.
+        scheduleEdgeSessionRenewal();
+      } else {
+        // Renewal failed (SSO session gone) — stop; the UNAUTHORIZED
+        // handling in useAuth/main.tsx owns the interactive fallback.
+        clearEdgeSessionExpiry();
+      }
+    });
+  }, delay);
+}
+
+/**
+ * Sync scheduling state from the server: fetch the current session expiry and
+ * (re)schedule the proactive renewal. Called after a successful auth.me.
+ */
+export async function syncEdgeSessionRenewal(): Promise<void> {
+  const info = await fetchSessionExpiry();
+  if (!info) return;
+  scheduleEdgeSessionRenewal(info.expiresAt);
+}
+
+/** Clear edge markers and cancel timers — folded into teardownSessionRefresh. */
+export function teardownEdgeSessionRenewal(): void {
+  cancelEdgeSessionRenewal();
+  clearEdgeSessionExpiry();
 }

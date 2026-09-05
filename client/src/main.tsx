@@ -2,6 +2,7 @@ import { trpc } from "@/lib/trpc";
 import "./i18n"; // initialise i18next before render
 import { UNAUTHED_ERR_MSG } from '@shared/const';
 import { getCsrfToken } from "@/hooks/useCsrf";
+import { createRenewingFetch } from "@/lib/renewingFetch";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -80,12 +81,16 @@ const trpcClient = trpc.createClient({
         const csrfToken = getCsrfToken();
         return csrfToken ? { 'x-csrf-token': csrfToken } : {};
       },
-      fetch(input, init) {
-        return globalThis.fetch(input, {
-          ...(init ?? {}),
-          credentials: "include",
-        });
-      },
+      fetch: (() => {
+        const baseFetch: typeof globalThis.fetch = (input, init) =>
+          globalThis.fetch(input, {
+            ...(init ?? {}),
+            credentials: "include",
+          });
+        // Wave 3: on a 401, attempt ONE silent session renewal and retry the
+        // original request once before surfacing UNAUTHORIZED to the UI.
+        return createRenewingFetch(baseFetch);
+      })(),
     }),
   ],
 });

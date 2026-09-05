@@ -1,8 +1,9 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
-  attemptSessionRefresh,
+  renewSessionOnce,
   scheduleSessionRefresh,
+  syncEdgeSessionRenewal,
   teardownSessionRefresh,
 } from "@/lib/sessionRefresh";
 import { TRPCClientError } from "@trpc/client";
@@ -43,6 +44,17 @@ export function useAuth(options?: UseAuthOptions) {
     } finally {
       teardownSessionRefresh();
       utils.auth.me.setData(undefined, null);
+      // Best-effort: also terminate the edge (oauth2-proxy) session so the
+      // portal cookie is really gone, not just the backend session cookie.
+      // Same-origin; redirect handled manually so we don't navigate away here.
+      try {
+        await fetch("/oauth2/sign_out", {
+          credentials: "include",
+          redirect: "manual",
+        });
+      } catch {
+        /* oauth2-proxy not in the path (dev) — backend logout already done */
+      }
       await utils.auth.me.invalidate();
     }
   }, [logoutMutation, utils]);
@@ -67,20 +79,25 @@ export function useAuth(options?: UseAuthOptions) {
   ]);
 
   // Silent session renewal: when a Keycloak token set is stored, keep it
-  // refreshed (expiresAt − 60s). No-op when the cookie-based flow is active.
+  // refreshed (expiresAt − 60s). Additionally, for the edge (cookie-based)
+  // flow, fetch the credential's expiry from the server and schedule a
+  // proactive silent SSO renewal so the portal never bounces on a hard 401.
   useEffect(() => {
-    if (state.user) scheduleSessionRefresh();
+    if (!state.user) return;
+    scheduleSessionRefresh();
+    void syncEdgeSessionRenewal();
   }, [state.user]);
 
-  // Session drop: attempt an imperative silent refresh before falling back
-  // to the SSO redirect.
+  // Session drop: attempt an imperative silent renewal (refresh grant when
+  // tokens exist, otherwise silent edge round-trip) before falling back to
+  // the SSO redirect.
   useEffect(() => {
     const err = meQuery.error;
     if (
       err instanceof TRPCClientError &&
       err.data?.code === "UNAUTHORIZED"
     ) {
-      void attemptSessionRefresh().then((renewed) => {
+      void renewSessionOnce().then((renewed) => {
         if (renewed) void meQuery.refetch();
       });
     }
