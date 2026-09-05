@@ -112,8 +112,8 @@ const STATUS_MESSAGES: Record<DeclarationStatus, string> = {
 function getNotifType(status: DeclarationStatus): string {
   if (status === "cleared") return "declaration_cleared";
   if (status === "rejected") return "declaration_rejected";
-  if (status === "docs_required") return "docs_required";
-  return "status_update";
+  if (status === "docs_required") return "document_required";
+  return "declaration_status_change";
 }
 
 describe("getNotifType", () => {
@@ -126,13 +126,13 @@ describe("getNotifType", () => {
   });
 
   it("returns docs_required for docs_required status", () => {
-    expect(getNotifType("docs_required")).toBe("docs_required");
+    expect(getNotifType("docs_required")).toBe("document_required");
   });
 
   it("returns status_update for other statuses", () => {
-    expect(getNotifType("payment_pending")).toBe("status_update");
-    expect(getNotifType("under_examination")).toBe("status_update");
-    expect(getNotifType("examination_complete")).toBe("status_update");
+    expect(getNotifType("payment_pending")).toBe("declaration_status_change");
+    expect(getNotifType("under_examination")).toBe("declaration_status_change");
+    expect(getNotifType("examination_complete")).toBe("declaration_status_change");
   });
 });
 

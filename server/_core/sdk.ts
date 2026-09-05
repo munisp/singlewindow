@@ -3,13 +3,18 @@ import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 import type { User } from "../../drizzle/schema";
+import { COOKIE_NAME } from "../../shared/const";
 import * as db from "../db";
 import { getPool } from "../db";
 import { ENV } from "./env";
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
-const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME ?? "session";
+// The session cookie is written with shared/const COOKIE_NAME everywhere
+// (demoAuth, e2eTestAuth, OAuth callback, logout); verification must read the
+// same name — single source of truth. SESSION_COOKIE_NAME remains as an
+// escape hatch for deployments that rename the cookie.
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME ?? COOKIE_NAME;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 export type SessionPayload = {

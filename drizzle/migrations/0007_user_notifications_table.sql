@@ -1,7 +1,7 @@
 CREATE TABLE "user_notifications" (
 "id" serial PRIMARY KEY NOT NULL,
 "user_id" integer NOT NULL,
-"type" "notification_type" DEFAULT 'general' NOT NULL,
+"type" "notification_type" DEFAULT 'system' NOT NULL,
 "title" varchar(255) NOT NULL,
 "body" text NOT NULL,
 "declaration_id" integer,

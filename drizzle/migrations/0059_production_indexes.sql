@@ -42,6 +42,10 @@ CREATE INDEX IF NOT EXISTS idx_sp_tax_id ON "stakeholder_profiles" ("tax_id");
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_fraud_status_created ON "fraud_cases" ("status", "created_at");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS idx_sanctions_hit_created ON "sanctions_checks" ("is_hit", "created_at");
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sanctions_checks' AND column_name='is_hit') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_sanctions_hit_created ON "sanctions_checks" ("is_hit", "created_at")';
+  END IF;
+END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS idx_risk_scan_created ON "risk_scan_results" ("created_at");

@@ -232,7 +232,7 @@ ALTER TABLE "cep_alerts" ADD CONSTRAINT "cep_alerts_declaration_id_declarations_
 ALTER TABLE "cep_alerts" ADD CONSTRAINT "cep_alerts_trader_id_users_id_fk" FOREIGN KEY ("trader_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cep_alerts" ADD CONSTRAINT "cep_alerts_assigned_to_users_id_fk" FOREIGN KEY ("assigned_to") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "cep_alerts" ADD CONSTRAINT "cep_alerts_resolved_by_users_id_fk" FOREIGN KEY ("resolved_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "cost_records" ADD CONSTRAINT "cost_records_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+-- moved to 0029 (FK requires uuid tenant_id; type conversion happens there)--> statement-breakpoint
 ALTER TABLE "declaration_amendments" ADD CONSTRAINT "declaration_amendments_declaration_id_declarations_id_fk" FOREIGN KEY ("declaration_id") REFERENCES "public"."declarations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "declaration_amendments" ADD CONSTRAINT "declaration_amendments_requested_by_users_id_fk" FOREIGN KEY ("requested_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "declaration_amendments" ADD CONSTRAINT "declaration_amendments_reviewed_by_users_id_fk" FOREIGN KEY ("reviewed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

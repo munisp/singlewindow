@@ -105,6 +105,16 @@ export async function assertCan(
 }
 
 /**
+ * Demo mode (dev/test only — production boot-refuses DEMO_MODE via
+ * server/_core/productionGates): no Permify sidecar is available, so
+ * relationship writes become logged no-ops. Defence in depth: never bypass
+ * when NODE_ENV=production, even if the startup gate was somehow skipped.
+ */
+function isDemoMode(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.DEMO_MODE === "true";
+}
+
+/**
  * Writes a relationship tuple to Permify.
  * Used when creating new resources (e.g., a new declaration assigns the trader as owner).
  */
@@ -125,6 +135,11 @@ export async function writeTuple(
       },
     ],
   };
+
+  if (isDemoMode()) {
+    console.warn(`[permify] DEMO_MODE: skipping writeTuple ${entityType}:${entityId}#${relation} -> ${subjectType}:${subjectId}`);
+    return;
+  }
 
   try {
     const res = await fetch(
@@ -169,6 +184,11 @@ export async function deleteTuple(
       },
     ],
   };
+
+  if (isDemoMode()) {
+    console.warn(`[permify] DEMO_MODE: skipping deleteTuple ${entityType}:${entityId}#${relation} -> ${subjectType}:${subjectId}`);
+    return;
+  }
 
   try {
     const res = await fetch(
