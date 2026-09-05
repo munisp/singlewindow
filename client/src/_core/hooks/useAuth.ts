@@ -1,9 +1,8 @@
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import {
-  renewSessionOnce,
+  attemptSessionRefresh,
   scheduleSessionRefresh,
-  syncEdgeSessionRenewal,
   teardownSessionRefresh,
 } from "@/lib/sessionRefresh";
 import { TRPCClientError } from "@trpc/client";
@@ -15,8 +14,16 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
-    options ?? {};
+  const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
+  // Compute the SSO login URL lazily: getLoginUrl() throws when
+  // VITE_KEYCLOAK_LOGIN_URL is unset (e.g. local DEMO_MODE without Keycloak),
+  // and a default-parameter evaluation would crash every useAuth caller even
+  // when no redirect is ever requested.
+  const resolvedRedirectPath = useMemo(() => {
+    if (redirectPath) return redirectPath;
+    if (!redirectOnUnauthenticated) return undefined;
+    return getLoginUrl();
+  }, [redirectPath, redirectOnUnauthenticated]);
   const utils = trpc.useUtils();
 
   const meQuery = trpc.auth.me.useQuery(undefined, {
@@ -44,17 +51,6 @@ export function useAuth(options?: UseAuthOptions) {
     } finally {
       teardownSessionRefresh();
       utils.auth.me.setData(undefined, null);
-      // Best-effort: also terminate the edge (oauth2-proxy) session so the
-      // portal cookie is really gone, not just the backend session cookie.
-      // Same-origin; redirect handled manually so we don't navigate away here.
-      try {
-        await fetch("/oauth2/sign_out", {
-          credentials: "include",
-          redirect: "manual",
-        });
-      } catch {
-        /* oauth2-proxy not in the path (dev) — backend logout already done */
-      }
       await utils.auth.me.invalidate();
     }
   }, [logoutMutation, utils]);
@@ -79,25 +75,20 @@ export function useAuth(options?: UseAuthOptions) {
   ]);
 
   // Silent session renewal: when a Keycloak token set is stored, keep it
-  // refreshed (expiresAt − 60s). Additionally, for the edge (cookie-based)
-  // flow, fetch the credential's expiry from the server and schedule a
-  // proactive silent SSO renewal so the portal never bounces on a hard 401.
+  // refreshed (expiresAt − 60s). No-op when the cookie-based flow is active.
   useEffect(() => {
-    if (!state.user) return;
-    scheduleSessionRefresh();
-    void syncEdgeSessionRenewal();
+    if (state.user) scheduleSessionRefresh();
   }, [state.user]);
 
-  // Session drop: attempt an imperative silent renewal (refresh grant when
-  // tokens exist, otherwise silent edge round-trip) before falling back to
-  // the SSO redirect.
+  // Session drop: attempt an imperative silent refresh before falling back
+  // to the SSO redirect.
   useEffect(() => {
     const err = meQuery.error;
     if (
       err instanceof TRPCClientError &&
       err.data?.code === "UNAUTHORIZED"
     ) {
-      void renewSessionOnce().then((renewed) => {
+      void attemptSessionRefresh().then((renewed) => {
         if (renewed) void meQuery.refetch();
       });
     }
@@ -109,15 +100,17 @@ export function useAuth(options?: UseAuthOptions) {
     if (meQuery.isLoading || logoutMutation.isPending) return;
     if (state.user) return;
     if (typeof window === "undefined") return;
-    if (window.location.pathname === redirectPath) return;
+    if (!resolvedRedirectPath) return;
+    if (window.location.pathname === resolvedRedirectPath) return;
 
-    window.location.href = redirectPath
+    window.location.href = resolvedRedirectPath
   }, [
     redirectOnUnauthenticated,
     redirectPath,
     logoutMutation.isPending,
     meQuery.isLoading,
     state.user,
+    resolvedRedirectPath,
   ]);
 
   return {

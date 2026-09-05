@@ -361,7 +361,7 @@ describe("declarations lifecycle — officer transitions", () => {
 
     expect(assertCan).toHaveBeenCalledWith("83", "declaration", "77", "hold");
     expect(createUserNotification).toHaveBeenCalledWith(expect.objectContaining({
-      type: "status_update",
+      type: "declaration_status_change",
       body: expect.stringContaining("selected for physical examination"),
     }));
     expect(publishEvent).toHaveBeenCalledWith("declaration.updated", expect.objectContaining({

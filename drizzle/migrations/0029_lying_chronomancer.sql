@@ -1,1 +1,2 @@
-ALTER TABLE "cost_records" ALTER COLUMN "tenant_id" SET DATA TYPE uuid;
+ALTER TABLE "cost_records" ALTER COLUMN "tenant_id" SET DATA TYPE uuid USING (md5("tenant_id"::text)::uuid);
+ALTER TABLE "cost_records" ADD CONSTRAINT "cost_records_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;

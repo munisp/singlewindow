@@ -1087,6 +1087,23 @@ export const declarationsRouter = router({
       const updateData: Record<string, unknown> = { status: input.status };
       if (input.status === "cleared") updateData.clearedAt = new Date();
 
+      // SW-18: a non-model (rules-fallback) risk score requires a recorded
+      // manual review before clearance. Completing the physical examination
+      // IS that manual review — record it on examination_complete so the
+      // clearance gate in this same procedure can be satisfied. Without this,
+      // any declaration scored during a scoring outage could never be cleared.
+      if (input.status === "examination_complete") {
+        const explanation = (decl as { aiExplanation?: Record<string, unknown> | null }).aiExplanation;
+        if (explanation && (explanation as any).modelScore === false && !(explanation as any).manualReviewCompleted) {
+          updateData.aiExplanation = {
+            ...explanation,
+            manualReviewCompleted: true,
+            manualReviewBy: ctx.user.id,
+            manualReviewAt: new Date().toISOString(),
+          };
+        }
+      }
+
       const updated = await updateDeclaration(input.id, updateData as any);
 
       await logAuditEvent({
@@ -1121,9 +1138,11 @@ export const declarationsRouter = router({
         under_examination: `${decl.declarationNumber} has been selected for physical examination.`,
         examination_complete: `Physical examination of ${decl.declarationNumber} is complete. Awaiting final clearance.`,
       };
+      // Values must be members of the notification_type pgEnum — invalid
+      // literals make the insert fail AFTER the status update has committed.
       const userNotifType = input.status === "cleared" ? "declaration_cleared" :
         input.status === "rejected" ? "declaration_rejected" :
-        input.status === "docs_required" ? "docs_required" : "status_update";
+        input.status === "docs_required" ? "document_required" : "declaration_status_change";
       const savedNotif = await createUserNotification({
         userId: decl.traderId,
         type: userNotifType,
