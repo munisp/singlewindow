@@ -12,6 +12,8 @@
  *   GET /v1/sla/breaches                 — SLA breach list (capped)
  *   GET /v1/customs/summary              — customs/NCS-NRS summary
  *   GET /v1/briefings/weekly             — JWS-signed weekly PDF briefing
+ *   GET /v1/port-performance/report      — port performance metrics (honest nulls)
+ *   GET /v1/port-performance/report.pdf  — JWS-signed port performance PDF
  */
 import type { Express } from "express";
 import { requireApiKey } from "../middleware/apiKeyAuth";
@@ -25,6 +27,11 @@ import {
   SLA_BREACH_MAX_PAGE,
 } from "../executive/kpiPack";
 import { BriefingSigningUnavailable, buildSignedWeeklyBriefing } from "../executive/briefing";
+import {
+  computePortPerformanceReport,
+  isPortPerformancePeriod,
+} from "../executive/portPerformance";
+import { buildSignedPortPerformancePdf } from "../executive/portPerformancePdf";
 import { callRiskScorer } from "../routers/riskModel";
 
 const PROD_UPSTREAM = { id: "executive-api", sandbox: false } as const;
@@ -133,6 +140,63 @@ export function registerExecutiveApiRoutes(app: Express): void {
       try {
         res.json(await computeCustomsSummary());
       } catch (err) {
+        down(res, err);
+      }
+    }
+  );
+
+  // ── Port performance report (Phase 16 Wave P2) ──────────────────────────────
+  // JSON metrics, fail-closed: value:null where a source has no data.
+  app.get(
+    "/v1/port-performance/report",
+    requireApiKey("reports:read", PROD_UPSTREAM),
+    async (req, res) => {
+      const period = String(req.query.period ?? "weekly");
+      if (!isPortPerformancePeriod(period)) {
+        res.status(400).json({ error: "period must be weekly, monthly or quarterly" });
+        return;
+      }
+      try {
+        res.json(await computePortPerformanceReport(period));
+      } catch (err) {
+        down(res, err);
+      }
+    }
+  );
+
+  // Signed PDF, same JWS-EdDSA envelope/kid convention as /v1/briefings/weekly.
+  app.get(
+    "/v1/port-performance/report.pdf",
+    requireApiKey("reports:read", PROD_UPSTREAM),
+    async (req, res) => {
+      const period = String(req.query.period ?? "weekly");
+      if (!isPortPerformancePeriod(period)) {
+        res.status(400).json({ error: "period must be weekly, monthly or quarterly" });
+        return;
+      }
+      try {
+        const report = await buildSignedPortPerformancePdf(period);
+        const accept = String(req.headers.accept ?? "");
+        if (accept.includes("application/pdf")) {
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("X-Content-JWS", report.signature);
+          res.setHeader("X-Content-KID", report.kid);
+          res.send(Buffer.from(report.payload, "base64"));
+          return;
+        }
+        res.json({
+          payload: report.payload,
+          signature: report.signature,
+          algorithm: report.algorithm,
+          kid: report.kid,
+          contentType: report.contentType,
+          generatedAt: report.generatedAt,
+        });
+      } catch (err) {
+        if (err instanceof BriefingSigningUnavailable || err instanceof KpiPackUnavailable) {
+          down(res, err);
+          return;
+        }
         down(res, err);
       }
     }
