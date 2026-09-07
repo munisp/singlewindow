@@ -50,6 +50,15 @@ const PcsConsignmentTimeline = lazy(() => import("./pages/app/PcsConsignmentTime
 const PcsBookings = lazy(() => import("./pages/app/PcsBookings"));
 const PcsBilling = lazy(() => import("./pages/app/PcsBilling"));
 const PcsDocuments = lazy(() => import("./pages/app/PcsDocuments"));
+// Phase 16 — PCS port-operations boards (port-interop read-through)
+const PcsPortCallStatus = lazy(() => import("./pages/app/PcsPortCallStatus"));
+const PcsVesselTracking = lazy(() => import("./pages/app/PcsVesselTracking"));
+const PcsBerthOccupancy = lazy(() => import("./pages/app/PcsBerthOccupancy"));
+// Phase 16 — AEO fast-lane admin + transshipment lane
+const AdminAeoFastLane = lazy(() => import("./pages/app/AdminAeoFastLane"));
+const TransshipmentWizard = lazy(() => import("./pages/app/TransshipmentWizard"));
+const TransshipmentList = lazy(() => import("./pages/app/TransshipmentList"));
+const TransshipmentDetail = lazy(() => import("./pages/app/TransshipmentDetail"));
 const Notifications = lazy(() => import("./pages/app/Notifications"));
 const Finance = lazy(() => import("./pages/app/Finance"));
 const PostClearanceAudit = lazy(() => import("./pages/app/PostClearanceAudit"));
@@ -494,6 +503,31 @@ function Router() {
       </Route>
       <Route path="/app/pcs/documents">
         <Suspense fallback={<LazyFallback />}><PcsDocuments /></Suspense>
+      </Route>
+      <Route path="/app/pcs/port-calls">
+        <Suspense fallback={<LazyFallback />}><PcsPortCallStatus /></Suspense>
+      </Route>
+      <Route path="/app/pcs/vessels">
+        <Suspense fallback={<LazyFallback />}><PcsVesselTracking /></Suspense>
+      </Route>
+      <Route path="/app/pcs/berths">
+        <Suspense fallback={<LazyFallback />}><PcsBerthOccupancy /></Suspense>
+      </Route>
+
+      {/* Phase 16 — AEO export fast-lane (admin) + transshipment lane (trader) */}
+      <Route path="/app/admin/aeo-fast-lane">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><AdminAeoFastLane /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/transshipment">
+        <Suspense fallback={<LazyFallback />}><TransshipmentList /></Suspense>
+      </Route>
+      <Route path="/app/transshipment/new">
+        <Suspense fallback={<LazyFallback />}><TransshipmentWizard /></Suspense>
+      </Route>
+      <Route path="/app/transshipment/:id">
+        {(params) => (
+          <Suspense fallback={<LazyFallback />}><TransshipmentDetail linkId={Number(params.id)} /></Suspense>
+        )}
       </Route>
 
       {/* Sprint 48 — Flink CEP Trade Pattern Alerts */}

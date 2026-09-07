@@ -47,6 +47,9 @@ import { pcsBookingRequestsTotal, pcsGapRenderedTotal } from "../_core/metrics";
 export type PcsUnavailableReason =
   | "not_configured"
   | "database_unavailable"
+  /** The upstream build predates the requested endpoint (404/501) — honestly
+   * reported as "not deployed", never substituted with fabricated rows. */
+  | "endpoint_not_deployed"
   | PortInteropUnavailableReason;
 
 export type PcsResult<T> =
@@ -259,6 +262,127 @@ export const pcsRouter = router({
         }
         if (lastFailure && visits.length === 0) return lastFailure as PcsResult<{ visits: unknown[]; unlinkedConsignments: number }>;
         return ok({ visits, unlinkedConsignments }, ["AIS", "BERTH_OPS"]);
+      }),
+  }),
+
+  // ─── Phase 16: port-call status board (read-through, authority-sourced) ────
+
+  portCalls: router({
+    status: protectedProcedure
+      .input(
+        z.object({
+          portCode: z.string().regex(/^[A-Z]{2,8}$/),
+          status: z.enum(["DRAFT", "SUBMITTED", "ACCEPTED", "REJECTED"]).optional(),
+          from: z.string().datetime().optional(),
+          to: z.string().datetime().optional(),
+          limit: z.number().int().min(1).max(200).default(50),
+        })
+      )
+      .query(async ({ ctx, input }): Promise<PcsResult<{ portCalls: unknown[] }>> => {
+        let client;
+        try {
+          client = getPortInteropClient();
+        } catch (err) {
+          return upstreamFailure(err);
+        }
+        try {
+          const portCalls = await client.listPortCalls(
+            { portCode: input.portCode, status: input.status, from: input.from, to: input.to, limit: input.limit },
+            { principal: principalOf(ctx.user.id) }
+          );
+          // Zero port calls is a truthful empty state; AIS gap disclosed.
+          return ok({ portCalls }, ["AIS", "BERTH_OPS"]);
+        } catch (err) {
+          if (
+            err instanceof PortInteropRejectedError &&
+            (err.statusCode === 404 || err.statusCode === 501)
+          ) {
+            return unavailable(
+              "endpoint_not_deployed",
+              "The connected port-interoperability service does not expose the port-call list endpoint (GET /v1/port-calls) — no port-call status data can be shown."
+            );
+          }
+          return upstreamFailure(err);
+        }
+      }),
+  }),
+
+  // ─── Phase 16: vessel tracking (derived from authority port calls; no AIS) ─
+
+  vessels: router({
+    track: protectedProcedure
+      .input(z.object({ portCode: z.string().regex(/^[A-Z]{2,8}$/) }))
+      .query(async ({ ctx, input }): Promise<PcsResult<{ vessels: unknown[] }>> => {
+        let client;
+        try {
+          client = getPortInteropClient();
+        } catch (err) {
+          return upstreamFailure(err);
+        }
+        try {
+          const portCalls = await client.listPortCalls(
+            { portCode: input.portCode, limit: 200 },
+            { principal: principalOf(ctx.user.id) }
+          );
+          // Group by IMO — vessel identity and call status are authority
+          // fields only; positions/predictive ETAs are GAP-PCS-AIS and are
+          // NEVER synthesized.
+          const byImo = new Map<string, { vesselImo: string; portCalls: unknown[]; latestStatus: string; latestUpdatedAt: string }>();
+          for (const pc of portCalls) {
+            const entry = byImo.get(pc.vessel_imo) ?? { vesselImo: pc.vessel_imo, portCalls: [], latestStatus: pc.status, latestUpdatedAt: pc.updated_at };
+            entry.portCalls.push(pc);
+            if (pc.updated_at >= entry.latestUpdatedAt) {
+              entry.latestStatus = pc.status;
+              entry.latestUpdatedAt = pc.updated_at;
+            }
+            byImo.set(pc.vessel_imo, entry);
+          }
+          return ok({ vessels: [...byImo.values()] }, ["AIS", "BERTH_OPS"]);
+        } catch (err) {
+          if (
+            err instanceof PortInteropRejectedError &&
+            (err.statusCode === 404 || err.statusCode === 501)
+          ) {
+            return unavailable(
+              "endpoint_not_deployed",
+              "The connected port-interoperability service does not expose the port-call list endpoint (GET /v1/port-calls) — vessel tracking cannot be shown."
+            );
+          }
+          return upstreamFailure(err);
+        }
+      }),
+  }),
+
+  // ─── Phase 16: berth occupancy board (read-through) ────────────────────────
+
+  berths: router({
+    occupancy: protectedProcedure
+      .input(z.object({ portCode: z.string().regex(/^[A-Z]{2,8}$/) }))
+      .query(async ({ ctx, input }): Promise<PcsResult<{ berths: unknown[] }>> => {
+        let client;
+        try {
+          client = getPortInteropClient();
+        } catch (err) {
+          return upstreamFailure(err);
+        }
+        try {
+          const berths = await client.listBerths(
+            { portCode: input.portCode },
+            { principal: principalOf(ctx.user.id) }
+          );
+          return ok({ berths }, ["BERTH_OPS"]);
+        } catch (err) {
+          if (
+            err instanceof PortInteropRejectedError &&
+            (err.statusCode === 404 || err.statusCode === 501)
+          ) {
+            return unavailable(
+              "endpoint_not_deployed",
+              "The connected port-interoperability service does not expose the berth occupancy endpoint (GET /v1/berths) — berth occupancy cannot be shown."
+            );
+          }
+          return upstreamFailure(err);
+        }
       }),
   }),
 

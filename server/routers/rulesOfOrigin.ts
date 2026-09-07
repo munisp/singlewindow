@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { getDb, createNotification } from "../db";
-import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, complianceEmailSchedule, complianceEmailDeliveryLog, type OriginCertificate } from "../../drizzle/schema";
+import { originCertificates, originCertStatusEnum, originCertTypeEnum, originCriteriaMet, complianceEmailSchedule, complianceEmailDeliveryLog, stakeholderProfiles, type OriginCertificate } from "../../drizzle/schema";
 import { eq, desc, and, or, ilike, count, gte, lte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { generateCertificatePdf } from "../lib/certificatePdf";
@@ -35,8 +35,19 @@ export const rulesOfOriginRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const certNumber = `CO-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-      const [cert] = await (await getDb())!.insert(originCertificates).values({
+      // Phase 16 AEO fast-lane: rules-of-origin fast path — certificates filed
+      // by AEO-certified exporters are flagged automatically (accreditation
+      // read live from stakeholder_profiles; never inferred).
+      const db = (await getDb())!;
+      const [profile] = await db
+        .select({ aeoStatus: stakeholderProfiles.aeoStatus })
+        .from(stakeholderProfiles)
+        .where(eq(stakeholderProfiles.userId, ctx.user.id))
+        .limit(1);
+      const fastPath = profile?.aeoStatus === "certified";
+      const [cert] = await db.insert(originCertificates).values({
         traderId: ctx.user.id,
+        fastPath,
         declarationId: input.declarationId ?? null,
         certType: input.certType,
         status: "submitted",
