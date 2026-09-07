@@ -48,7 +48,7 @@ jobs:
       typescript: ${{ steps.filter.outputs.typescript }}
       chaos: ${{ steps.filter.outputs.chaos }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: filter
@@ -94,8 +94,8 @@ jobs:
       # container. A unique name avoids collisions when runner capacity grows.
       TEST_COMPOSE_PROJECT: singlewindow-test-db-${{ github.run_id }}-${{ github.job }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -107,7 +107,7 @@ jobs:
         run: scripts/test-with-postgres.sh --reporter=verbose
       - name: Upload TypeScript test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: typescript-test-artifacts
           path: |
@@ -137,8 +137,8 @@ jobs:
           - 16379:16379
           - 16380:16380
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
       - name: Wait for Toxiproxy API readiness
@@ -159,7 +159,7 @@ jobs:
         run: pytest -q tests/chaos/test_quorum_fence_toxiproxy.py --junitxml=chaos-fence-junit.xml
       - name: Upload quorum-fence test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chaos-fence-results
           path: chaos-fence-junit.xml
@@ -181,15 +181,15 @@ jobs:
       run:
         working-directory: services/go/${{ matrix.service }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Run race-enabled tests and collect coverage
         run: go test -race -coverprofile=coverage.out ./...
       - name: Upload Go coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: go-${{ matrix.service }}-coverage
           path: services/go/${{ matrix.service }}/coverage.out
@@ -209,13 +209,13 @@ jobs:
       run:
         working-directory: services/rust/${{ matrix.service }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           components: clippy, rustfmt
       - name: Cache Cargo registry and build outputs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -230,7 +230,7 @@ jobs:
         run: cargo test --all-targets
       - name: Upload Rust binaries and test artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-${{ matrix.service }}-artifacts
           path: |
@@ -246,8 +246,8 @@ jobs:
       run:
         working-directory: services/go/mojaloop-gateway
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Generate ephemeral JWS key
@@ -266,8 +266,8 @@ jobs:
       run:
         working-directory: services/go/workflow-service
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Run health handler tests
