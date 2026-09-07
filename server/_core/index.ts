@@ -1512,6 +1512,9 @@ async function startServer() {
   // Phase 12 Mission C: executive/analytics/briefing REST surface
   const { registerExecutiveApiRoutes } = await import("../routes/executiveApi");
   registerExecutiveApiRoutes(app);
+  // Phase 16 Wave P1: shipping-line API products (berth-availability, congestion-forecast)
+  const { registerShippingLineApiRoutes } = await import("../routes/shippingLineApi");
+  registerShippingLineApiRoutes(app);
   // WP-8: external metered API surface for marketplace key holders
   const { requireApiKey } = await import("../middleware/apiKeyAuth");
   const { computeOperationalKpis } = await import("../marketplace/kpiService");

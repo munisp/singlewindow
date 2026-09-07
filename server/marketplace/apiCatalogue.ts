@@ -106,6 +106,28 @@ const EXTERNAL_ENTRIES: Array<Omit<CatalogueEntry, "specDigest" | "procedures"> 
     sandboxAvailable: false,
     specFragment: { service: "singlewindow", surfaces: ["GET /api/kpis/public", "GET /api/kpis/snapshot"] },
   },
+  {
+    apiId: "singlewindow.shipping.berth-availability",
+    title: "Shipping Lines — berth availability API (port-interoperability slots)",
+    owner: "port-operations",
+    classification: "PARTNER",
+    version: "1.0.0",
+    sla: { availabilityPct: 99.5, maxLatencyMs: 2000, support: "business-hours" },
+    openapiRef: "/api/marketplace/specs/berth-availability",
+    sandboxAvailable: false,
+    specFragment: { service: "singlewindow", surfaces: ["GET /v1/shipping/berth-availability"] },
+  },
+  {
+    apiId: "singlewindow.shipping.congestion-forecast",
+    title: "Shipping Lines — port congestion forecast API (ml-stack predictions)",
+    owner: "port-operations",
+    classification: "PARTNER",
+    version: "1.0.0",
+    sla: { availabilityPct: 99.5, maxLatencyMs: 2500, support: "business-hours" },
+    openapiRef: "/api/marketplace/specs/congestion-forecast",
+    sandboxAvailable: false,
+    specFragment: { service: "singlewindow", surfaces: ["GET /v1/shipping/congestion-forecast"] },
+  },
 ];
 
 const sha256hex = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
