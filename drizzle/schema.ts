@@ -24,7 +24,7 @@ export const aeoStatusEnum = pgEnum("aeo_status", [
 export const aeoTierEnum = pgEnum("aeo_tier", ["standard", "silver", "gold"]);
 
 export const declarationTypeEnum = pgEnum("declaration_type", [
-  "import", "export", "transit", "re_export"
+  "import", "export", "transit", "re_export", "transshipment"
 ]);
 
 export const declarationStatusEnum = pgEnum("declaration_status", [
@@ -613,6 +613,9 @@ export const dutyDrawbackClaims = pgTable("duty_drawback_claims", {
   submittedAt: timestamp("submitted_at"),
   reviewedAt: timestamp("reviewed_at"),
   paidAt: timestamp("paid_at"),
+  // Phase 16 AEO fast-lane: drawback acceleration for AEO-certified exporters.
+  fastTrack: boolean("fast_track").default(false).notNull(),
+  fastTrackAt: timestamp("fast_track_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -1387,6 +1390,8 @@ export const originCertificates = pgTable("origin_certificates", {
   revokedBy: integer("revoked_by").references(() => users.id),
   revocationReason: text("revocation_reason"),
   scanCount: integer("scan_count").default(0).notNull(),
+  // Phase 16 AEO fast-lane: rules-of-origin fast path for AEO-certified exporters.
+  fastPath: boolean("fast_path").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -3927,3 +3932,47 @@ export const marketplaceTiers = pgTable("marketplace_tiers", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 export type MarketplaceTier = typeof marketplaceTiers.$inferSelect;
+
+// ─── Phase 16 — Transshipment declaration lane (migration 0069) ─────────────
+
+export const bondedTransferStatusEnum = pgEnum("bonded_transfer_status", [
+  "initiated", "in_transit", "arrived_bond", "under_supervision",
+  "released", "completed", "cancelled",
+]);
+
+/**
+ * A transshipment declaration couples ONE inbound and ONE outbound manifest.
+ * Validation invariant (enforced in server/routers/transshipment.ts): the
+ * inbound manifest's port of discharge must equal the outbound manifest's
+ * port of loading — the transshipment port.
+ */
+export const transshipmentLinks = pgTable("transshipment_links", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().unique().references(() => declarations.id),
+  inboundManifestId: integer("inbound_manifest_id").notNull().references(() => manifests.id),
+  outboundManifestId: integer("outbound_manifest_id").notNull().references(() => manifests.id),
+  transshipmentPort: varchar("transshipment_port", { length: 64 }).notNull(),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tsl_inbound_manifest").on(t.inboundManifestId),
+  index("idx_tsl_outbound_manifest").on(t.outboundManifestId),
+]);
+export type TransshipmentLink = typeof transshipmentLinks.$inferSelect;
+export type InsertTransshipmentLink = typeof transshipmentLinks.$inferInsert;
+
+/**
+ * Append-only bonded transfer tracking: every status transition is a new row
+ * (audit trail; never an in-place update).
+ */
+export const bondedTransfers = pgTable("bonded_transfers", {
+  id: serial("id").primaryKey(),
+  transshipmentLinkId: integer("transshipment_link_id").notNull().references(() => transshipmentLinks.id),
+  fromStatus: bondedTransferStatusEnum("from_status"),
+  toStatus: bondedTransferStatusEnum("to_status").notNull(),
+  actorId: integer("actor_id").notNull().references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_btr_link").on(t.transshipmentLinkId)]);
+export type BondedTransfer = typeof bondedTransfers.$inferSelect;
+export type InsertBondedTransfer = typeof bondedTransfers.$inferInsert;

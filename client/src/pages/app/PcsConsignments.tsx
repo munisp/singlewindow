@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Ship, CalendarCheck, Receipt, FileText, ChevronRight, RefreshCw } from "lucide-react";
+import { Ship, CalendarCheck, Receipt, FileText, ChevronRight, RefreshCw, Anchor, LayoutGrid } from "lucide-react";
 import { useLocation } from "wouter";
 import { MILESTONE_LABELS, PcsDegradedBanner, PcsEmptyState, PcsGapList, ProvenanceLine } from "./pcs/pcsUi";
 
@@ -55,6 +55,24 @@ export default function PcsConsignments() {
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4 text-violet-400" /> Port documents</CardTitle>
               <CardDescription>Delivery orders, gate passes, terminal notices</CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="cursor-pointer transition-colors hover:border-sky-500/40" onClick={() => navigate("/app/pcs/port-calls")}>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base"><Anchor className="h-4 w-4 text-cyan-400" /> Port-call status</CardTitle>
+              <CardDescription>Live authority port-call records by port</CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="cursor-pointer transition-colors hover:border-sky-500/40" onClick={() => navigate("/app/pcs/vessels")}>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base"><Ship className="h-4 w-4 text-blue-400" /> Vessel tracking</CardTitle>
+              <CardDescription>Vessels via authority port calls (no AIS feed)</CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="cursor-pointer transition-colors hover:border-sky-500/40" onClick={() => navigate("/app/pcs/berths")}>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base"><LayoutGrid className="h-4 w-4 text-amber-400" /> Berth occupancy</CardTitle>
+              <CardDescription>Terminal berth state from the port authority</CardDescription>
             </CardHeader>
           </Card>
         </div>

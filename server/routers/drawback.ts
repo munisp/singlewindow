@@ -147,6 +147,8 @@ export const drawbackRouter = router({
           paidAt: dutyDrawbackClaims.paidAt,
           createdAt: dutyDrawbackClaims.createdAt,
           rejectionReason: dutyDrawbackClaims.rejectionReason,
+          fastTrack: dutyDrawbackClaims.fastTrack,
+          fastTrackAt: dutyDrawbackClaims.fastTrackAt,
         })
           .from(dutyDrawbackClaims)
           .where(where)

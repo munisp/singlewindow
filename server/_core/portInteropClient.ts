@@ -120,6 +120,21 @@ export interface PortInteropSlot {
   created_at: string;
 }
 
+/**
+ * Berth occupancy record (port-interop GET /v1/berths). Authority-sourced
+ * terminal berth state; optional linkage fields are absent when the berth is
+ * free or the upstream has not linked a port call yet.
+ */
+export interface PortInteropBerth {
+  berth_id: string;
+  port_code: string;
+  terminal_id?: string;
+  status: string;
+  call_id?: string;
+  vessel_imo?: string;
+  updated_at?: string;
+}
+
 export interface PortInteropObserverState {
   booking_id: string;
   stage: string;
@@ -449,6 +464,21 @@ export interface PortInteropCallContext {
 
 export interface PortInteropClient {
   getPortCall(callId: string, ctx: PortInteropCallContext): Promise<PortCall>;
+  /**
+   * GET /v1/port-calls?port_code&status&from&to&limit — port-call status
+   * board read (Phase 16). When the upstream build predates this endpoint it
+   * answers 404 → PortInteropRejectedError; routers surface that as an
+   * honest "endpoint_not_deployed" state, never fabricated rows.
+   */
+  listPortCalls(
+    query: { portCode: string; status?: string; from?: string; to?: string; limit?: number },
+    ctx: PortInteropCallContext
+  ): Promise<PortCall[]>;
+  /**
+   * GET /v1/berths?port_code — berth occupancy board read (Phase 16). Same
+   * 404 → honest-unavailable contract as listPortCalls.
+   */
+  listBerths(query: { portCode: string }, ctx: PortInteropCallContext): Promise<PortInteropBerth[]>;
   getBooking(bookingId: string, ctx: PortInteropCallContext): Promise<PortInteropBooking>;
   getBookingObserver(bookingId: string, ctx: PortInteropCallContext): Promise<PortInteropObserverState>;
   listSlots(query: { terminalId: string; from: string; to: string }, ctx: PortInteropCallContext): Promise<PortInteropSlot[]>;
@@ -692,6 +722,47 @@ export function createPortInteropClient(options: PortInteropClientOptions): Port
         `/v1/port-calls/${encodeURIComponent(callId)}`,
         { principal: ctx.principal },
         parsePortCall
+      );
+    },
+    listPortCalls(query, ctx) {
+      const params = new URLSearchParams({ port_code: query.portCode });
+      if (query.status) params.set("status", query.status);
+      if (query.from) params.set("from", query.from);
+      if (query.to) params.set("to", query.to);
+      if (query.limit !== undefined) params.set("limit", String(query.limit));
+      return call(
+        "port_interop.list_port_calls",
+        "GET",
+        `/v1/port-calls?${params.toString()}`,
+        { principal: ctx.principal },
+        (payload) => {
+          const body = payload as { port_calls?: unknown[] } | null;
+          if (!body || !Array.isArray(body.port_calls)) throw new Error("missing port_calls array");
+          return body.port_calls.map(parsePortCall);
+        }
+      );
+    },
+    listBerths(query, ctx) {
+      const params = new URLSearchParams({ port_code: query.portCode });
+      return call(
+        "port_interop.list_berths",
+        "GET",
+        `/v1/berths?${params.toString()}`,
+        { principal: ctx.principal },
+        (payload) => {
+          const body = payload as { berths?: unknown[] } | null;
+          if (!body || !Array.isArray(body.berths)) throw new Error("missing berths array");
+          return body.berths.map((raw) => {
+            const b = raw as PortInteropBerth | null;
+            if (!b || typeof b !== "object" || typeof b.berth_id !== "string" || !b.berth_id) {
+              throw new Error("missing berth_id");
+            }
+            if (typeof b.port_code !== "string" || typeof b.status !== "string") {
+              throw new Error("missing berth port_code/status");
+            }
+            return b;
+          });
+        }
       );
     },
     getBooking(bookingId, ctx) {

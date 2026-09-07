@@ -7,6 +7,12 @@
 -- Admin connections use "admin_user" (full access).
 --
 -- Apply: psql -U postgres -d tradegateway -f 01_rls_policies.sql
+--
+-- App-role requirement: the application roles created below must NOT bypass
+-- RLS. If any of these roles are ever recreated outside this DO block, they
+-- must be created (or altered) with NOBYPASSRLS — e.g.
+--   ALTER ROLE app_user NOBYPASSRLS;
+-- so table policies remain authoritative for every application connection.
 -- =============================================================================
 
 -- ─── Roles ────────────────────────────────────────────────────────────────────

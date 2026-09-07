@@ -298,6 +298,17 @@ export default function DutyDrawback() {
   });
 
   const utils = trpc.useUtils();
+
+  // Phase 16 AEO fast-lane: certified exporters may request drawback
+  // acceleration on their own submitted/under-review claims.
+  const { data: accreditation } = trpc.aeoFastLane.myAccreditation.useQuery(undefined, { enabled: isTrader });
+  const fastTrack = trpc.aeoFastLane.drawback.requestFastTrack.useMutation({
+    onSuccess: () => {
+      toast.success("Drawback fast-track requested — your claim is now prioritized for review.");
+      utils.drawback.list.invalidate();
+    },
+    onError: (err) => toast.error(err.message),
+  });
   const submit = trpc.drawback.submit.useMutation({
     onSuccess: (c) => {
       toast.success("Claim submitted", { description: `${c.claimNumber} submitted for review.` });
@@ -450,6 +461,21 @@ export default function DutyDrawback() {
                             >
                               Submit
                             </Button>
+                          )}
+                          {isTrader && accreditation?.certified && ["submitted", "under_review"].includes(claim.status) && (
+                            claim.fastTrack ? (
+                              <Badge className="bg-amber-500/20 text-amber-300 text-xs">fast-tracked</Badge>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => fastTrack.mutate({ claimId: claim.id })}
+                                disabled={fastTrack.isPending}
+                                className="h-7 px-2 border-amber-500/40 text-amber-300 text-xs"
+                              >
+                                Fast-track
+                              </Button>
+                            )
                           )}
                           {isReviewer && ["submitted", "under_review"].includes(claim.status) && (
                             <Button

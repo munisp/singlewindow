@@ -116,6 +116,11 @@ const EXEMPT_ROUTERS = new Set([
   // shared domain resource — callers manage only their own records, same
   // posture as the exempt webhooks router):
   "marketplace", "mswExchange", "secureChain",
+  // Phase 16: AEO fast-lane and transshipment lane — officer/trader roles are
+  // enforced in-router (OFFICER_QUEUE_ROLES / OFFICER_ROLES, adminProcedure,
+  // owner-scoped reads); trader-facing procedures manage only the caller's
+  // own records (same posture as the exempt pcs router).
+  "aeoFastLane", "transshipment",
 ]);
 
 function parseSchema(src) {
