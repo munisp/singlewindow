@@ -565,6 +565,17 @@ export const ENV = {
   mswExchangeSender: process.env.MSW_EXCHANGE_SENDER ?? "",
   mswExchangePeerUrl: process.env.MSW_EXCHANGE_PEER_URL ?? "",
   mlStackHttpUrl: process.env.ML_STACK_HTTP_URL ?? "",
+  // Env-only service token for ml-stack calls (Keycloak JWKS audience);
+  // read live by the shipping-products + queue-policy clients.
+  mlStackServiceToken: process.env.ML_STACK_SERVICE_TOKEN ?? "",
+  // Phase 18: shadow RL queue-policy gate (both must be set for the
+  // queuePolicy suggestion surface to call ml-stack; fail-closed otherwise)
+  rlQueuePolicyShadowEnabled: process.env.RL_QUEUE_POLICY_SHADOW_ENABLED ?? "",
+  // PRA-068 sweep registration for the optional CSP extension origins read
+  // in _core/index.ts (comma-separated origin lists; empty = none).
+  cspScriptSrcExtra: process.env.CSP_SCRIPT_SRC_EXTRA ?? "",
+  cspConnectSrcExtra: process.env.CSP_CONNECT_SRC_EXTRA ?? "",
+  cspImgSrcExtra: process.env.CSP_IMG_SRC_EXTRA ?? "",
   riskScorerPipeline: process.env.RISK_SCORER_PIPELINE ?? "",
   schedulerSecret: process.env.SCHEDULER_SECRET ?? "",
   cvContainerConsumerEnabled: process.env.CV_CONTAINER_CONSUMER_ENABLED ?? "",

@@ -121,6 +121,11 @@ const EXEMPT_ROUTERS = new Set([
   // owner-scoped reads); trader-facing procedures manage only the caller's
   // own records (same posture as the exempt pcs router).
   "aeoFastLane", "transshipment",
+  // Phase 18: RL queue-policy shadow surface — officer roles enforced
+  // in-router via requireOfficer (OFFICER_QUEUE_ROLES); the suggestion is
+  // an advisory annotation over the declaration queue (no auto-reorder) and
+  // the decision log is caller-attributed, same posture as aeoFastLane.
+  "queuePolicy",
 ]);
 
 function parseSchema(src) {

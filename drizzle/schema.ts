@@ -3976,3 +3976,28 @@ export const bondedTransfers = pgTable("bonded_transfers", {
 }, (t) => [index("idx_btr_link").on(t.transshipmentLinkId)]);
 export type BondedTransfer = typeof bondedTransfers.$inferSelect;
 export type InsertBondedTransfer = typeof bondedTransfers.$inferInsert;
+
+/**
+ * Phase 18: officer decisions on the RL queue-policy SHADOW suggestions.
+ * Append-only log for future offline-RL reward joins (accept/override of a
+ * suggested queue position vs the authoritative FIFO/AEO order). The
+ * suggestion is never auto-applied — this table records what the officer
+ * actually did, keyed by the policy version that made the suggestion.
+ */
+export const queuePolicyDecisions = pgTable("queue_policy_decisions", {
+  id: serial("id").primaryKey(),
+  officerId: integer("officer_id").notNull().references(() => users.id),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  policyVersion: varchar("policy_version", { length: 64 }).notNull(),
+  /** Position (1-based) the shadow policy suggested for this declaration. */
+  suggestedPosition: integer("suggested_position").notNull(),
+  /** Position (1-based) in the authoritative FIFO/AEO queue at decision time. */
+  authoritativePosition: integer("authoritative_position").notNull(),
+  decision: varchar("decision", { length: 16 }).notNull(), // 'accepted' | 'overrode'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_qpd_declaration").on(t.declarationId),
+  index("idx_qpd_officer").on(t.officerId),
+]);
+export type QueuePolicyDecision = typeof queuePolicyDecisions.$inferSelect;
+export type InsertQueuePolicyDecision = typeof queuePolicyDecisions.$inferInsert;

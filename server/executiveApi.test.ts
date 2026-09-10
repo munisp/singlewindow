@@ -35,6 +35,8 @@ describe("Mission C route registration", () => {
       "GET /v1/sla/breaches",
       "GET /v1/customs/summary",
       "GET /v1/briefings/weekly",
+      // Phase 18: RL queue-policy shadow status for the ministry portal
+      "GET /v1/rl/queue-policy/status",
     ]) {
       expect(paths, p).toContain(p);
     }
