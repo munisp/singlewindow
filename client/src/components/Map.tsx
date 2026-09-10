@@ -37,7 +37,7 @@
  * - Standalone service; manually apply results to map.
  * const geocoder = new google.maps.Geocoder();
  * geocoder.geocode({ address: "New York" }, (results, status) => {
- *   if (status === "OK" && results[0]) {
+ *   if (status === "OK" && results[0].geometry) {
  *     map.setCenter(results[0].geometry.location);
  *     new google.maps.marker.AdvancedMarkerElement({
  *       map,
@@ -101,7 +101,10 @@ function loadMapScript(): Promise<void> {
       return;
     }
     const script = document.createElement("script");
-    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry`;
+    // visualization is required by the heatmap layers in PortHeatmap /
+    // CargoTrackingMap — it was missing, so google.maps.visualization was
+    // undefined at runtime.
+    script.src = `${MAPS_PROXY_URL}/maps/api/js?key=${API_KEY}&v=weekly&libraries=marker,places,geocoding,geometry,visualization`;
     script.async = true;
     script.crossOrigin = "anonymous";
     script.onload = () => {
@@ -152,7 +155,8 @@ export function MapView({
       fullscreenControl: true,
       zoomControl: true,
       streetViewControl: true,
-      mapId: "DEMO_MAP_ID",
+      // G9: mapId is operator-configurable; DEMO_MAP_ID only as a dev default.
+      mapId: import.meta.env.VITE_GOOGLE_MAPS_MAP_ID || "DEMO_MAP_ID",
     });
     if (onMapReady) {
       onMapReady(map.current);
@@ -173,6 +177,12 @@ export function MapView({
   }
 
   return (
-    <div ref={mapContainer} className={cn("w-full h-[500px]", className)} />
+    // G12: expose the map region to assistive technology.
+    <div
+      ref={mapContainer}
+      role="region"
+      aria-label="Interactive map"
+      className={cn("w-full h-[500px]", className)}
+    />
   );
 }
