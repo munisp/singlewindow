@@ -23,7 +23,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME && k !== OFFLINE_QUEUE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => ![CACHE_NAME, OFFLINE_QUEUE_NAME, TILE_CACHE_NAME].includes(k)).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -36,9 +36,52 @@ self.addEventListener('message', (event) => {
 });
 
 // ─── FETCH ───────────────────────────────────────────────────────────────────
+// Phase 17 (G10): CacheFirst map-tile caching (pattern from hydrogenTransport
+// PWA). Only well-known open tile origins are cached — no arbitrary origins.
+const TILE_CACHE_NAME = 'tradegateway-tiles-v1';
+const TILE_ORIGINS = [
+  'https://tile.openstreetmap.org',
+  'https://tiles.openfreemap.org',
+  'https://basemaps.cartocdn.com',
+];
+const TILE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // ── Map tiles/styles/glyphs: cache-first with freshness cap ──────────────
+  if (request.method === 'GET' && TILE_ORIGINS.some((o) => url.origin === o)) {
+    event.respondWith(
+      caches.open(TILE_CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) {
+          const fetchedAt = Number(cached.headers.get('X-SW-Cached-At') || 0);
+          if (Date.now() - fetchedAt < TILE_CACHE_MAX_AGE_MS) return cached;
+        }
+        try {
+          const response = await fetch(request);
+          if (response.ok) {
+            const headers = new Headers(response.headers);
+            headers.set('X-SW-Cached-At', String(Date.now()));
+            const stamped = new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers,
+            });
+            cache.put(request, stamped.clone());
+            return stamped;
+          }
+          // Network answered but failed: fall back to stale tile if present
+          return cached || response;
+        } catch {
+          // Offline: serve the cached tile or an honest 503 — never a fake tile
+          return cached || new Response('tile unavailable offline', { status: 503 });
+        }
+      })
+    );
+    return;
+  }
 
   // Skip cross-origin requests
   if (url.origin !== self.location.origin) return;

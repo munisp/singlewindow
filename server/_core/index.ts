@@ -25,6 +25,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOpenApiRoute } from "../openapi";
 import { metricsRegistry } from "./metrics";
 import { registerHealthRoutes } from "../routes/health";
+import { parseCspOrigins } from "./csp";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -1297,24 +1298,37 @@ async function startServer() {
     maxAge: 86400,
   }));
   // ── Security headers (helmet) ─────────────────────────────────────────────
+  // Phase 17 (G1): map engines/tiles are config-driven, never CDN-wide-open.
+  // Operators whitelist ONLY the tile/style/glyph origins actually in use via
+  // env (comma-separated origins):
+  //   CSP_SCRIPT_SRC_EXTRA   — e.g. a same-origin maps bootstrap proxy
+  //   CSP_CONNECT_SRC_EXTRA  — e.g. https://tiles.openfreemap.org,https://tile.openstreetmap.org
+  //   CSP_IMG_SRC_EXTRA      — raster tile origins if img-src https: is ever tightened
+  // Defaults stay fail-closed (same-origin only) when the env vars are unset.
+  const cspScriptExtra = parseCspOrigins(process.env.CSP_SCRIPT_SRC_EXTRA);
+  const cspConnectExtra = parseCspOrigins(process.env.CSP_CONNECT_SRC_EXTRA);
+  const cspImgExtra = parseCspOrigins(process.env.CSP_IMG_SRC_EXTRA);
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         // Tighten CSP in production: remove unsafe-inline/eval
         scriptSrc: process.env.NODE_ENV === 'production'
-          ? ["'self'", "https://fonts.googleapis.com"]
+          ? ["'self'", "https://fonts.googleapis.com", ...cspScriptExtra]
           : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://fonts.googleapis.com"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        imgSrc: ["'self'", "data:", "blob:", "https:", ...cspImgExtra],
         // SW-S11-3: production connect-src is same-origin + websockets only —
         // the previous `https:` allowed exfiltration to any HTTPS endpoint.
+        // Map tile/style/glyph fetches require explicit CSP_CONNECT_SRC_EXTRA origins.
         connectSrc: process.env.NODE_ENV === 'production'
-          ? ["'self'", "wss:"]
+          ? ["'self'", "wss:", ...cspConnectExtra]
           : ["'self'", "wss:", "https:"],
         frameSrc: ["'none'"],
         objectSrc: ["'none'"],
+        // MapLibre GL / Cesium create WebGL workers from blob: URLs.
+        workerSrc: ["'self'", "blob:"],
         upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
       },
     },

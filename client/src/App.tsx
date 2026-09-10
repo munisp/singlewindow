@@ -28,6 +28,8 @@ import AdminKYCReview from "./pages/app/AdminKYCReview";
 import PortHeatmap from "./pages/app/PortHeatmap";
 // Lazy-load the specification page (it's large))
 import { lazy, Suspense } from "react";
+// Phase 17 (G2): Geospatial Portal — lazy, routed (previously dead code)
+const GeospatialPortal = lazy(() => import("./pages/geo/GeospatialPortal"));
 const Specification = lazy(() => import("./pages/Specification"));
 // Lazy-load heavy pages
 const SanctionsScreening = lazy(() => import("./pages/app/SanctionsScreening"));
@@ -279,6 +281,9 @@ function Router() {
 
       {/* Geospatial */}
       <Route path="/app/geo/heatmap" component={PortHeatmap} />
+      <Route path="/app/geo/portal">
+        <Suspense fallback={<LazyFallback />}><GeospatialPortal /></Suspense>
+      </Route>
       <Route path="/app/geo/congestion-forecast">
         <Suspense fallback={<LazyFallback />}><PortCongestionForecast /></Suspense>
       </Route>

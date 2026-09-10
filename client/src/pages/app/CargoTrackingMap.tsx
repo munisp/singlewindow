@@ -295,7 +295,11 @@ export default function CargoTrackingMap() {
         data: points,
         radius: 40,
       });
-      heatmapLayerRef.current.setMap((window as any).__map__);
+      // Phase 17 (G6): attach to the real map instance from onMapReady —
+      // (window).__map__ was never set by Map.tsx, so this silently no-op'd.
+      if (mapRef.current) {
+        heatmapLayerRef.current.setMap(mapRef.current);
+      }
     } else if (!showHeatmap && heatmapLayerRef.current) {
       heatmapLayerRef.current.setMap(null);
       heatmapLayerRef.current = null;
