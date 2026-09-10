@@ -42,11 +42,31 @@ export interface FluvioEvent {
   payload: VesselPosition | Record<string, unknown>;
 }
 
-export type FeedStatus = "connecting" | "connected" | "paused" | "reconnecting" | "error";
+export type FeedStatus = "connecting" | "connected" | "paused" | "reconnecting" | "error" | "disabled";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const FLUVIO_WS_URL = "ws://localhost:8085/ws";
+/**
+ * Phase 17 (G4): the Fluvio WS endpoint is env-driven, never hardcoded to
+ * localhost. Resolution order:
+ *   1. VITE_FLUVIO_WS_URL (full ws:// or wss:// URL; "off" disables the feed)
+ *   2. same-origin default: wss://<host>/ws (ws: on http: dev origins)
+ * When disabled, the hook reports status "disabled" and never opens a socket.
+ */
+export function resolveFluvioWsUrl(
+  envValue: string | undefined,
+  locationLike?: { protocol: string; host: string },
+): string | null {
+  const raw = (envValue ?? "").trim();
+  if (/^off$/i.test(raw)) return null;
+  if (/^wss?:\/\/.+/.test(raw)) return raw;
+  const loc = locationLike ?? (typeof window !== "undefined" ? window.location : undefined);
+  if (!loc) return null;
+  const scheme = loc.protocol === "https:" ? "wss:" : "ws:";
+  return `${scheme}//${loc.host}/ws`;
+}
+
+const FLUVIO_WS_URL = resolveFluvioWsUrl(import.meta.env.VITE_FLUVIO_WS_URL);
 const MAX_EVENTS = 500;           // ring buffer size
 const RECONNECT_DELAY_MS = 3000;  // 3 s between reconnect attempts
 const MAX_RECONNECT_ATTEMPTS = 10;
@@ -65,7 +85,7 @@ export function useFluvioFeed(options?: {
   } = options ?? {};
 
   const [events, setEvents] = useState<FluvioEvent[]>([]);
-  const [status, setStatus] = useState<FeedStatus>("connecting");
+  const [status, setStatus] = useState<FeedStatus>(FLUVIO_WS_URL ? "connecting" : "disabled");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [reconnectCount, setReconnectCount] = useState(0);
 
@@ -77,6 +97,11 @@ export function useFluvioFeed(options?: {
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+    if (!FLUVIO_WS_URL) {
+      // Honest disabled state: feed not configured for this deployment.
+      setStatus("disabled");
+      return;
+    }
 
     setStatus("connecting");
 
@@ -168,6 +193,7 @@ export function useFluvioFeed(options?: {
     events,
     vesselPositions,
     status,
+    feedUrl: FLUVIO_WS_URL,
     lastUpdated,
     reconnectCount,
     pause,
