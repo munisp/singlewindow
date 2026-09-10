@@ -34,14 +34,14 @@ import {
   users,
 } from "../../drizzle/schema";
 
-const OFFICER_QUEUE_ROLES = [
+export const OFFICER_QUEUE_ROLES = [
   "admin", "superadmin", "platform_admin", "customs_commissioner",
   "customs_officer", "inspector", "finance",
 ];
 
 const TIER_RANK = sql`case ${stakeholderProfiles.aeoTier} when 'gold' then 3 when 'silver' then 2 else 1 end`;
 
-function requireOfficer(role: string): void {
+export function requireOfficer(role: string): void {
   if (!OFFICER_QUEUE_ROLES.includes(role)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "Officer role required" });
   }
@@ -53,6 +53,53 @@ async function requireDb() {
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database is not available in this environment" });
   }
   return db;
+}
+
+/**
+ * Authoritative prioritized export-declaration queue: AEO-certified
+ * exporters first (gold > silver > standard), then FIFO by submission.
+ * Shared by the queue.prioritized procedure and the Phase 18 queuePolicy
+ * shadow router — the RL policy only ever ANNOTATES this order.
+ */
+export async function loadPrioritizedExportQueue(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  opts: { status?: string; limit: number }
+) {
+  const conditions = [eq(declarations.declarationType, "export")];
+  if (opts.status) conditions.push(eq(declarations.status, opts.status as never));
+  const rows = await db
+    .select({
+      id: declarations.id,
+      declarationNumber: declarations.declarationNumber,
+      traderId: declarations.traderId,
+      traderName: users.name,
+      status: declarations.status,
+      riskLane: declarations.riskLane,
+      riskScore: declarations.riskScore,
+      hsCode: declarations.hsCode,
+      goodsDescription: declarations.goodsDescription,
+      countryOfDestination: declarations.countryOfDestination,
+      submittedAt: declarations.submittedAt,
+      createdAt: declarations.createdAt,
+      aeoStatus: stakeholderProfiles.aeoStatus,
+      aeoTier: stakeholderProfiles.aeoTier,
+    })
+    .from(declarations)
+    .leftJoin(users, eq(declarations.traderId, users.id))
+    .leftJoin(stakeholderProfiles, eq(declarations.traderId, stakeholderProfiles.userId))
+    .where(and(...conditions))
+    .orderBy(
+      // Accredited exporters first, then tier rank, then FIFO.
+      sql`case when ${stakeholderProfiles.aeoStatus} = 'certified' then 0 else 1 end`,
+      desc(TIER_RANK),
+      sql`${declarations.submittedAt} asc nulls last`,
+      desc(declarations.id)
+    )
+    .limit(opts.limit);
+  return rows.map((r) => ({
+    ...r,
+    fastLane: r.aeoStatus === "certified",
+  }));
 }
 
 /** Accreditation record for a trader, or null when not AEO-certified. */
@@ -83,43 +130,11 @@ export const aeoFastLaneRouter = router({
       .query(async ({ ctx, input }) => {
         requireOfficer(ctx.user.role);
         const db = await requireDb();
-        const conditions = [eq(declarations.declarationType, "export")];
-        if (input?.status) conditions.push(eq(declarations.status, input.status as never));
-        const rows = await db
-          .select({
-            id: declarations.id,
-            declarationNumber: declarations.declarationNumber,
-            traderId: declarations.traderId,
-            traderName: users.name,
-            status: declarations.status,
-            riskLane: declarations.riskLane,
-            riskScore: declarations.riskScore,
-            hsCode: declarations.hsCode,
-            goodsDescription: declarations.goodsDescription,
-            countryOfDestination: declarations.countryOfDestination,
-            submittedAt: declarations.submittedAt,
-            createdAt: declarations.createdAt,
-            aeoStatus: stakeholderProfiles.aeoStatus,
-            aeoTier: stakeholderProfiles.aeoTier,
-          })
-          .from(declarations)
-          .leftJoin(users, eq(declarations.traderId, users.id))
-          .leftJoin(stakeholderProfiles, eq(declarations.traderId, stakeholderProfiles.userId))
-          .where(and(...conditions))
-          .orderBy(
-            // Accredited exporters first, then tier rank, then FIFO.
-            sql`case when ${stakeholderProfiles.aeoStatus} = 'certified' then 0 else 1 end`,
-            desc(TIER_RANK),
-            sql`${declarations.submittedAt} asc nulls last`,
-            desc(declarations.id)
-          )
-          .limit(input?.limit ?? 50);
-        return {
-          items: rows.map((r) => ({
-            ...r,
-            fastLane: r.aeoStatus === "certified",
-          })),
-        };
+        const items = await loadPrioritizedExportQueue(db, {
+          status: input?.status,
+          limit: input?.limit ?? 50,
+        });
+        return { items };
       }),
   }),
 

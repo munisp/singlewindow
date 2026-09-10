@@ -11,8 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
-import { Award, RefreshCw, Zap } from "lucide-react";
-import { useState } from "react";
+import { Award, RefreshCw, Sparkles, Zap } from "lucide-react";
+import { useMemo, useState } from "react";
 
 function QueryError({ message }: { message?: string }) {
   return <p className="text-sm text-red-400">{message ?? "Failed to load."}</p>;
@@ -20,10 +20,44 @@ function QueryError({ message }: { message?: string }) {
 
 export default function AdminAeoFastLane() {
   const [tab, setTab] = useState("exporters");
+  const [showShadow, setShowShadow] = useState(false);
   const exporters = trpc.aeoFastLane.admin.accreditedExporters.useQuery({});
   const queue = trpc.aeoFastLane.queue.prioritized.useQuery({});
   const drawback = trpc.aeoFastLane.drawback.fastTrackQueue.useQuery({});
   const origin = trpc.aeoFastLane.origin.fastPathQueue.useQuery({});
+
+  // Phase 18: RL queue-policy SHADOW suggestion. Loaded only when the
+  // officer opts in via the toggle; never auto-applied to the queue.
+  const shadow = trpc.queuePolicy.suggestion.useQuery({}, { enabled: showShadow, retry: false });
+  const recordDecision = trpc.queuePolicy.recordDecision.useMutation();
+  const utils = trpc.useUtils();
+
+  // Map declaration id -> 1-based suggested position for badge lookup.
+  const suggestedPosition = useMemo(() => {
+    const map = new Map<number, number>();
+    shadow.data?.suggestedOrder.forEach((id, i) => map.set(id, i + 1));
+    return map;
+  }, [shadow.data]);
+
+  /** Honest untrained/unconfigured state is a first-class rendering. */
+  const shadowRefusal =
+    shadow.error?.message?.includes("QUEUE_POLICY_NOT_TRAINED") ? "untrained"
+    : shadow.error?.message?.includes("QUEUE_POLICY_NOT_CONFIGURED") ? "not-configured"
+    : null;
+
+  function logDecision(declarationId: number, authoritativePosition: number, decision: "accepted" | "overrode") {
+    if (!shadow.data) return;
+    recordDecision.mutate(
+      {
+        declarationId,
+        policyVersion: shadow.data.policyVersion,
+        suggestedPosition: suggestedPosition.get(declarationId) ?? authoritativePosition,
+        authoritativePosition,
+        decision,
+      },
+      { onSuccess: () => utils.queuePolicy.suggestion.invalidate() }
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -78,30 +112,102 @@ export default function AdminAeoFastLane() {
                   <CardTitle className="text-base">Prioritized export declaration queue</CardTitle>
                   <CardDescription>AEO-certified exporters first (tier rank, then FIFO).</CardDescription>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => queue.refetch()} disabled={queue.isFetching}>
-                  <RefreshCw className={`h-3.5 w-3.5 ${queue.isFetching ? "animate-spin" : ""}`} />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={showShadow ? "default" : "outline"}
+                    size="sm"
+                    aria-pressed={showShadow}
+                    onClick={() => setShowShadow((v) => !v)}
+                  >
+                    <Sparkles className="mr-1 h-3.5 w-3.5" />
+                    {shadow.data
+                      ? `Suggested order (shadow policy ${shadow.data.policyVersion})`
+                      : "Shadow suggestion"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => queue.refetch()} disabled={queue.isFetching}>
+                    <RefreshCw className={`h-3.5 w-3.5 ${queue.isFetching ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-2">
+                {showShadow && shadow.isLoading && <Skeleton className="h-10 w-full" />}
+                {showShadow && shadowRefusal === "untrained" && (
+                  <div className="rounded-md border border-slate-700/60 p-3" role="status">
+                    <p className="text-sm font-medium">Policy not trained</p>
+                    <p className="text-xs text-slate-500">
+                      The ml-stack has no promoted queue policy yet (honest refusal). The authoritative
+                      AEO/FIFO order below remains in force — no suggestion is shown or fabricated.
+                    </p>
+                  </div>
+                )}
+                {showShadow && shadowRefusal === "not-configured" && (
+                  <div className="rounded-md border border-slate-700/60 p-3" role="status">
+                    <p className="text-sm font-medium">Shadow policy not configured</p>
+                    <p className="text-xs text-slate-500">
+                      This deployment has not enabled the RL shadow policy (ML_STACK_HTTP_URL /
+                      RL_QUEUE_POLICY_SHADOW_ENABLED). The authoritative order below remains in force.
+                    </p>
+                  </div>
+                )}
+                {showShadow && shadow.error && shadowRefusal === null && (
+                  <QueryError message={shadow.error.message} />
+                )}
+                {showShadow && shadow.data && (
+                  <p className="text-xs text-slate-500">
+                    Shadow policy <span className="font-mono">{shadow.data.policyVersion}</span> suggested an order for{" "}
+                    {shadow.data.suggestedOrder.length} queued declarations
+                    {shadow.data.opeScore != null ? ` · OPE score ${shadow.data.opeScore.toFixed(3)}` : ""}.
+                    Advisory only — it is never applied automatically; accepting or overriding is logged.
+                  </p>
+                )}
                 {queue.isLoading && <Skeleton className="h-24 w-full" />}
                 {queue.error && <QueryError message={queue.error.message} />}
                 {queue.data && queue.data.items.length === 0 && (
                   <p className="text-sm text-slate-500">No export declarations in the queue.</p>
                 )}
-                {queue.data?.items.map((d) => (
-                  <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-700/60 p-3">
-                    <div>
-                      <p className="font-mono text-sm">{d.declarationNumber}</p>
-                      <p className="text-xs text-slate-500">
-                        {d.traderName ?? `Trader #${d.traderId}`} · {d.hsCode ?? "—"} → {d.countryOfDestination ?? "—"}
-                      </p>
+                {queue.data?.items.map((d, idx) => {
+                  const suggested = suggestedPosition.get(d.id);
+                  const differs = suggested !== undefined && suggested !== idx + 1;
+                  return (
+                    <div key={d.id} className="flex items-center justify-between rounded-md border border-slate-700/60 p-3">
+                      <div>
+                        <p className="font-mono text-sm">{d.declarationNumber}</p>
+                        <p className="text-xs text-slate-500">
+                          {d.traderName ?? `Trader #${d.traderId}`} · {d.hsCode ?? "—"} → {d.countryOfDestination ?? "—"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {showShadow && shadow.data && suggested !== undefined && (
+                          <Badge className="bg-sky-500/20 text-sky-300">
+                            suggested #{suggested}{differs ? ` (auth #${idx + 1})` : ""}
+                          </Badge>
+                        )}
+                        {showShadow && shadow.data && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={recordDecision.isPending}
+                              onClick={() => logDecision(d.id, idx + 1, "accepted")}
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={recordDecision.isPending}
+                              onClick={() => logDecision(d.id, idx + 1, "overrode")}
+                            >
+                              Override
+                            </Button>
+                          </>
+                        )}
+                        {d.fastLane && <Badge className="bg-amber-500/20 text-amber-300">AEO fast-lane{d.aeoTier ? ` · ${d.aeoTier}` : ""}</Badge>}
+                        <Badge variant="outline">{d.status}</Badge>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {d.fastLane && <Badge className="bg-amber-500/20 text-amber-300">AEO fast-lane{d.aeoTier ? ` · ${d.aeoTier}` : ""}</Badge>}
-                      <Badge variant="outline">{d.status}</Badge>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           </TabsContent>

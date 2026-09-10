@@ -33,6 +33,11 @@ import {
 } from "../executive/portPerformance";
 import { buildSignedPortPerformancePdf } from "../executive/portPerformancePdf";
 import { callRiskScorer } from "../routers/riskModel";
+import {
+  QueuePolicyConfigError,
+  QueuePolicyUnavailableError,
+  getQueuePolicyStatus,
+} from "../rl/queuePolicy";
 
 const PROD_UPSTREAM = { id: "executive-api", sandbox: false } as const;
 
@@ -140,6 +145,42 @@ export function registerExecutiveApiRoutes(app: Express): void {
       try {
         res.json(await computeCustomsSummary());
       } catch (err) {
+        down(res, err);
+      }
+    }
+  );
+
+  // ── RL queue-policy shadow status (Phase 18) ────────────────────────────────
+  // Honest status of the ml-stack queue-policy for the ministry RL-insights
+  // card: trained/untrained, policy_version, OPE score when the registry
+  // carries it. Config-gated and fail-closed — 503 when the shadow policy
+  // surface is not configured or ml-stack is unreachable; untrained is a
+  // first-class 200 state, never fabricated.
+  app.get(
+    "/v1/rl/queue-policy/status",
+    requireApiKey("reports:read", PROD_UPSTREAM),
+    async (_req, res) => {
+      try {
+        const status = await getQueuePolicyStatus();
+        res.json({
+          status: "ok",
+          surface: "officer-export-queue",
+          trained: status.trained,
+          policyVersion: status.policyVersion,
+          opeScore: status.opeScore,
+          mode: status.mode,
+          note: status.trained
+            ? "Shadow policy promoted — suggestions are advisory only and never auto-applied."
+            : "Policy not trained — no promoted queue policy in the ml-stack registry.",
+        });
+      } catch (err) {
+        if (err instanceof QueuePolicyConfigError || err instanceof QueuePolicyUnavailableError) {
+          res.status(503).json({
+            status: "down",
+            error: err.message,
+          });
+          return;
+        }
         down(res, err);
       }
     }

@@ -125,6 +125,7 @@ import { openDataRouter } from "./routers/openData";
 import { ncsNrsRouter } from "./routers/ncsNrs";
 import { pcsRouter } from "./routers/pcs";
 import { aeoFastLaneRouter } from "./routers/aeoFastLane";
+import { queuePolicyRouter } from "./routers/queuePolicy";
 import { transshipmentRouter } from "./routers/transshipment";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
@@ -403,6 +404,8 @@ export const appRouter = router({
   // Phase 16 Wave P1 — AEO export fast-lane + transshipment declaration lane
   aeoFastLane: aeoFastLaneRouter,
   transshipment: transshipmentRouter,
+  // Phase 18 — RL queue-policy shadow suggestion (never auto-reorders)
+  queuePolicy: queuePolicyRouter,
 });
 
 export type AppRouter = typeof appRouter;
