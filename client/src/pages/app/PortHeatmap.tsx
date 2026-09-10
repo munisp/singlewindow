@@ -312,7 +312,9 @@ export default function PortHeatmap() {
   const [selectedPort, setSelectedPort] = useState<string | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<google.maps.Map | null>(null);
-  const heatmapRef = useRef<google.maps.visualization.HeatmapLayer | null>(null);
+  // @types/google.maps stubs HeatmapLayer (no ctor opts/setMap) — use a
+  // structural type matching the runtime API.
+  const heatmapRef = useRef<{ setMap(m: google.maps.Map | null): void } | null>(null);
   const markersRef = useRef<google.maps.Marker[]>([]);
   const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
@@ -407,7 +409,7 @@ export default function PortHeatmap() {
       weight: p.weight * 10,
     }));
 
-    heatmapRef.current = new google.maps.visualization.HeatmapLayer({
+    heatmapRef.current = new (google.maps.visualization as any).HeatmapLayer({
       data: heatmapPoints,
       map: mapRef.current,
       radius: 40,
@@ -461,10 +463,15 @@ export default function PortHeatmap() {
     });
   }, [heatmapData]);
 
-  // Trigger render when map and data are both ready
-  if (mapReady && heatmapData && markersRef.current.length === 0) {
-    renderHeatmap();
-  }
+  // Phase 17 (G7): heatmap/marker rendering is a side effect — it must live in
+  // useEffect keyed on [mapReady, heatmapData], never in the render body, and
+  // it must re-run on every data refresh (the previous markersRef.length===0
+  // guard left the heatmap stale until remount).
+  useEffect(() => {
+    if (mapReady && heatmapData) {
+      renderHeatmap();
+    }
+  }, [mapReady, heatmapData, renderHeatmap]);
 
   const stats = heatmapData ? {
     clear: heatmapData.filter(p => p.congestionStatus === "clear").length,
