@@ -60,8 +60,27 @@ const GROUP_META: Record<string, OwnerMeta> = {
   cargoTracking: { owner: "geo-service", classification: "PUBLIC", sla: DEFAULT_SLA, sandboxAvailable: true },
 };
 
+/**
+ * Phase 19 (F1/M5): tRPC router groups that must NEVER be auto-published in
+ * the signed catalogue — they are ungoverned or RESTRICTED internal control
+ * planes. Registered in api-registry.json only where governed (see the
+ * singlewindow.rl-queue-policy RESTRICTED external entry below).
+ */
+const UNGOVERNED_ROUTER_GROUPS: ReadonlySet<string> = new Set(["queuePolicy", "webhooks"]);
+
 /** Cross-repo public APIs registered in the platform marketplace (beyond this service's tRPC surface). */
 const EXTERNAL_ENTRIES: Array<Omit<CatalogueEntry, "specDigest" | "procedures"> & { specFragment: JsonValue }> = [
+  {
+    apiId: "singlewindow.rl-queue-policy",
+    title: "RL Queue Policy — officer export-queue shadow suggestion status (RESTRICTED)",
+    owner: "customs-compliance",
+    classification: "RESTRICTED",
+    version: "1.0.0",
+    sla: DEFAULT_SLA,
+    openapiRef: "/api/openapi.json#/paths/rl-queue-policy",
+    sandboxAvailable: false,
+    specFragment: { service: "singlewindow", surfaces: ["GET /v1/rl/queue-policy/status"], mode: "shadow-only" },
+  },
   {
     apiId: "blueeconomy-geo-service.feed",
     title: "Geo Service — AIS / met-ocean feed status API",
@@ -140,6 +159,12 @@ export function buildApiCatalogue(now: Date = new Date()): ApiCatalogue {
   const entries: CatalogueEntry[] = [];
 
   for (const [group, procedures] of Object.entries(ROUTER_CATALOGUE)) {
+    // Phase 19 (F1/M5): ungoverned/internal surfaces are NOT auto-published
+    // in the signed catalogue. The RL queue-policy shadow surface is
+    // RESTRICTED and officer-internal; webhook subscription management is a
+    // session/API-key control plane, not a partner data API. Both are
+    // governed outside ROUTER_CATALOGUE (registry: singlewindow.rl-queue-policy).
+    if (UNGOVERNED_ROUTER_GROUPS.has(group)) continue;
     const meta = GROUP_META[group] ?? {
       owner: "singlewindow",
       classification: "PARTNER" as ApiClassification,
