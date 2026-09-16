@@ -3608,3 +3608,525 @@ export type InsertPcsConsignment = typeof pcsConsignments.$inferInsert;
 // (consignment_id, source_event_id) uniqueness constraint.
 export const pcsMilestones = pgTable("pcs_milestones", {
   id: serial("id").primaryKey(),
+  consignmentId: integer("consignment_id").notNull().references(() => pcsConsignments.id, { onDelete: "cascade" }),
+  milestone: pcsMilestoneEnum("milestone").notNull(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  sourceTopic: varchar("source_topic", { length: 64 }).notNull(),
+  sourceEventId: uuid("source_event_id").notNull(),
+  provenanceSignatureVerified: boolean("provenance_signature_verified").notNull(),
+}, (t) => [
+  index("idx_pcs_milestones_consignment").on(t.consignmentId),
+  unique("pcs_milestones_consignment_event_unique").on(t.consignmentId, t.sourceEventId),
+]);
+export type PcsMilestone = typeof pcsMilestones.$inferSelect;
+export type InsertPcsMilestone = typeof pcsMilestones.$inferInsert;
+
+export const pcsBookingLinks = pgTable("pcs_booking_links", {
+  id: serial("id").primaryKey(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookingId: varchar("booking_id", { length: 128 }).notNull(),
+  consignmentId: integer("consignment_id").references(() => pcsConsignments.id, { onDelete: "set null" }),
+  createdVia: varchar("created_via", { length: 16 }).notNull(), // pcs | ussd | direct
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_booking_links_trader").on(t.traderUserId),
+  unique("pcs_booking_links_booking_unique").on(t.bookingId),
+]);
+export type PcsBookingLink = typeof pcsBookingLinks.$inferSelect;
+export type InsertPcsBookingLink = typeof pcsBookingLinks.$inferInsert;
+
+// Read-only ledger projection — NOT double-entry truth (billing truth stays in
+// port-interop's TigerBeetle/Mojaloop). projectionLagMs labels every row so UI
+// figures trace to their source event and staleness.
+export const pcsBillingSnapshots = pgTable("pcs_billing_snapshots", {
+  id: serial("id").primaryKey(),
+  bookingId: varchar("booking_id", { length: 128 }).notNull(),
+  invoiceId: varchar("invoice_id", { length: 128 }),
+  amountKobo: bigint("amount_kobo", { mode: "number" }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
+  status: varchar("status", { length: 32 }).notNull(),
+  receiptId: varchar("receipt_id", { length: 128 }),
+  ledgerCommitHash: varchar("ledger_commit_hash", { length: 128 }),
+  projectionLagMs: integer("projection_lag_ms"),
+  sourceEventId: uuid("source_event_id").notNull().unique(),
+  occurredAt: timestamp("occurred_at").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_pcs_billing_booking").on(t.bookingId),
+]);
+export type PcsBillingSnapshot = typeof pcsBillingSnapshots.$inferSelect;
+export type InsertPcsBillingSnapshot = typeof pcsBillingSnapshots.$inferInsert;
+
+// ─── MARITIME SINGLE WINDOW (MSW / IMO FAL; Phase 9 WP-C) ────────────────────
+// Producing boundary `blueeconomy-singlewindow-msw` for topic maritime.msw.v1.
+// Contract: blueeconomy-contracts proto/blueeconomy/msw/v1/msw.proto + docs/msw.md
+// (commit eb6b1ae — NORMATIVE). 11 event types; enum wire forms carry NO
+// MSW_FORM_TYPE_/MSW_AGENCY_ prefixes; digests are "sha256:<64 lowercase hex>".
+// Data minimization: form payloads / instruments / notes are retained HERE in
+// the boundary (jsonb/text columns); events carry identifiers + digests only.
+// Pratique-first (NPPM 2021) is enforced at the DB level where expressible
+// (checks below) and at the service level (server/mswService.ts) for the
+// temporal ordering rules (grant-before-schedule, no later refusal, maker-
+// checker, version chain) that a static CHECK cannot express.
+
+export const mswVisitStatusEnum = pgEnum("msw_visit_status", [
+  "DRAFT", "SUBMITTED", "UNDER_REVIEW", "CLEARED_TO_ENTER", "IN_PORT",
+  "CLEARED_TO_DEPART", "DEPARTED", "CANCELLED",
+]);
+export const mswFormTypeEnum = pgEnum("msw_form_type", [
+  "FAL1", "FAL2", "FAL3", "FAL4", "FAL5", "FAL6", "FAL7", "MDOH",
+]);
+export const mswAgencyEnum = pgEnum("msw_agency", [
+  "PORT_HEALTH", "NIS", "NCS", "NDLEA", "NIMASA", "NPA",
+]);
+export const mswClearanceKindEnum = pgEnum("msw_clearance_kind", ["ARRIVAL", "DEPARTURE"]);
+export const mswDeclarationStatusEnum = pgEnum("msw_declaration_status", [
+  "SUBMITTED", "ACCEPTED", "RETURNED",
+]);
+export const mswPratiqueDecisionEnum = pgEnum("msw_pratique_decision", ["GRANTED", "REFUSED"]);
+export const mswBoardingStatusEnum = pgEnum("msw_boarding_status", ["SCHEDULED", "COMPLETED"]);
+export const mswClearanceDecisionEnum = pgEnum("msw_clearance_decision", ["GRANTED", "REFUSED"]);
+
+export const mswVisits = pgTable("msw_visits", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswv-000001 style) from a dedicated
+  // sequence — never client-supplied.
+  visitId: varchar("visit_id", { length: 32 }).notNull().unique(),
+  // Port-call identifier owned by the port-interoperability boundary. NULL
+  // when unlinked; port-call fields are NEVER duplicated here beyond the id.
+  portCallId: varchar("port_call_id", { length: 256 }),
+  // True ONLY when the vessel identity was verified against the port-call
+  // record at creation time. False is the honest state for unlinked or
+  // unverifiable visits (PORT_CALL_UNVERIFIED / PORT_CALL_UNAVAILABLE).
+  portCallVerified: boolean("port_call_verified").notNull().default(false),
+  vesselImoNumber: varchar("vessel_imo_number", { length: 7 }).notNull(),
+  vesselName: varchar("vessel_name", { length: 256 }).notNull(),
+  vesselFlagCode: varchar("vessel_flag_code", { length: 2 }).notNull(),
+  portCode: varchar("port_code", { length: 5 }).notNull(),
+  agentReference: varchar("agent_reference", { length: 128 }).notNull(),
+  eta: timestamp("eta").notNull(),
+  etd: timestamp("etd"),
+  status: mswVisitStatusEnum("status").notNull().default("SUBMITTED"),
+  declaredByUserId: integer("declared_by_user_id").notNull().references(() => users.id),
+  declaredAt: timestamp("declared_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_visits_port_call").on(t.portCallId),
+  index("idx_msw_visits_vessel_imo").on(t.vesselImoNumber),
+  index("idx_msw_visits_status").on(t.status),
+]);
+export type MswVisit = typeof mswVisits.$inferSelect;
+export type InsertMswVisit = typeof mswVisits.$inferInsert;
+
+export const mswAgentNominations = pgTable("msw_agent_nominations", {
+  id: serial("id").primaryKey(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  agentReference: varchar("agent_reference", { length: 128 }).notNull(),
+  // Digest of the nomination instrument; the instrument itself is retained in
+  // the boundary (nomination_document), never emitted on the wire.
+  nominationDocumentDigestSha256: varchar("nomination_document_digest_sha256", { length: 80 }).notNull(),
+  nominationDocument: jsonb("nomination_document"),
+  nominatedByUserId: integer("nominated_by_user_id").notNull().references(() => users.id),
+  nominatedAt: timestamp("nominated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_agent_nominations_visit").on(t.visitPk),
+]);
+export type MswAgentNomination = typeof mswAgentNominations.$inferSelect;
+export type InsertMswAgentNomination = typeof mswAgentNominations.$inferInsert;
+
+export const mswDeclarations = pgTable("msw_declarations", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswd-000001 style).
+  declarationId: varchar("declaration_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  formType: mswFormTypeEnum("form_type").notNull(),
+  // Monotonic per-(visit, form_type), starting at 1 (single-submission
+  // principle, UNECE Rec-33): a re-submission is a NEW version chained to the
+  // prior submission by digest; returned versions are never edited.
+  version: integer("version").notNull(),
+  formPayloadDigestSha256: varchar("form_payload_digest_sha256", { length: 80 }).notNull(),
+  // Empty on version 1; otherwise the digest of the prior submission.
+  priorSubmissionDigestSha256: varchar("prior_submission_digest_sha256", { length: 80 }).notNull().default(""),
+  // NDPA PERSONAL category flag (FAL4/FAL5/FAL6/MDOH) — floors the envelope
+  // at RESTRICTED on the wire.
+  containsPersonalData: boolean("contains_personal_data").notNull(),
+  // Schema-validated form payload retained INSIDE the producing boundary;
+  // only its digest is emitted.
+  formPayload: jsonb("form_payload").notNull(),
+  status: mswDeclarationStatusEnum("status").notNull().default("SUBMITTED"),
+  submittedByUserId: integer("submitted_by_user_id").notNull().references(() => users.id),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  // Review (maker-checker) fields — populated on accept/return.
+  reviewingAgency: mswAgencyEnum("reviewing_agency"),
+  reviewedByUserId: integer("reviewed_by_user_id").references(() => users.id),
+  returnReasonCode: varchar("return_reason_code", { length: 64 }),
+  reviewNote: text("review_note"),
+  reviewNoteDigestSha256: varchar("review_note_digest_sha256", { length: 80 }),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [
+  index("idx_msw_declarations_visit").on(t.visitPk),
+  index("idx_msw_declarations_form").on(t.visitPk, t.formType),
+  unique("msw_declarations_visit_form_version_unique").on(t.visitPk, t.formType, t.version),
+]);
+export type MswDeclaration = typeof mswDeclarations.$inferSelect;
+export type InsertMswDeclaration = typeof mswDeclarations.$inferInsert;
+
+export const mswPratique = pgTable("msw_pratique", {
+  id: serial("id").primaryKey(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  decision: mswPratiqueDecisionEnum("decision").notNull(),
+  // Anchored to the Maritime Declaration of Health the decision is based on.
+  healthDeclarationPk: integer("health_declaration_pk").notNull().references(() => mswDeclarations.id),
+  officerReference: varchar("officer_reference", { length: 128 }).notNull(),
+  refusalReasonCode: varchar("refusal_reason_code", { length: 64 }),
+  // Digest of the decision record (grant or refusal) computed by the service;
+  // boarding completions bind to the GRANT digest (pratique-first invariant).
+  pratiqueRecordDigestSha256: varchar("pratique_record_digest_sha256", { length: 80 }).notNull(),
+  decidedByUserId: integer("decided_by_user_id").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_pratique_visit").on(t.visitPk),
+]);
+export type MswPratique = typeof mswPratique.$inferSelect;
+export type InsertMswPratique = typeof mswPratique.$inferInsert;
+
+export const mswBoardings = pgTable("msw_boardings", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswb-000001 style).
+  boardingId: varchar("boarding_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  // Fail-closed agency set (wire enum values). DB CHECK below enforces the
+  // pratique-first invariant at COMPLETION: a completed party containing any
+  // non-Port-Health agency must carry the antecedent pratique grant digest.
+  // The temporal scheduling rule (non-PH parties scheduled only after grant,
+  // no later refusal) is service-enforced (server/mswService.ts).
+  agencies: jsonb("agencies").$type<string[]>().notNull(),
+  scheduledByAgency: mswAgencyEnum("scheduled_by_agency").notNull(),
+  scheduledAt: timestamp("scheduled_at").notNull(),
+  scheduleNoteDigestSha256: varchar("schedule_note_digest_sha256", { length: 80 }).notNull().default(""),
+  status: mswBoardingStatusEnum("status").notNull().default("SCHEDULED"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  pratiqueGrantDigestSha256: varchar("pratique_grant_digest_sha256", { length: 80 }).notNull().default(""),
+  outcomeDigestSha256: varchar("outcome_digest_sha256", { length: 80 }),
+}, (t) => [
+  index("idx_msw_boardings_visit").on(t.visitPk),
+]);
+export type MswBoarding = typeof mswBoardings.$inferSelect;
+export type InsertMswBoarding = typeof mswBoardings.$inferInsert;
+
+export const mswClearances = pgTable("msw_clearances", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswc-000001 style).
+  clearanceId: varchar("clearance_id", { length: 32 }).notNull().unique(),
+  visitPk: integer("visit_pk").notNull().references(() => mswVisits.id, { onDelete: "cascade" }),
+  kind: mswClearanceKindEnum("kind").notNull(),
+  decision: mswClearanceDecisionEnum("decision").notNull(),
+  decidedByAgency: mswAgencyEnum("decided_by_agency").notNull(),
+  refusalReasonCode: varchar("refusal_reason_code", { length: 64 }),
+  // Digest of the evaluated precondition checklist. Mandatory for a DEPARTURE
+  // grant (DB CHECK below); the checklist content is computed by the service
+  // (all submitted form versions accepted + pratique granted + joint boarding
+  // completed — service-enforced temporal preconditions).
+  preconditionChecklistDigestSha256: varchar("precondition_checklist_digest_sha256", { length: 80 }).notNull().default(""),
+  conditionsDigestSha256: varchar("conditions_digest_sha256", { length: 80 }).notNull().default(""),
+  refusalRecordDigestSha256: varchar("refusal_record_digest_sha256", { length: 80 }).notNull().default(""),
+  decidedByUserId: integer("decided_by_user_id").notNull().references(() => users.id),
+  decidedAt: timestamp("decided_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_clearances_visit").on(t.visitPk),
+]);
+export type MswClearance = typeof mswClearances.$inferSelect;
+export type InsertMswClearance = typeof mswClearances.$inferInsert;
+// ─── Trade-Finance Consent Evidence (WP-6) ─────────────────────────────────
+// Local digest-evidence mirror of consent lifecycle events executed against
+// the financial-controls trade-finance rail. Rows carry only digests and
+// tokenized references — never raw datasets.
+export const tradeFinanceConsentEvidence = pgTable("trade_finance_consent_evidence", {
+  id: serial("id").primaryKey(),
+  consentId: varchar("consent_id", { length: 128 }).notNull(),
+  traderUserId: integer("trader_user_id").notNull().references(() => users.id),
+  traderRef: varchar("trader_ref", { length: 256 }).notNull(),
+  bankId: varchar("bank_id", { length: 128 }).notNull(),
+  action: varchar("action", { length: 32 }).notNull(),
+  envelopeDigestSha256: varchar("envelope_digest_sha256", { length: 128 }).notNull(),
+  detail: jsonb("detail"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tfce_trader_user_id").on(t.traderUserId),
+  index("idx_tfce_consent_id").on(t.consentId),
+]);
+export type TradeFinanceConsentEvidence = typeof tradeFinanceConsentEvidence.$inferSelect;
+export type InsertTradeFinanceConsentEvidence = typeof tradeFinanceConsentEvidence.$inferInsert;
+
+// ─── Phase 10 WP-3: cross-border MSW exchange foreign drafts ─────────────────
+// Inbound IMO Compendium messages (mswExchange.ts ingest) persist as DRAFTS
+// here — provenance-stamped, never auto-accepted; they must traverse the
+// platform's own submission/maker-checker lifecycle before any agency use.
+export const mswForeignDraftStatusEnum = pgEnum("msw_foreign_draft_status", ["DRAFT", "ADMITTED", "REJECTED"]);
+
+export const mswForeignDrafts = pgTable("msw_foreign_drafts", {
+  id: serial("id").primaryKey(),
+  // Service-assigned immutable identifier (mswfd-<uuid fragment>).
+  draftId: varchar("draft_id", { length: 40 }).notNull().unique(),
+  formType: mswFormTypeEnum("form_type").notNull(),
+  // Provenance stamp (docs/imo-wco-conformance.md §5).
+  foreignSender: varchar("foreign_sender", { length: 128 }).notNull(),
+  sourceMessageId: varchar("source_message_id", { length: 128 }).notNull(),
+  envelopeEventId: varchar("envelope_event_id", { length: 80 }).notNull(),
+  // JCS-canonical sha256 digest of the inbound IMO payload (integrity anchor).
+  envelopeDigestSha256: varchar("envelope_digest_sha256", { length: 80 }).notNull(),
+  // Reverse-mapped platform payload incl. embedded provenance block.
+  formPayload: jsonb("form_payload").notNull(),
+  // NDPA PERSONAL category flag (FAL4/FAL5/FAL6/MDOH) — floors at RESTRICTED.
+  containsPersonalData: boolean("contains_personal_data").notNull(),
+  status: mswForeignDraftStatusEnum("status").notNull().default("DRAFT"),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_msw_foreign_drafts_sender").on(t.foreignSender),
+  unique("msw_foreign_drafts_message_unique").on(t.foreignSender, t.sourceMessageId),
+]);
+export type MswForeignDraft = typeof mswForeignDrafts.$inferSelect;
+export type InsertMswForeignDraft = typeof mswForeignDrafts.$inferInsert;
+
+// ─── Phase 12 — Stakeholder-360 CRM: case/ticket workflow (migration 0065) ──
+// State machine enforced app-level (server/crm/cases.ts):
+//   open → triaged → in_progress → resolved → closed
+// Dispute-type cases require maker-checker resolution approval before close.
+export const crmCases = pgTable("crm_cases", {
+  id: serial("id").primaryKey(),
+  caseNumber: varchar("case_number", { length: 24 }).notNull().unique(),
+  subject: varchar("subject", { length: 240 }).notNull(),
+  description: text("description"),
+  caseType: varchar("case_type", { length: 32 }).default("general").notNull(), // general | declaration | payment | verification | dispute
+  priority: varchar("priority", { length: 16 }).default("medium").notNull(),   // low | medium | high | critical
+  status: varchar("status", { length: 20 }).default("open").notNull(),         // open | triaged | in_progress | resolved | closed
+  stakeholderProfileId: integer("stakeholder_profile_id").references(() => stakeholderProfiles.id),
+  declarationId: integer("declaration_id").references(() => declarations.id),
+  tenantId: uuid("tenant_id").references(() => tenants.id),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  assignedTo: integer("assigned_to").references(() => users.id),
+  resolutionSummary: text("resolution_summary"),
+  resolvedBy: integer("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at"),
+  resolutionApprovedBy: integer("resolution_approved_by").references(() => users.id),
+  resolutionApprovedAt: timestamp("resolution_approved_at"),
+  slaTriageDue: timestamp("sla_triage_due"),
+  slaResolutionDue: timestamp("sla_resolution_due"),
+  triagedAt: timestamp("triaged_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_crm_cases_status").on(t.status),
+  index("idx_crm_cases_stakeholder").on(t.stakeholderProfileId),
+  index("idx_crm_cases_assigned").on(t.assignedTo),
+  index("idx_crm_cases_tenant").on(t.tenantId),
+  index("idx_crm_cases_created_by").on(t.createdBy),
+  index("idx_crm_cases_created_at").on(t.createdAt),
+]);
+export type CrmCase = typeof crmCases.$inferSelect;
+export type InsertCrmCase = typeof crmCases.$inferInsert;
+
+export const crmCaseEvents = pgTable("crm_case_events", {
+  id: serial("id").primaryKey(),
+  caseId: integer("case_id").notNull().references(() => crmCases.id, { onDelete: "cascade" }),
+  eventType: varchar("event_type", { length: 40 }).notNull(), // created | assigned | transition | resolution | resolution_approved | closed | note
+  fromStatus: varchar("from_status", { length: 20 }),
+  toStatus: varchar("to_status", { length: 20 }),
+  actorId: integer("actor_id").notNull().references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_crm_case_events_case").on(t.caseId)]);
+export type CrmCaseEvent = typeof crmCaseEvents.$inferSelect;
+
+// ─── Phase 12 — Marketplace monetization tiers (migration 0066) ─────────────
+export const marketplaceTiers = pgTable("marketplace_tiers", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 20 }).notNull().unique(), // free | builder | enterprise
+  name: varchar("name", { length: 80 }).notNull(),
+  rateLimitPerMinute: integer("rate_limit_per_minute").notNull(),
+  monthlyCallQuota: integer("monthly_call_quota"),           // NULL = unmetered
+  pricePerCallUsd: decimal("price_per_call_usd", { precision: 10, scale: 6 }).default("0").notNull(),
+  monthlyFeeUsd: decimal("monthly_fee_usd", { precision: 10, scale: 2 }).default("0").notNull(),
+  features: json("features"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+export type MarketplaceTier = typeof marketplaceTiers.$inferSelect;
+
+// ─── Phase 16 — Transshipment declaration lane (migration 0069) ─────────────
+
+export const bondedTransferStatusEnum = pgEnum("bonded_transfer_status", [
+  "initiated", "in_transit", "arrived_bond", "under_supervision",
+  "released", "completed", "cancelled",
+]);
+
+/**
+ * A transshipment declaration couples ONE inbound and ONE outbound manifest.
+ * Validation invariant (enforced in server/routers/transshipment.ts): the
+ * inbound manifest's port of discharge must equal the outbound manifest's
+ * port of loading — the transshipment port.
+ */
+export const transshipmentLinks = pgTable("transshipment_links", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().unique().references(() => declarations.id),
+  inboundManifestId: integer("inbound_manifest_id").notNull().references(() => manifests.id),
+  outboundManifestId: integer("outbound_manifest_id").notNull().references(() => manifests.id),
+  transshipmentPort: varchar("transshipment_port", { length: 64 }).notNull(),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_tsl_inbound_manifest").on(t.inboundManifestId),
+  index("idx_tsl_outbound_manifest").on(t.outboundManifestId),
+]);
+export type TransshipmentLink = typeof transshipmentLinks.$inferSelect;
+export type InsertTransshipmentLink = typeof transshipmentLinks.$inferInsert;
+
+/**
+ * Append-only bonded transfer tracking: every status transition is a new row
+ * (audit trail; never an in-place update).
+ */
+export const bondedTransfers = pgTable("bonded_transfers", {
+  id: serial("id").primaryKey(),
+  transshipmentLinkId: integer("transshipment_link_id").notNull().references(() => transshipmentLinks.id),
+  fromStatus: bondedTransferStatusEnum("from_status"),
+  toStatus: bondedTransferStatusEnum("to_status").notNull(),
+  actorId: integer("actor_id").notNull().references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_btr_link").on(t.transshipmentLinkId)]);
+export type BondedTransfer = typeof bondedTransfers.$inferSelect;
+export type InsertBondedTransfer = typeof bondedTransfers.$inferInsert;
+
+/**
+ * Phase 19 (F1/M2): RL queue-policy suggestion EPISODE. Every served shadow
+ * suggestion is persisted (policy version, candidate ids, feature snapshot,
+ * both orders, served_at) so offline-RL reward joins can attribute a decision
+ * to the exact episode and replay the state the policy saw.
+ */
+export const queuePolicySuggestions = pgTable("queue_policy_suggestions", {
+  id: serial("id").primaryKey(),
+  policyVersion: varchar("policy_version", { length: 64 }).notNull(),
+  /** Declaration ids the policy scored, in request order. */
+  candidateIds: json("candidate_ids").notNull().$type<number[]>(),
+  /** Feature values per candidate id, exactly as sent to the scorer. */
+  featureSnapshot: json("feature_snapshot").notNull().$type<Record<string, Record<string, number>>>(),
+  /** Binding FIFO/AEO order at serve time. */
+  authoritativeOrder: json("authoritative_order").notNull().$type<number[]>(),
+  /** Policy-suggested order (advisory only). */
+  suggestedOrder: json("suggested_order").notNull().$type<number[]>(),
+  /** Officer the suggestion was served to. */
+  servedTo: integer("served_to").references(() => users.id),
+  servedAt: timestamp("served_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_qps_policy_version").on(t.policyVersion),
+  index("idx_qps_served_at").on(t.servedAt),
+]);
+export type QueuePolicySuggestion = typeof queuePolicySuggestions.$inferSelect;
+export type InsertQueuePolicySuggestion = typeof queuePolicySuggestions.$inferInsert;
+
+/**
+ * Phase 18: officer decisions on the RL queue-policy SHADOW suggestions.
+ * Append-only log for future offline-RL reward joins (accept/override of a
+ * suggested queue position vs the authoritative FIFO/AEO order). The
+ * suggestion is never auto-applied — this table records what the officer
+ * actually did, keyed by the policy version that made the suggestion.
+ */
+export const queuePolicyDecisions = pgTable("queue_policy_decisions", {
+  id: serial("id").primaryKey(),
+  officerId: integer("officer_id").notNull().references(() => users.id),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  policyVersion: varchar("policy_version", { length: 64 }).notNull(),
+  /** Position (1-based) the shadow policy suggested for this declaration. */
+  suggestedPosition: integer("suggested_position").notNull(),
+  /** Position (1-based) in the authoritative FIFO/AEO queue at decision time. */
+  authoritativePosition: integer("authoritative_position").notNull(),
+  decision: varchar("decision", { length: 16 }).notNull(), // 'accepted' | 'overrode'
+  /** Suggestion episode this decision answers (Phase 19 F1/M2). */
+  suggestionId: integer("suggestion_id").references(() => queuePolicySuggestions.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_qpd_declaration").on(t.declarationId),
+  index("idx_qpd_officer").on(t.officerId),
+  // M1: one decision per (suggestion episode, declaration, officer) — reward
+  // log is insert-idempotent; duplicate submissions hit 23505 and are folded.
+  uniqueIndex("uq_qpd_suggestion_declaration_officer")
+    .on(t.suggestionId, t.declarationId, t.officerId)
+    .where(sql`suggestion_id is not null`),
+  // M3: the CHECK constraint 0070 created only in SQL, expressed in schema.
+  check("queue_policy_decisions_decision_check", sql`decision IN ('accepted','overrode')`),
+]);
+export type QueuePolicyDecision = typeof queuePolicyDecisions.$inferSelect;
+export type InsertQueuePolicyDecision = typeof queuePolicyDecisions.$inferInsert;
+
+// ─── PHASE 19 (F5a): IMDG dangerous-goods line items (A5-B9) ────────────────
+// Structural IMDG validation lives in server/_core/imdg.ts; no substance DB.
+export const declarationDgItems = pgTable("declaration_dg_items", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  unNumber: varchar("un_number", { length: 4 }).notNull(),
+  imoClass: varchar("imo_class", { length: 8 }).notNull(),
+  packingGroup: varchar("packing_group", { length: 8 }),
+  properShippingName: varchar("proper_shipping_name", { length: 256 }).notNull(),
+  flashpointCelsius: decimal("flashpoint_celsius", { precision: 6, scale: 1 }),
+  emsCodes: json("ems_codes"),
+  marinePollutant: boolean("marine_pollutant").default(false).notNull(),
+  quantityDescription: varchar("quantity_description", { length: 256 }),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_dg_items_declaration").on(t.declarationId),
+  index("idx_dg_items_un_number").on(t.unNumber),
+]);
+export type DeclarationDgItem = typeof declarationDgItems.$inferSelect;
+export type InsertDeclarationDgItem = typeof declarationDgItems.$inferInsert;
+
+// ─── PHASE 19 (F5a): shore-pass / crew-change applications (A5-C5) ──────────
+// State machine: SUBMITTED → APPROVED | REJECTED; APPROVED → REVOKED | EXPIRED.
+export const shorePassApplications = pgTable("shore_pass_applications", {
+  id: serial("id").primaryKey(),
+  applicationNumber: varchar("application_number", { length: 32 }).notNull().unique(),
+  vesselImoNumber: varchar("vessel_imo_number", { length: 7 }).notNull(),
+  voyageNumber: varchar("voyage_number", { length: 64 }).notNull(),
+  portCode: varchar("port_code", { length: 5 }).notNull(),
+  crewFamilyName: varchar("crew_family_name", { length: 128 }).notNull(),
+  crewGivenNames: varchar("crew_given_names", { length: 128 }).notNull(),
+  crewNationalityCode: varchar("crew_nationality_code", { length: 2 }).notNull(),
+  crewRankOrRating: varchar("crew_rank_or_rating", { length: 64 }).notNull(),
+  crewDateOfBirth: varchar("crew_date_of_birth", { length: 10 }).notNull(),
+  purpose: text("purpose").notNull(),
+  stcwCertificateNumber: varchar("stcw_certificate_number", { length: 64 }),
+  /** NOT_REQUESTED | VERIFIED | FAILED | NOT_CONFIGURED — approval is gated on VERIFIED/NOT_REQUESTED. */
+  verificationStatus: varchar("verification_status", { length: 16 }).notNull().default("NOT_REQUESTED"),
+  verificationOutcome: varchar("verification_outcome", { length: 16 }),
+  status: varchar("status", { length: 16 }).notNull().default("SUBMITTED"),
+  requestedBy: integer("requested_by").notNull().references(() => users.id),
+  decidedBy: integer("decided_by").references(() => users.id),
+  decisionReason: text("decision_reason"),
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_shore_pass_vessel").on(t.vesselImoNumber, t.voyageNumber),
+  index("idx_shore_pass_status").on(t.status),
+  index("idx_shore_pass_requested_by").on(t.requestedBy),
+]);
+export type ShorePassApplication = typeof shorePassApplications.$inferSelect;
+export type InsertShorePassApplication = typeof shorePassApplications.$inferInsert;
+
+/** Append-only shore-pass audit trail — every transition writes one row. */
+export const shorePassEvents = pgTable("shore_pass_events", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => shorePassApplications.id),
+  action: varchar("action", { length: 32 }).notNull(),
+  fromStatus: varchar("from_status", { length: 16 }),
+  toStatus: varchar("to_status", { length: 16 }),
+  actorId: integer("actor_id").notNull(),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_shore_pass_events_app").on(t.applicationId)]);
+export type ShorePassEvent = typeof shorePassEvents.$inferSelect;
+export type InsertShorePassEvent = typeof shorePassEvents.$inferInsert;
