@@ -935,6 +935,7 @@ export const declarationsRouter = router({
             invoiceValue: decl.invoiceValue,
             invoiceCurrency: decl.invoiceCurrency,
             dutyAmount: decl.dutyAmount,
+            vatAmount: decl.vatAmount,
             totalDue: decl.totalDue,
             assignedOfficerId: decl.assignedOfficerId,
             aiExplanation: decl.aiExplanation,
