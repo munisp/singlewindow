@@ -968,6 +968,28 @@ cron.schedule("0 0 4 * * *", async () => {
 }, { timezone: "UTC" });
 console.log("[Cron] Nightly revocation CSV email scheduled at 04:00 UTC daily");
 
+// ── Marketplace webhook delivery worker (Phase 19 F1/H4) ─────────────────────
+// 15s tick, overlap-guarded inside processDueDeliveries. Fail-closed: with no
+// WEBHOOK_SECRET_KEY configured the worker refuses to run (never delivers
+// unsigned webhooks) and logs an honest skip.
+import { processDueDeliveries, webhooksConfigured } from "../webhooks/outbound";
+let webhookWorkerLastIdleLog = 0;
+setInterval(async () => {
+  try {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) return;
+    const r = await processDueDeliveries(db);
+    if (r.skippedReason === "not_configured" && Date.now() - webhookWorkerLastIdleLog > 300_000) {
+      webhookWorkerLastIdleLog = Date.now();
+      console.warn("[Webhooks] delivery worker idle — WEBHOOK_SECRET_KEY not configured (unsigned delivery refused)");
+    }
+  } catch (err) {
+    console.error("[Webhooks] delivery worker tick failed:", err);
+  }
+}, 15_000);
+console.log(`[Webhooks] outbound delivery worker scheduled every 15s (configured: ${webhooksConfigured()})`);
+
 // ── SLA breach real-time alert broadcast ─────────────────────────────────────
 // Runs every 15 minutes. Queries declarations that have breached their SLA and
 // broadcasts a workload_update WebSocket event to all connected officers so the
@@ -1529,6 +1551,9 @@ async function startServer() {
   // Phase 16 Wave P1: shipping-line API products (berth-availability, congestion-forecast)
   const { registerShippingLineApiRoutes } = await import("../routes/shippingLineApi");
   registerShippingLineApiRoutes(app);
+  // Phase 19 (F1/H2): governed marketplace webhook subscriptions (API-key scoped)
+  const { registerMarketplaceWebhookRoutes } = await import("../routes/marketplaceWebhooks");
+  registerMarketplaceWebhookRoutes(app);
   // WP-8: external metered API surface for marketplace key holders
   const { requireApiKey } = await import("../middleware/apiKeyAuth");
   const { computeOperationalKpis } = await import("../marketplace/kpiService");
