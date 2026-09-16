@@ -127,6 +127,8 @@ import { pcsRouter } from "./routers/pcs";
 import { aeoFastLaneRouter } from "./routers/aeoFastLane";
 import { queuePolicyRouter } from "./routers/queuePolicy";
 import { transshipmentRouter } from "./routers/transshipment";
+import { dangerousGoodsRouter } from "./routers/dangerousGoods";
+import { shorePassRouter } from "./routers/shorePass";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
 
@@ -406,6 +408,9 @@ export const appRouter = router({
   transshipment: transshipmentRouter,
   // Phase 18 — RL queue-policy shadow suggestion (never auto-reorders)
   queuePolicy: queuePolicyRouter,
+  // Phase 19 (F5a) — IMDG dangerous-goods declarations + shore-pass lifecycle
+  dangerousGoods: dangerousGoodsRouter,
+  shorePass: shorePassRouter,
 });
 
 export type AppRouter = typeof appRouter;
