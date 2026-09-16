@@ -34,9 +34,12 @@ import {
   users,
 } from "../../drizzle/schema";
 
+// Phase 19 (F1/M4): trimmed to values the user_role enum can actually hold
+// (userRoleEnum in drizzle/schema.ts). "superadmin", "platform_admin" and
+// "customs_commissioner" were unreachable dead values — auth.changeRole can
+// never assign them.
 export const OFFICER_QUEUE_ROLES = [
-  "admin", "superadmin", "platform_admin", "customs_commissioner",
-  "customs_officer", "inspector", "finance",
+  "admin", "customs_officer", "inspector", "finance",
 ];
 
 const TIER_RANK = sql`case ${stakeholderProfiles.aeoTier} when 'gold' then 3 when 'silver' then 2 else 1 end`;
@@ -264,6 +267,7 @@ export const aeoFastLaneRouter = router({
     const accreditation = await accreditationOf(db, ctx.user.id);
     return { certified: accreditation !== null, aeoTier: accreditation?.aeoTier ?? null };
   }),
+
 
   admin: router({
     /** Admin surface: accredited exporter profiles (AEO-certified only). */
