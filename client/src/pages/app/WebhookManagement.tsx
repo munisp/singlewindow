@@ -148,7 +148,7 @@ function SecretDisplay({ secret }: { secret: string }) {
   return (
     <div className="flex items-center gap-1">
       <span className="font-mono text-xs text-muted-foreground">
-        {show ? secret : `${secret.slice(0, 12)}${"•".repeat(16)}`}
+        {show ? secret : `${secret.slice(0, 12)}${"\u2022".repeat(16)}`}
       </span>
       <button onClick={() => setShow(!show)} className="text-muted-foreground hover:text-foreground">
         {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
@@ -216,7 +216,7 @@ export default function WebhookManagement() {
                   <Icon className={`h-5 w-5 ${color}`} />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold">{value ?? "—"}</p>
+                  <p className="text-2xl font-bold">{value ?? "\u2014"}</p>
                   <p className="text-xs text-muted-foreground">{label}</p>
                 </div>
               </CardContent>
@@ -338,7 +338,7 @@ export default function WebhookManagement() {
                             )}
                           </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">{new Date(d.deliveredAt).toLocaleString()}</p>
+                        <p className="text-xs text-muted-foreground">{d.deliveredAt ? new Date(d.deliveredAt).toLocaleString() : (d.status ?? "PENDING")}</p>
                         {d.attemptCount > 1 && (
                           <p className="text-xs text-amber-400 mt-0.5">{d.attemptCount} attempts</p>
                         )}
@@ -360,20 +360,26 @@ export default function WebhookManagement() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground mb-3">
-              Every webhook delivery includes an <code className="bg-muted px-1 rounded text-xs">X-TradeGateway-Signature</code> header.
-              Verify it using your signing secret to ensure authenticity.
+              Every webhook delivery includes an <code className="bg-muted px-1 rounded text-xs">X-BlueEconomy-Signature</code> header \u2014
+              HMAC-SHA256 over <code className="bg-muted px-1 rounded text-xs">&lt;deliveryId&gt;.&lt;timestamp&gt;.&lt;raw body&gt;</code> keyed
+              by your signing secret. Verify it (constant-time) before processing, and dedupe on
+              the <code className="bg-muted px-1 rounded text-xs">X-BlueEconomy-Delivery-Id</code> header \u2014 retries reuse the same id.
             </p>
             <div className="bg-muted/30 rounded-lg p-3 font-mono text-xs overflow-x-auto">
-              <pre>{`// Node.js verification example
+              <pre>{`// Node.js verification example (governed contract: marketplace/webhooks.md)
 const crypto = require('crypto');
 
-function verifySignature(payload, signature, secret) {
-  const hmac = crypto.createHmac('sha256', secret);
-  hmac.update(JSON.stringify(payload));
-  const expected = 'sha256=' + hmac.digest('hex');
-  return crypto.timingSafeEqual(
-    Buffer.from(signature), Buffer.from(expected)
-  );
+// Headers: X-BlueEconomy-Delivery-Id, X-BlueEconomy-Timestamp,
+//          X-BlueEconomy-Signature ("sha256=<hex>")
+function verifySignature(rawBody, headers, secret) {
+  const deliveryId = headers['x-blueeconomy-delivery-id'];
+  const timestamp  = headers['x-blueeconomy-timestamp'];
+  const signature  = headers['x-blueeconomy-signature'];
+  // Reject stale deliveries (skew > 300 s)
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) return false;
+  const signed = \`${deliveryId}.\${timestamp}.\${rawBody}\`; // raw body, NOT re-serialized JSON
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(signed, 'utf8').digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }`}</pre>
             </div>
           </CardContent>
