@@ -45,14 +45,17 @@ export default function AdminAeoFastLane() {
     : shadow.error?.message?.includes("QUEUE_POLICY_NOT_CONFIGURED") ? "not-configured"
     : null;
 
-  function logDecision(declarationId: number, authoritativePosition: number, decision: "accepted" | "overrode") {
-    if (!shadow.data) return;
+  // Phase 19 (F1/M1): decisions are accepted ONLY for declarations the
+  // served suggestion actually scored — the server derives both positions
+  // from the persisted episode and rejects non-members, so the client never
+  // fabricates a suggested position.
+  function logDecision(declarationId: number, decision: "accepted" | "overrode") {
+    if (!shadow.data?.suggestionId) return;
+    if (!suggestedPosition.has(declarationId)) return;
     recordDecision.mutate(
       {
+        suggestionId: shadow.data.suggestionId,
         declarationId,
-        policyVersion: shadow.data.policyVersion,
-        suggestedPosition: suggestedPosition.get(declarationId) ?? authoritativePosition,
-        authoritativePosition,
         decision,
       },
       { onSuccess: () => utils.queuePolicy.suggestion.invalidate() }
@@ -182,13 +185,15 @@ export default function AdminAeoFastLane() {
                             suggested #{suggested}{differs ? ` (auth #${idx + 1})` : ""}
                           </Badge>
                         )}
-                        {showShadow && shadow.data && (
+                        {/* M1: Accept/Override render only for rows the policy
+                            actually suggested — never for un-suggested rows. */}
+                        {showShadow && shadow.data && suggested !== undefined && (
                           <>
                             <Button
                               variant="outline"
                               size="sm"
                               disabled={recordDecision.isPending}
-                              onClick={() => logDecision(d.id, idx + 1, "accepted")}
+                              onClick={() => logDecision(d.id, "accepted")}
                             >
                               Accept
                             </Button>
@@ -196,7 +201,7 @@ export default function AdminAeoFastLane() {
                               variant="ghost"
                               size="sm"
                               disabled={recordDecision.isPending}
-                              onClick={() => logDecision(d.id, idx + 1, "overrode")}
+                              onClick={() => logDecision(d.id, "overrode")}
                             >
                               Override
                             </Button>
