@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date, check
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -1280,7 +1280,18 @@ export const webhookSubscriptions = pgTable("webhook_subscriptions", {
   userId: integer("user_id").notNull().references(() => users.id),
   name: varchar("name", { length: 128 }).notNull(),
   url: varchar("url", { length: 512 }).notNull(),
-  secret: varchar("secret", { length: 256 }).notNull(),
+  // Phase 19 (F1/H3): plaintext secret retired — nullable legacy column kept
+  // for pre-0072 rows; new rows store ONLY the sha256 hash + AES-256-GCM
+  // envelope. The raw secret is returned once at create/rotate, never stored.
+  secret: varchar("secret", { length: 256 }),
+  secretHash: varchar("secret_hash", { length: 64 }),
+  secretEnc: text("secret_enc"),
+  /** Marketplace product apiId this subscription is bound to (REST path). */
+  apiId: varchar("api_id", { length: 128 }),
+  /** Owning marketplace API key for API-key-scoped subscriptions. */
+  apiKeyId: integer("api_key_id").references(() => apiKeys.id),
+  /** Sandbox-key subscriptions receive only sandbox-marked deliveries. */
+  sandboxMode: boolean("sandbox_mode").default(false).notNull(),
   events: json("events").notNull().$type<string[]>(),
   isActive: boolean("is_active").default(true).notNull(),
   lastDeliveredAt: timestamp("last_delivered_at"),
@@ -1302,11 +1313,23 @@ export const webhookDeliveries = pgTable("webhook_deliveries", {
   statusCode: integer("status_code"),
   responseBody: text("response_body"),
   success: boolean("success").default(false).notNull(),
-  attemptCount: integer("attempt_count").default(1).notNull(),
-  deliveredAt: timestamp("delivered_at").defaultNow().notNull(),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  // Phase 19 (F1/H2/H4): worker-owned honest delivery log. delivered_at is
+  // set by the delivery worker ONLY on a delivered attempt — never at insert.
+  deliveryId: varchar("delivery_id", { length: 36 }),
+  /** PENDING | RETRYING | DELIVERED | EXHAUSTED */
+  status: varchar("status", { length: 16 }).default("PENDING").notNull(),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  nextRetryAt: timestamp("next_retry_at"),
+  lastHttpStatus: integer("last_http_status"),
+  sandbox: boolean("sandbox").default(false).notNull(),
+  deliveredAt: timestamp("delivered_at"),
 }, (t) => [
   index("idx_webhook_deliveries_sub_id").on(t.subscriptionId),
   index("idx_webhook_deliveries_success").on(t.success),
+  index("idx_webhook_deliveries_status").on(t.status),
+  index("idx_webhook_deliveries_due").on(t.nextRetryAt),
+  uniqueIndex("uq_webhook_deliveries_delivery_id").on(t.deliveryId),
 ]);
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
 export type InsertWebhookDelivery = typeof webhookDeliveries.$inferInsert;
@@ -3978,6 +4001,33 @@ export type BondedTransfer = typeof bondedTransfers.$inferSelect;
 export type InsertBondedTransfer = typeof bondedTransfers.$inferInsert;
 
 /**
+ * Phase 19 (F1/M2): RL queue-policy suggestion EPISODE. Every served shadow
+ * suggestion is persisted (policy version, candidate ids, feature snapshot,
+ * both orders, served_at) so offline-RL reward joins can attribute a decision
+ * to the exact episode and replay the state the policy saw.
+ */
+export const queuePolicySuggestions = pgTable("queue_policy_suggestions", {
+  id: serial("id").primaryKey(),
+  policyVersion: varchar("policy_version", { length: 64 }).notNull(),
+  /** Declaration ids the policy scored, in request order. */
+  candidateIds: json("candidate_ids").notNull().$type<number[]>(),
+  /** Feature values per candidate id, exactly as sent to the scorer. */
+  featureSnapshot: json("feature_snapshot").notNull().$type<Record<string, Record<string, number>>>(),
+  /** Binding FIFO/AEO order at serve time. */
+  authoritativeOrder: json("authoritative_order").notNull().$type<number[]>(),
+  /** Policy-suggested order (advisory only). */
+  suggestedOrder: json("suggested_order").notNull().$type<number[]>(),
+  /** Officer the suggestion was served to. */
+  servedTo: integer("served_to").references(() => users.id),
+  servedAt: timestamp("served_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_qps_policy_version").on(t.policyVersion),
+  index("idx_qps_served_at").on(t.servedAt),
+]);
+export type QueuePolicySuggestion = typeof queuePolicySuggestions.$inferSelect;
+export type InsertQueuePolicySuggestion = typeof queuePolicySuggestions.$inferInsert;
+
+/**
  * Phase 18: officer decisions on the RL queue-policy SHADOW suggestions.
  * Append-only log for future offline-RL reward joins (accept/override of a
  * suggested queue position vs the authoritative FIFO/AEO order). The
@@ -3994,10 +4044,89 @@ export const queuePolicyDecisions = pgTable("queue_policy_decisions", {
   /** Position (1-based) in the authoritative FIFO/AEO queue at decision time. */
   authoritativePosition: integer("authoritative_position").notNull(),
   decision: varchar("decision", { length: 16 }).notNull(), // 'accepted' | 'overrode'
+  /** Suggestion episode this decision answers (Phase 19 F1/M2). */
+  suggestionId: integer("suggestion_id").references(() => queuePolicySuggestions.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_qpd_declaration").on(t.declarationId),
   index("idx_qpd_officer").on(t.officerId),
+  // M1: one decision per (suggestion episode, declaration, officer) — reward
+  // log is insert-idempotent; duplicate submissions hit 23505 and are folded.
+  uniqueIndex("uq_qpd_suggestion_declaration_officer")
+    .on(t.suggestionId, t.declarationId, t.officerId)
+    .where(sql`suggestion_id is not null`),
+  // M3: the CHECK constraint 0070 created only in SQL, expressed in schema.
+  check("queue_policy_decisions_decision_check", sql`decision IN ('accepted','overrode')`),
 ]);
 export type QueuePolicyDecision = typeof queuePolicyDecisions.$inferSelect;
 export type InsertQueuePolicyDecision = typeof queuePolicyDecisions.$inferInsert;
+
+// ─── PHASE 19 (F5a): IMDG dangerous-goods line items (A5-B9) ────────────────
+// Structural IMDG validation lives in server/_core/imdg.ts; no substance DB.
+export const declarationDgItems = pgTable("declaration_dg_items", {
+  id: serial("id").primaryKey(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  unNumber: varchar("un_number", { length: 4 }).notNull(),
+  imoClass: varchar("imo_class", { length: 8 }).notNull(),
+  packingGroup: varchar("packing_group", { length: 8 }),
+  properShippingName: varchar("proper_shipping_name", { length: 256 }).notNull(),
+  flashpointCelsius: decimal("flashpoint_celsius", { precision: 6, scale: 1 }),
+  emsCodes: json("ems_codes"),
+  marinePollutant: boolean("marine_pollutant").default(false).notNull(),
+  quantityDescription: varchar("quantity_description", { length: 256 }),
+  createdBy: integer("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_dg_items_declaration").on(t.declarationId),
+  index("idx_dg_items_un_number").on(t.unNumber),
+]);
+export type DeclarationDgItem = typeof declarationDgItems.$inferSelect;
+export type InsertDeclarationDgItem = typeof declarationDgItems.$inferInsert;
+
+// ─── PHASE 19 (F5a): shore-pass / crew-change applications (A5-C5) ──────────
+// State machine: SUBMITTED → APPROVED | REJECTED; APPROVED → REVOKED | EXPIRED.
+export const shorePassApplications = pgTable("shore_pass_applications", {
+  id: serial("id").primaryKey(),
+  applicationNumber: varchar("application_number", { length: 32 }).notNull().unique(),
+  vesselImoNumber: varchar("vessel_imo_number", { length: 7 }).notNull(),
+  voyageNumber: varchar("voyage_number", { length: 64 }).notNull(),
+  portCode: varchar("port_code", { length: 5 }).notNull(),
+  crewFamilyName: varchar("crew_family_name", { length: 128 }).notNull(),
+  crewGivenNames: varchar("crew_given_names", { length: 128 }).notNull(),
+  crewNationalityCode: varchar("crew_nationality_code", { length: 2 }).notNull(),
+  crewRankOrRating: varchar("crew_rank_or_rating", { length: 64 }).notNull(),
+  crewDateOfBirth: varchar("crew_date_of_birth", { length: 10 }).notNull(),
+  purpose: text("purpose").notNull(),
+  stcwCertificateNumber: varchar("stcw_certificate_number", { length: 64 }),
+  /** NOT_REQUESTED | VERIFIED | FAILED | NOT_CONFIGURED — approval is gated on VERIFIED/NOT_REQUESTED. */
+  verificationStatus: varchar("verification_status", { length: 16 }).notNull().default("NOT_REQUESTED"),
+  verificationOutcome: varchar("verification_outcome", { length: 16 }),
+  status: varchar("status", { length: 16 }).notNull().default("SUBMITTED"),
+  requestedBy: integer("requested_by").notNull().references(() => users.id),
+  decidedBy: integer("decided_by").references(() => users.id),
+  decisionReason: text("decision_reason"),
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_shore_pass_vessel").on(t.vesselImoNumber, t.voyageNumber),
+  index("idx_shore_pass_status").on(t.status),
+  index("idx_shore_pass_requested_by").on(t.requestedBy),
+]);
+export type ShorePassApplication = typeof shorePassApplications.$inferSelect;
+export type InsertShorePassApplication = typeof shorePassApplications.$inferInsert;
+
+/** Append-only shore-pass audit trail — every transition writes one row. */
+export const shorePassEvents = pgTable("shore_pass_events", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => shorePassApplications.id),
+  action: varchar("action", { length: 32 }).notNull(),
+  fromStatus: varchar("from_status", { length: 16 }),
+  toStatus: varchar("to_status", { length: 16 }),
+  actorId: integer("actor_id").notNull(),
+  detail: text("detail"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("idx_shore_pass_events_app").on(t.applicationId)]);
+export type ShorePassEvent = typeof shorePassEvents.$inferSelect;
+export type InsertShorePassEvent = typeof shorePassEvents.$inferInsert;

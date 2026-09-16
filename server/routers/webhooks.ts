@@ -8,7 +8,15 @@ import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { webhookSubscriptions, webhookDeliveries } from "../../drizzle/schema";
 import { eq, desc, and, count } from "drizzle-orm";
-import crypto from "crypto";
+import {
+  GOVERNED_TOPICS,
+  WebhooksNotConfiguredError,
+  encryptSecret,
+  generateSecret,
+  hashSecret,
+  rotateSubscriptionSecret,
+  webhooksConfigured,
+} from "../webhooks/outbound";
 
 async function requireDb() {
   const db = await getDb();
@@ -16,14 +24,11 @@ async function requireDb() {
   return db;
 }
 
-const SUPPORTED_EVENTS = [
-  "declaration.submitted", "declaration.approved", "declaration.rejected", "declaration.released",
-  "payment.confirmed", "payment.failed",
-  "kyc.approved", "kyc.rejected",
-  "permit.issued", "permit.expiring",
-  "vessel.geofence_entry", "vessel.geofence_exit",
-  "alert.high_risk", "alert.sanctions_hit",
-] as const;
+// Phase 19 (F1/H2): aligned to the governed marketplace registry topics
+// (plural namespaces, api-registry.json webhookEvents). The legacy singular
+// topics are retired — a registry-conformant subscriber and the runtime now
+// speak the same contract.
+const SUPPORTED_EVENTS = GOVERNED_TOPICS;
 
 export const webhooksRouter = router({
   /** List my webhook subscriptions */
@@ -34,8 +39,8 @@ export const webhooksRouter = router({
       .from(webhookSubscriptions)
       .where(eq(webhookSubscriptions.userId, ctx.user.id))
       .orderBy(desc(webhookSubscriptions.createdAt));
-    // Mask secret
-    return rows.map(r => ({ ...r, secret: `${r.secret.slice(0, 8)}${"*".repeat(24)}` }));
+    // Mask secret (H3: only the hash exists at rest — mask from it)
+    return rows.map(r => ({ ...r, secret: maskSecret(r), secretEnc: undefined }));
   }),
 
   /** Create a webhook subscription */
@@ -46,18 +51,24 @@ export const webhooksRouter = router({
       events: z.array(z.enum(SUPPORTED_EVENTS)).min(1),
     }))
     .mutation(async ({ input, ctx }) => {
+      if (!webhooksConfigured()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "WEBHOOKS_NOT_CONFIGURED: platform webhook signing key is not configured" });
+      }
       const db = await requireDb();
-      const secret = `whsec_${crypto.randomBytes(32).toString("hex")}`;
+      const secret = generateSecret();
       const [row] = await db.insert(webhookSubscriptions).values({
         userId: ctx.user.id,
         name: input.name,
         url: input.url,
-        secret,
-        events: input.events,
+        secret: null,
+        secretHash: hashSecret(secret),
+        secretEnc: encryptSecret(secret),
+        events: [...input.events],
         isActive: true,
         failureCount: 0,
       }).returning();
-      return { ...row, secret }; // Return full secret once on creation
+      // Return the raw secret exactly once — at rest only sha256 + AES-256-GCM.
+      return { ...row, secret, secretHash: undefined, secretEnc: undefined };
     }),
 
   /** Update a webhook subscription */
@@ -77,10 +88,10 @@ export const webhooksRouter = router({
 
       const { id, ...updates } = input;
       const [row] = await db.update(webhookSubscriptions)
-        .set({ ...updates, updatedAt: new Date() })
+        .set({ ...updates, events: updates.events ? [...updates.events] : undefined, updatedAt: new Date() })
         .where(eq(webhookSubscriptions.id, id))
         .returning();
-      return { ...row, secret: `${row.secret.slice(0, 8)}${"*".repeat(24)}` };
+      return { ...row, secret: maskSecret(row), secretEnc: undefined };
     }),
 
   /** Delete a webhook subscription */
@@ -104,11 +115,15 @@ export const webhooksRouter = router({
         .where(and(eq(webhookSubscriptions.id, input.id), eq(webhookSubscriptions.userId, ctx.user.id)));
       if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "Webhook not found" });
 
-      const newSecret = `whsec_${crypto.randomBytes(32).toString("hex")}`;
-      await db.update(webhookSubscriptions)
-        .set({ secret: newSecret, updatedAt: new Date() })
-        .where(eq(webhookSubscriptions.id, input.id));
-      return { secret: newSecret };
+      try {
+        const secret = await rotateSubscriptionSecret(db, input.id);
+        return { secret }; // raw secret returned once
+      } catch (err) {
+        if (err instanceof WebhooksNotConfiguredError) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
+        }
+        throw err;
+      }
     }),
 
   /** Get delivery history for a subscription */
@@ -151,7 +166,7 @@ export const webhooksRouter = router({
       const rows = await db.select().from(webhookSubscriptions).orderBy(desc(webhookSubscriptions.createdAt))
         .limit(input?.limit ?? 100)
         .offset(input?.offset ?? 0);
-      return rows.map(r => ({ ...r, secret: `${r.secret.slice(0, 8)}${"*".repeat(24)}` }));
+      return rows.map(r => ({ ...r, secret: maskSecret(r), secretEnc: undefined }));
     }),
 
   /** Admin: get delivery stats */
@@ -172,22 +187,19 @@ export const webhooksRouter = router({
   }),
 });
 
+function maskSecret(r: { secret: string | null; secretHash: string | null }): string {
+  const basis = r.secretHash ?? r.secret ?? "";
+  return basis ? `${basis.slice(0, 8)}${"*".repeat(24)}` : "";
+}
+
 function getEventDescription(event: string): string {
   const descriptions: Record<string, string> = {
-    "declaration.submitted": "Fired when a trader submits a new declaration",
-    "declaration.approved": "Fired when a customs officer approves a declaration",
-    "declaration.rejected": "Fired when a declaration is rejected",
-    "declaration.released": "Fired when goods are cleared and released",
-    "payment.confirmed": "Fired when a duty payment is confirmed",
-    "payment.failed": "Fired when a payment attempt fails",
-    "kyc.approved": "Fired when a KYC verification is approved",
-    "kyc.rejected": "Fired when a KYC verification is rejected",
-    "permit.issued": "Fired when an OGA permit is issued",
-    "permit.expiring": "Fired 30 days before a permit expires",
-    "vessel.geofence_entry": "Fired when a vessel enters a geofence zone",
-    "vessel.geofence_exit": "Fired when a vessel exits a geofence zone",
-    "alert.high_risk": "Fired when a high-risk declaration is flagged",
-    "alert.sanctions_hit": "Fired when a sanctions screening match is found",
+    "declarations.submitted": "Fired when a trader submits a new declaration",
+    "declarations.status_changed": "Fired when a declaration changes status",
+    "declarations.cleared": "Fired when goods are cleared and released",
+    "payments.initiated": "Fired when a duty payment is initiated",
+    "payments.confirmed": "Fired when a duty payment is confirmed",
+    "payments.failed": "Fired when a payment attempt fails",
   };
   return descriptions[event] ?? event;
 }

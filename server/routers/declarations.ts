@@ -16,6 +16,7 @@ import { assertCan, setOwner } from "../_core/permify";
 import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } from "../_core/wsServer";
 import { nanoid } from "nanoid";
 import { publishEvent, TOPICS } from "../_core/kafka";
+import { enqueueEvent } from "../webhooks/outbound";
 import { assertValidTransition, assignRiskLane, validateHsCode, checkPermitValidity, calculateDuty, type DeclarationStatus } from "../businessRules";
 import { indexDeclaration, searchDeclarations, OpenSearchUnavailableError } from "../_core/opensearch";
 import { scoreDeclarationRisk, scoreDeclarationRiskComposite, configuredRiskScorers, ScorerUnavailableError, validateDeclarationWithEngine, getCargoPosition } from "../_core/polyglotClients";
@@ -261,6 +262,22 @@ function applyRulesBaseline(
  */
 const PLATFORM_WIDE_ROLES = ["platform_admin", "admin", "superadmin", "customs_commissioner"];
 
+/**
+ * Phase 19 (F1/H2): enqueue a governed marketplace webhook event for active
+ * subscriptions. Fire-and-forget — webhook delivery is asynchronous worker
+ * business and must never block or fail the declaration flow.
+ */
+function emitDeclarationWebhook(event: "declarations.submitted" | "declarations.status_changed" | "declarations.cleared", data: Record<string, unknown>): void {
+  // LAZY getDb: resolve the db module at call time (dynamic import), not at
+  // module load. Keeps the emitter mock-safe in unit tests that stub ../db
+  // AFTER this router module was already imported, and guarantees the emitter
+  // never throws synchronously into the declaration flow.
+  void import("../db")
+    .then((m) => m.getDb())
+    .then((db) => (db ? enqueueEvent(db, { apiId: "singlewindow.declarations", event, data }) : 0))
+    .catch(() => { /* non-blocking — delivery is the worker's job */ });
+}
+
 export const declarationsRouter = router({
   // Create a new draft declaration
   create: protectedProcedure
@@ -502,6 +519,18 @@ export const declarationsRouter = router({
         },
         metadata: { userId: String(ctx.user.id) },
             }).catch(() => { /* non-blocking — Kafka unavailable in demo mode */ });
+      // Phase 19 (F1): governed marketplace webhook — declarations.submitted
+      emitDeclarationWebhook("declarations.submitted", {
+        declarationId: input.id,
+        declarationNumber: decl.declarationNumber,
+        traderId: ctx.user.id,
+        status: "under_assessment",
+        riskLane: risk.lane,
+        riskScore: risk.score,
+        hsCode: decl.hsCode,
+        totalDue: total.toFixed(2),
+        currency: decl.invoiceCurrency,
+      });
       // R5 FIX: Index in OpenSearch for full-text search (non-blocking)
       indexDeclaration({
         id: input.id,
@@ -1105,6 +1134,22 @@ export const declarationsRouter = router({
       }
 
       const updated = await updateDeclaration(input.id, updateData as any);
+
+      // Phase 19 (F1): governed marketplace webhooks — status change/cleared
+      emitDeclarationWebhook("declarations.status_changed", {
+        declarationId: input.id,
+        declarationNumber: decl.declarationNumber,
+        previousStatus: decl.status,
+        status: input.status,
+      });
+      if (input.status === "cleared") {
+        emitDeclarationWebhook("declarations.cleared", {
+          declarationId: input.id,
+          declarationNumber: decl.declarationNumber,
+          traderId: decl.traderId,
+          clearedAt: new Date().toISOString(),
+        });
+      }
 
       await logAuditEvent({
         entityType: "declaration",

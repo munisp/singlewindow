@@ -14,6 +14,7 @@ import type { TrpcContext } from "./_core/context";
 import {
   declarations,
   queuePolicyDecisions,
+  queuePolicySuggestions,
   stakeholderProfiles,
   users,
 } from "../drizzle/schema";
@@ -38,7 +39,7 @@ afterEach(() => {
 });
 
 let seq = 0;
-async function seedUser(role: "user" | "customs_officer" = "user") {
+async function seedUser(role: string = "user") {
   const db = (await getDb())!;
   seq += 1;
   const [u] = await db
@@ -171,42 +172,126 @@ describeDb("Phase 18 queue-policy shadow router against real PostgreSQL", () => 
     await expect(caller.queuePolicy.suggestion({})).rejects.toThrow(/Officer role required/);
     await expect(
       caller.queuePolicy.recordDecision({
+        suggestionId: 1,
         declarationId: 1,
-        policyVersion: "v1",
-        suggestedPosition: 1,
-        authoritativePosition: 1,
         decision: "accepted",
       })
     ).rejects.toThrow(/Officer role required/);
   });
 
-  it("logs accept/override decisions append-only for future reward joins", async () => {
+  it("admits every OFFICER_QUEUE_ROLES member (M4)", async () => {
+    for (const role of ["admin", "customs_officer", "inspector", "finance"] as const) {
+      const officer = await seedUser(role);
+      const caller = appRouter.createCaller(makeCtx(officer));
+      // Not configured here (shadow disabled in afterEach) — a PRECONDITION_FAILED
+      // proves the caller passed the RBAC gate.
+      await expect(caller.queuePolicy.suggestion({})).rejects.toThrow(/QUEUE_POLICY_NOT_CONFIGURED/);
+    }
+  });
+
+  async function serveSuggestion() {
     const officer = await seedUser("customs_officer");
     const trader = await seedUser();
-    const decl = await seedDeclaration(trader.id, "D");
+    const a = await seedDeclaration(trader.id, "S1");
+    const b = await seedDeclaration(trader.id, "S2");
+    enableShadow();
+    stubMlStack({
+      mode: "shadow",
+      policy_version: "queue-policy-v0.1.0",
+      suggested_order: [b.id, a.id],
+      ope_score: 0.71,
+    });
     const caller = appRouter.createCaller(makeCtx(officer));
+    const res = await caller.queuePolicy.suggestion({});
+    expect(res.suggestionId).toBeGreaterThan(0);
+    return { officer, a, b, res, caller };
+  }
+
+  it("suggestion persists a served EPISODE (M1/M2) with both orders + candidates", async () => {
+    const { res, a, b } = await serveSuggestion();
+    const db = (await getDb())!;
+    const [episode] = await db
+      .select()
+      .from(queuePolicySuggestions)
+      .where(eq(queuePolicySuggestions.id, res.suggestionId));
+    expect(episode.policyVersion).toBe("queue-policy-v0.1.0");
+    expect(episode.suggestedOrder).toEqual([b.id, a.id]);
+    expect(episode.authoritativeOrder).toContain(a.id);
+    expect(episode.authoritativeOrder).toContain(b.id);
+    expect(episode.candidateIds).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(episode.featureSnapshot).toBeTruthy();
+  });
+
+  it("recordDecision derives positions server-side and logs accepted/overrode", async () => {
+    const { officer, a, b, res, caller } = await serveSuggestion();
     const accepted = await caller.queuePolicy.recordDecision({
-      declarationId: decl.id,
-      policyVersion: "queue-policy-v0.1.0",
-      suggestedPosition: 2,
-      authoritativePosition: 3,
+      suggestionId: res.suggestionId,
+      declarationId: b.id, // suggested position 1
       decision: "accepted",
     });
     const overrode = await caller.queuePolicy.recordDecision({
-      declarationId: decl.id,
-      policyVersion: "queue-policy-v0.1.0",
-      suggestedPosition: 2,
-      authoritativePosition: 4,
+      suggestionId: res.suggestionId,
+      declarationId: a.id, // suggested position 2
       decision: "overrode",
     });
     expect(accepted.recorded).toBe(true);
+    expect(accepted.duplicate).toBe(false);
     expect(overrode.id).toBeGreaterThan(accepted.id);
     const db = (await getDb())!;
     const rows = await db
       .select()
       .from(queuePolicyDecisions)
-      .where(eq(queuePolicyDecisions.declarationId, decl.id));
-    expect(rows.map((r) => r.decision).sort()).toEqual(["accepted", "overrode"]);
+      .where(eq(queuePolicyDecisions.suggestionId, res.suggestionId));
+    expect(rows).toHaveLength(2);
+    const byDecl = new Map(rows.map((r) => [r.declarationId, r]));
+    // Server-derived: b was suggested first; a's authoritative position >= 1.
+    expect(byDecl.get(b.id)!.suggestedPosition).toBe(1);
+    expect(byDecl.get(a.id)!.suggestedPosition).toBe(2);
+    expect(byDecl.get(a.id)!.authoritativePosition).toBeGreaterThanOrEqual(1);
     expect(rows.every((r) => r.officerId === officer.id)).toBe(true);
+    expect(rows.every((r) => r.policyVersion === "queue-policy-v0.1.0")).toBe(true);
+  });
+
+  it("duplicate recordDecision folds via the unique index (23505 cause-chain walk)", async () => {
+    const { b, res, caller } = await serveSuggestion();
+    const first = await caller.queuePolicy.recordDecision({
+      suggestionId: res.suggestionId,
+      declarationId: b.id,
+      decision: "accepted",
+    });
+    const again = await caller.queuePolicy.recordDecision({
+      suggestionId: res.suggestionId,
+      declarationId: b.id,
+      decision: "accepted",
+    });
+    expect(again.recorded).toBe(true);
+    expect(again.duplicate).toBe(true);
+    expect(again.id).toBe(first.id);
+    const db = (await getDb())!;
+    const rows = await db
+      .select()
+      .from(queuePolicyDecisions)
+      .where(eq(queuePolicyDecisions.suggestionId, res.suggestionId));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("recordDecision refuses unknown episodes and non-member declarations", async () => {
+    const { b, res, caller } = await serveSuggestion();
+    await expect(
+      caller.queuePolicy.recordDecision({
+        suggestionId: 999_999,
+        declarationId: b.id,
+        decision: "accepted",
+      })
+    ).rejects.toThrow(/not found/);
+    const outsider = await seedUser();
+    const foreign = await seedDeclaration(outsider.id, "F");
+    await expect(
+      caller.queuePolicy.recordDecision({
+        suggestionId: res.suggestionId,
+        declarationId: foreign.id,
+        decision: "overrode",
+      })
+    ).rejects.toThrow(/not in the scored candidate set/);
   });
 });

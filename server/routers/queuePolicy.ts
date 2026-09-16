@@ -20,7 +20,8 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { queuePolicyDecisions } from "../../drizzle/schema";
+import { and, eq } from "drizzle-orm";
+import { queuePolicyDecisions, queuePolicySuggestions } from "../../drizzle/schema";
 import {
   loadPrioritizedExportQueue,
   requireOfficer,
@@ -33,6 +34,23 @@ import {
   requestQueuePolicySuggestion,
   type QueuePolicyCandidate,
 } from "../rl/queuePolicy";
+
+/**
+ * M2: 23505 unique_violation detection that WALKS the error cause chain.
+ * node-postgres surfaces the SQLSTATE on the thrown error itself, but
+ * driver wrappers (drizzle proxies, pool middleware) may wrap it — the
+ * code can live on err.cause (or deeper). Verified against real PG both
+ * ways; a flat `err.code === "23505"` check misses wrapped violations and
+ * would surface a spurious 500 instead of folding the duplicate.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  let cur: unknown = err;
+  for (let depth = 0; depth < 8 && cur != null && typeof cur === "object"; depth += 1) {
+    if ((cur as { code?: unknown }).code === "23505") return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
 
 function toTrpcError(err: unknown): TRPCError {
   if (err instanceof QueuePolicyUntrainedError) {
@@ -97,12 +115,31 @@ export const queuePolicyRouter = router({
       }));
       try {
         const suggestion = await requestQueuePolicySuggestion(candidates);
+        // M2: persist the suggestion EPISODE (policy version, candidate ids,
+        // feature snapshot, both orders, served_at) so recordDecision can be
+        // attributed to this exact episode and offline-RL replay can
+        // reconstruct the state the policy saw.
+        const authoritativeOrder = items.map((r) => r.id);
+        const featureSnapshot: Record<string, Record<string, number>> = {};
+        for (const c of candidates) featureSnapshot[String(c.declarationId)] = c.features;
+        const [episode] = await db
+          .insert(queuePolicySuggestions)
+          .values({
+            policyVersion: suggestion.policyVersion,
+            candidateIds: candidates.map((c) => c.declarationId),
+            featureSnapshot,
+            authoritativeOrder,
+            suggestedOrder: suggestion.suggestedOrder,
+            servedTo: ctx.user.id,
+          })
+          .returning({ id: queuePolicySuggestions.id });
         return {
+          suggestionId: episode.id,
           mode: suggestion.mode,
           policyVersion: suggestion.policyVersion,
           opeScore: suggestion.opeScore,
           /** Authoritative FIFO/AEO order — binding, never auto-reordered. */
-          authoritativeOrder: items.map((r) => r.id),
+          authoritativeOrder,
           suggestedOrder: suggestion.suggestedOrder,
         };
       } catch (err) {
@@ -114,13 +151,21 @@ export const queuePolicyRouter = router({
    * Append-only officer decision log (reward-join substrate). The decision
    * is recorded against the policy version that produced the suggestion.
    */
+  /**
+   * Record the officer's decision against a SERVED suggestion episode (M1/M2).
+   * The client supplies only { suggestionId, declarationId, decision }; both
+   * positions and the policy version are derived server-side from the
+   * persisted episode — fabricated positions are impossible. Membership is
+   * validated: the declaration must be in the episode's candidate set. The
+   * (suggestion_id, declaration_id, officer_id) unique index makes the log
+   * insert-idempotent: a duplicate submission (double-click, retry) folds
+   * into the already-recorded decision instead of appending a second row.
+   */
   recordDecision: protectedProcedure
     .input(
       z.object({
+        suggestionId: z.number().int().positive(),
         declarationId: z.number().int().positive(),
-        policyVersion: z.string().min(1).max(64),
-        suggestedPosition: z.number().int().min(1),
-        authoritativePosition: z.number().int().min(1),
         decision: z.enum(["accepted", "overrode"]),
       })
     )
@@ -133,17 +178,58 @@ export const queuePolicyRouter = router({
           message: "Database is not available in this environment",
         });
       }
-      const [row] = await db
-        .insert(queuePolicyDecisions)
-        .values({
-          officerId: ctx.user.id,
-          declarationId: input.declarationId,
-          policyVersion: input.policyVersion,
-          suggestedPosition: input.suggestedPosition,
-          authoritativePosition: input.authoritativePosition,
-          decision: input.decision,
-        })
-        .returning();
-      return { id: row.id, recorded: true };
+      const [episode] = await db
+        .select()
+        .from(queuePolicySuggestions)
+        .where(eq(queuePolicySuggestions.id, input.suggestionId));
+      if (!episode) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Suggestion episode #${input.suggestionId} not found — decisions can only be recorded against a served suggestion`,
+        });
+      }
+      const candidates = episode.candidateIds as number[];
+      if (!candidates.includes(input.declarationId)) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Declaration #${input.declarationId} was not in the scored candidate set of suggestion #${input.suggestionId}`,
+        });
+      }
+      const suggestedOrder = episode.suggestedOrder as number[];
+      const authoritativeOrder = episode.authoritativeOrder as number[];
+      const suggestedPosition = suggestedOrder.indexOf(input.declarationId) + 1;
+      const authoritativePosition = authoritativeOrder.indexOf(input.declarationId) + 1;
+      try {
+        const [row] = await db
+          .insert(queuePolicyDecisions)
+          .values({
+            officerId: ctx.user.id,
+            declarationId: input.declarationId,
+            policyVersion: episode.policyVersion,
+            suggestedPosition,
+            authoritativePosition,
+            decision: input.decision,
+            suggestionId: episode.id,
+          })
+          .returning();
+        return { id: row.id, recorded: true, duplicate: false };
+      } catch (err) {
+        // 23505 unique_violation → this officer already decided on this
+        // declaration in this episode: fold into the existing row.
+        if (isUniqueViolation(err)) {
+          const [existing] = await db
+            .select({ id: queuePolicyDecisions.id })
+            .from(queuePolicyDecisions)
+            .where(
+              and(
+                eq(queuePolicyDecisions.suggestionId, episode.id),
+                eq(queuePolicyDecisions.declarationId, input.declarationId),
+                eq(queuePolicyDecisions.officerId, ctx.user.id)
+              )
+            );
+          return { id: existing?.id, recorded: true, duplicate: true };
+        }
+        throw err;
+      }
     }),
 });

@@ -149,7 +149,7 @@ export const ENV = {
   // ─── SendGrid ─────────────────────────────────────────────────────────────
   sendgridApiKey: process.env.SENDGRID_API_KEY ?? "",
   sendgridFromEmail: process.env.SENDGRID_FROM_EMAIL ?? "noreply@tradegateway.gov.ng",
-  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway\u2122 NGSWTP",
+  sendgridFromName: process.env.SENDGRID_FROM_NAME ?? "TradeGateway™ NGSWTP",
 
   // ─── Wazuh ────────────────────────────────────────────────────────────────
   wazuhApiUrl: process.env.WAZUH_API_URL ?? "https://localhost:55000",
@@ -364,6 +364,13 @@ export const ENV = {
 
   // ─── Sanctions Webhook ────────────────────────────────────────────────────
   sanctionsWebhookSecret: process.env.SANCTIONS_WEBHOOK_SECRET ?? "",
+
+  // ─── Marketplace outbound webhooks (Phase 19 F1/H2-H4) ────────────────────
+  // Env-only platform key for the AES-256-GCM per-subscription secret
+  // envelope. NOT boot-required: deployments without it honestly refuse
+  // webhook registration (503 WEBHOOKS_NOT_CONFIGURED) and the delivery
+  // worker refuses to deliver unsigned webhooks (fail-closed).
+  webhookSecretKey: process.env.WEBHOOK_SECRET_KEY ?? "",
 
   // ─── Caddy On-Demand TLS ask endpoint (PRA-015, Phase 9) ─────────────────
   // Shared secret gating tenant.validateHostname (Caddy's on_demand_tls.ask).
