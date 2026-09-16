@@ -1,0 +1,15 @@
+// Node.js verification example (governed contract: marketplace/webhooks.md)
+const crypto = require('crypto');
+
+// Headers: X-BlueEconomy-Delivery-Id, X-BlueEconomy-Timestamp,
+//          X-BlueEconomy-Signature ("sha256=<hex>")
+function verifySignature(rawBody, headers, secret) {
+  const deliveryId = headers['x-blueeconomy-delivery-id'];
+  const timestamp  = headers['x-blueeconomy-timestamp'];
+  const signature  = headers['x-blueeconomy-signature'];
+  // Reject stale deliveries (skew > 300 s)
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) return false;
+  const signed = "PLACEHOLDER_LINE_380";
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(signed, 'utf8').digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
