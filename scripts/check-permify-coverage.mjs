@@ -126,6 +126,11 @@ const EXEMPT_ROUTERS = new Set([
   // an advisory annotation over the declaration queue (no auto-reorder) and
   // the decision log is caller-attributed, same posture as aeoFastLane.
   "queuePolicy",
+  // Phase 19 (F5a): IMDG dangerous-goods + shore-pass — owner-scoped writes
+  // (callers manage only their own declarations/applications), officer reads
+  // and decisions enforced in-router via requireOfficer (OFFICER_QUEUE_ROLES),
+  // same posture as aeoFastLane/queuePolicy.
+  "dangerousGoods", "shorePass",
 ]);
 
 function parseSchema(src) {
