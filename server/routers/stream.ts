@@ -55,10 +55,16 @@ export const streamRouter = router({
     .query(async ({ input }) => {
       const available = await fluvioAvailable();
       if (!available) {
+        // Honest unavailable state: the Fluvio backend is deprecated and not
+        // deployed in this environment. Never fabricate synthetic events.
         return {
-          events: generateFallbackEvents(input.limit, input.declarationId),
-          count: Math.min(input.limit, 20),
-          source: "fallback",
+          events: [] as object[],
+          count: 0,
+          source: "unavailable" as const,
+          available: false,
+          reason: FLUVIO_SVC_URL
+            ? "STREAM_BACKEND_UNAVAILABLE"
+            : "STREAMING_NOT_CONFIGURED",
         };
       }
       const params = new URLSearchParams({ limit: String(input.limit) });
@@ -169,12 +175,6 @@ export const streamRouter = router({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: `Failed to publish test event (${res.status})`,
-        });
-      }
-      return res.json();
-    }),
-});
-`,
         });
       }
       return res.json();
