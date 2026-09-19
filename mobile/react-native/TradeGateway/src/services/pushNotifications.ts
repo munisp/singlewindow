@@ -10,7 +10,7 @@
  *
  * Architecture:
  *   - Uses Expo Notifications (expo-notifications) as the cross-platform abstraction
- *   - Backend endpoint: POST /api/trpc/insiderThreat.registerPushToken
+ *   - Backend endpoint: POST /api/trpc/pushTokens.registerPushToken
  *   - Alert routing: insider.threat.detected → SecurityMonitor tab
  *
  * Usage:
@@ -141,7 +141,10 @@ export async function registerPushTokenWithBackend(
   apiBaseUrl: string
 ): Promise<boolean> {
   try {
-    const response = await fetch(`${apiBaseUrl}/api/trpc/insiderThreat.registerPushToken`, {
+    // Phase 20 fix: the insiderThreat router has no registerPushToken
+    // procedure; the real backend contract is pushTokens.registerPushToken
+    // (same as the Flutter app), input { token, platform, userId? }.
+    const response = await fetch(`${apiBaseUrl}/api/trpc/pushTokens.registerPushToken`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

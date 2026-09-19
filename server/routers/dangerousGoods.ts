@@ -30,7 +30,7 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb, logAuditEvent } from "../db";
 import { declarations } from "../../drizzle/schema";
-import { declarationDgItems } from "../../drizzle/schemaDgShorePass";
+import { declarationDgItems } from "../../drizzle/schema";
 import { and, eq } from "drizzle-orm";
 import { validateImdgItem } from "../_core/imdg";
 import { requireOfficer } from "./aeoFastLane";

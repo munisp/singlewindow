@@ -11,7 +11,7 @@ import { getAuthToken } from "./auth";
 
 export const trpc = createTRPCReact<AppRouter>();
 
-const API_BASE_URL = process.env.TRADEGATEWAY_API_URL ?? "https://api.tradegateway.gov.ng";
+export const API_BASE_URL = process.env.TRADEGATEWAY_API_URL ?? "https://api.tradegateway.gov.ng";
 
 export function createTRPCClient() {
   return trpc.createClient({

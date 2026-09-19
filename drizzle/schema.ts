@@ -1893,6 +1893,10 @@ export const cepAlerts = pgTable("cep_alerts", {
 export type CepAlertRow = typeof cepAlerts.$inferSelect;
 
 // ─── CEP Suppression Log ─────────────────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): CEP suppression log — never read/written outside drizzle/. Flink CEP path writes cep_alerts; grep hits in _core/metrics.ts are Prometheus counters, not table access.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const cepSuppressionLog = pgTable("cep_suppression_log", {
   id: serial("id").primaryKey(),
   alertId: varchar("alert_id", { length: 100 }).notNull(),
@@ -2109,6 +2113,10 @@ export type NlQueryTemplate = typeof nlQueryTemplates.$inferSelect;
 export type InsertNlQueryTemplate = typeof nlQueryTemplates.$inferInsert;
 
 // ─── OFFICER WORKLOAD SNAPSHOTS (v56) ─────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/officerWorkload.ts computes workload in-memory; no persistence to this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const officerWorkloadSnapshots = pgTable("officer_workload_snapshots", {
   id: serial("id").primaryKey(),
   officerId: integer("officer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -2162,6 +2170,10 @@ export type SlaEscalation = typeof slaEscalations.$inferSelect;
 export const threatIntelSeverityEnum = pgEnum("threat_intel_severity", [
   "info", "low", "medium", "high", "critical",
 ]);
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/threatIntel.ts is a parallel/in-memory implementation that does not touch this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const threatIntelFeeds = pgTable("threat_intel_feeds", {
   id: serial("id").primaryKey(),
   feedSource: varchar("feed_source", { length: 128 }).notNull(),
@@ -2183,6 +2195,10 @@ export const threatIntelFeeds = pgTable("threat_intel_feeds", {
 export type ThreatIntelFeed = typeof threatIntelFeeds.$inferSelect;
 
 // ─── STREAM EVENTS (v56) ──────────────────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. Fluvio streaming backend is DEPRECATED (P0-9, _core/env.ts); no writer exists.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const streamEvents = pgTable("stream_events", {
   id: serial("id").primaryKey(),
   topic: varchar("topic", { length: 128 }).notNull(),
@@ -2208,6 +2224,10 @@ export const socIncidentSeverityEnum = pgEnum("soc_incident_severity", [
 export const socIncidentStatusEnum = pgEnum("soc_incident_status", [
   "open", "investigating", "contained", "resolved", "closed",
 ]);
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/soc.ts does not touch this table (stub/parallel implementation).
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const socIncidents = pgTable("soc_incidents", {
   id: serial("id").primaryKey(),
   incidentNumber: varchar("incident_number", { length: 64 }).notNull().unique(),
@@ -2233,6 +2253,10 @@ export type SocIncident = typeof socIncidents.$inferSelect;
 export const aseanSwMessageTypeEnum = pgEnum("asean_sw_message_type", [
   "CUSCAR", "CUSRES", "CUSDEC", "IFTMIN", "IFTSTA", "COPARN", "COARRI",
 ]);
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/aseanSw.ts does not persist to this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const aseanSwMessages = pgTable("asean_sw_messages", {
   id: serial("id").primaryKey(),
   messageId: varchar("message_id", { length: 128 }).notNull().unique(),
@@ -2283,6 +2307,10 @@ export const freeZoneOperations = pgTable("free_zone_operations", {
 export type FreeZoneOperation = typeof freeZoneOperations.$inferSelect;
 
 // ─── CEN MESSAGES (v56) ───────────────────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/cen.ts does not persist to this table (same-named Prometheus counters in _core/metrics.ts are not table access).
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const cenMessages = pgTable("cen_messages", {
   id: serial("id").primaryKey(),
   messageRef: varchar("message_ref", { length: 128 }).notNull().unique(),
@@ -2306,6 +2334,10 @@ export const cenMessages = pgTable("cen_messages", {
 export type CenMessage = typeof cenMessages.$inferSelect;
 
 // ─── KNOWLEDGE GRAPH NODES & EDGES (v56) ──────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/knowledgeGraph.ts does not persist to this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const knowledgeGraphNodes = pgTable("knowledge_graph_nodes", {
   id: serial("id").primaryKey(),
   nodeId: varchar("node_id", { length: 128 }).notNull().unique(),
@@ -2322,6 +2354,10 @@ export const knowledgeGraphNodes = pgTable("knowledge_graph_nodes", {
 ]);
 export type KnowledgeGraphNode = typeof knowledgeGraphNodes.$inferSelect;
 
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/knowledgeGraph.ts does not persist to this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const knowledgeGraphEdges = pgTable("knowledge_graph_edges", {
   id: serial("id").primaryKey(),
   sourceNodeId: varchar("source_node_id", { length: 128 }).notNull().references(() => knowledgeGraphNodes.nodeId, { onDelete: "cascade" }),
@@ -2338,6 +2374,10 @@ export const knowledgeGraphEdges = pgTable("knowledge_graph_edges", {
 export type KnowledgeGraphEdge = typeof knowledgeGraphEdges.$inferSelect;
 
 // ─── RISK MODEL CONFIGURATIONS (v56) ─────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/riskModel.ts does not touch this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const riskModelConfigs = pgTable("risk_model_configs", {
   id: serial("id").primaryKey(),
   modelName: varchar("model_name", { length: 128 }).notNull().unique(),
@@ -3130,6 +3170,10 @@ export type InsertDeclarationRiskHistory = typeof declarationRiskHistory.$inferI
 //   matched      — code matches a declaration's vision-analysis container read
 //   unmatched    — no declaration/vision record declares this container
 //   invalid_code — ISO 6346 check digit invalid (per producer event)
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Written only by the cv.container-code.v1 Kafka consumer (server/cvContainerConsumer.ts), which was orphaned until Phase 20 wired it into startup behind CV_CONTAINER_CONSUMER_ENABLED (default off). Migration 0060 intentionally retained.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const containerOcrReads = pgTable("container_ocr_reads", {
   id: serial("id").primaryKey(),
   eventId: varchar("event_id", { length: 128 }).notNull().unique(),
@@ -3490,6 +3534,10 @@ export type CRFDocument = typeof crfDocuments.$inferSelect;
 export type InsertCRFDocument = typeof crfDocuments.$inferInsert;
 
 // ─── Mojaloop Payments (Go service) ──────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. Mojaloop flows go through fund-flow/Temporal; this table has no writer or reader.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const mojaloopPayments = pgTable("mojaloop_payments", {
   id: serial("id").primaryKey(),
   paymentRef: varchar("payment_ref", { length: 64 }).notNull().unique(),
@@ -3516,6 +3564,10 @@ export type MojaloopPayment = typeof mojaloopPayments.$inferSelect;
 export type InsertMojaloopPayment = typeof mojaloopPayments.$inferInsert;
 
 // ─── LPCO Records ─────────────────────────────────────────────────────────────
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. LPCO flows use other tables; this one is orphaned.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const lpcoRecords = pgTable("lpco_records", {
   id: serial("id").primaryKey(),
   declarationId: integer("declaration_id").notNull().references(() => declarations.id),
@@ -3543,6 +3595,10 @@ export type InsertLPCORecord = typeof lpcoRecords.$inferInsert;
 // ─── Phase-6 Remediation: Webhook Delivery Dedupe ────────────────────────────
 // Records every inbound webhook delivery exactly once so replays can be
 // acknowledged without re-applying side effects (see server/webhooks/dedupe.ts).
+/**
+ * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. Webhook receipt handling does not persist to this table.
+ * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
 export const webhookReceipts = pgTable("webhook_receipts", {
   id: serial("id").primaryKey(),
   source: varchar("source", { length: 32 }).notNull(),

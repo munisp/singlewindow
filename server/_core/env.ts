@@ -19,10 +19,11 @@
 //        risk-engine ALSO binds/publishes 8087 → KNOWN COLLISION.
 //   8093 cen-service (Go bind default 8093, renumbered per P0-7) — compose
 //        hs-classifier ALSO binds/publishes 8093 → KNOWN COLLISION.
-//   8096 asean-sw-service (Go bind default 8096) — compose fluvio-consumer
-//        ALSO binds/publishes 8096; stale fluvioSvc entry → KNOWN COLLISION.
-//   8098 freezone-service (Go bind default 8098) — stale deltaLakeSvc entry
-//        → KNOWN COLLISION (deltaLakeSvc deprecated, unassigned).
+//   8096 asean-sw-service (Go bind default 8096) — RESOLVED (Phase 20):
+//        the compose fluvio-consumer service and the stale fluvioSvc PORTS
+//        entry that double-published 8096 were removed.
+//   8098 freezone-service (Go bind default 8098) — RESOLVED (Phase 20):
+//        the stale deltaLakeSvc PORTS entry was removed (deprecated).
 //   8095 compose vision-service (OCR) vs PORTS.visionService 8105 — KNOWN
 //        DIVERGENCE: no real service binds 8105 (microservices/vision-service
 //        compose-binds 8095; the legacy services/python/vision-service that
@@ -53,11 +54,12 @@ export const PORTS = {
   freeZoneService: 8098, // matches freezone-service bind default + freeZone.ts
   cenService: 8093, // cen-service renumbered off 8097 (profile-service collision, P0-7)
   tigerBeetleBridge: 8086, // CANONICAL — the only money-rail bridge
-  // DEPRECATED (P0-9): Fluvio is not deployed — these entries are stale and
-  // their ports are owned by asean-sw-service (8096) / profile-service (8097).
-  fluvioSvc: 8096,
-  fluvioWs: 8097,
-  deltaLakeSvc: 8098,
+  // Phase 20: DEPRECATED fluvioSvc (8096) / fluvioWs (8097) / deltaLakeSvc
+  // (8098) entries REMOVED — Fluvio/DeltaLake are not deployed and those
+  // ports are owned by asean-sw-service (8096) / profile-service (8097) /
+  // freezone-service (8098). Fluvio URLs remain env-only (fail-closed
+  // placeholders in the 8111-8116 block); the stream router reports
+  // STREAMING_NOT_CONFIGURED when unset.
   flinkCepSvc: 8099,
   flinkStreamGrpc: 50099,
   sedonaSvc: 8100,
@@ -165,9 +167,8 @@ export const ENV = {
 
   // ─── ASEAN Single Window ──────────────────────────────────────────────────
   // Canonical owner of 8096 per PORTS.aseanSwService (Go bind default 8096).
-  // KNOWN COLLISION: compose fluvio-consumer also publishes 8096, and the
-  // deprecated fluvioSvc default pointed here too — both moved off (see the
-  // registry header and the Fluvio Extended section).
+  // Phase 20: the compose fluvio-consumer (which double-published 8096) and
+  // the deprecated fluvioSvc PORTS entry were removed — collision resolved.
   aseanSwServiceUrl: process.env.ASEAN_SW_SERVICE_URL ?? process.env.ASEAN_SW_URL ?? "http://localhost:8096", // asean-sw-service bind default
   aseanGatewayGrpcAddr: process.env.ASEAN_GATEWAY_GRPC_ADDR ?? "localhost:50091",
 

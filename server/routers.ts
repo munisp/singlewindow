@@ -133,6 +133,7 @@ import { shorePassRouter } from "./routers/shorePass";
 import { complianceReportingRouter } from "./routers/complianceReporting";
 
 export const appRouter = router({
+  // External regulatory/ops API surface (no in-repo caller) — docs/trpc-api-registry.md
   complianceReporting: complianceReportingRouter,
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
@@ -339,6 +340,7 @@ export const appRouter = router({
   secureChain: secureChainRouter,
   traderScorecard: traderScorecardRouter,
   cargoTracking: cargoTrackingRouter,
+  // External FAL-party API surface (Phase 9 WP-C contract) — docs/trpc-api-registry.md
   msw: mswRouter,
   mswExchange: mswExchangeRouter,
   onboarding: onboardingRouter,
@@ -355,11 +357,15 @@ export const appRouter = router({
   kpiTargets: kpiTargetsRouter,
   traderRatings: traderRatingsRouter,
   opensearch: opensearchRouter,
+  // Phase 20: the following routers have no in-repo client caller by design —
+  // they are the documented external tRPC-HTTP API surface for partner
+  // agencies / regulators / ops tooling. See docs/trpc-api-registry.md.
   fundFlow: fundFlowRouter,
   tigerbeetleSeed: tigerbeetleSeedRouter,
   insiderThreat: insiderThreatRouter,
   pushTokens: pushTokensRouter,
   permify: permifyRouter,
+  // External ops-tooling API surface (no in-repo caller) — docs/trpc-api-registry.md
   redis: redisRouter,
   kafkaEvents: kafkaEventsRouter,
   ogaPermitAudit: ogaPermitAuditRouter,
@@ -393,6 +399,7 @@ export const appRouter = router({
   conflictStats: conflictStatsRouter,
   ucr: ucrRouter,
   manifests: manifestsRouter,
+  // External API surface (no in-repo caller) — docs/trpc-api-registry.md
   valuation: valuationRouter,
   crf: crfRouter,
   wtoValuation: wtoValuationRouter,

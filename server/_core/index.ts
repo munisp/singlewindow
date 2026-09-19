@@ -1743,6 +1743,15 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
     // Seed default KPI targets on startup (idempotent)
     import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
+    // Phase 20: wire the cv.container-code.v1 Kafka consumer into startup.
+    // Honest default OFF: startCvContainerConsumer() returns immediately unless
+    // CV_CONTAINER_CONSUMER_ENABLED=true; when enabled it is fail-closed
+    // (KEY_DIRECTORY_PATH mandatory, every JWS envelope must verify).
+    import("../cvContainerConsumer")
+      .then(({ startCvContainerConsumer }) => startCvContainerConsumer())
+      .catch((err) => {
+        console.error("[cv-container] FATAL: consumer failed to start:", err);
+      });
     // Seed demo data (bonded warehouses, CEP patterns, cost records) — idempotent
     // SW-O4: demo seeding ONLY in explicit demo mode (never in production —
     // productionGates already boot-refuses DEMO_MODE there). Seeded rows are
