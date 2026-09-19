@@ -53,11 +53,12 @@ export const PORTS = {
   freeZoneService: 8098, // matches freezone-service bind default + freeZone.ts
   cenService: 8093, // cen-service renumbered off 8097 (profile-service collision, P0-7)
   tigerBeetleBridge: 8086, // CANONICAL — the only money-rail bridge
-  // DEPRECATED (P0-9): Fluvio is not deployed — these entries are stale and
-  // their ports are owned by asean-sw-service (8096) / profile-service (8097).
-  fluvioSvc: 8096,
-  fluvioWs: 8097,
-  deltaLakeSvc: 8098,
+  // Phase 20: DEPRECATED fluvioSvc (8096) / fluvioWs (8097) / deltaLakeSvc
+  // (8098) entries REMOVED — Fluvio/DeltaLake are not deployed and those
+  // ports are owned by asean-sw-service (8096) / profile-service (8097) /
+  // freezone-service (8098). Fluvio URLs remain env-only (fail-closed
+  // placeholders in the 8111-8116 block); the stream router reports
+  // STREAMING_NOT_CONFIGURED when unset.
   flinkCepSvc: 8099,
   flinkStreamGrpc: 50099,
   sedonaSvc: 8100,

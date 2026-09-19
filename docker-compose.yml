@@ -321,11 +321,9 @@ services:
   #                         This compose service is the vision-OCR probe target
   #                         (VISION_SVC_URL, default 8095, matches). Set
   #                         VISION_SERVICE_URL explicitly for the NLP/vision API.
-  #   fluvio-consumer:      8096  ← KNOWN COLLISION: 8096 is canonically owned by
-  #                         asean-sw-service (PORTS.aseanSwService, Go bind
-  #                         default 8096). Gateway FLUVIO_CONSUMER_URL default
-  #                         moved off; set FLUVIO_CONSUMER_URL=http://fluvio-consumer:8096
-  #                         explicitly in compose. SHOULD be renumbered here.
+  #   fluvio-consumer:      REMOVED (Phase 20) — previously double-published
+  #                         8096, canonically owned by asean-sw-service
+  #                         (PORTS.aseanSwService). Collision resolved.
   #
   # Historical note: an earlier wave-4 flag listed anomaly-detection 8091 vs
   # aseanSwService and gnn-risk 8092 vs freeZoneService as collisions. Those
@@ -700,30 +698,12 @@ services:
       retries: 3
       start_period: 30s
 
-  # ── Fluvio Consumer (Go) ─────────────────────────────────────────────────────
-  fluvio-consumer:
-    build:
-      context: ./microservices/fluvio-consumer
-      dockerfile: Dockerfile
-    container_name: tg-fluvio-consumer
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      PORT: 8096
-      FLUVIO_ENDPOINT: ${FLUVIO_ENDPOINT:-localhost:9003}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-tradegateway_redis_2026}@redis:6379
-    ports:
-      - "8096:8096"
-    networks:
-      - tradegateway-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+  # ── Fluvio Consumer (Go) — REMOVED (Phase 20, orphan-code audit finding 9/11).
+  # Fluvio is DEPRECATED (P0-9) and not deployed; this service double-published
+  # port 8096, which is canonically owned by asean-sw-service. The monorepo
+  # `stream` router now honestly reports STREAMING_NOT_CONFIGURED. The source
+  # remains under microservices/fluvio-consumer (see its README status note);
+  # reinstate only together with a real Fluvio backend and a non-colliding port.
 
   # ─── Polyglot Services (Sprint R) ────────────────────────────────────────────
 
