@@ -73,6 +73,10 @@ const FraudCases = lazy(() => import('./pages/app/FraudCases'));
 const RiskAlerts = lazy(() => import('./pages/app/RiskAlerts'));
 const MyCertificates = lazy(() => import('./pages/app/MyCertificates'));
 const OfficerWorkload = lazy(() => import('./pages/app/OfficerWorkload'));
+// Phase 20: officer UIs for the Phase 19 shorePass / dangerousGoods routers
+// (previously orphaned — tRPC APIs shipped without any UI caller).
+const ShorePassBoard = lazy(() => import('./pages/app/ShorePassBoard'));
+const DangerousGoodsBoard = lazy(() => import('./pages/app/DangerousGoodsBoard'));
 const NotificationCentre = lazy(() => import('./pages/app/NotificationCentre'));
 const SLABreachDashboard = lazy(() => import('./pages/app/SLABreachDashboard'));
 const NotificationPreferences = lazy(() => import('./pages/app/NotificationPreferences'));
@@ -233,6 +237,12 @@ function Router() {
 
       {/* Customs Officer Portal — B9: CustomsGuard wraps all /app/customs routes */}
       <Route path="/app/customs"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
+      <Route path="/app/customs/shore-pass">
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><ShorePassBoard /></Suspense></CustomsGuard>
+      </Route>
+      <Route path="/app/customs/dangerous-goods">
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><DangerousGoodsBoard /></Suspense></CustomsGuard>
+      </Route>
       <Route path="/app/customs/queue"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
       <Route path="/app/customs/declarations/:id"><CustomsGuard><DeclarationDetail /></CustomsGuard></Route>
       <Route path="/app/customs/vision"><CustomsGuard><VisionAnalysis /></CustomsGuard></Route>
