@@ -51,9 +51,32 @@ interface NimcTokenClaims {
   active?: boolean;
 }
 
+/**
+ * Phase 20 (GAP 6): unsigned dev decode is gated behind an EXPLICIT opt-in
+ * flag and hard-refused in production. Previously, missing client credentials
+ * silently decoded the IDP JWT with no signature verification — an attacker
+ * could mint any NIN claim. Now:
+ *   - production (NODE_ENV=production): NEVER decode unsigned (fail-closed;
+ *     validateProductionConfig also refuses to boot with the flag set);
+ *   - non-production: unsigned decode only when
+ *     NIGERIA_ID_ALLOW_UNSIGNED_DEV_TOKENS=true is explicitly set;
+ *   - otherwise: introspection via Keycloak with client credentials.
+ */
+export function isUnsignedDevDecodeAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  return process.env.NIGERIA_ID_ALLOW_UNSIGNED_DEV_TOKENS === "true";
+}
+
 async function validateNimcToken(idpToken: string): Promise<NimcTokenClaims> {
-  // Development mode — decode without verification if no client credentials
+  // Development mode — decode without verification ONLY with explicit opt-in.
   if (!NIN_CLIENT_ID || !NIN_CLIENT_SECRET) {
+    if (!isUnsignedDevDecodeAllowed()) {
+      throw new Error(
+        "NIN IDP token validation is unavailable: NIGERIA_ID_CLIENT_ID/SECRET are not " +
+        "configured and unsigned dev decoding is not enabled " +
+        "(set NIGERIA_ID_ALLOW_UNSIGNED_DEV_TOKENS=true in NON-production environments only)."
+      );
+    }
     const parts = idpToken.split(".");
     if (parts.length !== 3) throw new Error("Invalid JWT format");
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));

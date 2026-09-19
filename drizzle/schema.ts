@@ -8,6 +8,15 @@ import { sql } from "drizzle-orm";
 
 export const userRoleEnum = pgEnum("user_role", ["user", "admin", "customs_officer", "oga_officer", "inspector", "finance"]);
 
+// Phase 20 (GAP 9): account lifecycle status for offboarding/suspension.
+export const userStatusEnum = pgEnum("user_status", ["active", "suspended", "offboarded"]);
+
+// Phase 20 (GAP 1): maker-checker lifecycle for privileged role grants.
+export const roleRequestStatusEnum = pgEnum("role_request_status", ["pending", "approved", "rejected"]);
+
+// Phase 20 (GAP 4): maker-checker lifecycle for elevated API-key scope grants.
+export const apiScopeRequestStatusEnum = pgEnum("api_scope_request_status", ["pending", "approved", "rejected"]);
+
 export const stakeholderTypeEnum = pgEnum("stakeholder_type", [
   "trader", "customs_officer", "oga_officer", "freight_forwarder",
   "bank_officer", "port_authority", "system_admin", "auditor"
@@ -105,6 +114,8 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("login_method", { length: 64 }),
   role: userRoleEnum("role").default("user").notNull(),
+  // Phase 20 (GAP 9): suspended/offboarded accounts are rejected at auth time.
+  status: userStatusEnum("status").default("active").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),
@@ -112,6 +123,50 @@ export const users = pgTable("users", {
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
+
+// ─── ROLE REQUESTS (Phase 20, GAP 1) ─────────────────────────────────────────
+// Privileged roles (customs_officer, oga_officer, inspector, finance, admin)
+// can no longer be self-assigned; they require a maker-checker approval:
+// the requester (maker) submits, a DIFFERENT admin (checker) approves/rejects.
+export const roleRequests = pgTable("role_requests", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  requestedRole: userRoleEnum("requested_role").notNull(),
+  status: roleRequestStatusEnum("status").default("pending").notNull(),
+  reason: text("reason"),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_role_requests_user_id").on(t.userId),
+  index("idx_role_requests_status").on(t.status),
+]);
+export type RoleRequest = typeof roleRequests.$inferSelect;
+
+// ─── API SCOPE ELEVATION REQUESTS (Phase 20, GAP 4) ──────────────────────────
+// Elevated scopes (admin:all) are not self-issuable; they require the same
+// maker-checker approval flow, per api-registry.json governance.
+export const apiScopeRequests = pgTable("api_scope_requests", {
+  id: serial("id").primaryKey(),
+  apiKeyId: integer("api_key_id").notNull().references(() => apiKeys.id),
+  userId: integer("user_id").notNull().references(() => users.id),
+  scope: varchar("scope", { length: 64 }).notNull(),
+  status: apiScopeRequestStatusEnum("status").default("pending").notNull(),
+  reason: text("reason"),
+  reviewedBy: integer("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_api_scope_requests_key").on(t.apiKeyId),
+  index("idx_api_scope_requests_status").on(t.status),
+]);
+export type ApiScopeRequest = typeof apiScopeRequests.$inferSelect;
+
+
 
 // ─── STAKEHOLDER PROFILES ────────────────────────────────────────────────────
 

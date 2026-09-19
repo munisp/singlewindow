@@ -112,65 +112,35 @@ export async function verifyKeycloakToken(
 }
 
 // ─── Role extraction ──────────────────────────────────────────────────────────
-type TradeGatewayRole =
-  | "admin"
-  | "customs_officer"
-  | "oga_officer"
-  | "inspector"
-  | "finance"
-  | "user";
+// Phase 20 (GAP 5): mapping lives in ./roleClaimMap (single source of truth,
+// shared with keycloakRoleSync). Bare realm claims no longer auto-map; they
+// require an explicit ADMIN_ROLE_CLAIM_MAP allowlist entry.
+import {
+  collectClaimsFromPayload,
+  mapKeycloakClaims,
+  type RoleClaimMapping,
+  type TradeGatewayRole,
+} from "./roleClaimMap";
 
-const ROLE_MAP: Record<string, TradeGatewayRole> = {
-  "tradegateway-admin": "admin",
-  "tradegateway-customs-officer": "customs_officer",
-  "tradegateway-oga-officer": "oga_officer",
-  "tradegateway-inspector": "inspector",
-  "tradegateway-finance": "finance",
-  "tradegateway-trader": "user",
-  admin: "admin",
-  customs_officer: "customs_officer",
-  oga_officer: "oga_officer",
-  inspector: "inspector",
-  finance: "finance",
-  trader: "user",
-};
+export type { RoleClaimMapping, TradeGatewayRole };
 
-const ROLE_PRIORITY: Record<TradeGatewayRole, number> = {
-  admin: 100,
-  customs_officer: 80,
-  oga_officer: 70,
-  inspector: 60,
-  finance: 50,
-  user: 10,
-};
+/**
+ * Extracts the full fail-closed role mapping from a verified Keycloak payload.
+ */
+export function extractRoleMappingFromPayload(
+  payload: KeycloakTokenPayload
+): RoleClaimMapping {
+  return mapKeycloakClaims(collectClaimsFromPayload(payload));
+}
 
 /**
  * Extracts the highest-priority TradeGateway role from a verified Keycloak payload.
+ * Returns null only when NO claim mapped — callers must treat that as
+ * lowest-privilege ("user"), never as "keep whatever the token implies".
  */
 export function extractRoleFromPayload(
   payload: KeycloakTokenPayload
 ): TradeGatewayRole | null {
-  const roles: string[] = [];
-
-  if (payload.realm_access?.roles) {
-    roles.push(...payload.realm_access.roles);
-  }
-  if (payload.resource_access) {
-    for (const client of Object.values(payload.resource_access)) {
-      if (client?.roles) roles.push(...client.roles);
-    }
-  }
-
-  let best: TradeGatewayRole | null = null;
-  let bestPriority = -1;
-
-  for (const r of roles) {
-    const mapped = ROLE_MAP[r];
-    if (mapped && ROLE_PRIORITY[mapped] > bestPriority) {
-      best = mapped;
-      bestPriority = ROLE_PRIORITY[mapped];
-    }
-  }
-
-  return best;
+  const mapping = extractRoleMappingFromPayload(payload);
+  return mapping.mapped ? mapping.role : null;
 }

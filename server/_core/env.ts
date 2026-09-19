@@ -669,6 +669,15 @@ export function validateProductionConfig(config = ENV): void {
       return actual !== "" && devValues.includes(actual);
     })
     .map(([envVar]) => envVar);
+  // Phase 20 (GAP 6): dev-only escape hatches must never reach production.
+  // A production process booted with unsigned NIN IDP token decoding enabled
+  // would accept attacker-minted identity claims — refuse to boot.
+  const forbiddenDevFlags = [
+    process.env.NIGERIA_ID_ALLOW_UNSIGNED_DEV_TOKENS === "true"
+      ? "NIGERIA_ID_ALLOW_UNSIGNED_DEV_TOKENS"
+      : "",
+  ].filter(Boolean);
+
   const unsafeEndpoints = [
     ["DATABASE_URL", config.databaseUrl],
     ["KEYCLOAK_URL", config.keycloakUrl],
@@ -681,11 +690,12 @@ export function validateProductionConfig(config = ENV): void {
     ["TIGERBEETLE_ADDRESSES", config.tigerBeetleAddresses.join(",")],
   ].filter(([, value]) => isUnsafeProductionEndpoint(value)).map(([name]) => name);
 
-  if (missing.length || unsafeEndpoints.length || knownDevValues.length) {
+  if (missing.length || unsafeEndpoints.length || knownDevValues.length || forbiddenDevFlags.length) {
     const details = [
       missing.length ? `missing: ${missing.join(", ")}` : "",
       unsafeEndpoints.length ? `unsafe local endpoint: ${unsafeEndpoints.join(", ")}` : "",
       knownDevValues.length ? `known dev placeholder value: ${knownDevValues.join(", ")}` : "",
+      forbiddenDevFlags.length ? `dev-only flag enabled in production: ${forbiddenDevFlags.join(", ")}` : "",
     ].filter(Boolean).join("; ");
     throw new Error(`[ENV] Production configuration rejected (${details}).`);
   }
