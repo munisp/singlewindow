@@ -32,7 +32,7 @@ import { TRPCError } from "@trpc/server";
 import { randomBytes } from "node:crypto";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { shorePassApplications, shorePassEvents } from "../../drizzle/schemaDgShorePass";
+import { shorePassApplications, shorePassEvents } from "../../drizzle/schema";
 import { eq } from "drizzle-orm";
 import { requireOfficer } from "./aeoFastLane";
 import { verifyStcwCertificate } from "../_core/seafarerRegistryClient";
