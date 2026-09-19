@@ -51,7 +51,20 @@ async function checkRateLimit(apiKeyId: number, limitPerMinute: number): Promise
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
-const ScopeEnum = z.enum(["declarations:read", "declarations:write", "payments:read", "payments:write", "reports:read", "admin:all"]);
+// Phase 20 (GAP 4): elevated scopes are NOT self-issuable. Per
+// developer-platform api-registry.json governance, production-tier elevation
+// (incl. admin:all) requires maker-checker approval — requestElevatedScope /
+// reviewScopeElevation below. Self-issuance is limited to non-elevated scopes.
+export const ELEVATED_SCOPES = ["admin:all"] as const;
+export const SELF_ISSUABLE_SCOPES = ["declarations:read", "declarations:write", "payments:read", "payments:write", "reports:read"] as const;
+
+const ScopeEnum = z.enum(SELF_ISSUABLE_SCOPES);
+const ElevatedScopeEnum = z.enum(ELEVATED_SCOPES);
+
+/** True when a comma-separated scope list contains an elevated scope. */
+export function containsElevatedScope(scopes: string): boolean {
+  return scopes.split(",").some((s) => (ELEVATED_SCOPES as readonly string[]).includes(s.trim()));
+}
 
 export const devPortalRouter = router({
   // Create a new API key
@@ -229,6 +242,132 @@ export const devPortalRouter = router({
       }
     }),
 
+  /**
+   * requestElevatedScope — Phase 20 (GAP 4): maker submits an elevated-scope
+   * request for one of THEIR OWN keys. Stays PENDING until a different admin
+   * approves (maker ≠ checker). Audit-logged.
+   */
+  requestElevatedScope: protectedProcedure
+    .input(z.object({
+      keyId: z.number().int().positive(),
+      scope: ElevatedScopeEnum,
+      reason: z.string().min(10).max(1000),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = (await getDb())!;
+      const { apiScopeRequests } = await import("../../drizzle/schema");
+
+      const [key] = await db.select().from(apiKeys)
+        .where(and(eq(apiKeys.id, input.keyId), eq(apiKeys.userId, ctx.user.id)));
+      if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "API key not found" });
+      if (key.status !== "active") {
+        throw new TRPCError({ code: "CONFLICT", message: `API key is ${key.status}` });
+      }
+      if (containsElevatedScope(key.scopes)) {
+        throw new TRPCError({ code: "CONFLICT", message: "API key already has an elevated scope" });
+      }
+
+      const [pending] = await db.select({ id: apiScopeRequests.id }).from(apiScopeRequests)
+        .where(and(eq(apiScopeRequests.apiKeyId, input.keyId), eq(apiScopeRequests.status, "pending")))
+        .limit(1);
+      if (pending) {
+        throw new TRPCError({ code: "CONFLICT", message: "This key already has a pending scope-elevation request" });
+      }
+
+      const [created] = await db.insert(apiScopeRequests).values({
+        apiKeyId: input.keyId,
+        userId: ctx.user.id,
+        scope: input.scope,
+        reason: input.reason,
+      }).returning();
+
+      const { logAuditEvent } = await import("../db");
+      await logAuditEvent({
+        entityType: "user",
+        entityId: ctx.user.id,
+        action: "api_scope_elevation_requested",
+        actorId: ctx.user.id,
+        actorType: "user",
+        previousState: null,
+        newState: { apiKeyId: input.keyId, scope: input.scope, scopeRequestId: created.id },
+        metadata: { reason: input.reason },
+      });
+
+      return { success: true, scopeRequestId: created.id, status: "pending" as const };
+    }),
+
+  /**
+   * reviewScopeElevation — admin (checker) approves/rejects an elevated-scope
+   * request. Maker ≠ checker is enforced; approval mutates the key's scopes
+   * and the grant is audit-logged.
+   */
+  reviewScopeElevation: adminProcedure
+    .input(z.object({
+      scopeRequestId: z.number().int().positive(),
+      decision: z.enum(["approved", "rejected"]),
+      reviewNote: z.string().max(1000).optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const db = (await getDb())!;
+      const { apiScopeRequests } = await import("../../drizzle/schema");
+
+      const [request] = await db.select().from(apiScopeRequests)
+        .where(eq(apiScopeRequests.id, input.scopeRequestId)).limit(1);
+      if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "Scope request not found" });
+      if (request.status !== "pending") {
+        throw new TRPCError({ code: "CONFLICT", message: `Scope request already ${request.status}` });
+      }
+      if (request.userId === ctx.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Maker-checker violation: you cannot review your own scope-elevation request.",
+        });
+      }
+
+      await db.update(apiScopeRequests).set({
+        status: input.decision,
+        reviewedBy: ctx.user.id,
+        reviewedAt: new Date(),
+        reviewNote: input.reviewNote ?? null,
+        updatedAt: new Date(),
+      }).where(eq(apiScopeRequests.id, request.id));
+
+      if (input.decision === "approved") {
+        const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, request.apiKeyId)).limit(1);
+        if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "API key no longer exists" });
+        const scopes = key.scopes.split(",").map((s) => s.trim()).filter(Boolean);
+        if (!scopes.includes(request.scope)) scopes.push(request.scope);
+        await db.update(apiKeys)
+          .set({ scopes: scopes.join(",") })
+          .where(eq(apiKeys.id, request.apiKeyId));
+      }
+
+      const { logAuditEvent } = await import("../db");
+      await logAuditEvent({
+        entityType: "user",
+        entityId: request.userId,
+        action: input.decision === "approved" ? "api_scope_elevation_approved" : "api_scope_elevation_rejected",
+        actorId: ctx.user.id,
+        actorType: "admin",
+        previousState: { scopeRequestStatus: "pending", scope: request.scope },
+        newState: { scopeRequestStatus: input.decision, apiKeyId: request.apiKeyId },
+        metadata: { scopeRequestId: request.id, reviewNote: input.reviewNote ?? null },
+      });
+
+      return { success: true, decision: input.decision };
+    }),
+
+  /**
+   * listPendingScopeElevations — admin: pending scope-elevation queue.
+   */
+  listPendingScopeElevations: adminProcedure.query(async () => {
+    const db = (await getDb())!;
+    const { apiScopeRequests } = await import("../../drizzle/schema");
+    return db.select().from(apiScopeRequests)
+      .where(eq(apiScopeRequests.status, "pending"))
+      .orderBy(desc(apiScopeRequests.createdAt));
+  }),
+
   // Get available API scopes and their descriptions
   getAvailableScopes: protectedProcedure
     .query(() => {
@@ -238,7 +377,7 @@ export const devPortalRouter = router({
         { scope: "payments:read", description: "Read payment records and duty calculations", tier: "basic" },
         { scope: "payments:write", description: "Initiate payments and duty settlements", tier: "standard" },
         { scope: "reports:read", description: "Access analytics reports and statistics", tier: "standard" },
-        { scope: "admin:all", description: "Full administrative access (restricted)", tier: "enterprise" },
+        { scope: "admin:all", description: "Full administrative access — NOT self-issuable; requires maker-checker approval via requestElevatedScope (Phase 20)", tier: "enterprise" },
       ];
     }),
 

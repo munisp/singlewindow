@@ -671,13 +671,26 @@ type SelfAssignableRole = typeof ROLE_OPTIONS[number]["value"];
 
 function RoleSelectionStep({ onSelect }: { onSelect: (role: SelfAssignableRole) => void }) {
   const [selected, setSelected] = useState<SelfAssignableRole | null>(null);
+  const [requestSubmitted, setRequestSubmitted] = useState(false);
   const selectRoleMutation = trpc.onboarding.selectRole.useMutation();
+  const requestRoleMutation = trpc.onboarding.requestRole.useMutation();
 
+  // Phase 20 (GAP 1): only the trader-level role is self-assignable.
+  // Privileged roles go through maker-checker admin approval (onboarding.requestRole).
   const handleConfirm = async () => {
     if (!selected) return;
     try {
-      await selectRoleMutation.mutateAsync({ role: selected });
-      onSelect(selected);
+      if (selected === "user") {
+        await selectRoleMutation.mutateAsync({ role: selected });
+        onSelect(selected);
+      } else {
+        await requestRoleMutation.mutateAsync({
+          role: selected,
+          reason: "Privileged role requested via the onboarding role picker; credentials to be verified by the reviewing administrator.",
+        });
+        setRequestSubmitted(true);
+        toast.success("Role request submitted. An administrator must approve it before the role is granted.");
+      }
     } catch (err) {
       // Fail-closed: role was NOT saved — do not advance on a fake success
       toast.error(err instanceof Error ? err.message : "Your role could not be saved. Please try again.");

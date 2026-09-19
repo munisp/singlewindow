@@ -6,44 +6,26 @@
  * at the gateway layer), extracts the realm_access.roles claim, maps the first
  * matching TradeGateway role to the user.role column, and upserts the user record.
  *
- * Role priority (highest wins):
- *   admin > customs_officer > oga_officer > inspector > finance > user
+ * Phase 20 (GAP 5) — fail-closed claim mapping:
+ *   - Claim → role mapping is delegated to ./_core/roleClaimMap (single source
+ *     of truth). Bare realm claims (e.g. a bare `admin` from ANY realm) no
+ *     longer auto-map; they require an explicit ADMIN_ROLE_CLAIM_MAP allowlist
+ *     entry. Unknown privileged claims leave the user at the lowest-privilege
+ *     role AND record a PENDING role request (honest pending state) instead of
+ *     silently granting access.
+ *   - Every role write is audit-logged via db.logAuditEvent.
+ *   - Suspended/offboarded users are never modified.
  *
  * This is intentionally non-blocking: if the token is absent, malformed, or the
  * DB is unavailable, the function returns silently without affecting the request.
  */
 
 import type { Request } from "express";
-
-// TradeGateway role enum values (must match drizzle/schema.ts userRoleEnum)
-type TradeGatewayRole = "admin" | "customs_officer" | "oga_officer" | "inspector" | "finance" | "user";
-
-// Keycloak realm role → TradeGateway role mapping
-const KEYCLOAK_ROLE_MAP: Record<string, TradeGatewayRole> = {
-  "tradegateway-admin":           "admin",
-  "tradegateway-customs-officer": "customs_officer",
-  "tradegateway-oga-officer":     "oga_officer",
-  "tradegateway-inspector":       "inspector",
-  "tradegateway-finance":         "finance",
-  "tradegateway-trader":          "user",
-  // Also accept bare role names (for Keycloak realms that don't prefix)
-  "admin":           "admin",
-  "customs_officer": "customs_officer",
-  "oga_officer":     "oga_officer",
-  "inspector":       "inspector",
-  "finance":         "finance",
-  "trader":          "user",
-};
-
-// Role priority for conflict resolution
-const ROLE_PRIORITY: Record<TradeGatewayRole, number> = {
-  admin:           100,
-  customs_officer: 80,
-  oga_officer:     70,
-  inspector:       60,
-  finance:         50,
-  user:            10,
-};
+import {
+  collectClaimsFromPayload,
+  mapKeycloakClaims,
+  type TradeGatewayRole,
+} from "./roleClaimMap";
 
 /**
  * Decodes a JWT payload without verifying the signature.
@@ -61,45 +43,17 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 /**
- * Extracts the highest-priority TradeGateway role from a Keycloak JWT.
- * Returns null if no matching role is found.
+ * Extracts the mapped TradeGateway role from a Keycloak JWT.
+ * Returns the full mapping result (role, mapped flag, unmapped privileged claims).
  */
-function extractRoleFromToken(token: string): TradeGatewayRole | null {
+export function extractRoleMappingFromToken(token: string) {
   const payload = decodeJwtPayload(token);
   if (!payload) return null;
-
-  // Keycloak stores realm roles in payload.realm_access.roles
-  const realmRoles: string[] = [];
-  const realmAccess = payload.realm_access as { roles?: string[] } | undefined;
-  if (realmAccess?.roles && Array.isArray(realmAccess.roles)) {
-    realmRoles.push(...realmAccess.roles);
-  }
-
-  // Also check resource_access for client-specific roles
-  const resourceAccess = payload.resource_access as Record<string, { roles?: string[] }> | undefined;
-  if (resourceAccess) {
-    for (const client of Object.values(resourceAccess)) {
-      if (client?.roles && Array.isArray(client.roles)) {
-        realmRoles.push(...client.roles);
-      }
-    }
-  }
-
-  if (realmRoles.length === 0) return null;
-
-  // Map and find highest-priority role
-  let bestRole: TradeGatewayRole | null = null;
-  let bestPriority = -1;
-
-  for (const keycloakRole of realmRoles) {
-    const mapped = KEYCLOAK_ROLE_MAP[keycloakRole];
-    if (mapped && ROLE_PRIORITY[mapped] > bestPriority) {
-      bestRole = mapped;
-      bestPriority = ROLE_PRIORITY[mapped];
-    }
-  }
-
-  return bestRole;
+  const claims = collectClaimsFromPayload(
+    payload as { realm_access?: { roles?: string[] }; resource_access?: Record<string, { roles?: string[] }> }
+  );
+  if (claims.length === 0) return null;
+  return mapKeycloakClaims(claims);
 }
 
 /**
@@ -115,35 +69,84 @@ export async function syncKeycloakRole(req: Request, userId: number): Promise<vo
     if (!authHeader?.startsWith("Bearer ")) return;
 
     const token = authHeader.slice(7);
-    const role = extractRoleFromToken(token);
-    if (!role) return;
+    const mapping = extractRoleMappingFromToken(token);
+    if (!mapping) return;
 
-    // Only update if the role differs from the current value (avoid unnecessary writes)
-    const { getDb } = await import("../db");
+    const { getDb, logAuditEvent } = await import("../db");
     const db = await getDb();
     if (!db) return;
 
-    const { users } = await import("../../drizzle/schema");
-    const { eq } = await import("drizzle-orm");
+    const { users, roleRequests } = await import("../../drizzle/schema");
+    const { and, eq } = await import("drizzle-orm");
 
     const [current] = await db
-      .select({ role: users.role })
+      .select({ role: users.role, status: users.status })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
 
-    if (current?.role === role) return; // Already in sync
+    if (!current) return;
+    // Fail-closed: never mutate suspended/offboarded accounts via claim sync.
+    if (current.status !== "active") return;
 
-    await db
-      .update(users)
-      .set({ role, updatedAt: new Date() })
-      .where(eq(users.id, userId));
+    const role: TradeGatewayRole = mapping.role;
 
-    console.log(`[KeycloakRoleSync] User ${userId} role synced to '${role}' from Keycloak token`);
+    if (current.role !== role) {
+      await db
+        .update(users)
+        .set({ role, updatedAt: new Date() })
+        .where(eq(users.id, userId));
+
+      // Audit trail for every claim-driven role write (GAP 5 / GAP 12).
+      await logAuditEvent({
+        entityType: "user",
+        entityId: userId,
+        action: "keycloak_role_sync",
+        actorId: null,
+        actorType: "keycloak_claim_sync",
+        previousState: { role: current.role },
+        newState: { role },
+        metadata: { source: "realm_claims" },
+      });
+      console.log(`[KeycloakRoleSync] User ${userId} role synced '${current.role}' → '${role}' (audited)`);
+    }
+
+    // Honest pending state: privileged claims that were NOT granted become
+    // pending maker-checker role requests instead of silent access.
+    for (const claim of mapping.unmappedPrivilegedClaims) {
+      const requestedRole = claimToPrivilegedRole(claim);
+      if (!requestedRole) continue; // not a grantable privileged role — nothing to request
+      try {
+        const [existing] = await db
+          .select({ id: roleRequests.id })
+          .from(roleRequests)
+          .where(and(eq(roleRequests.userId, userId), eq(roleRequests.status, "pending")))
+          .limit(1);
+        if (existing) continue;
+        await db.insert(roleRequests).values({
+          userId,
+          requestedRole,
+          reason: `Auto-created: unmapped privileged Keycloak claim '${claim}' requires admin approval (GAP 5 fail-closed mapping).`,
+        });
+      } catch (e) {
+        console.warn("[KeycloakRoleSync] Failed to record pending role request:", e);
+      }
+    }
   } catch (err) {
     // Non-fatal — log and continue
     console.warn("[KeycloakRoleSync] Role sync failed (non-fatal):", err);
   }
+}
+
+/** Best-effort mapping of a privileged claim name to a grantable privileged role. */
+function claimToPrivilegedRole(
+  claim: string
+): "admin" | "customs_officer" | "oga_officer" | "inspector" | "finance" | null {
+  const stripped = claim.replace(/^tradegateway-/, "").replace(/-/g, "_");
+  const privileged = ["admin", "customs_officer", "oga_officer", "inspector", "finance"] as const;
+  return (privileged as readonly string[]).includes(stripped)
+    ? (stripped as (typeof privileged)[number])
+    : null;
 }
 
 /**

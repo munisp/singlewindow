@@ -45,6 +45,7 @@ export function buildCronUser(openId: string): AuthenticatedUser {
     email: null,
     loginMethod: "cron",
     role: "admin",
+    status: "active",
     isCron: true,
     taskUid,
     createdAt: now,
@@ -127,23 +128,48 @@ class LocalSessionService {
     const authHeader = req.headers.authorization as string | undefined;
     if (authHeader?.startsWith("Bearer ")) {
       try {
-        const { verifyKeycloakToken, extractRoleFromPayload } = await import("./keycloakVerifier");
+        const { verifyKeycloakToken, extractRoleMappingFromPayload } = await import("./keycloakVerifier");
         const payload = await verifyKeycloakToken(authHeader);
         if (!payload?.sub) throw new Error("Keycloak token subject is missing.");
 
         const signedInAt = new Date();
-        const role = extractRoleFromPayload(payload);
+        // Phase 20 (GAP 5): fail-closed claim mapping. Only a mapped claim can
+        // change a role; an EXISTING user with no mapped claim keeps their DB
+        // role (no silent downgrade of admins), while a NEW user is provisioned
+        // at the lowest-privilege role. Every auto-provision is audit-logged.
+        const mapping = extractRoleMappingFromPayload(payload);
+        const existing = await db.getUserByOpenId(payload.sub);
         await db.upsertUser({
           openId: payload.sub,
           name: payload.preferred_username ?? payload.sub,
           email: typeof payload.email === "string" ? payload.email : null,
           loginMethod: "keycloak",
           lastSignedIn: signedInAt,
-          ...(role ? { role } : {}),
+          ...(mapping.mapped ? { role: mapping.role } : {}),
         });
         const user = await db.getUserByOpenId(payload.sub);
-        if (user) return user;
-        throw new Error("Keycloak user could not be provisioned.");
+        if (!user) throw new Error("Keycloak user could not be provisioned.");
+        if (!existing) {
+          try {
+            await db.logAuditEvent({
+              entityType: "user",
+              entityId: user.id,
+              action: "keycloak_auto_provision",
+              actorId: null,
+              actorType: "keycloak_bearer",
+              previousState: null,
+              newState: { openId: user.openId, role: user.role, loginMethod: "keycloak" },
+              metadata: { mappedClaims: mapping.mapped, unmappedPrivilegedClaims: mapping.unmappedPrivilegedClaims },
+            });
+          } catch (e) {
+            console.warn("[Auth] Failed to audit-log auto-provision:", e);
+          }
+        }
+        // Fail-closed: suspended/offboarded accounts cannot authenticate.
+        if (user.status !== "active") {
+          throw ForbiddenError(`Account is ${user.status}; contact an administrator.`);
+        }
+        return user;
       } catch (error) {
         console.warn("[Auth] Keycloak bearer-token authentication failed", String(error));
         throw ForbiddenError("Invalid Keycloak bearer token");
@@ -163,11 +189,15 @@ class LocalSessionService {
         await client.query("SELECT set_config('app.current_user_role', $1, false)", ["admin"]);
         const result = await client.query<{
           id: number; open_id: string; name: string | null; email: string | null;
-          login_method: string | null; role: string; created_at: Date; updated_at: Date; last_signed_in: Date;
+          login_method: string | null; role: string; status: string; created_at: Date; updated_at: Date; last_signed_in: Date;
         }>("SELECT * FROM users WHERE open_id = $1 LIMIT 1", [session.openId]);
         if (!result.rows[0]) throw ForbiddenError("Demo user not found — run the demo seed script");
-        await client.query("UPDATE users SET last_signed_in = $1 WHERE open_id = $2", [signedInAt, session.openId]);
         const row = result.rows[0];
+        // Fail-closed: suspended/offboarded accounts cannot authenticate (demo path included).
+        if (row.status && row.status !== "active") {
+          throw ForbiddenError(`Account is ${row.status}; contact an administrator.`);
+        }
+        await client.query("UPDATE users SET last_signed_in = $1 WHERE open_id = $2", [signedInAt, session.openId]);
         return {
           id: row.id,
           openId: row.open_id,
@@ -175,6 +205,7 @@ class LocalSessionService {
           email: row.email,
           loginMethod: row.login_method,
           role: row.role as User["role"],
+          status: (row.status ?? "active") as User["status"],
           createdAt: row.created_at,
           updatedAt: row.updated_at,
           lastSignedIn: row.last_signed_in,
@@ -190,6 +221,10 @@ class LocalSessionService {
 
     const user = await db.getUserByOpenId(session.openId);
     if (!user) throw ForbiddenError("Session user is not provisioned");
+    // Fail-closed: suspended/offboarded accounts cannot authenticate.
+    if (user.status !== "active") {
+      throw ForbiddenError(`Account is ${user.status}; contact an administrator.`);
+    }
     await db.upsertUser({ openId: user.openId, lastSignedIn: signedInAt });
     return user;
   }

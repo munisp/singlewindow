@@ -81,8 +81,9 @@ async function analyseDocumentViaKYCService(
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-// ─── Mock analysis for development (when KYC service is not running) ──────
-
+// NOTE (Phase 20, GAP 6): the dev-time mock-analysis fallback was removed —
+// when the KYC service is unreachable, analysis fails closed with
+// SERVICE_UNAVAILABLE (see analyseDocument below). No silent mock path remains.
 
 // ─── Router ───────────────────────────────────────────────────────────────
 

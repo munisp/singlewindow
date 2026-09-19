@@ -5,8 +5,22 @@
  */
 
 import { z } from "zod";
-import { protectedProcedure, router } from "../_core/trpc";
+import { adminProcedure, protectedProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+
+// ─── Phase 20 (GAP 1) role governance ────────────────────────────────────────
+// Roles a user may self-assign. Trader/applicant-level only — everything else
+// requires maker-checker approval via onboarding.requestRole / reviewRoleRequest.
+export const SELF_ASSIGNABLE_ROLES = ["user"] as const;
+export type SelfAssignableRole = (typeof SELF_ASSIGNABLE_ROLES)[number];
+
+// Privileged roles that require maker-checker approval (never self-assignable).
+export const PRIVILEGED_ROLES = ["customs_officer", "oga_officer", "inspector", "finance", "admin"] as const;
+export type PrivilegedRole = (typeof PRIVILEGED_ROLES)[number];
+
+export function isSelfAssignableRole(role: string): role is SelfAssignableRole {
+  return (SELF_ASSIGNABLE_ROLES as readonly string[]).includes(role);
+}
 
 // ─── STEP SCHEMAS ─────────────────────────────────────────────────────────────
 
@@ -265,15 +279,28 @@ export const onboardingRouter = router({
     }),
 
   /**
-   * selectRole — Sprint 80: allows a new user to self-select their role
-   * before starting the onboarding wizard.
-   * Restricted to roles a user can self-assign (not admin).
+   * selectRole — Sprint 80 / Phase 20 (GAP 1): self-select onboarding role.
+   *
+   * FAIL-CLOSED: only trader/applicant-level roles ("user") are self-assignable.
+   * Privileged roles (customs_officer, oga_officer, inspector, finance, admin)
+   * were previously self-assignable here with zero verification — that
+   * privilege-escalation path is removed. Use onboarding.requestRole to submit
+   * a maker-checker role request for admin approval.
    */
   selectRole: protectedProcedure
     .input(z.object({
       role: z.enum(["user", "customs_officer", "oga_officer", "inspector", "finance"]),
     }))
     .mutation(async ({ ctx, input }) => {
+      if (!isSelfAssignableRole(input.role)) {
+        // Honest failure + pointer to the governed path. No silent success.
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            `Role '${input.role}' is privileged and cannot be self-assigned. ` +
+            `Submit onboarding.requestRole for maker-checker admin approval.`,
+        });
+      }
       try {
         const db = await (await import("../db")).getDb();
         if (!db) return { success: true, role: input.role };
@@ -282,27 +309,196 @@ export const onboardingRouter = router({
         await db.update(users)
           .set({ role: input.role, updatedAt: new Date() })
           .where(eq(users.id, ctx.user.id));
-        // Seed Permify with the new role relation
+        return { success: true, role: input.role };
+      } catch (e) {
+        if (e instanceof TRPCError) throw e;
+        return { success: true, role: input.role };
+      }
+    }),
+
+  /**
+   * requestRole — Phase 20 (GAP 1): maker submits a privileged-role request.
+   * The request is PENDING until a DIFFERENT admin approves it
+   * (maker ≠ checker, enforced in reviewRoleRequest). Fully audit-logged.
+   */
+  requestRole: protectedProcedure
+    .input(z.object({
+      role: z.enum(["customs_officer", "oga_officer", "inspector", "finance", "admin"]),
+      reason: z.string().min(10).max(1000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await (await import("../db")).getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { roleRequests } = await import("../../drizzle/schema");
+      const { and, eq } = await import("drizzle-orm");
+
+      // One pending request per user at a time (no queue flooding).
+      const [pending] = await db
+        .select({ id: roleRequests.id })
+        .from(roleRequests)
+        .where(and(eq(roleRequests.userId, ctx.user.id), eq(roleRequests.status, "pending")))
+        .limit(1);
+      if (pending) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "You already have a pending role request; wait for it to be reviewed.",
+        });
+      }
+
+      const [created] = await db.insert(roleRequests).values({
+        userId: ctx.user.id,
+        requestedRole: input.role,
+        reason: input.reason,
+      }).returning();
+
+      const { logAuditEvent } = await import("../db");
+      await logAuditEvent({
+        entityType: "user",
+        entityId: ctx.user.id,
+        action: "role_request_submitted",
+        actorId: ctx.user.id,
+        actorType: "user",
+        previousState: null,
+        newState: { requestedRole: input.role, roleRequestId: created.id },
+        metadata: { reason: input.reason },
+      });
+
+      return { success: true, roleRequestId: created.id, status: "pending" as const };
+    }),
+
+  /**
+   * myRoleRequests — the caller's own role-request history.
+   */
+  myRoleRequests: protectedProcedure.query(async ({ ctx }) => {
+    const db = await (await import("../db")).getDb();
+    if (!db) return [];
+    const { roleRequests } = await import("../../drizzle/schema");
+    const { desc, eq } = await import("drizzle-orm");
+    return db.select().from(roleRequests)
+      .where(eq(roleRequests.userId, ctx.user.id))
+      .orderBy(desc(roleRequests.createdAt));
+  }),
+
+  /**
+   * listPendingRoleRequests — admin: pending maker-checker queue.
+   */
+  listPendingRoleRequests: adminProcedure.query(async () => {
+    const db = await (await import("../db")).getDb();
+    if (!db) return [];
+    const { roleRequests } = await import("../../drizzle/schema");
+    const { desc, eq } = await import("drizzle-orm");
+    return db.select().from(roleRequests)
+      .where(eq(roleRequests.status, "pending"))
+      .orderBy(desc(roleRequests.createdAt));
+  }),
+
+  /**
+   * reviewRoleRequest — admin (checker) approves/rejects a role request.
+   * Maker ≠ checker: the reviewing admin must NOT be the requester.
+   * On approval the role is granted and the grant is audit-logged.
+   */
+  reviewRoleRequest: adminProcedure
+    .input(z.object({
+      roleRequestId: z.number().int().positive(),
+      decision: z.enum(["approved", "rejected"]),
+      reviewNote: z.string().max(1000).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await (await import("../db")).getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+      const { roleRequests, users } = await import("../../drizzle/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const [request] = await db.select().from(roleRequests)
+        .where(eq(roleRequests.id, input.roleRequestId)).limit(1);
+      if (!request) throw new TRPCError({ code: "NOT_FOUND", message: "Role request not found" });
+      if (request.status !== "pending") {
+        throw new TRPCError({ code: "CONFLICT", message: `Role request already ${request.status}` });
+      }
+      // Maker-checker separation: the requester cannot approve their own request.
+      if (request.userId === ctx.user.id) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Maker-checker violation: you cannot review your own role request.",
+        });
+      }
+
+      await db.update(roleRequests).set({
+        status: input.decision,
+        reviewedBy: ctx.user.id,
+        reviewedAt: new Date(),
+        reviewNote: input.reviewNote ?? null,
+        updatedAt: new Date(),
+      }).where(eq(roleRequests.id, request.id));
+
+      if (input.decision === "approved") {
+        await db.update(users)
+          .set({ role: request.requestedRole, updatedAt: new Date() })
+          .where(eq(users.id, request.userId));
+        // Seed Permify with the approved role relation
         try {
           const { writeRelationship } = await import("../_core/permify");
-          const userId = String(ctx.user.id);
           const roleToRelation: Record<string, string> = {
             "admin": "admin",
             "customs_officer": "member",
             "oga_officer": "oga",
             "finance": "finance",
             "auditor": "auditor",
-            "trader": "member",
           };
-          const relation = roleToRelation[input.role] ?? "member";
-          await writeRelationship("organisation", "main", relation, "user", userId);
+          const relation = roleToRelation[request.requestedRole] ?? "member";
+          await writeRelationship("organisation", "main", relation, "user", String(request.userId));
         } catch (permifyErr) {
           console.warn("[Permify] Failed to seed role relation:", permifyErr);
         }
-        return { success: true, role: input.role };
-      } catch {
-        return { success: true, role: input.role };
       }
+
+      const { logAuditEvent } = await import("../db");
+      await logAuditEvent({
+        entityType: "user",
+        entityId: request.userId,
+        action: input.decision === "approved" ? "role_request_approved" : "role_request_rejected",
+        actorId: ctx.user.id,
+        actorType: "admin",
+        previousState: { roleRequestStatus: "pending", requestedRole: request.requestedRole },
+        newState: { roleRequestStatus: input.decision, grantedRole: input.decision === "approved" ? request.requestedRole : null },
+        metadata: { roleRequestId: request.id, reviewNote: input.reviewNote ?? null },
+      });
+
+      return { success: true, decision: input.decision };
+    }),
+
+  /**
+   * suspendUser — admin: suspend an account (GAP 9). Suspended users are
+   * rejected at authentication time in sdk.authenticateRequest.
+   */
+  suspendUser: adminProcedure
+    .input(z.object({ userId: z.number().int().positive(), reason: z.string().min(5).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You cannot suspend your own account." });
+      }
+      return setUserStatus(ctx.user.id, input.userId, "suspended", input.reason);
+    }),
+
+  /**
+   * reactivateUser — admin: reactivate a suspended account.
+   */
+  reactivateUser: adminProcedure
+    .input(z.object({ userId: z.number().int().positive(), reason: z.string().min(5).max(1000).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      return setUserStatus(ctx.user.id, input.userId, "active", input.reason ?? "reactivated");
+    }),
+
+  /**
+   * offboardUser — admin: permanently offboard an account (terminal state).
+   */
+  offboardUser: adminProcedure
+    .input(z.object({ userId: z.number().int().positive(), reason: z.string().min(5).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "You cannot offboard your own account." });
+      }
+      return setUserStatus(ctx.user.id, input.userId, "offboarded", input.reason);
     }),
 
   /**
@@ -338,3 +534,45 @@ export const onboardingRouter = router({
     }
   }),
 });
+
+/**
+ * setUserStatus — Phase 20 (GAP 9): shared admin lifecycle transition helper.
+ * Writes the status change and an audit event; rejects unknown users and
+ * no-op transitions. Enforcement of the status happens at authentication
+ * time in server/_core/sdk.ts (fail-closed).
+ */
+async function setUserStatus(
+  actorAdminId: number,
+  targetUserId: number,
+  status: "active" | "suspended" | "offboarded",
+  reason: string,
+) {
+  const db = await (await import("../db")).getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
+  const { users } = await import("../../drizzle/schema");
+  const { eq } = await import("drizzle-orm");
+
+  const [target] = await db
+    .select({ id: users.id, role: users.role, status: users.status })
+    .from(users).where(eq(users.id, targetUserId)).limit(1);
+  if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+  if (target.status === status) {
+    throw new TRPCError({ code: "CONFLICT", message: `User is already ${status}` });
+  }
+
+  await db.update(users).set({ status, updatedAt: new Date() }).where(eq(users.id, targetUserId));
+
+  const { logAuditEvent } = await import("../db");
+  await logAuditEvent({
+    entityType: "user",
+    entityId: targetUserId,
+    action: `user_${status === "active" ? "reactivated" : status}`,
+    actorId: actorAdminId,
+    actorType: "admin",
+    previousState: { status: target.status, role: target.role },
+    newState: { status },
+    metadata: { reason },
+  });
+
+  return { success: true, userId: targetUserId, status };
+}
