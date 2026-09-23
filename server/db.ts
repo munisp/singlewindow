@@ -141,6 +141,41 @@ export async function closePool(): Promise<void> {
 
 // ─── USER QUERIES ─────────────────────────────────────────────────────────────
 
+function buildUserUpsertParts(user: InsertUser) {
+  const values: InsertUser = { openId: user.openId };
+  const updateSet: Record<string, unknown> = {};
+
+  const textFields = ["name", "email", "loginMethod"] as const;
+  type TextField = (typeof textFields)[number];
+
+  const assignNullable = (field: TextField) => {
+    const value = user[field];
+    if (value === undefined) return;
+    const normalized = value ?? null;
+    values[field] = normalized;
+    updateSet[field] = normalized;
+  };
+
+  textFields.forEach(assignNullable);
+
+  if (user.lastSignedIn !== undefined) {
+    values.lastSignedIn = user.lastSignedIn;
+    updateSet.lastSignedIn = user.lastSignedIn;
+  }
+  if (user.role !== undefined) {
+    values.role = user.role;
+    updateSet.role = user.role;
+  } else if (user.openId === ENV.bootstrapOwnerOpenId) {
+    values.role = 'admin';
+    updateSet.role = 'admin';
+  }
+
+  if (!values.lastSignedIn) values.lastSignedIn = new Date();
+  if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
+
+  return { values, updateSet };
+}
+
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required for upsert");
 
@@ -151,41 +186,39 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = { openId: user.openId };
-    const updateSet: Record<string, unknown> = {};
-
-    const textFields = ["name", "email", "loginMethod"] as const;
-    type TextField = (typeof textFields)[number];
-
-    const assignNullable = (field: TextField) => {
-      const value = user[field];
-      if (value === undefined) return;
-      const normalized = value ?? null;
-      values[field] = normalized;
-      updateSet[field] = normalized;
-    };
-
-    textFields.forEach(assignNullable);
-
-    if (user.lastSignedIn !== undefined) {
-      values.lastSignedIn = user.lastSignedIn;
-      updateSet.lastSignedIn = user.lastSignedIn;
-    }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
-    } else if (user.openId === ENV.bootstrapOwnerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-    }
-
-    if (!values.lastSignedIn) values.lastSignedIn = new Date();
-    if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-
+    const { values, updateSet } = buildUserUpsertParts(user);
     await db.insert(users).values(values).onConflictDoUpdate({
       target: users.openId,
       set: updateSet,
     });
+  } catch (error) {
+    console.error("[Database] Failed to upsert user:", error);
+    throw error;
+  }
+}
+
+/**
+ * Phase 21 (perf): same upsert as {@link upsertUser} but returns the row via
+ * a single `INSERT ... ON CONFLICT ... RETURNING` round-trip, letting the auth
+ * hot path avoid the follow-up SELECT. Returns undefined when the DB is
+ * unavailable (same fail-soft contract as getUserByOpenId/upsertUser).
+ */
+export async function upsertUserReturning(user: InsertUser) {
+  if (!user.openId) throw new Error("User openId is required for upsert");
+
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot upsert user: database not available");
+    return undefined;
+  }
+
+  try {
+    const { values, updateSet } = buildUserUpsertParts(user);
+    const rows = await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
+      set: updateSet,
+    }).returning();
+    return rows[0];
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -1346,13 +1379,19 @@ export async function withRlsContext<T>(
     // SW-G3: set EXACTLY the GUC names the RLS policies read
     // (infra/postgres/01_rls_policies.sql, folded into drizzle/migrations/0052):
     //   app.current_user_id, app.current_role, app.current_trader_id
-    await client.query("SELECT set_config('app.current_user_id', $1, true)", [String(user.id)]);
-    await client.query("SELECT set_config('app.current_role', $1, true)", [user.role]);
-    await client.query("SELECT set_config('app.current_trader_id', $1, true)", [String(user.id)]);
-    // Phase-11: tenant-scoped policies (drizzle/migrations/0064) read this GUC.
-    // Empty string = no tenant context → tenant tables default-deny unless the
-    // role is platform admin.
-    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [user.tenantId ?? ""]);
+    // Phase-11: tenant-scoped policies (drizzle/migrations/0064) read
+    // app.current_tenant_id. Empty string = no tenant context → tenant tables
+    // default-deny unless the role is platform admin.
+    // Phase 21 (perf): all four set_config calls are combined into ONE
+    // round-trip (single SELECT, transaction-scoped is_local=true ≡ SET LOCAL)
+    // instead of four serialized calls.
+    await client.query(
+      "SELECT set_config('app.current_user_id', $1, true), " +
+        "set_config('app.current_role', $2, true), " +
+        "set_config('app.current_trader_id', $3, true), " +
+        "set_config('app.current_tenant_id', $4, true)",
+      [String(user.id), user.role, String(user.id), user.tenantId ?? ""]
+    );
     // Create a Drizzle instance bound to this specific client
     const txDb = drizzle(client as any);
     const result = await callback(txDb as any);
