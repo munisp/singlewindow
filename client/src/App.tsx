@@ -11,26 +11,28 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AdminGuard, CustomsGuard, OGAGuard, FinanceGuard, SecurityGuard, ExecutiveGuard } from "./components/RoleGuard";
 import Home from "./pages/Home";
-import TraderDashboard from "./pages/app/TraderDashboard";
-import NewDeclaration from "./pages/app/NewDeclaration";
-import CustomsDashboard from "./pages/app/CustomsDashboard";
-import OGAPortal from "./pages/app/OGAPortal";
-import OGAExpiryCalendar from "./pages/app/OGAExpiryCalendar";
-import AdminConsole from "./pages/app/AdminConsole";
-import SecurityOps from "./pages/app/SecurityOps";
-import DeclarationDetail from "./pages/app/DeclarationDetail";
-import KYCPortal from "./pages/app/KYCPortal";
-import VisionAnalysis from "./pages/app/VisionAnalysis";
-import AIAssistant from "./pages/app/AIAssistant";
-import DocumentVault from "./pages/app/DocumentVault";
 import ShareLanding from "./pages/ShareLanding";
-import AdminKYCReview from "./pages/app/AdminKYCReview";
-import PortHeatmap from "./pages/app/PortHeatmap";
 // Lazy-load the specification page (it's large))
 import { lazy, Suspense } from "react";
 // Phase 17 (G2): Geospatial Portal — lazy, routed (previously dead code)
 const GeospatialPortal = lazy(() => import("./pages/geo/GeospatialPortal"));
 const Specification = lazy(() => import("./pages/Specification"));
+// Phase 21 perf: the remaining authenticated pages are code-split too —
+// only the public shell (Home, guards, share landing) stays eager.
+const TraderDashboard = lazy(() => import("./pages/app/TraderDashboard"));
+const NewDeclaration = lazy(() => import("./pages/app/NewDeclaration"));
+const CustomsDashboard = lazy(() => import("./pages/app/CustomsDashboard"));
+const OGAPortal = lazy(() => import("./pages/app/OGAPortal"));
+const OGAExpiryCalendar = lazy(() => import("./pages/app/OGAExpiryCalendar"));
+const AdminConsole = lazy(() => import("./pages/app/AdminConsole"));
+const SecurityOps = lazy(() => import("./pages/app/SecurityOps"));
+const DeclarationDetail = lazy(() => import("./pages/app/DeclarationDetail"));
+const KYCPortal = lazy(() => import("./pages/app/KYCPortal"));
+const VisionAnalysis = lazy(() => import("./pages/app/VisionAnalysis"));
+const AIAssistant = lazy(() => import("./pages/app/AIAssistant"));
+const DocumentVault = lazy(() => import("./pages/app/DocumentVault"));
+const AdminKYCReview = lazy(() => import("./pages/app/AdminKYCReview"));
+const PortHeatmap = lazy(() => import("./pages/app/PortHeatmap"));
 // Lazy-load heavy pages
 const SanctionsScreening = lazy(() => import("./pages/app/SanctionsScreening"));
 const MojaloopPayments = lazy(() => import("./pages/app/MojaloopPayments"));
@@ -217,14 +219,14 @@ function Router() {
       </Route>
 
       {/* Trader Portal */}
-      <Route path="/app/trader" component={TraderDashboard} />
-      <Route path="/app/trader/new" component={NewDeclaration} />
+      <Route path="/app/trader">{() => <Suspense fallback={<LazyFallback />}><TraderDashboard /></Suspense>}</Route>
+      <Route path="/app/trader/new">{() => <Suspense fallback={<LazyFallback />}><NewDeclaration /></Suspense>}</Route>
       <Route path="/app/trader/declarations">
         <Suspense fallback={<LazyFallback />}><TraderDeclarations /></Suspense>
       </Route>
-      <Route path="/app/trader/declarations/new" component={NewDeclaration} />
-      <Route path="/app/trader/declarations/:id" component={DeclarationDetail} />
-      <Route path="/app/trader/kyc" component={KYCPortal} />
+      <Route path="/app/trader/declarations/new">{() => <Suspense fallback={<LazyFallback />}><NewDeclaration /></Suspense>}</Route>
+      <Route path="/app/trader/declarations/:id">{() => <Suspense fallback={<LazyFallback />}><DeclarationDetail /></Suspense>}</Route>
+      <Route path="/app/trader/kyc">{() => <Suspense fallback={<LazyFallback />}><KYCPortal /></Suspense>}</Route>
       <Route path="/app/trader/profile">
         <Suspense fallback={<LazyFallback />}><TraderProfile /></Suspense>
       </Route>
@@ -236,21 +238,21 @@ function Router() {
       </Route>
 
       {/* Customs Officer Portal — B9: CustomsGuard wraps all /app/customs routes */}
-      <Route path="/app/customs"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
+      <Route path="/app/customs"><CustomsGuard><Suspense fallback={<LazyFallback />}><CustomsDashboard /></Suspense></CustomsGuard></Route>
       <Route path="/app/customs/shore-pass">
         <CustomsGuard><Suspense fallback={<LazyFallback />}><ShorePassBoard /></Suspense></CustomsGuard>
       </Route>
       <Route path="/app/customs/dangerous-goods">
         <CustomsGuard><Suspense fallback={<LazyFallback />}><DangerousGoodsBoard /></Suspense></CustomsGuard>
       </Route>
-      <Route path="/app/customs/queue"><CustomsGuard><CustomsDashboard /></CustomsGuard></Route>
-      <Route path="/app/customs/declarations/:id"><CustomsGuard><DeclarationDetail /></CustomsGuard></Route>
-      <Route path="/app/customs/vision"><CustomsGuard><VisionAnalysis /></CustomsGuard></Route>
+      <Route path="/app/customs/queue"><CustomsGuard><Suspense fallback={<LazyFallback />}><CustomsDashboard /></Suspense></CustomsGuard></Route>
+      <Route path="/app/customs/declarations/:id"><CustomsGuard><Suspense fallback={<LazyFallback />}><DeclarationDetail /></Suspense></CustomsGuard></Route>
+      <Route path="/app/customs/vision"><CustomsGuard><Suspense fallback={<LazyFallback />}><VisionAnalysis /></Suspense></CustomsGuard></Route>
       <Route path="/app/customs/vision-batch">
         <CustomsGuard><Suspense fallback={<LazyFallback />}><VisionBatchAnalysis /></Suspense></CustomsGuard>
       </Route>
       <Route path="/app/customs/risk">
-        <CustomsGuard><Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense></CustomsGuard>
+        <Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense>
       </Route>
       <Route path="/app/customs/payments">
         <CustomsGuard><Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense></CustomsGuard>
@@ -263,13 +265,13 @@ function Router() {
       </Route>
 
       {/* OGA Portal */}
-      <Route path="/app/oga">{() => <OGAGuard><OGAPortal /></OGAGuard>}</Route>
+      <Route path="/app/oga">{() => <OGAGuard><Suspense fallback={<LazyFallback />}><OGAPortal /></Suspense></OGAGuard>}</Route>
       <Route path="/app/nl-query">{() => <Suspense fallback={<LazyFallback />}><NLFinancialQuery /></Suspense>}</Route>
-      <Route path="/app/oga/expiry-calendar">{() => <OGAGuard><OGAExpiryCalendar /></OGAGuard>}</Route>
+      <Route path="/app/oga/expiry-calendar">{() => <OGAGuard><Suspense fallback={<LazyFallback />}><OGAExpiryCalendar /></Suspense></OGAGuard>}</Route>
 
       {/* Admin Console — B9: AdminGuard wraps all /app/admin routes */}
-      <Route path="/app/admin"><AdminGuard><AdminConsole /></AdminGuard></Route>
-      <Route path="/app/admin/kyc-review"><AdminGuard><AdminKYCReview /></AdminGuard></Route>
+      <Route path="/app/admin"><AdminGuard><Suspense fallback={<LazyFallback />}><AdminConsole /></Suspense></AdminGuard></Route>
+      <Route path="/app/admin/kyc-review"><AdminGuard><Suspense fallback={<LazyFallback />}><AdminKYCReview /></Suspense></AdminGuard></Route>
       <Route path="/app/admin/users">
         <AdminGuard><Suspense fallback={<LazyFallback />}><AdminUsers /></Suspense></AdminGuard>
       </Route>
@@ -284,13 +286,13 @@ function Router() {
       </Route>
 
       {/* Security Operations Center — B9: SecurityGuard wraps all /app/security routes */}
-      <Route path="/app/security"><SecurityGuard><SecurityOps /></SecurityGuard></Route>
+      <Route path="/app/security"><SecurityGuard><Suspense fallback={<LazyFallback />}><SecurityOps /></Suspense></SecurityGuard></Route>
       <Route path="/app/security/sanctions">
         <SecurityGuard><Suspense fallback={<LazyFallback />}><SanctionsScreening /></Suspense></SecurityGuard>
       </Route>
 
       {/* Geospatial */}
-      <Route path="/app/geo/heatmap" component={PortHeatmap} />
+      <Route path="/app/geo/heatmap">{() => <Suspense fallback={<LazyFallback />}><PortHeatmap /></Suspense>}</Route>
       <Route path="/app/geo/portal">
         <Suspense fallback={<LazyFallback />}><GeospatialPortal /></Suspense>
       </Route>
@@ -402,8 +404,8 @@ function Router() {
       </Route>
 
       {/* AI Assistant */}
-      <Route path="/app/ai-assistant" component={AIAssistant} />
-      <Route path="/app/document-vault" component={DocumentVault} />
+      <Route path="/app/ai-assistant">{() => <Suspense fallback={<LazyFallback />}><AIAssistant /></Suspense>}</Route>
+      <Route path="/app/document-vault">{() => <Suspense fallback={<LazyFallback />}><DocumentVault /></Suspense>}</Route>
       <Route path="/share/:token" component={ShareLanding} />
 
       {/* Sprint 31 — Finance Ledger (TigerBeetle) */}
@@ -807,10 +809,10 @@ function Router() {
 
       {/* 404 */}
       <Route path="/404" component={NotFound} />
-              <Route path="/app/aeo-comments/:renewalId" component={AEORenewalComments} />
-        <Route path="/admin/sanctions-entities" component={SanctionsEntitiesPage} />
-        <Route path="/app/schedule-analytics" component={ScheduleAnalyticsPage} />
-        <Route path="/admin/batch-reports" component={BatchValidationReportPage} />
+              <Route path="/app/aeo-comments/:renewalId">{() => <Suspense fallback={<LazyFallback />}><AEORenewalComments /></Suspense>}</Route>
+        <Route path="/admin/sanctions-entities">{() => <Suspense fallback={<LazyFallback />}><SanctionsEntitiesPage /></Suspense>}</Route>
+        <Route path="/app/schedule-analytics">{() => <Suspense fallback={<LazyFallback />}><ScheduleAnalyticsPage /></Suspense>}</Route>
+        <Route path="/admin/batch-reports">{() => <Suspense fallback={<LazyFallback />}><BatchValidationReportPage /></Suspense>}</Route>
         <Route path="/app/ucr">{() => <Suspense fallback={<LazyFallback />}><UCRManagement /></Suspense>}</Route>
         <Route path="/app/manifests">{() => <Suspense fallback={<LazyFallback />}><ManifestManagement /></Suspense>}</Route>
         <Route path="/app/trade-analytics">{() => <Suspense fallback={<LazyFallback />}><TradeAnalyticsDashboard /></Suspense>}</Route>
