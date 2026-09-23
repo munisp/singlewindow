@@ -7,6 +7,14 @@ import { COOKIE_NAME } from "../../shared/const";
 import * as db from "../db";
 import { getPool } from "../db";
 import { ENV } from "./env";
+// Static import (Phase 21 perf): the per-request dynamic import() put a
+// module-resolution microtask on every authenticated call. This module only
+// depends on ./env and ./roleClaimMap — no cycle.
+import {
+  extractRoleMappingFromPayload,
+  verifyKeycloakToken,
+  type KeycloakTokenPayload,
+} from "./keycloakVerifier";
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
@@ -34,6 +42,38 @@ export type AuthenticatedUser = User & {
 // Fail-closed: cron sessions still require a VALID signed session cookie —
 // this prefix grants nothing by itself.
 export const CRON_OPEN_ID_PREFIX = "cron_";
+
+// ─── Phase 21 (perf): request auth hot-path caches ─────────────────────────
+// Verified Keycloak payloads, keyed by the Express request object, so
+// createContext can read roles without verifying the same RS256 JWT twice.
+const verifiedBearerPayloads = new WeakMap<Request, KeycloakTokenPayload>();
+
+// last_signed_in write throttle: at most one write per user per
+// LAST_SIGNED_IN_WRITE_INTERVAL_MS PER PROCESS. last_signed_in is an
+// analytics/audit convenience column (not a security control), so a ≤60 s
+// staleness is acceptable; in multi-instance deployments each instance may
+// write once per interval (still a >60× reduction vs. every request).
+export const LAST_SIGNED_IN_WRITE_INTERVAL_MS = 60_000;
+const lastSignedInWriteAt = new Map<string, number>();
+const LAST_SIGNED_IN_THROTTLE_MAX = 50_000;
+
+/** Test hook: reset the last_signed_in write throttle. */
+export function __resetLastSignedInThrottle(): void {
+  lastSignedInWriteAt.clear();
+}
+
+function lastSignedInWriteDue(openId: string, nowMs: number): boolean {
+  const last = lastSignedInWriteAt.get(openId);
+  return last === undefined || nowMs - last >= LAST_SIGNED_IN_WRITE_INTERVAL_MS;
+}
+
+function markLastSignedInWritten(openId: string, nowMs: number): void {
+  if (lastSignedInWriteAt.size >= LAST_SIGNED_IN_THROTTLE_MAX && !lastSignedInWriteAt.has(openId)) {
+    const oldest = lastSignedInWriteAt.keys().next().value;
+    if (oldest !== undefined) lastSignedInWriteAt.delete(oldest);
+  }
+  lastSignedInWriteAt.set(openId, nowMs);
+}
 
 export function buildCronUser(openId: string): AuthenticatedUser {
   const taskUid = openId.slice(CRON_OPEN_ID_PREFIX.length);
@@ -124,13 +164,24 @@ class LocalSessionService {
     }
   }
 
+  /**
+   * Returns the Keycloak payload verified during authenticateRequest for this
+   * exact request (Bearer path only), or undefined. Lets createContext read
+   * realm/client roles without verifying the same token a second time.
+   */
+  getVerifiedBearerPayload(req: Request): KeycloakTokenPayload | undefined {
+    return verifiedBearerPayloads.get(req);
+  }
+
   async authenticateRequest(req: Request): Promise<AuthenticatedUser> {
     const authHeader = req.headers.authorization as string | undefined;
     if (authHeader?.startsWith("Bearer ")) {
       try {
-        const { verifyKeycloakToken, extractRoleMappingFromPayload } = await import("./keycloakVerifier");
         const payload = await verifyKeycloakToken(authHeader);
         if (!payload?.sub) throw new Error("Keycloak token subject is missing.");
+        // Single verification per request: createContext reads this payload
+        // (roles enrichment) instead of re-verifying the same RS256 token.
+        verifiedBearerPayloads.set(req, payload);
 
         const signedInAt = new Date();
         // Phase 20 (GAP 5): fail-closed claim mapping. Only a mapped claim can
@@ -139,15 +190,37 @@ class LocalSessionService {
         // at the lowest-privilege role. Every auto-provision is audit-logged.
         const mapping = extractRoleMappingFromPayload(payload);
         const existing = await db.getUserByOpenId(payload.sub);
-        await db.upsertUser({
-          openId: payload.sub,
-          name: payload.preferred_username ?? payload.sub,
-          email: typeof payload.email === "string" ? payload.email : null,
-          loginMethod: "keycloak",
-          lastSignedIn: signedInAt,
-          ...(mapping.mapped ? { role: mapping.role } : {}),
-        });
-        const user = await db.getUserByOpenId(payload.sub);
+
+        // Phase 21 (perf): previously every Bearer request ran SELECT →
+        // UPSERT (write) → SELECT. Now the common case is a single SELECT;
+        // the write only happens when something actually changed:
+        //   - new user (auto-provision), or
+        //   - a mapped role/profile claim differs from the stored row
+        //     (fail-closed role sync is NOT delayed by the throttle), or
+        //   - last_signed_in is older than the throttle interval.
+        // The write itself is one UPSERT ... RETURNING round-trip.
+        const claimName = payload.preferred_username ?? payload.sub;
+        const claimEmail = typeof payload.email === "string" ? payload.email : null;
+        const roleChanged = mapping.mapped && existing != null && existing.role !== mapping.role;
+        const profileChanged =
+          existing != null &&
+          (existing.name !== claimName ||
+            existing.email !== claimEmail ||
+            existing.loginMethod !== "keycloak");
+        const touchDue = lastSignedInWriteDue(payload.sub, signedInAt.getTime());
+
+        let user = existing;
+        if (!existing || roleChanged || profileChanged || touchDue) {
+          user = await db.upsertUserReturning({
+            openId: payload.sub,
+            name: claimName,
+            email: claimEmail,
+            loginMethod: "keycloak",
+            lastSignedIn: signedInAt,
+            ...(mapping.mapped ? { role: mapping.role } : {}),
+          });
+          if (user) markLastSignedInWritten(payload.sub, signedInAt.getTime());
+        }
         if (!user) throw new Error("Keycloak user could not be provisioned.");
         if (!existing) {
           try {
@@ -197,7 +270,11 @@ class LocalSessionService {
         if (row.status && row.status !== "active") {
           throw ForbiddenError(`Account is ${row.status}; contact an administrator.`);
         }
-        await client.query("UPDATE users SET last_signed_in = $1 WHERE open_id = $2", [signedInAt, session.openId]);
+        // Phase 21 (perf): throttled last_signed_in write (see Bearer path).
+        if (lastSignedInWriteDue(session.openId, signedInAt.getTime())) {
+          await client.query("UPDATE users SET last_signed_in = $1 WHERE open_id = $2", [signedInAt, session.openId]);
+          markLastSignedInWritten(session.openId, signedInAt.getTime());
+        }
         return {
           id: row.id,
           openId: row.open_id,
@@ -225,7 +302,12 @@ class LocalSessionService {
     if (user.status !== "active") {
       throw ForbiddenError(`Account is ${user.status}; contact an administrator.`);
     }
-    await db.upsertUser({ openId: user.openId, lastSignedIn: signedInAt });
+    // Phase 21 (perf): last_signed_in is throttled (≤1 write/user/60 s/process)
+    // instead of a write on every cookie-authenticated request.
+    if (lastSignedInWriteDue(user.openId, signedInAt.getTime())) {
+      await db.upsertUser({ openId: user.openId, lastSignedIn: signedInAt });
+      markLastSignedInWritten(user.openId, signedInAt.getTime());
+    }
     return user;
   }
 }

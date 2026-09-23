@@ -31,7 +31,7 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb, logAuditEvent } from "../db";
 import { declarations } from "../../drizzle/schema";
 import { declarationDgItems } from "../../drizzle/schema";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { validateImdgItem } from "../_core/imdg";
 import { requireOfficer } from "./aeoFastLane";
 
@@ -186,20 +186,39 @@ export const dangerousGoodsRouter = router({
     .query(async ({ ctx, input }) => {
       requireOfficer(ctx.user.role);
       const db = await requireDb();
-      const allItems = await db.select().from(declarationDgItems);
-      const board = [] as Array<{ declaration: unknown; items: unknown[] }>;
+      // Phase 21 (perf): previously this loaded the ENTIRE dg-items table and
+      // then ran one SELECT per declaration (N+1). Now: one bounded scan of
+      // the most recent dg items to pick the page's declaration ids, then ONE
+      // batched declarations fetch via IN (...) — 2 round-trips total.
+      const limit = input?.limit ?? 100;
+      const recentItems = await db
+        .select()
+        .from(declarationDgItems)
+        .orderBy(desc(declarationDgItems.createdAt))
+        .limit(5000); // bounded scan window for the board page
+      const declarationIds: number[] = [];
       const seen = new Set<number>();
-      for (const item of allItems) {
-        if (seen.has(item.declarationId) || board.length >= (input?.limit ?? 100)) continue;
+      for (const item of recentItems) {
+        if (seen.has(item.declarationId)) continue;
         seen.add(item.declarationId);
-        const declRows = await db
-          .select()
-          .from(declarations)
-          .where(eq(declarations.id, item.declarationId))
-          .limit(1);
-        if (!declRows[0]) continue;
-        const items = allItems.filter((i: { declarationId: number }) => i.declarationId === item.declarationId);
-        board.push({ declaration: declRows[0], items });
+        declarationIds.push(item.declarationId);
+        if (declarationIds.length >= limit) break;
+      }
+      if (declarationIds.length === 0) return { count: 0, board: [] };
+      const declRows = await db
+        .select()
+        .from(declarations)
+        .where(inArray(declarations.id, declarationIds));
+      const declById = new Map<number, unknown>();
+      for (const d of declRows) declById.set(d.id, d);
+      const board = [] as Array<{ declaration: unknown; items: unknown[] }>;
+      for (const declarationId of declarationIds) {
+        const declaration = declById.get(declarationId);
+        if (!declaration) continue;
+        board.push({
+          declaration,
+          items: recentItems.filter((i: { declarationId: number }) => i.declarationId === declarationId),
+        });
       }
       return { count: board.length, board };
     }),

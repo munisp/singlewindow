@@ -435,32 +435,49 @@ export const slaEscalationRouter = router({
       const escalated: Array<{ declarationId: number; declarationNumber: string; lane: string; elapsedHours: number }> = [];
       const skipped: number[] = [];
 
+      // Phase 21 (perf): evaluate breaches in-memory, then ONE batched
+      // existence check (IN (...)) and at most two bulk INSERTs — replacing up
+      // to 500 serialized existence SELECTs + per-row INSERTs.
+      type Breach = { decl: (typeof pending)[number]; lane: string; threshold: number; elapsed: number };
+      const breaches: Breach[] = [];
       for (const decl of pending) {
         const lane = (decl.riskLane ?? "YELLOW").toUpperCase();
         const threshold = SLA_THRESHOLDS[lane] ?? SLA_THRESHOLDS.YELLOW;
         const elapsed = now - new Date(decl.submittedAt!).getTime();
-
         if (elapsed < threshold) {
           skipped.push(decl.id);
           continue;
         }
+        breaches.push({ decl, lane, threshold, elapsed });
+      }
 
-        // Check if already escalated
-        const [existing] = await db.select({ id: slaEscalations.id })
+      let alreadyEscalated = new Set<number>();
+      if (breaches.length > 0) {
+        const existingRows = await db
+          .select({ declarationId: slaEscalations.declarationId })
           .from(slaEscalations)
           .where(and(
-            eq(slaEscalations.declarationId, decl.id),
+            inArray(slaEscalations.declarationId, breaches.map((b) => b.decl.id)),
             eq(slaEscalations.resolved, false),
-          ))
-          .limit(1);
+          ));
+        alreadyEscalated = new Set(
+          existingRows
+            .map((r) => r.declarationId)
+            .filter((v): v is number => v !== null),
+        );
+      }
 
-        if (existing) {
-          skipped.push(decl.id);
-          continue;
+      const toEscalate = breaches.filter((b) => {
+        if (alreadyEscalated.has(b.decl.id)) {
+          skipped.push(b.decl.id);
+          return false;
         }
+        return true;
+      });
 
-        if (!input.dryRun) {
-          await db.insert(slaEscalations).values({
+      if (!input.dryRun && toEscalate.length > 0) {
+        await db.insert(slaEscalations).values(
+          toEscalate.map(({ decl, lane, threshold, elapsed }) => ({
             declarationId: decl.id,
             breachType: `${lane}_sla_breach`,
             escalationLevel: 1,
@@ -471,21 +488,25 @@ export const slaEscalationRouter = router({
             thresholdMs: threshold,
             resolved: false,
             createdAt: new Date(),
-          });
+          }))
+        );
 
-          // Notify supervisor if requested
-          if (input.notifySupervisor) {
-            await db.insert(userNotifications).values({
+        // Notify supervisors if requested (single bulk insert)
+        if (input.notifySupervisor) {
+          await db.insert(userNotifications).values(
+            toEscalate.map(({ decl, lane, elapsed }) => ({
               userId: decl.assignedOfficerId ?? ctx.user.id,
               title: "SLA Breach Auto-Escalation",
               body: `Declaration ${decl.declarationNumber} (${lane} lane) has breached its SLA. Elapsed: ${Math.round(elapsed / 3600000)}h`,
-              type: "sla_breach",
+              type: "sla_breach" as const,
               isRead: false,
               createdAt: new Date(),
-            });
-          }
+            }))
+          );
         }
+      }
 
+      for (const { decl, lane, elapsed } of toEscalate) {
         escalated.push({
           declarationId: decl.id,
           declarationNumber: decl.declarationNumber,

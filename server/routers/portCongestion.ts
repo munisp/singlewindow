@@ -29,8 +29,41 @@ async function pgQuery<T = Record<string, unknown>>(sql: string, params: unknown
   return rows as T[];
 }
 
+/**
+ * Phase 21 (perf): the trailing-7-day AVG aggregate behind the port profiles
+ * ran on EVERY call of every congestion endpoint. It is reference-shaped,
+ * slowly-varying data (7-day window), so it is cached in-process for
+ * PROFILES_CACHE_TTL_MS.
+ *
+ * Staleness honesty: profiles may lag freshly-ingested congestion events by
+ * up to the TTL (60 s). Given the 7-day averaging window this lag is
+ * immaterial; forecast responses continue to carry their own `updatedAt`
+ * timestamp and heuristic-model label, and the cache only bounds aggregate
+ * recomputation — it never fabricates data (DB-unavailable still falls back
+ * to the static PORT_PROFILES exactly as before, and errors are not cached).
+ */
+export const PORT_PROFILES_CACHE_TTL_MS = 60_000;
+let portProfilesCache:
+  | { computedAt: number; profiles: Record<string, typeof PORT_PROFILES[string]> }
+  | null = null;
+
+/** Test hook: clear the in-process port-profiles cache. */
+export function __clearPortProfilesCache(): void {
+  portProfilesCache = null;
+}
+
 /** Load dynamic port profiles from DB, falling back to static defaults */
 async function getPortProfiles(): Promise<Record<string, typeof PORT_PROFILES[string]>> {
+  const now = Date.now();
+  if (portProfilesCache && now - portProfilesCache.computedAt < PORT_PROFILES_CACHE_TTL_MS) {
+    return portProfilesCache.profiles;
+  }
+  const profiles = await computePortProfiles();
+  portProfilesCache = { computedAt: now, profiles };
+  return profiles;
+}
+
+async function computePortProfiles(): Promise<Record<string, typeof PORT_PROFILES[string]>> {
   const dbPorts = await pgQuery<{
     port_code: string; port_name: string; country: string;
     avg_wait: number; avg_vessels: number; avg_backlog: number;

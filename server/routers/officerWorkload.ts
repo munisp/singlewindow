@@ -80,45 +80,44 @@ export const officerWorkloadRouter = router({
         if (row.officerId != null) queueMap.set(row.officerId, Number(row.queueDepth));
       }
 
-      // Cleared declarations in period: compute avg review time (submittedAt → clearedAt)
-      const clearedRows = await db
-        .select({
-          officerId: declarations.assignedOfficerId,
-          submittedAt: declarations.submittedAt,
-          clearedAt: declarations.clearedAt,
-        })
-        .from(declarations)
-        .where(
-          and(
-            isNotNull(declarations.assignedOfficerId),
-            isNotNull(declarations.submittedAt),
-            isNotNull(declarations.clearedAt),
-            gte(declarations.clearedAt, since),
-            eq(declarations.status, "cleared")
-          )
-        )
-        .limit(5000);
+      // Cleared declarations in period: avg review time (submittedAt → clearedAt)
+      // Phase 21 (perf): computed as ONE SQL aggregate grouped by officer
+      // instead of pulling up to 5000 rows into Node and averaging in JS.
+      // Semantics are identical (same filters, same SLA boundary, AVG over the
+      // same population) — only the execution location moved.
+      const clearedAggResult = await db.execute(sql`
+        SELECT assigned_officer_id AS officer_id,
+               COUNT(*)::int AS total,
+               AVG(EXTRACT(EPOCH FROM (cleared_at - submitted_at)) / 3600.0)::float8 AS avg_hours,
+               COUNT(*) FILTER (
+                 WHERE cleared_at - submitted_at <= (${input.slaTargetHours}::float8 || ' hours')::interval
+               )::int AS within_sla
+        FROM declarations
+        WHERE assigned_officer_id IS NOT NULL
+          AND submitted_at IS NOT NULL
+          AND cleared_at IS NOT NULL
+          AND cleared_at >= ${since}
+          AND status = 'cleared'
+        GROUP BY assigned_officer_id
+      `);
+      const clearedAgg = (clearedAggResult as unknown as { rows: Array<Record<string, unknown>> }).rows;
 
-      // Group by officer
       type OfficerStats = {
-        reviewTimes: number[];
+        avgHours: number | null;
         withinSla: number;
         total: number;
       };
       const statsMap = new Map<number, OfficerStats>();
-
-      for (const row of clearedRows) {
-        if (row.officerId == null || !row.submittedAt || !row.clearedAt) continue;
-        const hours =
-          (new Date(row.clearedAt).getTime() - new Date(row.submittedAt).getTime()) /
-          (1000 * 60 * 60);
-        if (!statsMap.has(row.officerId)) {
-          statsMap.set(row.officerId, { reviewTimes: [], withinSla: 0, total: 0 });
-        }
-        const s = statsMap.get(row.officerId)!;
-        s.reviewTimes.push(hours);
-        s.total++;
-        if (hours <= input.slaTargetHours) s.withinSla++;
+      for (const row of clearedAgg) {
+        const officerId = Number(row.officer_id);
+        if (!Number.isFinite(officerId)) continue;
+        const total = Number(row.total ?? 0);
+        const avgRaw = row.avg_hours == null ? null : Number(row.avg_hours);
+        statsMap.set(officerId, {
+          avgHours: avgRaw != null && Number.isFinite(avgRaw) ? avgRaw : null,
+          withinSla: Number(row.within_sla ?? 0),
+          total,
+        });
       }
 
       // Open fraud cases per officer
@@ -144,10 +143,7 @@ export const officerWorkloadRouter = router({
       // Build per-officer result
       const officerResults = officers.map((o) => {
         const stats = statsMap.get(o.id);
-        const avgReviewHours =
-          stats && stats.reviewTimes.length > 0
-            ? stats.reviewTimes.reduce((a, b) => a + b, 0) / stats.reviewTimes.length
-            : null;
+        const avgReviewHours = stats && stats.total > 0 ? stats.avgHours : null;
         const slaRate =
           stats && stats.total > 0 ? (stats.withinSla / stats.total) * 100 : null;
 
@@ -165,21 +161,19 @@ export const officerWorkloadRouter = router({
         };
       });
 
-      // Team-level aggregates
-      const allReviewTimes = clearedRows
-        .filter((r) => r.submittedAt && r.clearedAt)
-        .map(
-          (r) =>
-            (new Date(r.clearedAt!).getTime() - new Date(r.submittedAt!).getTime()) /
-            (1000 * 60 * 60)
-        );
-      const teamAvgHours =
-        allReviewTimes.length > 0
-          ? allReviewTimes.reduce((a, b) => a + b, 0) / allReviewTimes.length
-          : null;
-      const teamWithinSla = allReviewTimes.filter((h) => h <= input.slaTargetHours).length;
+      // Team-level aggregates (weighted across the per-officer SQL aggregates —
+      // same population the previous in-JS computation averaged over).
+      let teamTotalReviews = 0;
+      let teamWeightedHours = 0;
+      let teamWithinSla = 0;
+      for (const s of statsMap.values()) {
+        teamTotalReviews += s.total;
+        if (s.avgHours != null) teamWeightedHours += s.avgHours * s.total;
+        teamWithinSla += s.withinSla;
+      }
+      const teamAvgHours = teamTotalReviews > 0 ? teamWeightedHours / teamTotalReviews : null;
       const teamSlaRate =
-        allReviewTimes.length > 0 ? (teamWithinSla / allReviewTimes.length) * 100 : null;
+        teamTotalReviews > 0 ? (teamWithinSla / teamTotalReviews) * 100 : null;
 
       return {
         officers: officerResults,
@@ -346,11 +340,18 @@ export const officerWorkloadRouter = router({
       }
 
       if (!input.dryRun && assignments.length > 0) {
-        for (const a of assignments) {
-          await db.update(declarations)
-            .set({ assignedOfficerId: a.officerId, updatedAt: new Date() })
-            .where(eq(declarations.id, a.declarationId));
-        }
+        // Phase 21 (perf): ONE set-based UPDATE ... FROM (VALUES ...) instead
+        // of up to officers×maxAssignmentsPerOfficer serialized UPDATEs.
+        const valuesList = sql.join(
+          assignments.map((a) => sql`(${a.declarationId}::int, ${a.officerId}::int)`),
+          sql`, `
+        );
+        await db.execute(sql`
+          UPDATE declarations AS d
+          SET assigned_officer_id = v.officer_id, updated_at = NOW()
+          FROM (VALUES ${valuesList}) AS v(declaration_id, officer_id)
+          WHERE d.id = v.declaration_id
+        `);
       }
 
       return {

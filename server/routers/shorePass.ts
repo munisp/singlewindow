@@ -33,7 +33,7 @@ import { randomBytes } from "node:crypto";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { shorePassApplications, shorePassEvents } from "../../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, lte } from "drizzle-orm";
 import { requireOfficer } from "./aeoFastLane";
 import { verifyStcwCertificate } from "../_core/seafarerRegistryClient";
 import {
@@ -95,6 +95,35 @@ async function recordEvent(
  * EXPIRED at read time (with an audit event) — expiry is wall-clock
  * authoritative, the stored row is bookkeeping.
  */
+/**
+ * Batched expiry sweep (Phase 21 perf): one set-based UPDATE transitions every
+ * APPROVED pass whose validUntil has lapsed, plus one batched audit-event
+ * insert — replacing up to N serialized lazy-expiry UPDATEs inside list
+ * endpoints. Expiry remains wall-clock authoritative and fail-closed.
+ * Returns the number of passes transitioned.
+ */
+async function sweepExpiredApplications(db: any): Promise<number> {
+  const now = new Date();
+  const expired = await db
+    .update(shorePassApplications)
+    .set({ status: "EXPIRED", updatedAt: now })
+    .where(and(eq(shorePassApplications.status, "APPROVED"), lte(shorePassApplications.validUntil, now)))
+    .returning();
+  if (expired.length > 0) {
+    await db.insert(shorePassEvents).values(
+      expired.map((application: any) => ({
+        applicationId: application.id,
+        action: "expired",
+        fromStatus: "APPROVED",
+        toStatus: "EXPIRED",
+        actorId: application.decidedBy ?? application.requestedBy,
+        detail: "validUntil passed (batched expiry sweep)",
+      }))
+    );
+  }
+  return expired.length;
+}
+
 async function applyLazyExpiry(db: any, application: any): Promise<any> {
   if (
     application.status === "APPROVED" &&
@@ -378,11 +407,8 @@ export const shorePassRouter = router({
       .select()
       .from(shorePassApplications)
       .where(eq(shorePassApplications.status, "APPROVED"));
-    let expired = 0;
-    for (const application of approved) {
-      const after = await applyLazyExpiry(db, application);
-      if (after.status === "EXPIRED") expired += 1;
-    }
+    // Phase 21 (perf): single set-based UPDATE instead of a per-row loop.
+    const expired = await sweepExpiredApplications(db);
     return { scanned: approved.length, expired };
   }),
 
@@ -411,13 +437,16 @@ export const shorePassRouter = router({
 
   listMine: protectedProcedure.query(async ({ ctx }) => {
     const db = await requireDb();
+    // Phase 21 (perf): batch the expiry transition (one UPDATE) instead of a
+    // serialized per-row lazy-expiry write; bound the result set.
+    await sweepExpiredApplications(db);
     const rows = await db
       .select()
       .from(shorePassApplications)
-      .where(eq(shorePassApplications.requestedBy, ctx.user.id));
-    const out = [] as unknown[];
-    for (const row of rows) out.push(await applyLazyExpiry(db, row));
-    return { applications: out };
+      .where(eq(shorePassApplications.requestedBy, ctx.user.id))
+      .orderBy(desc(shorePassApplications.createdAt))
+      .limit(200);
+    return { applications: rows };
   }),
 
   listForOfficer: protectedProcedure
@@ -426,25 +455,30 @@ export const shorePassRouter = router({
         .object({
           status: z.enum(["SUBMITTED", "APPROVED", "REJECTED", "REVOKED", "EXPIRED"]).optional(),
           vesselImoNumber: z.string().regex(IMO_NUMBER_RE).optional(),
+          // Phase 21 (perf): the unfiltered read previously had NO LIMIT at
+          // all. Pagination is now mandatory-bounded (default 100, max 500).
+          limit: z.number().int().min(1).max(500).default(100),
+          offset: z.number().int().min(0).default(0),
         })
         .optional()
     )
     .query(async ({ ctx, input }) => {
       requireOfficer(ctx.user.role);
       const db = await requireDb();
-      let rows;
-      if (input?.status) {
-        rows = await db.select().from(shorePassApplications).where(eq(shorePassApplications.status, input.status));
-      } else if (input?.vesselImoNumber) {
-        rows = await db
-          .select()
-          .from(shorePassApplications)
-          .where(eq(shorePassApplications.vesselImoNumber, input.vesselImoNumber));
-      } else {
-        rows = await db.select().from(shorePassApplications);
-      }
-      const out = [] as unknown[];
-      for (const row of rows) out.push(await applyLazyExpiry(db, row));
-      return { applications: out };
+      // Batch the expiry transition before reading (one UPDATE, not N).
+      await sweepExpiredApplications(db);
+      const conditions = [];
+      if (input?.status) conditions.push(eq(shorePassApplications.status, input.status));
+      if (input?.vesselImoNumber) conditions.push(eq(shorePassApplications.vesselImoNumber, input.vesselImoNumber));
+      const limit = input?.limit ?? 100;
+      const offset = input?.offset ?? 0;
+      const rows = await db
+        .select()
+        .from(shorePassApplications)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(shorePassApplications.createdAt))
+        .limit(limit)
+        .offset(offset);
+      return { applications: rows, limit, offset };
     }),
 });

@@ -41,21 +41,19 @@ export async function createContext(
 
     const authHeader = opts.req.headers.authorization as string | undefined;
     if (authHeader?.startsWith("Bearer ") && user) {
-      try {
-        const { verifyKeycloakToken } = await import("./keycloakVerifier");
-        const payload = await verifyKeycloakToken(authHeader);
-        if (payload) {
-          const roles: string[] = [];
-          if (payload.realm_access?.roles) roles.push(...payload.realm_access.roles);
-          if (payload.resource_access) {
-            for (const client of Object.values(payload.resource_access)) {
-              if (client?.roles) roles.push(...client.roles);
-            }
+      // Phase 21 (perf): reuse the payload already verified inside
+      // sdk.authenticateRequest instead of re-verifying the same RS256 JWT
+      // (and paying a dynamic import) on every request.
+      const payload = sdk.getVerifiedBearerPayload(opts.req);
+      if (payload) {
+        const roles: string[] = [];
+        if (payload.realm_access?.roles) roles.push(...payload.realm_access.roles);
+        if (payload.resource_access) {
+          for (const client of Object.values(payload.resource_access)) {
+            if (client?.roles) roles.push(...client.roles);
           }
-          keycloakRoles = roles;
         }
-      } catch {
-        // Non-critical — roles enrichment failure should not block the request
+        keycloakRoles = roles;
       }
     }
   } catch (error) {
