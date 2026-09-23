@@ -28,8 +28,13 @@ const queryClient = new QueryClient({
       staleTime: 30_000,
       // Keep unused data in cache for 5 minutes
       gcTime: 5 * 60_000,
-      // Refetch when window regains focus (user returns to tab)
-      refetchOnWindowFocus: true,
+      // Phase 21 perf: don't stampede the API when the tab regains focus —
+      // live-ops pages opt back in explicitly per query.
+      refetchOnWindowFocus: false,
+      // Phase 21 perf: polling queries pause while the tab is hidden
+      // (visibility-aware intervals); pages no longer burn quota in
+      // background tabs.
+      refetchIntervalInBackground: false,
       // Refetch when network reconnects after going offline
       refetchOnReconnect: true,
     },
