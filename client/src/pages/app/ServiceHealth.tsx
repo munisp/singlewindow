@@ -126,7 +126,7 @@ const SERVICE_REGISTRY: Record<string, ServiceMeta> = {
     description: "ASEAN Single Window G2G document exchange",
     icon: Globe,
     category: "Integration",
-    port: 9092,
+    port: 9083,
   },
   "sedona-geo": {
     label: "Geospatial Analytics (Sedona)",
@@ -202,27 +202,27 @@ export default function ServiceHealth() {
 
   const { data: tbModes } = trpc.system.tigerbeetleModes.useQuery(undefined, {
     refetchInterval: 30_000,
-    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const { data, isLoading, error } = trpc.system.serviceHealth.useQuery(undefined, {
     refetchInterval: 30_000,
-    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const { data: httpHealth, isLoading: httpLoading } = trpc.system.microserviceHealth.useQuery(undefined, {
     refetchInterval: 30_000,
-    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const { data: circuitData, isLoading: circuitLoading } = trpc.system.circuitBreakerStatus.useQuery(undefined, {
     refetchInterval: 15_000,
-    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   const { data: securityData, isLoading: securityLoading } = trpc.system.securityEvents.useQuery(
     { limit: 50 },
-    { refetchInterval: 15_000, refetchIntervalInBackground: true }
+    { refetchInterval: 15_000, refetchOnWindowFocus: true }
   );
 
   const services = data?.services ?? {};
