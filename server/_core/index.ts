@@ -38,6 +38,7 @@ import { sanitizeMiddleware } from "./sanitize";
 import { closeKafka } from "./kafka";
 import { setupWebSocketServer, broadcastVesselUpdate } from "./wsServer";
 import { sdk } from "./sdk";
+import compression from "compression";
 import { PAYMENT_STATUS } from "./statuses";
 
 // ── Rate limiting ─────────────────────────────────────────────────────────────
@@ -1363,6 +1364,16 @@ async function startServer() {
   }));
   // ── Input sanitization (XSS prevention) ─────────────────────────────────────
   app.use(sanitizeMiddleware);
+  // ── Response compression (Phase 21 perf) ─────────────────────────────────
+  // gzip/deflate for JSON/CSV API payloads (large list responses: declaration
+  // queues, DG board, notifications). SSE streams are excluded — compression
+  // buffering would break their real-time delivery semantics.
+  app.use(compression({
+    filter: (req, res) => {
+      if (req.path === "/api/events/anomalies") return false;
+      return compression.filter(req, res);
+    },
+  }));
   // ── File upload guard (ransomware/malware delivery prevention) ─────────────
   app.use("/api/upload", fileUploadGuard);
 
@@ -1664,6 +1675,34 @@ async function startServer() {
     app.post("/api/scheduled/tenant-domain-poll", tenantDomainPollerHandler);
     console.log("[Heartbeat] /api/scheduled/tenant-domain-poll registered");
   }
+  // ── HTTP caching for reference-data reads (Phase 21 perf) ──────────────
+  // tRPC queries over httpBatchLink arrive as GET /api/trpc/<proc> (batched:
+  // comma-joined procedure paths). Whitelisted read-only, slowly-varying
+  // reference-data procedures get an honest short Cache-Control TTL so client
+  // pollers and shared caches can reuse responses; every other API response
+  // stays uncached (mutations are POST and never match).
+  //   - portCongestion.* : 60 s — matches the server-side 7-day aggregate
+  //     cache TTL (PORT_PROFILES_CACHE_TTL_MS); staleness is bounded and
+  //     documented there.
+  //   - apiChangelog.*   : 300 s — published API changelog/versions (public
+  //     reference data that changes only on deploys).
+  const REFERENCE_DATA_CACHE_TTLS: Array<{ prefix: string; maxAgeSeconds: number; scope: "private" | "public" }> = [
+    { prefix: "portCongestion.", maxAgeSeconds: 60, scope: "private" },
+    { prefix: "apiChangelog.", maxAgeSeconds: 300, scope: "public" },
+  ];
+  app.use("/api/trpc", (req, res, next) => {
+    if (req.method !== "GET") return next();
+    // req.path is mount-relative ("/portCongestion.getNetworkSummary" or a
+    // comma-joined batch "/a.getX,b.getY"); strip the leading slash.
+    const procedures = req.path.replace(/^\//, "").split(",");
+    for (const { prefix, maxAgeSeconds, scope } of REFERENCE_DATA_CACHE_TTLS) {
+      if (procedures.every((p) => p.startsWith(prefix))) {
+        res.setHeader("Cache-Control", `${scope}, max-age=${maxAgeSeconds}`);
+        break;
+      }
+    }
+    next();
+  });
   // tRPC API — apply general rate limiting
   app.use("/api/trpc", trpcRateLimit);
   app.use(
