@@ -259,6 +259,13 @@ export async function revokeSession(sessionId: string): Promise<void> {
   }
   try {
     await redis.set(`revoked:${sessionId}`, "1", "EX", SESSION_REVOCATION_TTL_S);
+    // Same-instance revocation is immediate: refresh the local verdict cache
+    // so the next isSessionRevoked() on this process denies without waiting
+    // for the negative-cache TTL to expire.
+    revocationVerdictCache.set(sessionId, {
+      revoked: true,
+      expiresAt: Date.now() + REVOCATION_CACHE_TTL_MS,
+    });
   } catch (err) {
     if (process.env.NODE_ENV === "production") {
       throw new RateLimiterUnavailableError(
@@ -274,18 +281,66 @@ export async function revokeSession(sessionId: string): Promise<void> {
  * Returns true if the session is blacklisted (should be rejected).
  * Fail-closed in production: Redis down => treat every presented session as
  * revoked (deny) rather than letting logged-out tokens back in.
+ *
+ * Phase 21 (perf): verdicts are memoised in-process for
+ * REVOCATION_CACHE_TTL_MS so the per-request critical path does not pay a
+ * Redis round-trip for every authenticated call.
+ *   - Revoked (positive) verdicts are cached safely — a deny never becomes an
+ *     allow because of the cache.
+ *   - Not-revoked (negative) verdicts are cached for at most the TTL, so a
+ *     logout on ANOTHER instance takes effect within TTL (worst case 10 s)
+ *     instead of immediately. Logout on THIS instance updates the local cache
+ *     synchronously in revokeSession(), so same-instance revocation is still
+ *     immediate. The JWT itself remains HS256-verified; this cache only
+ *     bounds revocation propagation, never authentication.
+ *   - Redis errors NEVER populate the cache and never auto-allow: the
+ *     existing fail-closed posture (prod => deny) is preserved for any
+ *     sessionId without a fresh cached verdict.
  */
+const REVOCATION_CACHE_TTL_MS = 10_000; // 10 s — see docstring above
+const REVOCATION_CACHE_MAX = 10_000; // bound memory; oldest entries evicted
+const revocationVerdictCache = new Map<string, { revoked: boolean; expiresAt: number }>();
+
+/** Test hook: clear the in-process revocation verdict cache. */
+export function __clearRevocationVerdictCache(): void {
+  revocationVerdictCache.clear();
+}
+
 export async function isSessionRevoked(sessionId: string): Promise<boolean> {
+  const now = Date.now();
+  const cached = revocationVerdictCache.get(sessionId);
+  if (cached && cached.expiresAt > now) {
+    return cached.revoked;
+  }
+  if (cached) revocationVerdictCache.delete(sessionId);
+
   const redis = getRedis();
   if (!redis) {
     return process.env.NODE_ENV === "production"; // prod: deny; dev: allow
   }
+  let revoked: boolean;
   try {
     const val = await redis.get(`revoked:${sessionId}`);
-    return val === "1";
+    revoked = val === "1";
   } catch {
-    return process.env.NODE_ENV === "production";
+    return process.env.NODE_ENV === "production"; // errors are not cached and never auto-allow
   }
+  if (revocationVerdictCache.size >= REVOCATION_CACHE_MAX) {
+    // Evict expired entries first; fall back to the oldest-inserted key.
+    let evicted = false;
+    for (const [key, entry] of revocationVerdictCache) {
+      if (entry.expiresAt <= now) {
+        revocationVerdictCache.delete(key);
+        evicted = true;
+      }
+    }
+    if (!evicted) {
+      const oldest = revocationVerdictCache.keys().next().value;
+      if (oldest !== undefined) revocationVerdictCache.delete(oldest);
+    }
+  }
+  revocationVerdictCache.set(sessionId, { revoked, expiresAt: now + REVOCATION_CACHE_TTL_MS });
+  return revoked;
 }
 
 // ─── Distributed idempotency key store ───────────────────────────────────────
