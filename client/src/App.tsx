@@ -252,7 +252,7 @@ function Router() {
         <CustomsGuard><Suspense fallback={<LazyFallback />}><VisionBatchAnalysis /></Suspense></CustomsGuard>
       </Route>
       <Route path="/app/customs/risk">
-        <Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense>
+        <CustomsGuard><Suspense fallback={<LazyFallback />}><CustomsRisk /></Suspense></CustomsGuard>
       </Route>
       <Route path="/app/customs/payments">
         <CustomsGuard><Suspense fallback={<LazyFallback />}><MojaloopPayments /></Suspense></CustomsGuard>
