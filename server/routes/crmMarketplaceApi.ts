@@ -11,7 +11,15 @@
  * middleware authenticates the key, enforces scope/rate limit/sandbox
  * routing and writes the api_usage_logs metering record that the invoice
  * endpoint aggregates. Verification-as-a-service therefore meters per call
- * with NO separate billing path.
+ * with NO separate billing path. Since Phase 22, requireApiKey also accepts a
+ * Keycloak Bearer JWT (Authorization: Bearer …) when no X-API-Key is sent —
+ * bearer calls are not marketplace-metered and the case actor resolves from
+ * the verified user.
+ *
+ * Phase 22 (mobile contract, additive-only): case payloads carry a `case_id`
+ * alias (= caseNumber), and the stakeholder-360 profile carries a
+ * `stakeholder_id` alias (= profile id) with a guaranteed root `timeline`
+ * array. No existing field was renamed or removed.
  *
  * Fail-closed: DB outage → 503; unknown party → 404; missing/invalid
  * invoice period → 400; invoice for a key other than the caller's → 403.
@@ -39,10 +47,20 @@ import { buildUsageInvoice, MarketplaceBillingError } from "../marketplace/tiers
 
 const PROD_UPSTREAM = { id: "crm-marketplace", sandbox: false } as const;
 
-/** Resolve the platform user behind the caller's API key (case actor). */
+/** Phase 22: additive mobile alias — case_id = caseNumber (fallback: numeric id). */
+function withCaseId<T extends { id: number; caseNumber?: string | null }>(c: T): T & { case_id: string } {
+  return { ...c, case_id: c.caseNumber ?? String(c.id) };
+}
+
+/** Resolve the platform user behind the caller (case actor): the API key's
+ *  owner, or the Bearer-authenticated Keycloak user (Phase 22). */
 async function actorForRequest(req: any): Promise<{ id: number; role: string }> {
   const keyId = req.apiKeyContext?.keyId;
-  if (keyId == null) throw new Error("No API key context on request");
+  if (keyId == null) {
+    const bearer = req.bearerUser;
+    if (bearer) return { id: bearer.id, role: bearer.role };
+    throw new Error("No API key context on request");
+  }
   const db = (await getDb())!;
   const [key] = await db.select().from(apiKeys).where(eq(apiKeys.id, keyId)).limit(1);
   if (!key) throw new Error(`API key ${keyId} no longer exists`);
@@ -68,7 +86,9 @@ export function registerCrmMarketplaceApiRoutes(app: Express): void {
         return;
       }
       try {
-        res.json(await listCases({ status: status as CrmCaseStatus | undefined, limit, offset }));
+        const result = await listCases({ status: status as CrmCaseStatus | undefined, limit, offset });
+        // Phase 22: additive case_id alias on every item (mobile contract).
+        res.json({ ...result, items: result.items.map(withCaseId) });
       } catch (err) {
         res.status(503).json({
           status: "down",
@@ -94,7 +114,7 @@ export function registerCrmMarketplaceApiRoutes(app: Express): void {
           res.status(404).json({ error: `Case ${id} not found` });
           return;
         }
-        res.json({ case: c, timeline: await getCaseTimeline(id) });
+        res.json({ case: withCaseId(c), timeline: await getCaseTimeline(id) });
       } catch (err) {
         res.status(503).json({
           status: "down",
@@ -132,7 +152,7 @@ export function registerCrmMarketplaceApiRoutes(app: Express): void {
         }
         // Idempotent replay: already in the requested state.
         if (existing.status === toStatus) {
-          res.status(200).json({ case: existing, idempotentReplay: true, idempotencyKey: idempotencyKey ?? null });
+          res.status(200).json({ case: withCaseId(existing), idempotentReplay: true, idempotencyKey: idempotencyKey ?? null });
           return;
         }
         const actor = await actorForRequest(req);
@@ -143,7 +163,7 @@ export function registerCrmMarketplaceApiRoutes(app: Express): void {
           resolutionSummary,
           actor,
         });
-        res.status(200).json({ ...result, idempotencyKey: idempotencyKey ?? null });
+        res.status(200).json({ ...result, case: withCaseId(result.case), idempotencyKey: idempotencyKey ?? null });
       } catch (err) {
         if (err instanceof CaseTransitionError) {
           const current = await getCaseById(id).catch(() => null);
@@ -202,7 +222,14 @@ export function registerCrmMarketplaceApiRoutes(app: Express): void {
         return;
       }
       try {
-        res.json(await getStakeholder360(id));
+        const result = await getStakeholder360(id);
+        // Phase 22 (mobile contract, additive): profile.stakeholder_id alias
+        // (= profile id) and a guaranteed root `timeline` array.
+        res.json({
+          ...result,
+          profile: { ...result.profile, stakeholder_id: result.profile.id },
+          timeline: Array.isArray(result.timeline) ? result.timeline : [],
+        });
       } catch (err) {
         if (err instanceof StakeholderNotFoundError) {
           res.status(404).json({ error: err.message });
