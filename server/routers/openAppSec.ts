@@ -2,9 +2,13 @@
  * OpenAppSec WAF Events tRPC Router — Sprint v81
  * Admin/security procedures for WAF event monitoring and triage.
  *
- * All procedures read directly from the openAppSecEvents table in PostgreSQL.
- * WAF events are ingested via the Kafka consumer (topic: waf-events) which
- * receives events from the OpenAppSec agent running alongside APISIX.
+ * All procedures read directly from the open_appsec_events table in PostgreSQL.
+ * HONESTY NOTE (Phase 22): no OpenAppSec agent is deployed in the blueeconomy
+ * stack. The table is named open_appsec_events for historical reasons; the
+ * actual enforcement + ingestion path is the Coraza WAF embedded in Caddy,
+ * whose events are written by server/routers/corazaWaf.ts. The gitops
+ * ServiceMonitor for an OpenAppSec agent is render-gated off
+ * (charts/apisix-routes values: openappsec.serviceMonitor.enabled=false).
  * No mock data — returns empty results when no events exist.
  */
 import { z } from "zod";
