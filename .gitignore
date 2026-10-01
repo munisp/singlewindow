@@ -142,6 +142,6 @@ infra/github-actions-runner/*.token
 infra/github-actions-runner/*.secret
 infra/github-actions-runner/.runtime/
 
-# RustFS object-storage runtime data directory (committed by mistake — Phase 22 purge)
+# RustFS (S3-compatible object store) runtime data — never commit
 .rustfs.sys/
 **/.rustfs.sys/
