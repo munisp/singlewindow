@@ -4241,3 +4241,48 @@ export const shorePassEvents = pgTable("shore_pass_events", {
 }, (t) => [index("idx_shore_pass_events_app").on(t.applicationId)]);
 export type ShorePassEvent = typeof shorePassEvents.$inferSelect;
 export type InsertShorePassEvent = typeof shorePassEvents.$inferInsert;
+
+// ─── PHASE 22: Risk-Model Registry persisted in PostgreSQL (migration 0074) ──
+// Replaces the in-memory MODEL_REGISTRY_DATA / AB_TESTS_DATA arrays that
+// server/routers/riskModel.ts previously served. Seed rows in migration 0074
+// carry over the exact data the arrays served, so response shapes are
+// unchanged; promotion/champion state now survives restarts.
+export const riskModelVersions = pgTable("risk_model_versions", {
+  id: serial("id").primaryKey(),
+  versionId: varchar("version_id", { length: 64 }).notNull().unique(),
+  version: varchar("version", { length: 32 }).notNull(),
+  algorithm: varchar("algorithm", { length: 64 }).notNull(),
+  accuracy: real("accuracy").notNull().default(0),
+  f1Score: real("f1_score").notNull().default(0),
+  precision: real("precision").notNull().default(0),
+  recall: real("recall").notNull().default(0),
+  aucRoc: real("auc_roc").notNull().default(0),
+  trainingSamples: integer("training_samples").notNull().default(0),
+  status: varchar("status", { length: 16 }).notNull().default("archived"), // archived | champion | challenger
+  promotedAt: timestamp("promoted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("idx_rmv_status").on(t.status),
+]);
+export type RiskModelVersion = typeof riskModelVersions.$inferSelect;
+export type InsertRiskModelVersion = typeof riskModelVersions.$inferInsert;
+
+export const riskModelAbTests = pgTable("risk_model_ab_tests", {
+  id: serial("id").primaryKey(),
+  testId: varchar("test_id", { length: 64 }).notNull().unique(),
+  championVersion: varchar("champion_version", { length: 32 }).notNull(),
+  challengerVersion: varchar("challenger_version", { length: 32 }).notNull(),
+  trafficSplitPct: integer("traffic_split_pct").notNull().default(10),
+  status: varchar("status", { length: 16 }).notNull().default("running"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  championAccuracy: real("champion_accuracy").notNull().default(0),
+  challengerAccuracy: real("challenger_accuracy").notNull().default(0),
+  championRequests: integer("champion_requests").notNull().default(0),
+  challengerRequests: integer("challenger_requests").notNull().default(0),
+  winner: varchar("winner", { length: 16 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("idx_rmat_status").on(t.status),
+]);
+export type RiskModelAbTest = typeof riskModelAbTests.$inferSelect;
+export type InsertRiskModelAbTest = typeof riskModelAbTests.$inferInsert;

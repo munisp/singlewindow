@@ -1982,20 +1982,31 @@ async function runPaymentArchivalCron() {
           )
         );
       if (Number(total) === 0) continue;
+      // Phase 22 (fail-closed): the previous implementation inserted a
+      // status:"completed" row with a FABRICATED s3://…parquet storageUri and
+      // an estimated byte count — no parquet object ever existed. Now the
+      // cron only ENQUEUES an honest status:"pending" job (storageUri NULL,
+      // bytesWritten 0); the lakehouse writer sets completedAt/storageUri/
+      // bytesWritten with real values only after the object actually exists.
+      const sinkBucket = process.env.PAYMENT_ARCHIVE_SINK_BUCKET;
+      if (!sinkBucket) {
+        console.warn(
+          `[Cron] Payment archival — ${tier} tier has ${total} committed transfers due, ` +
+          `but PAYMENT_ARCHIVE_SINK_BUCKET is not configured; skipping without recording a fake archive.`,
+        );
+        continue;
+      }
       const jobId = `archival-${tier}-${now.toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
-      const bytesEstimate = Number(total) * 512;
       await db.insert(paj).values({
         jobId,
         tier,
         periodStart,
         periodEnd,
-        transfersArchived: Number(total),
-        bytesWritten: BigInt(bytesEstimate),
-        status: "completed",
-        completedAt: now,
-        storageUri: `s3://tradegateway-archive/${tier}/${now.toISOString().slice(0, 10)}/${jobId}.parquet`,
+        transfersArchived: 0,
+        bytesWritten: BigInt(0),
+        status: "pending",
       });
-      console.log(`[Cron] Payment archival — ${tier} tier: archived ${total} transfers → ${jobId}`);
+      console.log(`[Cron] Payment archival — ${tier} tier: enqueued ${jobId} (${total} transfers pending real archive to ${sinkBucket})`);
     } catch (err) {
       console.error(`[Cron] Payment archival ${tier} tier failed:`, err);
     }

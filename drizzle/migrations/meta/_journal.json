@@ -519,6 +519,13 @@
       "when": 1789700000000,
       "tag": "0073_phase20_onboarding_governance",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790000000000,
+      "tag": "0074_phase22_risk_model_registry",
+      "breakpoints": true
     }
   ]
 }

@@ -141,3 +141,7 @@ infra/github-actions-runner/.env
 infra/github-actions-runner/*.token
 infra/github-actions-runner/*.secret
 infra/github-actions-runner/.runtime/
+
+# RustFS (S3-compatible object store) runtime data — never commit
+.rustfs.sys/
+**/.rustfs.sys/
