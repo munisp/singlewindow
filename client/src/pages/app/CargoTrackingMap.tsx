@@ -109,12 +109,14 @@ export default function CargoTrackingMap() {
     { refetchInterval: isWsLive ? false : 30000 }
   );
 
+  // Phase 21 perf: when the WebSocket feed is live it already carries the
+  // fleet state — pause all three REST pollers instead of duplicating them.
   const { data: statsData, isError: statsError } = trpc.cargoTracking.getVesselStats.useQuery(undefined, {
-    refetchInterval: 30000,
+    refetchInterval: isWsLive ? false : 30000,
   });
 
   const { data: arrivalsData, isError: arrivalsError } = trpc.cargoTracking.getPortArrivals.useQuery(undefined, {
-    refetchInterval: 60000,
+    refetchInterval: isWsLive ? false : 60000,
   });
 
   const trackingUnavailable = !isWsLive && (vesselsError || statsError || arrivalsError);
@@ -137,6 +139,12 @@ export default function CargoTrackingMap() {
 
   // ─── MARKER MANAGEMENT ──────────────────────────────────────────────────────
 
+  // Phase 21 perf: marker elements are updated in place — unchanged vessels
+  // are skipped entirely (signature diff), moved vessels keep their DOM node
+  // and only get a new position / rotation / colour instead of a full
+  // content rebuild on every 30s refresh.
+  const markerPartsRef = useRef<Map<string, { bubble: HTMLDivElement; label: HTMLDivElement; signature: string }>>(new Map());
+
   const updateMarkers = useCallback((vessels: Vessel[]) => {
     if (!mapRef.current || !window.google) return;
 
@@ -147,6 +155,7 @@ export default function CargoTrackingMap() {
       if (!currentIds.has(id)) {
         marker.map = null;
         markersRef.current.delete(id);
+        markerPartsRef.current.delete(id);
       }
     });
 
@@ -154,42 +163,52 @@ export default function CargoTrackingMap() {
       const position = { lat: vessel.lat, lng: vessel.lon };
       const riskColor = vessel.riskFlag ? RISK_COLORS[vessel.riskFlag] : "#6b7280";
       const icon = VESSEL_ICONS[vessel.vesselType ?? ""] ?? "🚢";
-
-      // Create marker element
-      const el = document.createElement("div");
-      el.style.cssText = `
-        display: flex; flex-direction: column; align-items: center; cursor: pointer;
-        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
-        transition: transform 0.3s ease;
-      `;
-
-      const bubble = document.createElement("div");
-      bubble.style.cssText = `
-        background: ${riskColor}; color: white; border-radius: 50%;
-        width: 36px; height: 36px; display: flex; align-items: center;
-        justify-content: center; font-size: 18px; border: 2px solid white;
-        box-shadow: 0 0 0 2px ${riskColor}40;
-        transform: rotate(${vessel.heading}deg);
-      `;
-      bubble.textContent = icon;
-
-      const label = document.createElement("div");
-      label.style.cssText = `
-        background: rgba(0,0,0,0.75); color: white; font-size: 10px;
-        padding: 2px 6px; border-radius: 4px; margin-top: 2px;
-        white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis;
-      `;
-      label.textContent = vessel.vesselName;
-
-      el.appendChild(bubble);
-      el.appendChild(label);
+      const signature = `${vessel.lat},${vessel.lon},${vessel.heading},${vessel.riskFlag},${vessel.vesselName},${icon}`;
 
       const existing = markersRef.current.get(vessel.id);
-      if (existing) {
-        // Animate to new position
+      const parts = markerPartsRef.current.get(vessel.id);
+      if (existing && parts) {
+        // Diff: nothing changed since the last render — leave the marker alone.
+        if (parts.signature === signature) return;
+        parts.signature = signature;
+        // In-place update: move the existing marker and mutate its DOM.
         existing.position = position;
-        (existing as any).content = el;
+        existing.title = vessel.vesselName;
+        parts.bubble.style.background = riskColor;
+        parts.bubble.style.boxShadow = `0 0 0 2px ${riskColor}40`;
+        parts.bubble.style.transform = `rotate(${vessel.heading}deg)`;
+        parts.bubble.textContent = icon;
+        parts.label.textContent = vessel.vesselName;
       } else {
+        // Create marker element
+        const el = document.createElement("div");
+        el.style.cssText = `
+          display: flex; flex-direction: column; align-items: center; cursor: pointer;
+          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+          transition: transform 0.3s ease;
+        `;
+
+        const bubble = document.createElement("div");
+        bubble.style.cssText = `
+          background: ${riskColor}; color: white; border-radius: 50%;
+          width: 36px; height: 36px; display: flex; align-items: center;
+          justify-content: center; font-size: 18px; border: 2px solid white;
+          box-shadow: 0 0 0 2px ${riskColor}40;
+          transform: rotate(${vessel.heading}deg);
+        `;
+        bubble.textContent = icon;
+
+        const label = document.createElement("div");
+        label.style.cssText = `
+          background: rgba(0,0,0,0.75); color: white; font-size: 10px;
+          padding: 2px 6px; border-radius: 4px; margin-top: 2px;
+          white-space: nowrap; max-width: 120px; overflow: hidden; text-overflow: ellipsis;
+        `;
+        label.textContent = vessel.vesselName;
+
+        el.appendChild(bubble);
+        el.appendChild(label);
+
         const marker = new google.maps.marker.AdvancedMarkerElement({
           map: mapRef.current!,
           position,
@@ -198,6 +217,7 @@ export default function CargoTrackingMap() {
         });
         marker.addListener("click", () => setSelectedVessel(vessel));
         markersRef.current.set(vessel.id, marker);
+        markerPartsRef.current.set(vessel.id, { bubble, label, signature });
       }
     });
 

@@ -77,6 +77,22 @@ export default defineConfig({
     // Note: MapLibre splits into a lazy chunk automatically (GeospatialPortal
     // is lazy-routed); Cesium ships as prebuilt same-origin assets under
     // /cesium/ loaded on demand — see the cesium plugins above.
+    rollupOptions: {
+      output: {
+        // Phase 21 perf: stable vendor chunks so routine app deploys don't
+        // bust the whole bundle cache.
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|wouter)[\\/]/.test(id)) return "vendor-react";
+          if (id.includes("@tanstack") || id.includes("@trpc") || id.includes("superjson")) return "vendor-query";
+          if (id.includes("maplibre-gl") || id.includes("cesium")) return "vendor-maps";
+          if (/[\\/]node_modules[\\/]d3/.test(id) || id.includes("recharts")) return "vendor-charts";
+          if (id.includes("react-hook-form") || id.includes("@hookform") || id.includes("zod")) return "vendor-forms";
+          if (id.includes("@radix-ui")) return "vendor-radix";
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     host: true,

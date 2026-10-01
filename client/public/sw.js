@@ -46,6 +46,32 @@ const TILE_ORIGINS = [
 ];
 const TILE_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// Phase 21 perf: bound the tile cache — LRU eviction by count so long-lived
+// sessions can't grow the Cache Storage unboundedly (quota pressure evicts
+// the whole origin otherwise).
+const TILE_CACHE_MAX_ENTRIES = 500;
+let tileEvictionLastRun = 0;
+
+async function evictTileCache(cache) {
+  // Throttle: eviction scans are O(n); run at most once a minute.
+  const now = Date.now();
+  if (now - tileEvictionLastRun < 60_000) return;
+  tileEvictionLastRun = now;
+  const keys = await cache.keys();
+  if (keys.length <= TILE_CACHE_MAX_ENTRIES) return;
+  const entries = [];
+  for (const key of keys) {
+    const response = await cache.match(key);
+    entries.push({ key, fetchedAt: Number(response?.headers.get('X-SW-Cached-At') || 0) });
+  }
+  // Oldest-cached first (approximates LRU without per-hit bookkeeping).
+  entries.sort((a, b) => a.fetchedAt - b.fetchedAt);
+  const excess = entries.length - TILE_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < excess; i++) {
+    await cache.delete(entries[i].key);
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -69,7 +95,7 @@ self.addEventListener('fetch', (event) => {
               statusText: response.statusText,
               headers,
             });
-            cache.put(request, stamped.clone());
+            cache.put(request, stamped.clone()).then(() => evictTileCache(cache));
             return stamped;
           }
           // Network answered but failed: fall back to stale tile if present
