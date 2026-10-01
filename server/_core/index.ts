@@ -760,3 +760,1285 @@ console.log("[Cron] Daily notification digest scheduled at 08:00 UTC");
 // CEP daily breach digest — every day at 08:05 UTC (5 min after daily digest)
 cron.schedule("0 5 8 * * *", runDailyBreachDigest, { timezone: "UTC" });
 console.log("[Cron] CEP daily breach digest scheduled at 08:05 UTC");
+
+// ── Weekly admin analytics KPI report ───────────────────────────────────────────────
+// Sends a weekly KPI summary to the owner every Monday at 08:00 UTC.
+async function runWeeklyAnalyticsReport() {
+  try {
+    const { getDb } = await import("../db");
+    const { declarations, payments } = await import("../../drizzle/schema");
+    const { sql, gte, and, isNotNull } = await import("drizzle-orm");
+    const { notifyOwner } = await import("./notification");
+    const db = await getDb();
+    if (!db) return;
+
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    // 7-day declaration count + clearance stats
+    const [declStats] = await db
+      .select({
+        total7d: sql<number>`COUNT(*)::int`.as("total_7d"),
+        cleared7d: sql<number>`COUNT(*) FILTER (WHERE ${declarations.status} = 'cleared')::int`.as("cleared_7d"),
+        avgHours: sql<number>`
+          AVG(EXTRACT(EPOCH FROM (${declarations.clearedAt} - ${declarations.submittedAt})) / 3600)
+          FILTER (WHERE ${declarations.clearedAt} IS NOT NULL AND ${declarations.submittedAt} IS NOT NULL)
+        `.as("avg_hours"),
+      })
+      .from(declarations)
+      .where(gte(declarations.createdAt, since7d));
+
+    // 7-day duty revenue
+    const [payStats] = await db
+      .select({
+        revenue7d: sql<number>`COALESCE(SUM(${payments.amount}), 0)::numeric(18,2)`.as("revenue_7d"),
+      })
+      .from(payments)
+      .where(
+        and(
+          sql`${payments.status} = ${PAYMENT_STATUS.CONFIRMED}`,
+          gte(payments.createdAt, since7d)
+        )
+      );
+
+    // SLA breach count (declarations still in processing beyond SLA)
+    const processingRows = await db
+      .select({ submittedAt: declarations.submittedAt, riskLane: declarations.riskLane })
+      .from(declarations)
+      .where(
+        and(
+          sql`${declarations.status} IN ('submitted','under_assessment','docs_required','payment_pending','payment_confirmed','under_examination')`,
+          isNotNull(declarations.submittedAt)
+        )
+      )
+      .limit(1000);
+
+    const SLA_MS: Record<string, number> = {
+      green: 4 * 3600 * 1000, yellow: 24 * 3600 * 1000, red: 72 * 3600 * 1000, blue: 48 * 3600 * 1000,
+    };
+    const now = Date.now();
+    const slaBreaches = processingRows.filter((r) => {
+      if (!r.submittedAt) return false;
+      const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+      return elapsed > (SLA_MS[r.riskLane ?? "green"] ?? SLA_MS.green);
+    }).length;
+
+    const total7d = declStats?.total7d ?? 0;
+    const cleared7d = declStats?.cleared7d ?? 0;
+    const clearanceRate = total7d > 0 ? Math.round((cleared7d / total7d) * 100) : 0;
+    const avgHours = declStats?.avgHours != null ? Number(Number(declStats.avgHours).toFixed(1)) : null;
+    const revenue7d = Number(payStats?.revenue7d ?? 0);
+
+    await notifyOwner({
+      title: `[Weekly Analytics] TradeGateway KPI Report — ${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}`,
+      content: [
+        "TradeGateway Weekly KPI Summary",
+        `Period: Last 7 days (ending ${new Date().toUTCString()})`,
+        "",
+        "Declarations",
+        `  Total submitted: ${total7d}`,
+        `  Cleared: ${cleared7d} (${clearanceRate}% clearance rate)`,
+        avgHours != null ? `  Avg clearance time: ${avgHours}h` : "  Avg clearance time: N/A",
+        "",
+        "Revenue",
+        `  Duty collected: $${revenue7d.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        "",
+        "Compliance",
+        `  Active SLA breaches: ${slaBreaches}`,
+        "",
+        "Log in to the Admin Analytics Dashboard for full charts and drill-down.",
+      ].join("\n"),
+    });
+
+    console.log(`[Cron] Weekly analytics report sent (${total7d} declarations, $${revenue7d.toFixed(2)} revenue, ${slaBreaches} SLA breaches)`);
+  } catch (err) {
+    console.error("[Cron] Weekly analytics report failed:", err);
+  }
+}
+
+// Weekly digest + analytics report — every Monday at 08:00 UTC
+cron.schedule("0 0 8 * * 1", async () => {
+  await runNotificationDigest("weekly");
+  await runWeeklyAnalyticsReport();
+}, { timezone: "UTC" });
+console.log("[Cron] Weekly digest + analytics report scheduled at 08:00 UTC every Monday");
+
+// ── Document expiry enforcement cron ───────────────────────────────────────────
+// Runs daily at 03:00 UTC. Revokes share links whose expiresAt has passed,
+// logs an audit event for each, and notifies the owner.
+export async function runDocumentExpiryCron() {
+  try {
+    const { getDb } = await import("../db");
+    const { documentShares } = await import("../../drizzle/schema");
+    const { notifyOwner } = await import("./notification");
+    const { logAuditEvent } = await import("../db");
+    const { lte, isNull, and, inArray } = await import("drizzle-orm");
+    const db = await getDb();
+    if (!db) {
+      console.warn("[Cron] DB unavailable — skipping document expiry cron");
+      return { expired: 0, error: "DB unavailable" };
+    }
+
+    const now = new Date();
+
+    // Find share links that have passed their expiresAt and have not yet been revoked
+    const expiredShares = await db
+      .select({ id: documentShares.id, documentId: documentShares.documentId, label: documentShares.label })
+      .from(documentShares)
+      .where(
+        and(
+          lte(documentShares.expiresAt, now),
+          isNull(documentShares.revokedAt)
+        )
+      );
+
+    if (expiredShares.length === 0) {
+      console.log("[Cron] Document expiry: no expired share links found");
+      return { expired: 0 };
+    }
+
+    const shareIds = expiredShares.map((s) => s.id);
+
+    // Revoke all expired share links
+    await db
+      .update(documentShares)
+      .set({ revokedAt: now })
+      .where(inArray(documentShares.id, shareIds));
+
+    // Log an audit event for each expired share
+    for (const share of expiredShares) {
+      await logAuditEvent({
+        actorId: null,
+        actorType: "system",
+        action: "expire",
+        entityType: "document_vault" as any,
+        entityId: share.documentId,
+        metadata: { shareId: share.id, label: share.label, expiredAt: now.toISOString() },
+      });
+    }
+
+    // Notify owner
+    await notifyOwner({
+      title: `[Document Vault] ${expiredShares.length} share link(s) auto-expired`,
+      content: [
+        `Document share expiry cron ran at ${now.toUTCString()}.`,
+        `${expiredShares.length} share link(s) have been automatically revoked after passing their expiry time.`,
+        ``,
+        `Affected share IDs: ${shareIds.join(", ")}`,
+        ``,
+        `Log in to TradeGateway to review the Document Vault.`,
+      ].join("\n"),
+    });
+
+    console.log(`[Cron] Document expiry: revoked ${expiredShares.length} expired share link(s)`);
+    return { expired: expiredShares.length };
+  } catch (err) {
+    console.error("[Cron] Document expiry cron failed:", err);
+    return { expired: 0, error: String(err) };
+  }
+}
+
+// Document expiry cron — daily at 03:00 UTC
+cron.schedule("0 0 3 * * *", runDocumentExpiryCron, { timezone: "UTC" });
+console.log("[Cron] Document expiry enforcement scheduled at 03:00 UTC daily");
+
+// ── Executive Dashboard daily digest ─────────────────────────────────────────
+// Fires at 03:05 UTC every day (5 min after document expiry to avoid DB contention).
+// Collects yesterday's KPIs and sends a structured owner notification.
+import { runExecDailyDigest } from "../jobs/execDigest";
+cron.schedule("0 5 3 * * *", async () => {
+  await runExecDailyDigest();
+}, { timezone: "UTC" });
+console.log("[Cron] Executive daily digest scheduled at 03:05 UTC daily");
+
+// ── AEO Certificate Renewal Reminder cron ────────────────────────────────────
+// Fires at 03:10 UTC every day. Sends renewal reminders at 60/30/7 days before expiry.
+import { runAeoRenewalReminders } from "../jobs/aeoRenewalReminders";
+cron.schedule("0 10 3 * * *", async () => {
+  await runAeoRenewalReminders();
+}, { timezone: "UTC" });
+console.log("[Cron] AEO renewal reminders scheduled at 03:10 UTC daily");
+
+// ── Nightly Revocation CSV email cron ────────────────────────────────────────
+// Fires at 04:00 UTC every day. Emails yesterday's revocation log CSV to all
+// active compliance officer addresses in the compliance_email_schedule table.
+import { runNightlyRevocationCsv } from "../jobs/nightlyRevocationCsv";
+import { startPaymentWorker, stopPaymentWorker } from "../paymentWorker";
+import { startPaymentArchivalWriter, stopPaymentArchivalWriter } from "../workers/paymentArchivalWriter";
+import { runScheduledBalanceDriftCheck } from "../balanceDrift";
+cron.schedule("0 0 4 * * *", async () => {
+  await runNightlyRevocationCsv();
+}, { timezone: "UTC" });
+console.log("[Cron] Nightly revocation CSV email scheduled at 04:00 UTC daily");
+
+// ── Marketplace webhook delivery worker (Phase 19 F1/H4) ─────────────────────
+// 15s tick, overlap-guarded inside processDueDeliveries. Fail-closed: with no
+// WEBHOOK_SECRET_KEY configured the worker refuses to run (never delivers
+// unsigned webhooks) and logs an honest skip.
+import { processDueDeliveries, webhooksConfigured } from "../webhooks/outbound";
+let webhookWorkerLastIdleLog = 0;
+setInterval(async () => {
+  try {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) return;
+    const r = await processDueDeliveries(db);
+    if (r.skippedReason === "not_configured" && Date.now() - webhookWorkerLastIdleLog > 300_000) {
+      webhookWorkerLastIdleLog = Date.now();
+      console.warn("[Webhooks] delivery worker idle — WEBHOOK_SECRET_KEY not configured (unsigned delivery refused)");
+    }
+  } catch (err) {
+    console.error("[Webhooks] delivery worker tick failed:", err);
+  }
+}, 15_000);
+console.log(`[Webhooks] outbound delivery worker scheduled every 15s (configured: ${webhooksConfigured()})`);
+
+// ── SLA breach real-time alert broadcast ─────────────────────────────────────
+// Runs every 15 minutes. Queries declarations that have breached their SLA and
+// broadcasts a workload_update WebSocket event to all connected officers so the
+// CustomsDashboard alert banner refreshes without a page reload.
+async function runSLABreachAlertBroadcast() {
+  try {
+    const { getDb } = await import("../db");
+    const { declarations } = await import("../../drizzle/schema");
+    const { and, inArray, isNotNull, sql, count } = await import("drizzle-orm");
+    const { broadcastWorkloadUpdate } = await import("./wsServer");
+    const db = await getDb();
+    if (!db) return;
+    const SLA_MS: Record<string, number> = {
+      green: 4 * 3600 * 1000,
+      yellow: 24 * 3600 * 1000,
+      red: 72 * 3600 * 1000,
+      blue: 48 * 3600 * 1000,
+    };
+    // Valid enum values from declarationStatusEnum in schema.ts
+    const processingStatuses = ["submitted", "under_assessment", "docs_required", "payment_pending", "payment_confirmed", "under_examination"];
+    const now = new Date();
+    // Count total pending
+    const [totalPendingRow] = await db
+      .select({ count: count() })
+      .from(declarations)
+      .where(inArray(declarations.status, processingStatuses as any[]));
+    // Count by lane
+    const [redRow] = await db.select({ count: count() }).from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), sql`${declarations.riskLane} = 'red'`));
+    const [yellowRow] = await db.select({ count: count() }).from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), sql`${declarations.riskLane} = 'yellow'`));
+    const [greenRow] = await db.select({ count: count() }).from(declarations)
+      .where(and(inArray(declarations.status, processingStatuses as any[]), sql`${declarations.riskLane} = 'green'`));
+    // Count SLA breaches
+    const processingRows = await db
+      .select({ submittedAt: declarations.submittedAt, riskLane: declarations.riskLane })
+      .from(declarations)
+      .where(
+        and(
+          inArray(declarations.status, processingStatuses as any[]),
+          isNotNull(declarations.submittedAt)
+        )
+      )
+      .limit(1000);
+    const slaBreachedCount = processingRows.filter((r) => {
+      if (!r.submittedAt) return false;
+      const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+      const threshold = SLA_MS[r.riskLane ?? "green"] ?? SLA_MS.green;
+      return elapsed > threshold;
+    }).length;
+    broadcastWorkloadUpdate({
+      totalPending: totalPendingRow?.count ?? 0,
+      redLane: redRow?.count ?? 0,
+      yellowLane: yellowRow?.count ?? 0,
+      greenLane: greenRow?.count ?? 0,
+      slaBreached: slaBreachedCount,
+      updatedAt: now.toISOString(),
+    });
+    if (slaBreachedCount > 0) {
+      console.log(`[Cron] SLA breach alert broadcast — ${slaBreachedCount} breach(es) detected, workload_update sent to all officers`);
+    }
+    // Sprint 118: read threshold from site_settings (falls back to 5 if not set)
+    let SLA_BREACH_EMAIL_THRESHOLD = 5;
+    try {
+      const { siteSettings: siteSettingsTable } = await import("../../drizzle/schema");
+      const { eq: eqSS } = await import("drizzle-orm");
+      const [thresholdRow] = await db
+        .select({ value: siteSettingsTable.value })
+        .from(siteSettingsTable)
+        .where(eqSS(siteSettingsTable.key, "sla_breach_email_threshold"))
+        .limit(1);
+      if (thresholdRow) {
+        const parsed = parseInt(thresholdRow.value, 10);
+        if (!isNaN(parsed) && parsed > 0) SLA_BREACH_EMAIL_THRESHOLD = parsed;
+      }
+    } catch { /* non-fatal, use default */ }
+    if (slaBreachedCount >= SLA_BREACH_EMAIL_THRESHOLD) {
+      try {
+        const { notifyOwner } = await import("./notification");
+        const redBreaches = processingRows.filter((r) => {
+          if (!r.submittedAt || (r.riskLane ?? "green") !== "red") return false;
+          const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+          return elapsed > SLA_MS.red;
+        }).length;
+        const yellowBreaches = processingRows.filter((r) => {
+          if (!r.submittedAt || (r.riskLane ?? "green") !== "yellow") return false;
+          const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+          return elapsed > SLA_MS.yellow;
+        }).length;
+        const greenBreaches = slaBreachedCount - redBreaches - yellowBreaches;
+        await notifyOwner({
+          title: `🚨 SLA Breach Alert — ${slaBreachedCount} Declaration${slaBreachedCount !== 1 ? "s" : ""} Overdue`,
+          content: [
+            `**SLA Breach Digest** — ${now.toUTCString()}`,
+            ``,
+            `A total of **${slaBreachedCount}** declaration${slaBreachedCount !== 1 ? "s are" : " is"} currently breaching their SLA threshold.`,
+            ``,
+            `| Lane   | Breached |`,
+            `|--------|----------|`,
+            `| 🔴 Red    | ${redBreaches} |`,
+            `| 🟡 Yellow | ${yellowBreaches} |`,
+            `| 🟢 Green  | ${greenBreaches} |`,
+            ``,
+            `Please log in to the Customs Dashboard and use the **SLA Breached** filter to triage these declarations immediately.`,
+          ].join("\n"),
+        });
+        console.log(`[Cron] SLA breach escalation email sent — ${slaBreachedCount} breaches (threshold: ${SLA_BREACH_EMAIL_THRESHOLD})`);
+      } catch (emailErr) {
+        console.warn("[Cron] SLA breach escalation email failed:", emailErr);
+      }
+    }
+  } catch (err) {
+    console.error("[Cron] SLA breach alert broadcast failed:", err);
+  }
+}
+// SLA breach alert broadcast — every 15 minutes (offset by 7 minutes from port congestion scan)
+// NOTE: "7/15" is rejected by node-cron >= 4.6 (boot-fatal at module load).
+// The explicit list 7,22,37,52 is the semantically identical classic-cron form.
+cron.schedule("0 7,22,37,52 * * * *", runSLABreachAlertBroadcast, { timezone: "UTC" });
+console.log("[Cron] SLA breach alert broadcast scheduled every 15 minutes");
+
+// ─── Nightly Bulk Export Expiry Cleanup ──────────────────────────────────────
+// Runs at 03:30 UTC every day.
+// Hard-deletes bulk_exports rows whose expiresAt has passed and removes their S3 objects.
+async function runBulkExportExpiryCron() {
+  try {
+    const { getDb } = await import("../db");
+    const db = await getDb();
+    if (!db) { console.warn("[BulkExportExpiry] DB unavailable, skipping."); return; }
+    const now = new Date();
+    const { lt: ltOp, eq: eqOp } = await import("drizzle-orm");
+    const { bulkExports: bulkExportsTable } = await import("../../drizzle/schema");
+    const { storageDelete } = await import("../storage");
+    // Find all expired rows
+    const expired = await db
+      .select({ id: bulkExportsTable.id, s3Key: bulkExportsTable.s3Key })
+      .from(bulkExportsTable)
+      .where(ltOp(bulkExportsTable.expiresAt, now));
+
+    if (expired.length === 0) {
+      console.log("[BulkExportExpiry] No expired exports to clean up.");
+      return;
+    }
+
+    let deleted = 0;
+    let s3Errors = 0;
+    for (const row of expired) {
+      try {
+        if (row.s3Key) {
+          await storageDelete(row.s3Key);
+        }
+      } catch (e) {
+        console.warn(`[BulkExportExpiry] S3 delete failed for key ${row.s3Key}:`, e);
+        s3Errors++;
+      }
+      await db.delete(bulkExportsTable).where(eqOp(bulkExportsTable.id, row.id));
+      deleted++;
+    }
+    console.log(`[BulkExportExpiry] Cleaned up ${deleted} expired exports (${s3Errors} S3 errors).`);
+  } catch (err) {
+    console.error("[BulkExportExpiry] Cron error:", err);
+  }
+}
+cron.schedule("0 30 3 * * *", runBulkExportExpiryCron, { timezone: "UTC" });
+console.log("[Cron] Bulk export expiry cleanup scheduled nightly at 03:30 UTC");
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const server = net.createServer();
+    server.listen(port, () => {
+      server.close(() => resolve(true));
+    });
+    server.on("error", () => resolve(false));
+  });
+}
+
+async function findAvailablePort(startPort: number = 3000): Promise<number> {
+  for (let port = startPort; port < startPort + 20; port++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`No available port found starting from ${startPort}`);
+}
+
+async function runPermifySeedOnStartup() {
+  const permifyHost = process.env.PERMIFY_HOST;
+  if (!permifyHost) {
+    console.log("[Permify] PERMIFY_HOST not set — skipping seed on startup");
+    return;
+  }
+  try {
+    // Check if Permify is reachable before attempting seed
+    const healthRes = await fetch(`${permifyHost}/healthz`, { signal: AbortSignal.timeout(2000) });
+    if (!healthRes.ok) {
+      console.warn("[Permify] Health check failed — skipping seed");
+      return;
+    }
+    // Write the schema
+    const schemaPath = new URL("../../infra/permify/schema.perm", import.meta.url);
+    let schemaBody: string;
+    try {
+      const { readFileSync } = await import("fs");
+      schemaBody = readFileSync(schemaPath, "utf8");
+    } catch {
+      console.warn("[Permify] schema.perm not found — skipping seed");
+      return;
+    }
+    const PERMIFY_TENANT = process.env.PERMIFY_TENANT || "tradegateway";
+    const schemaRes = await fetch(`${permifyHost}/v1/tenants/${PERMIFY_TENANT}/schemas/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ schema: schemaBody }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (schemaRes.ok) {
+      console.log("[Permify] Schema written successfully");
+    } else {
+      const text = await schemaRes.text();
+      console.warn(`[Permify] Schema write failed (${schemaRes.status}): ${text}`);
+    }
+  } catch (err) {
+    console.warn("[Permify] Seed on startup failed (non-fatal):", err);
+  }
+}
+
+async function startServer() {
+  // ── Phase-6 startup gates (fail fast, before any listener or route) ─────────
+  // 1. Refuse to boot in production when demo/test/mock surfaces are enabled.
+  // 2. Refuse to boot in production with missing or known-dev webhook secrets.
+  {
+    const { assertNoDemoSurfacesInProduction } = await import("./productionGates");
+    assertNoDemoSurfacesInProduction();
+    const { validateWebhookSecrets } = await import("./webhookSecretsValidator");
+    validateWebhookSecrets();
+  }
+  const app = express();
+  // Trust the reverse proxy (Manus/nginx) so express-rate-limit reads the correct client IP
+  app.set('trust proxy', 1);
+  const server = createServer(app);
+  // Permify schema seed on startup (non-blocking, only when PERMIFY_HOST is set)
+  runPermifySeedOnStartup().catch(() => {});
+  // R4 FIX: Provision system payment accounts (NCS Revenue, Bond Collateral, etc.) at startup
+  import('../_core/paymentAccountProvisioner').then(({ provisionSystemAccounts }) => {
+    provisionSystemAccounts().catch((err) => console.warn('[Startup] System account provisioning failed:', err.message));
+  }).catch(() => {});
+  // R5 FIX: Ensure OpenSearch indices exist at startup
+  import('../_core/opensearch').then(({ ensureOpenSearchIndices }) => {
+    ensureOpenSearchIndices().catch((err) => console.warn('[Startup] OpenSearch index init failed:', err.message));
+  }).catch(() => {});
+  // Sprint 63: WebSocket server for real-time notifications
+  setupWebSocketServer(server);
+
+  // ── OTel tenant attribution — JWT claim / edge header → baggage (Phase-7) ────
+  // Must run before any handler so downstream server spans inherit the baggage.
+  // No-op when telemetry is disabled; never blocks a request.
+  {
+    const { tenantBaggageMiddleware } = await import("./telemetry");
+    app.use(tenantBaggageMiddleware);
+  }
+
+  // ── Request correlation ID middleware ───────────────────────────────────────────────
+  // Injects X-Request-ID header for distributed tracing. Uses incoming header if
+  // already set by a reverse proxy (nginx/APISIX), otherwise generates a new UUID.
+  app.use((req: any, res: any, next: any) => {
+    const requestId = (req.headers['x-request-id'] as string) ||
+      `tg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    req.requestId = requestId;
+    res.setHeader('X-Request-ID', requestId);
+    next();
+  });
+
+  // ── Structured access logging ───────────────────────────────────────────────────────────
+  // Logs each API request as structured JSON in production, human-readable in dev.
+  if (process.env.NODE_ENV === 'production') {
+    app.use((req: any, res: any, next: any) => {
+      const start = Date.now();
+      res.on('finish', () => {
+        // Skip health check and metrics noise in production logs
+        if (req.path === '/api/health/live' || req.path === '/metrics') return;
+        const log = {
+          ts: new Date().toISOString(),
+          requestId: req.requestId,
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          ms: Date.now() - start,
+          ip: req.ip,
+          ua: req.headers['user-agent']?.slice(0, 120),
+        };
+        process.stdout.write(JSON.stringify(log) + '\n');
+      });
+      next();
+    });
+  }
+  // ── CORS ─────────────────────────────────────────────────────────────────────
+  // Explicit allowlist. Additional deployment origins are configured via the
+  // CORS_ALLOWED_ORIGINS env var (comma-separated exact origins, https only in
+  // production). localhost/127.0.0.1 origins are development-only. Credentials
+  // are enabled, so no wildcard/pattern-broad origins are ever permitted.
+  const envOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map(o => o.trim())
+    .filter(Boolean)
+    .filter(o => {
+      if (process.env.NODE_ENV === "production" && !o.startsWith("https://")) {
+        console.warn(`[CORS] Ignoring non-HTTPS origin in production: ${o}`);
+        return false;
+      }
+      return true;
+    });
+  const allowedOrigins: (RegExp | string)[] = [
+    /\.manus\.space$/,
+    /\.manus\.computer$/,
+    ...envOrigins,
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : [/^https?:\/\/localhost(:\d+)?$/, /^https?:\/\/127\.0\.0\.1(:\d+)?$/]),
+  ];
+  // ── DDoS slow-down (global — applied before CORS so it catches all traffic) ──
+  app.use("/api", ddosSlowDown);
+
+  app.use(cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = allowedOrigins.some(p => typeof p === 'string' ? p === origin : p.test(origin));
+      callback(allowed ? null : new Error('CORS: origin not allowed'), allowed);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
+    exposedHeaders: ['X-Request-ID'],
+    maxAge: 86400,
+  }));
+  // ── Security headers (helmet) ─────────────────────────────────────────────
+  // Phase 17 (G1): map engines/tiles are config-driven, never CDN-wide-open.
+  // Operators whitelist ONLY the tile/style/glyph origins actually in use via
+  // env (comma-separated origins):
+  //   CSP_SCRIPT_SRC_EXTRA   — e.g. a same-origin maps bootstrap proxy
+  //   CSP_CONNECT_SRC_EXTRA  — e.g. https://tiles.openfreemap.org,https://tile.openstreetmap.org
+  //   CSP_IMG_SRC_EXTRA      — raster tile origins if img-src https: is ever tightened
+  // Defaults stay fail-closed (same-origin only) when the env vars are unset.
+  const cspScriptExtra = parseCspOrigins(process.env.CSP_SCRIPT_SRC_EXTRA);
+  const cspConnectExtra = parseCspOrigins(process.env.CSP_CONNECT_SRC_EXTRA);
+  const cspImgExtra = parseCspOrigins(process.env.CSP_IMG_SRC_EXTRA);
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        // Tighten CSP in production: remove unsafe-inline/eval
+        scriptSrc: process.env.NODE_ENV === 'production'
+          ? ["'self'", "https://fonts.googleapis.com", ...cspScriptExtra]
+          : ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://fonts.googleapis.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "blob:", "https:", ...cspImgExtra],
+        // SW-S11-3: production connect-src is same-origin + websockets only —
+        // the previous `https:` allowed exfiltration to any HTTPS endpoint.
+        // Map tile/style/glyph fetches require explicit CSP_CONNECT_SRC_EXTRA origins.
+        connectSrc: process.env.NODE_ENV === 'production'
+          ? ["'self'", "wss:", ...cspConnectExtra]
+          : ["'self'", "wss:", "https:"],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        // MapLibre GL / Cesium create WebGL workers from blob: URLs.
+        workerSrc: ["'self'", "blob:"],
+        upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    frameguard: { action: 'deny' },
+    noSniff: true,
+    xssFilter: true,
+  }));
+  // ── Input sanitization (XSS prevention) ─────────────────────────────────────
+  app.use(sanitizeMiddleware);
+  // ── Response compression (Phase 21 perf) ─────────────────────────────────
+  // gzip/deflate for JSON/CSV API payloads (large list responses: declaration
+  // queues, DG board, notifications). SSE streams are excluded — compression
+  // buffering would break their real-time delivery semantics.
+  app.use(compression({
+    filter: (req, res) => {
+      if (req.path === "/api/events/anomalies") return false;
+      return compression.filter(req, res);
+    },
+  }));
+  // ── File upload guard (ransomware/malware delivery prevention) ─────────────
+  app.use("/api/upload", fileUploadGuard);
+
+  // ── Financial operation rate limiting ────────────────────────────────────────
+  app.use("/api/trpc/payments", financialRateLimit);
+  app.use("/api/trpc/mojaloop", financialRateLimit);
+  app.use("/api/trpc/batchPayments", financialRateLimit);
+  app.use("/api/trpc/ledger", financialRateLimit);
+  app.use("/api/trpc/drawback", financialRateLimit);
+
+  // ── Admin operation rate limiting ─────────────────────────────────────────────
+  app.use("/api/trpc/bulkExport", adminOperationRateLimit);
+  app.use("/api/trpc/tenant", adminOperationRateLimit);
+  app.use("/api/trpc/keycloak", adminOperationRateLimit);
+
+  // ── Scheduled-job endpoints: Bearer-auth, fail-closed in production ────────
+  app.use("/api/scheduled", scheduledJobAuth);
+
+  // ── Webhook/ingest endpoints: strict unauthenticated-traffic rate limits ──
+  const webhookRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many webhook requests." },
+  });
+  app.use("/api/webhooks", webhookRateLimit);
+  app.use("/api/v1/msw/exchange", webhookRateLimit);
+
+  // Body parser — 10 MB JSON, 25 MB for URL-encoded (file uploads use multipart)
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
+
+  // ─── MSW CROSS-BORDER EXCHANGE INGEST (Phase 10 WP-3) ───────────────────────
+  // MSW-to-MSW signed ingest, mirroring port-interop's NSW JWS ingress
+  // (POST /v1/nsw/port-calls): authority JWS (RS256, pinned peer JWKS) +
+  // jti replay reserve + envelope v1.0 content-signature verify + fail-closed
+  // IMO reverse mapping into a foreign declaration DRAFT (never auto-accepted).
+  app.post("/api/v1/msw/exchange/ingest", async (req, res) => {
+    try {
+      const { ingestExchangeMessage } = await import("./mswExchange");
+      const result = await ingestExchangeMessage({
+        authorityJws: req.headers["x-msw-authority-signature"] as string | undefined,
+        rawBody: JSON.stringify(req.body ?? {}),
+      });
+      res.status(202).json({ ok: true, ...result });
+    } catch (err) {
+      const { MswExchangeError } = await import("./mswExchange");
+      if (err instanceof MswExchangeError) {
+        const status =
+          err.reasonCode === "EXCHANGE_SIGNATURE_MISSING" || err.reasonCode === "EXCHANGE_SIGNATURE_REJECTED" ? 401
+          : err.reasonCode === "EXCHANGE_REPLAY" ? 409
+          : err.reasonCode === "EXCHANGE_ENVELOPE_REJECTED" || err.reasonCode === "EXCHANGE_IMPORT_REJECTED" ? 400
+          : 503; // CONFIG / REPLAY_STORE_UNAVAILABLE / PERSISTENCE_UNAVAILABLE fail closed as unavailable
+        res.status(status).json({ ok: false, reasonCode: err.reasonCode, error: err.message });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "internal error" });
+    }
+  });
+
+  // ─── KEYCLOAK EVENT WEBHOOK ──────────────────────────────────────────────────
+  app.post("/api/webhooks/keycloak-event", express.json(), async (req, res) => {
+    try {
+      const secret = process.env.KEYCLOAK_WEBHOOK_SECRET;
+      if (secret) {
+        const sig = req.headers["x-keycloak-signature"] as string | undefined;
+        if (!sig) { res.status(401).json({ error: "Missing signature" }); return; }
+        const { createHmac } = await import("crypto");
+        const hmac = createHmac("sha256", secret);
+        hmac.update(JSON.stringify(req.body));
+        const expected = hmac.digest("hex");
+        if (sig !== expected) { res.status(401).json({ error: "Invalid signature" }); return; }
+      }
+      const event = req.body as {
+        type?: string; realmId?: string; userId?: string;
+        resourceType?: string; operationType?: string;
+        representation?: unknown; time?: number;
+      };
+      const eventType = event.type ?? event.operationType ?? "UNKNOWN";
+      const actor = event.userId ?? "keycloak-system";
+      const detail = JSON.stringify({ resourceType: event.resourceType, representation: event.representation });
+      // Write to auditEvents
+      try {
+        const dbModule = await import("../db");
+        const db = await dbModule.getDb();
+        if (db) {
+          const { auditEvents } = await import("../../drizzle/schema");
+          await db.insert(auditEvents).values({
+            action: `KEYCLOAK_${eventType}`,
+            entityType: "user" as any,
+            entityId: 0,
+            actorId: null,
+            actorType: "keycloak",
+            metadata: { actor, detail },
+            createdAt: event.time ? new Date(event.time) : new Date(),
+          });
+        }
+      } catch (dbErr) {
+        console.warn("[Keycloak Webhook] DB write failed:", dbErr);
+      }
+      // Index in OpenSearch
+      try {
+        const { indexAuditEvent } = await import("./opensearch");
+        await indexAuditEvent({
+          id: 0,
+          action: `KEYCLOAK_${eventType}`,
+          entityType: event.resourceType ?? "keycloak",
+          entityId: 0,
+          actorId: null,
+          actorType: "keycloak",
+          createdAt: event.time ? new Date(event.time) : new Date(),
+        });
+      } catch (osErr) {
+        console.warn("[Keycloak Webhook] OpenSearch index failed:", osErr);
+      }
+      res.json({ received: true });
+    } catch (err) {
+      console.error("[Keycloak Webhook] Error:", err);
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // ─── OPENSEARCH ILM ADMIN ENDPOINT ───────────────────────────────────────────
+  app.post("/api/admin/opensearch/setup-ilm", async (req, res) => {
+    try {
+      const authResult = await sdk.authenticateRequest(req);
+      if (!authResult || authResult.role !== "admin") {
+        res.status(403).json({ error: "Admin access required" });
+        return;
+      }
+      const { setupIndexLifecycle } = await import("./opensearch");
+      const result = await setupIndexLifecycle();
+      res.json(result);
+    } catch (err) {
+      console.error("[ILM Setup] Error:", err);
+      res.status(500).json({ error: "ILM setup failed" });
+    }
+  });
+
+  // Sprint 68: OpenAPI spec endpoint
+  registerOpenApiRoute(app);
+  // Deep health check endpoints (/api/health, /api/health/live, /api/health/ready)
+  registerHealthRoutes(app);
+  // Prometheus metrics endpoint — scraped by Prometheus every 15 s
+  // SECURITY: Restricted to internal network (loopback/RFC-1918) or bearer token auth
+  app.get("/metrics", async (req, res) => {
+    const clientIp = (req.headers['x-forwarded-for'] as string || req.ip || req.socket.remoteAddress || '').split(',')[0].trim();
+    const isInternal = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(clientIp)
+      || clientIp.startsWith('10.') || clientIp.startsWith('172.16.') || clientIp.startsWith('192.168.');
+    const metricsToken = process.env.METRICS_BEARER_TOKEN || '';
+    const authHeader = req.headers.authorization || '';
+    const hasValidToken = metricsToken.length > 0 && authHeader === `Bearer ${metricsToken}`;
+    if (!isInternal && !hasValidToken) {
+      res.status(403).json({ error: 'Metrics endpoint restricted to internal network. Provide Bearer token for external access.' });
+      return;
+    }
+    try {
+      res.set("Content-Type", metricsRegistry.contentType);
+      res.end(await metricsRegistry.metrics());
+    } catch (err) {
+      res.status(500).end(String(err));
+    }
+  });
+  // Sprint 74: OGA approval callback webhook (POST /api/webhooks/oga)
+  const { registerOgaWebhookRoute } = await import("../webhooks/oga");
+  registerOgaWebhookRoute(app);
+  // Sprint 77: Sanctions screening real-time alert webhook (POST /api/webhooks/sanctions-hit)
+  const { registerSanctionsWebhookRoute } = await import("../webhooks/sanctions");
+  registerSanctionsWebhookRoute(app);
+  // v39: Flink CEP alert ingest webhook (POST /api/webhooks/cep-event)
+  const { registerCepWebhookRoute } = await import("../webhooks/cep");
+  registerCepWebhookRoute(app);
+  // Sprint 79: Public certificate verification endpoint (GET /api/verify/:certNumber)
+  const { registerCertVerifyRoute } = await import("../routes/certVerify");
+  registerCertVerifyRoute(app);
+  // WP-8: API marketplace public surface (signed catalogue, public KPIs, status)
+  const { registerMarketplacePublicRoutes } = await import("../routes/marketplacePublic");
+  registerMarketplacePublicRoutes(app);
+  // Phase 12: stakeholder-360 CRM + marketplace monetization REST surface
+  const { registerCrmMarketplaceApiRoutes } = await import("../routes/crmMarketplaceApi");
+  registerCrmMarketplaceApiRoutes(app);
+  // Phase 12 Mission C: executive/analytics/briefing REST surface
+  const { registerExecutiveApiRoutes } = await import("../routes/executiveApi");
+  registerExecutiveApiRoutes(app);
+  // Phase 22: REST push-token registration (Bearer-auth, mobile contract)
+  const { registerPushTokensApiRoutes } = await import("../routes/pushTokensApi");
+  registerPushTokensApiRoutes(app);
+  // Phase 16 Wave P1: shipping-line API products (berth-availability, congestion-forecast)
+  const { registerShippingLineApiRoutes } = await import("../routes/shippingLineApi");
+  registerShippingLineApiRoutes(app);
+  // Phase 19 (F1/H2): governed marketplace webhook subscriptions (API-key scoped)
+  const { registerMarketplaceWebhookRoutes } = await import("../routes/marketplaceWebhooks");
+  registerMarketplaceWebhookRoutes(app);
+  // WP-8: external metered API surface for marketplace key holders
+  const { requireApiKey } = await import("../middleware/apiKeyAuth");
+  const { computeOperationalKpis } = await import("../marketplace/kpiService");
+  app.get(
+    "/api/ext/v1/kpis",
+    requireApiKey("reports:read", { id: "kpi-service", sandbox: false }),
+    async (_req, res) => {
+      try {
+        res.json(await computeOperationalKpis(24));
+      } catch (err) {
+        res.status(503).json({ status: "down", error: err instanceof Error ? err.message : "KPIs unavailable" });
+      }
+    }
+  );
+  // File upload endpoint — authenticated multipart upload to S3
+  const { uploadRouter } = await import("../routes/uploadRoute");
+  app.use("/api/upload", uploadRouter);
+  // E2E test auth endpoint — only mounted when E2E_TEST_MODE=1 (never in production)
+  if (process.env.E2E_TEST_MODE === "1") {
+    const { registerE2eTestAuthRoute } = await import("../routes/e2eTestAuth");
+    registerE2eTestAuthRoute(app);
+  }
+  // Demo mode auth endpoint — only mounted when DEMO_MODE=true
+  // Provides zero-friction demo access without OAuth for all 6 portal roles
+  if (process.env.DEMO_MODE === "true") {
+    const { registerDemoAuthRoute } = await import("../routes/demoAuth");
+    registerDemoAuthRoute(app);
+  }
+
+  // SSE endpoint for real-time anomaly alerts (insider threat monitoring)
+  {
+    const { anomalySSEHandler } = await import("../sse");
+    app.get("/api/events/anomalies", anomalySSEHandler);
+    console.log("[SSE] Anomaly alert stream mounted at GET /api/events/anomalies");
+  }
+
+  // Kafka consumer for insider threat topics → anomalyBus → SSE clients
+  {
+    const { startInsiderThreatKafkaConsumer } = await import("../kafkaConsumer");
+    startInsiderThreatKafkaConsumer().catch((err: Error) =>
+      console.warn("[KafkaConsumer] Failed to start insider threat consumer:", err.message)
+    );
+  }
+
+  // Phase 8: PCS projection consumer for ports.*.v1 outbox topics → pcs_* read model
+  {
+    const { startPcsProjectionConsumer } = await import("../pcsProjection");
+    startPcsProjectionConsumer().catch((err: Error) =>
+      console.warn("[PcsProjection] Failed to start PCS projection consumer:", err.message)
+    );
+  }
+
+  // PRA-096 (Phase 9): geo vessel projection consumer for vessels.events →
+  // vessel_tracking_events read model (envelope v1.0 verified, fail-closed DLQ)
+  {
+    const { startGeoVesselProjectionConsumer } = await import("../geoVesselProjection");
+    startGeoVesselProjectionConsumer().catch((err: Error) =>
+      console.warn("[GeoVesselProjection] Failed to start geo vessel consumer (GAP-AIS-FEED stays open):", err.message)
+    );
+  }
+
+  // Scheduled Heartbeat handlers — must be before Vite/static fallthrough
+  {
+    const { bondExpiryDigestHandler } = await import("../scheduled/bondExpiryDigest");
+    app.post("/api/scheduled/bond-expiry-digest", bondExpiryDigestHandler);
+  }
+
+    // 4-Eyes Approval Expiry — heartbeat handler + cron
+  {
+    const { fourEyesExpiryHandler, runFourEyesExpiryCron } = await import("../scheduled/fourEyesExpiry");
+    app.post("/api/scheduled/four-eyes-expiry", fourEyesExpiryHandler);
+    // Also run as an in-process cron every 15 minutes
+    cron.schedule("0 */15 * * * *", runFourEyesExpiryCron, { timezone: "UTC" });
+    console.log("[Cron] 4-Eyes approval expiry scheduled every 15 minutes");
+  }
+  // Lakehouse Nightly Trade-Stats Rollup — Heartbeat handler
+  // Cron is created via: external scheduler registration for lakehouse-nightly-rollup
+  //   --cron "0 0 2 * * *" --path /api/scheduled/lakehouse-rollup
+  //   --description "Nightly trade-stats Delta Lake write-back at 02:00 UTC"
+  // Must be run after deploying the site.
+  {
+    const { lakehouseRollupHandler } = await import("../scheduled/lakehouseRollup");
+    app.post("/api/scheduled/lakehouse-rollup", lakehouseRollupHandler);
+    console.log("[Heartbeat] /api/scheduled/lakehouse-rollup registered");
+  }
+  // v106: Post-Clearance Audit Weekly Reminder — Heartbeat handler (Monday 06:00 UTC)
+  {
+    const { postAuditReminderHandler } = await import("../scheduled/postAuditReminder");
+    app.post("/api/scheduled/post-audit-reminder", postAuditReminderHandler);
+    console.log("[Heartbeat] /api/scheduled/post-audit-reminder registered");
+  }
+  {
+    const { slaBreachEscalationHandler } = await import("../scheduled/slaBreachEscalation");
+    app.post("/api/scheduled/sla-breach-escalation", slaBreachEscalationHandler);
+    console.log("[Heartbeat] /api/scheduled/sla-breach-escalation registered");
+  }
+  {
+    const { documentVaultExpiryHandler } = await import("../scheduled/documentVaultExpiry");
+    app.post("/api/scheduled/document-vault-expiry", documentVaultExpiryHandler);
+    console.log("[Heartbeat] /api/scheduled/document-vault-expiry registered");
+  }
+  // Tenant Domain DNS Propagation Poller — Heartbeat handler (every 15 min)
+  // Cron creation: external scheduler registration for tenant-domain-poller
+  //   --cron "0 */15 * * * *" --path /api/scheduled/tenant-domain-poll
+  //   --description "Auto-verify pending tenant custom domains every 15 minutes"
+  {
+    const { tenantDomainPollerHandler } = await import("../scheduled/tenantDomainPoller");
+    app.post("/api/scheduled/tenant-domain-poll", tenantDomainPollerHandler);
+    console.log("[Heartbeat] /api/scheduled/tenant-domain-poll registered");
+  }
+  // ── HTTP caching for reference-data reads (Phase 21 perf) ──────────────
+  // tRPC queries over httpBatchLink arrive as GET /api/trpc/<proc> (batched:
+  // comma-joined procedure paths). Whitelisted read-only, slowly-varying
+  // reference-data procedures get an honest short Cache-Control TTL so client
+  // pollers and shared caches can reuse responses; every other API response
+  // stays uncached (mutations are POST and never match).
+  //   - portCongestion.* : 60 s — matches the server-side 7-day aggregate
+  //     cache TTL (PORT_PROFILES_CACHE_TTL_MS); staleness is bounded and
+  //     documented there.
+  //   - apiChangelog.*   : 300 s — published API changelog/versions (public
+  //     reference data that changes only on deploys).
+  const REFERENCE_DATA_CACHE_TTLS: Array<{ prefix: string; maxAgeSeconds: number; scope: "private" | "public" }> = [
+    { prefix: "portCongestion.", maxAgeSeconds: 60, scope: "private" },
+    { prefix: "apiChangelog.", maxAgeSeconds: 300, scope: "public" },
+  ];
+  app.use("/api/trpc", (req, res, next) => {
+    if (req.method !== "GET") return next();
+    // req.path is mount-relative ("/portCongestion.getNetworkSummary" or a
+    // comma-joined batch "/a.getX,b.getY"); strip the leading slash.
+    const procedures = req.path.replace(/^\//, "").split(",");
+    for (const { prefix, maxAgeSeconds, scope } of REFERENCE_DATA_CACHE_TTLS) {
+      if (procedures.every((p) => p.startsWith(prefix))) {
+        res.setHeader("Cache-Control", `${scope}, max-age=${maxAgeSeconds}`);
+        break;
+      }
+    }
+    next();
+  });
+  // tRPC API — apply general rate limiting
+  app.use("/api/trpc", trpcRateLimit);
+  app.use(
+    "/api/trpc",
+    createExpressMiddleware({
+      router: appRouter,
+      createContext,
+    })
+  );
+  // ── CEP Suppression Log CSV export (admin-only) ───────────────────────────
+  // NOTE: must be registered BEFORE the SPA fallback/apiNotFound (serveStatic/
+  // setupVite below) — anything mounted after the /api 404 handler is unreachable.
+  app.get("/api/cep/suppression-log.csv", async (req, res) => {
+    try {
+      const user = await sdk.authenticateRequest(req as any).catch(() => null);
+      if (!user || user.role !== "admin") {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    } catch {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    try {
+      const { getPool } = await import("../db");
+      const pool = getPool();
+      if (!pool) { res.status(500).json({ error: "DB unavailable" }); return; }
+      const { rows } = await pool.query(`
+        SELECT
+          sl.id,
+          sl.alert_id,
+          sl.pattern_id,
+          sl.suppressed_by,
+          u.name AS suppressed_by_name,
+          sl.hours,
+          sl.suppressed_until,
+          sl.created_at
+        FROM cep_suppression_log sl
+        LEFT JOIN users u ON u.id = sl.suppressed_by
+        ORDER BY sl.created_at DESC
+      `);
+      const header = "id,alert_id,pattern_id,suppressed_by,suppressed_by_name,hours,suppressed_until,created_at\n";
+      const csvRows = (rows as Record<string, unknown>[]).map((r) =>
+        [
+          r.id, r.alert_id, r.pattern_id, r.suppressed_by,
+          `"${String(r.suppressed_by_name ?? "").replace(/"/g, '""')}"`,
+          r.hours,
+          r.suppressed_until ? new Date(r.suppressed_until as string).toISOString() : "",
+          r.created_at ? new Date(r.created_at as string).toISOString() : "",
+        ].join(",")
+      );
+      const csv = header + csvRows.join("\n");
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="suppression-log.csv"');
+      res.send(csv);
+    } catch (err) {
+      console.error("[CSV] suppression-log export error:", err);
+      res.status(500).json({ error: "Export failed" });
+    }
+  });
+
+  // development mode uses Vite, production mode uses static files
+  if (process.env.NODE_ENV === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+
+  const preferredPort = parseInt(process.env.PORT || "3000");
+  const port = await findAvailablePort(preferredPort);
+
+  if (port !== preferredPort) {
+    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+  }
+
+    server.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}/`);
+    // Seed default KPI targets on startup (idempotent)
+    import("../routers/kpiTargets").then(({ seedDefaultKpiTargets }) => seedDefaultKpiTargets()).catch(() => {});
+    // Phase 20: wire the cv.container-code.v1 Kafka consumer into startup.
+    // Honest default OFF: startCvContainerConsumer() returns immediately unless
+    // CV_CONTAINER_CONSUMER_ENABLED=true; when enabled it is fail-closed
+    // (KEY_DIRECTORY_PATH mandatory, every JWS envelope must verify).
+    import("../cvContainerConsumer")
+      .then(({ startCvContainerConsumer }) => startCvContainerConsumer())
+      .catch((err) => {
+        console.error("[cv-container] FATAL: consumer failed to start:", err);
+      });
+    // Seed demo data (bonded warehouses, CEP patterns, cost records) — idempotent
+    // SW-O4: demo seeding ONLY in explicit demo mode (never in production —
+    // productionGates already boot-refuses DEMO_MODE there). Seeded rows are
+    // marked source='demo' so dashboards/alerts can exclude them.
+    import("./productionGates").then(({ isDemoModeEnabled }) => {
+      if (!isDemoModeEnabled()) return;
+      import("../seedDemoData")
+        .then(({ seedAllDemoData }) => seedAllDemoData())
+        .catch((err) => {
+          // Fail loudly in dev — a half-seeded demo env is worse than none.
+          console.error("[Seed] FATAL: demo data seeding failed:", err);
+        });
+    });
+
+    // v52: Check CEP pattern threshold breaches every 30 minutes and notify owner
+    const checkThresholdBreaches = async () => {
+      try {
+        const { getPool, getDb } = await import("../db");
+        await getDb();
+        const pool = getPool();
+        if (!pool) return;
+        // Find patterns with a threshold set
+        const { rows: patterns } = await pool.query<{
+          pattern_id: string;
+          pattern_name: string;
+          daily_alert_threshold: number;
+        }>(`SELECT pattern_id, pattern_name, daily_alert_threshold
+            FROM cep_patterns
+            WHERE daily_alert_threshold IS NOT NULL AND is_active = true`);
+        if (patterns.length === 0) return;
+        const { notifyOwner } = await import("./notification");
+        for (const pattern of patterns) {
+          const { rows: [{ count }] } = await pool.query<{ count: string }>(
+            `SELECT COUNT(*) AS count FROM cep_alerts
+             WHERE pattern_id = $1
+               AND status NOT IN ('resolved', 'dismissed')
+               AND detected_at >= NOW() - INTERVAL '24 hours'`,
+            [pattern.pattern_id]
+          );
+          const dailyCount = parseInt(count, 10);
+          if (dailyCount > pattern.daily_alert_threshold) {
+            await notifyOwner({
+              title: `⚠ CEP Threshold Breach: ${pattern.pattern_name}`,
+              content: `Pattern "${pattern.pattern_name}" fired ${dailyCount} alerts in the last 24 hours, exceeding the configured threshold of ${pattern.daily_alert_threshold}. Review the CEP Alerts dashboard immediately.`,
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        // Non-critical — swallow errors silently
+      }
+    };
+    // Run once at startup, then every 30 minutes
+    checkThresholdBreaches();
+    setInterval(checkThresholdBreaches, 30 * 60 * 1000);
+  });
+
+  // ── Graceful shutdown ─────────────────────────────────────────────────────
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+    server.close(async () => {
+      console.log('[Server] HTTP server closed.');
+      try {
+        const { closePool } = await import('../db');
+        await closePool();
+        console.log('[Server] Database pool closed.');
+      } catch (err) {
+        console.error('[Server] Error closing database pool:', err);
+      }
+      console.log('[Server] Graceful shutdown complete.');
+      process.exit(0);
+    });
+    // Force exit after 30 seconds if graceful shutdown hangs
+    setTimeout(() => {
+      console.error('[Server] Graceful shutdown timed out. Forcing exit.');
+      process.exit(1);
+    }, 30_000);
+  };
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  // Also close Kafka producer on shutdown
+  process.on('SIGTERM', () => closeKafka().catch(() => {}));
+  process.on('SIGINT', () => closeKafka().catch(() => {}));
+
+  // Sprint 70/73: Broadcast live vessel positions every 15 seconds; check geofence crossings
+  // Deduplicate geofence alerts: track last-fired time per vessel+geofence pair
+  const geofenceAlertCache = new Map<string, number>();
+
+  setInterval(async () => {
+    try {
+      const { getLiveVesselsData } = await import("../routers/cargoTracking");
+      const vessels = await getLiveVesselsData();
+      if (vessels.length > 0) {
+        broadcastVesselUpdate({
+          vessels,
+          totalCount: vessels.length,
+          lastRefresh: new Date().toISOString(),
+        });
+        // Sprint 73: Check geofence crossings for each vessel
+        const { getDb } = await import("../db");
+        const db = await getDb();
+        if (db) {
+          const { geofences: gfTable } = await import("../../drizzle/schema");
+          const { eq } = await import("drizzle-orm");
+          const { notifyOwner } = await import("./notification");
+          const activeGeoFences = await db.select().from(gfTable).where(eq(gfTable.status, "active"));
+          // Point-in-polygon check using ray casting algorithm
+          const pointInPolygon = (lat: number, lon: number, polygon: Array<{ lat: number; lon: number }>) => {
+            let inside = false;
+            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+              const xi = polygon[i].lon, yi = polygon[i].lat;
+              const xj = polygon[j].lon, yj = polygon[j].lat;
+              const intersect = ((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+          for (const vessel of vessels) {
+            for (const gf of activeGeoFences) {
+              if (!gf.polygon || gf.polygon.length < 3) continue;
+              const inside = pointInPolygon(vessel.lat, vessel.lon, gf.polygon);
+              if (inside && gf.alertOnEntry && gf.notifyOwnerOnTrigger) {
+                const eventKey = `gf-${gf.id}-${vessel.mmsi}`;
+                const now = Date.now();
+                const lastFired = geofenceAlertCache.get(eventKey) ?? 0;
+                if (now - lastFired > 3_600_000) {
+                  geofenceAlertCache.set(eventKey, now);
+                  notifyOwner({
+                    title: `Geofence Alert: ${vessel.vesselName} entered ${gf.name}`,
+                    content: `Vessel ${vessel.vesselName} (MMSI: ${vessel.mmsi}) entered geofence zone "${gf.name}" (${gf.geofenceType}) at ${new Date().toUTCString()}. Position: ${vessel.lat.toFixed(4)}, ${vessel.lon.toFixed(4)}.`,
+                  }).catch(() => {});
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Silently skip if DB is unavailable
+    }
+  }, 15_000);
+}
+
+startServer().catch(console.error);
+
+// ── Payment Queue Background Worker ────────────────────────────────────────
+// Polls payment_queue every 5s, calls Mojaloop ILP, commits/retries with
+// exponential back-off. Dead-letters after max_attempts (default 5).
+startPaymentWorker();
+
+// ── Payment Archival Lakehouse Writer (Phase 22) ─────────────────────────────
+// Fulfils the status='pending' payment_archival_jobs rows enqueued by
+// runPaymentArchivalCron below: claims each job atomically (UPDATE … WHERE
+// status='pending' RETURNING), exports the committed payment_queue rows in the
+// job's tier window as CSV, PUTs the object to
+// s3://$PAYMENT_ARCHIVE_SINK_BUCKET/{tier}/{YYYY-MM-DD}/{jobId}.csv, and only
+// then marks the job completed with the REAL storageUri, actual bytesWritten
+// and transfersArchived. Any sink error marks the job failed + errorMessage —
+// never a fabricated URI. Disabled (one log line) when
+// PAYMENT_ARCHIVE_SINK_BUCKET is not set. See server/workers/paymentArchivalWriter.ts.
+startPaymentArchivalWriter();
+
+// Graceful shutdown: stop workers before process exits
+process.once("SIGTERM", () => stopPaymentWorker());
+process.once("SIGINT",  () => stopPaymentWorker());
+process.once("SIGTERM", () => stopPaymentArchivalWriter());
+process.once("SIGINT",  () => stopPaymentArchivalWriter());
+
+// ── Payment Archive Tiering Cron (1B payments/day pattern) ──────────────────
+// Inspired by: https://backend.how/posts/1b-payments-per-day/
+// Hot  (≤7 days):   fast read path, full PostgreSQL row
+// Warm (7–90 days): CSV export on object storage (see paymentArchivalWriter), metadata in DB
+// Cold (>90 days):  deep archive, CSV export on cold object storage
+async function runPaymentArchivalCron() {
+  const { getDb: _archiveGetDb } = await import("../db");
+  const db = await _archiveGetDb();
+  if (!db) {
+    console.warn("[Cron] Payment archival — DB unavailable, skipping");
+    return;
+  }
+  const now = new Date();
+  const tiers: Array<{ tier: "hot" | "warm" | "cold"; fromDays: number; toDays: number }> = [
+    { tier: "hot",  fromDays: 0,  toDays: 7   },
+    { tier: "warm", fromDays: 7,  toDays: 90  },
+    { tier: "cold", fromDays: 90, toDays: 3650 },
+  ];
+  for (const { tier, fromDays, toDays } of tiers) {
+    try {
+      const periodEnd   = new Date(now.getTime() - fromDays * 86_400_000);
+      const periodStart = new Date(now.getTime() - toDays  * 86_400_000);
+      const { paymentQueue: pq, paymentArchivalJobs: paj } = await import("../../drizzle/schema");
+      const { count: drizzleCount, eq: drizzleEq, and: drizzleAnd, gte: drizzleGte, lt: drizzleLt } = await import("drizzle-orm");
+      const [{ total }] = await db
+        .select({ total: drizzleCount() })
+        .from(pq)
+        .where(
+          drizzleAnd(
+            drizzleEq(pq.status, "committed"),
+            drizzleGte(pq.createdAt, periodStart),
+            drizzleLt(pq.createdAt, periodEnd),
+          )
+        );
+      if (Number(total) === 0) continue;
+      // Phase 22 (fail-closed): the previous implementation inserted a
+      // status:"completed" row with a FABRICATED s3://…parquet storageUri and
+      // an estimated byte count — no parquet object ever existed. Now the
+      // cron only ENQUEUES an honest status:"pending" job (storageUri NULL,
+      // bytesWritten 0); the lakehouse writer sets completedAt/storageUri/
+      // bytesWritten with real values only after the object actually exists.
+      const sinkBucket = process.env.PAYMENT_ARCHIVE_SINK_BUCKET;
+      if (!sinkBucket) {
+        console.warn(
+          `[Cron] Payment archival — ${tier} tier has ${total} committed transfers due, ` +
+          `but PAYMENT_ARCHIVE_SINK_BUCKET is not configured; skipping without recording a fake archive.`,
+        );
+        continue;
+      }
+      const jobId = `archival-${tier}-${now.toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 8)}`;
+      await db.insert(paj).values({
+        jobId,
+        tier,
+        periodStart,
+        periodEnd,
+        transfersArchived: 0,
+        bytesWritten: BigInt(0),
+        status: "pending",
+      });
+      console.log(`[Cron] Payment archival — ${tier} tier: enqueued ${jobId} (${total} transfers pending real archive to ${sinkBucket})`);
+    } catch (err) {
+      console.error(`[Cron] Payment archival ${tier} tier failed:`, err);
+    }
+  }
+}
+
+// Run archival daily at 04:00 UTC
+cron.schedule("0 0 4 * * *", runPaymentArchivalCron, { timezone: "UTC" });
+console.log("[Cron] Payment archival (Hot/Warm/Cold) scheduled at 04:00 UTC daily");
+
+// ── Balance Drift Reconciliation Cron (daily at 03:00 UTC) ─────────────────
+// Compares payment_accounts mirror vs committed payment_queue sums.
+// Notifies owner if any account has non-zero drift.
+cron.schedule("0 0 3 * * *", runScheduledBalanceDriftCheck, { timezone: "UTC" });
+console.log("[Cron] Balance drift reconciliation scheduled at 03:00 UTC daily");
