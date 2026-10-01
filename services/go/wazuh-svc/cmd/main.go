@@ -2,18 +2,28 @@
 // Provides login anomaly detection, API key abuse detection,
 // privilege escalation playbooks, and security score computation
 // for the TradeGateway NGSWTP platform.
+//
+// Phase 23 (C1): all state is persisted in PostgreSQL via pgx/v5.
+// The previous in-memory map store and seedStore() fabricated
+// agents/playbooks/alerts on every boot — removed. The service is
+// FAIL-CLOSED: it refuses to start when DATABASE_URL is unset or the
+// database is unreachable, and never falls back to memory.
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"log"
 	"math"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -27,20 +37,50 @@ const (
 	SeverityLow      AlertSeverity = "LOW"
 )
 
+// severityToLevel maps an AlertSeverity onto the Wazuh rule-level scale
+// (0–16) stored in wazuh_alerts.level.
+func severityToLevel(s AlertSeverity) int {
+	switch s {
+	case SeverityCritical:
+		return 15
+	case SeverityHigh:
+		return 12
+	case SeverityMedium:
+		return 7
+	default:
+		return 3
+	}
+}
+
+// levelToSeverity is the inverse of severityToLevel for rows read back
+// from wazuh_alerts when the payload does not carry an explicit severity.
+func levelToSeverity(level int) AlertSeverity {
+	switch {
+	case level >= 14:
+		return SeverityCritical
+	case level >= 10:
+		return SeverityHigh
+	case level >= 5:
+		return SeverityMedium
+	default:
+		return SeverityLow
+	}
+}
+
 type WazuhAlert struct {
-	ID          string        `json:"id"`
-	RuleID      int           `json:"rule_id"`
-	RuleName    string        `json:"rule_name"`
-	Description string        `json:"description"`
-	Severity    AlertSeverity `json:"severity"`
-	AgentID     string        `json:"agent_id"`
-	AgentName   string        `json:"agent_name"`
-	UserID      string        `json:"user_id,omitempty"`
-	IPAddress   string        `json:"ip_address,omitempty"`
-	Category    string        `json:"category"` // AUTH, API_ABUSE, PRIVILEGE_ESC, MALWARE, ANOMALY
-	Timestamp   time.Time     `json:"timestamp"`
-	Resolved    bool          `json:"resolved"`
-	PlaybookID  string        `json:"playbook_id,omitempty"`
+	ID          string         `json:"id"`
+	RuleID      int            `json:"rule_id"`
+	RuleName    string         `json:"rule_name"`
+	Description string         `json:"description"`
+	Severity    AlertSeverity  `json:"severity"`
+	AgentID     string         `json:"agent_id"`
+	AgentName   string         `json:"agent_name"`
+	UserID      string         `json:"user_id,omitempty"`
+	IPAddress   string         `json:"ip_address,omitempty"`
+	Category    string         `json:"category"` // AUTH, API_ABUSE, PRIVILEGE_ESC, MALWARE, ANOMALY
+	Timestamp   time.Time      `json:"timestamp"`
+	Resolved    bool           `json:"resolved"`
+	PlaybookID  string         `json:"playbook_id,omitempty"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
@@ -65,12 +105,12 @@ type Playbook struct {
 }
 
 type PlaybookExecution struct {
-	ID         string    `json:"id"`
-	PlaybookID string    `json:"playbook_id"`
-	AlertID    string    `json:"alert_id"`
-	Status     string    `json:"status"` // RUNNING, COMPLETED, FAILED
-	Actions    []string  `json:"actions_taken"`
-	StartedAt  time.Time `json:"started_at"`
+	ID          string     `json:"id"`
+	PlaybookID  string     `json:"playbook_id"`
+	AlertID     string     `json:"alert_id"`
+	Status      string     `json:"status"` // RUNNING, COMPLETED, FAILED
+	Actions     []string   `json:"actions_taken"`
+	StartedAt   time.Time  `json:"started_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
@@ -90,99 +130,212 @@ type AnomalyResult struct {
 	Score       float64       `json:"score"`
 }
 
-// ─── Store ────────────────────────────────────────────────────────────────────
+// ─── Store (PostgreSQL, pgx/v5) ───────────────────────────────────────────────
 
 type Store struct {
-	mu          sync.RWMutex
-	alerts      map[string]*WazuhAlert
-	agents      map[string]*Agent
-	playbooks   map[string]*Playbook
-	executions  map[string]*PlaybookExecution
-	loginEvents []LoginEvent
+	pool *pgxpool.Pool
 }
 
-var store = &Store{
-	alerts:    make(map[string]*WazuhAlert),
-	agents:    make(map[string]*Agent),
-	playbooks: make(map[string]*Playbook),
-	executions: make(map[string]*PlaybookExecution),
+var store *Store
+
+// alertExtra is the jsonb payload of wazuh_alerts.data — everything the
+// relational columns (id, rule_id, level, description, agent_id,
+// created_at) do not carry.
+type alertExtra struct {
+	RuleName   string         `json:"rule_name"`
+	Severity   AlertSeverity  `json:"severity"`
+	AgentName  string         `json:"agent_name"`
+	UserID     string         `json:"user_id,omitempty"`
+	IPAddress  string         `json:"ip_address,omitempty"`
+	Category   string         `json:"category"`
+	Resolved   bool           `json:"resolved"`
+	PlaybookID string         `json:"playbook_id,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
-func seedStore() {
-	now := time.Now()
+func marshalAlertData(a *WazuhAlert) ([]byte, error) {
+	return json.Marshal(alertExtra{
+		RuleName:   a.RuleName,
+		Severity:   a.Severity,
+		AgentName:  a.AgentName,
+		UserID:     a.UserID,
+		IPAddress:  a.IPAddress,
+		Category:   a.Category,
+		Resolved:   a.Resolved,
+		PlaybookID: a.PlaybookID,
+		Metadata:   a.Metadata,
+	})
+}
 
-	agents := []*Agent{
-		{ID: "001", Name: "customs-api-gateway-01", IP: "10.0.1.10", OS: "Ubuntu 22.04", Status: "active", LastSeen: now, Version: "4.7.0", Groups: []string{"api-gateway", "production"}},
-		{ID: "002", Name: "customs-db-primary-01", IP: "10.0.2.10", OS: "Ubuntu 22.04", Status: "active", LastSeen: now.Add(-2 * time.Minute), Version: "4.7.0", Groups: []string{"database", "production"}},
-		{ID: "003", Name: "keycloak-svc-01", IP: "10.0.3.10", OS: "Ubuntu 22.04", Status: "active", LastSeen: now.Add(-1 * time.Minute), Version: "4.7.0", Groups: []string{"auth", "production"}},
-		{ID: "004", Name: "mojaloop-gateway-01", IP: "10.0.4.10", OS: "Ubuntu 22.04", Status: "active", LastSeen: now.Add(-30 * time.Second), Version: "4.7.0", Groups: []string{"payments", "production"}},
-		{ID: "005", Name: "risk-engine-01", IP: "10.0.5.10", OS: "Ubuntu 22.04", Status: "disconnected", LastSeen: now.Add(-15 * time.Minute), Version: "4.7.0", Groups: []string{"ml", "production"}},
+func scanAlert(id string, ruleID, level int, description, agentID string, data []byte, createdAt time.Time) *WazuhAlert {
+	var extra alertExtra
+	if len(data) > 0 {
+		_ = json.Unmarshal(data, &extra)
 	}
+	sev := extra.Severity
+	if sev == "" {
+		sev = levelToSeverity(level)
+	}
+	return &WazuhAlert{
+		ID:          id,
+		RuleID:      ruleID,
+		RuleName:    extra.RuleName,
+		Description: description,
+		Severity:    sev,
+		AgentID:     agentID,
+		AgentName:   extra.AgentName,
+		UserID:      extra.UserID,
+		IPAddress:   extra.IPAddress,
+		Category:    extra.Category,
+		Timestamp:   createdAt,
+		Resolved:    extra.Resolved,
+		PlaybookID:  extra.PlaybookID,
+		Metadata:    extra.Metadata,
+	}
+}
 
-	playbooks := []*Playbook{
-		{
-			ID: "pb-001", Name: "Brute Force Response",
-			Description: "Auto-block IP after 5 failed logins within 5 minutes",
-			TriggerRule: 5710, AutoExecute: true,
-			Actions: []string{"block_ip_firewall", "revoke_active_sessions", "notify_owner", "create_incident"},
-		},
-		{
-			ID: "pb-002", Name: "Privilege Escalation Response",
-			Description: "Revoke elevated permissions and alert security team",
-			TriggerRule: 5902, AutoExecute: true,
-			Actions: []string{"revoke_admin_token", "demote_role_to_user", "notify_owner", "create_incident", "require_mfa_reenrollment"},
-		},
-		{
-			ID: "pb-003", Name: "API Key Abuse Response",
-			Description: "Suspend API key and rate-limit IP on abuse detection",
-			TriggerRule: 9001, AutoExecute: true,
-			Actions: []string{"suspend_api_key", "block_ip_rate_limit", "notify_owner"},
-		},
-		{
-			ID: "pb-004", Name: "Impossible Travel Response",
-			Description: "Flag account for review when login from geographically impossible location",
-			TriggerRule: 5715, AutoExecute: false,
-			Actions: []string{"flag_account_for_review", "require_additional_verification", "notify_owner"},
-		},
-		{
-			ID: "pb-005", Name: "Malware Detection Response",
-			Description: "Isolate affected agent and trigger forensic scan",
-			TriggerRule: 87105, AutoExecute: true,
-			Actions: []string{"isolate_agent", "trigger_forensic_scan", "notify_owner", "create_incident"},
-		},
+func (s *Store) listAlerts(ctx context.Context) ([]*WazuhAlert, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, rule_id, level, description, agent_id, data, created_at
+		   FROM wazuh_alerts ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
 	}
+	defer rows.Close()
 
-	// Seed some sample alerts
-	alerts := []*WazuhAlert{
-		{
-			ID: uuid.New().String(), RuleID: 5710, RuleName: "Multiple failed logins",
-			Description: "5 failed login attempts from 192.168.1.100 within 3 minutes",
-			Severity: SeverityHigh, AgentID: "003", AgentName: "keycloak-svc-01",
-			IPAddress: "192.168.1.100", Category: "AUTH",
-			Timestamp: now.Add(-10 * time.Minute), Resolved: false,
-			Metadata: map[string]any{"failed_count": 5, "window_minutes": 3},
-		},
-		{
-			ID: uuid.New().String(), RuleID: 9001, RuleName: "API key rate spike",
-			Description: "API key ngswtp_prod_abc123 exceeded 1000 req/min (normal: 60)",
-			Severity: SeverityMedium, AgentID: "001", AgentName: "customs-api-gateway-01",
-			Category: "API_ABUSE",
-			Timestamp: now.Add(-5 * time.Minute), Resolved: false,
-			Metadata: map[string]any{"key_prefix": "ngswtp_prod_abc", "req_per_min": 1000},
-		},
+	alerts := make([]*WazuhAlert, 0)
+	for rows.Next() {
+		var (
+			id, description, agentID string
+			ruleID, level            int
+			data                     []byte
+			createdAt                time.Time
+		)
+		if err := rows.Scan(&id, &ruleID, &level, &description, &agentID, &data, &createdAt); err != nil {
+			return nil, err
+		}
+		alerts = append(alerts, scanAlert(id, ruleID, level, description, agentID, data, createdAt))
 	}
+	return alerts, rows.Err()
+}
 
-	store.mu.Lock()
-	for _, a := range agents {
-		store.agents[a.ID] = a
+func (s *Store) insertAlert(ctx context.Context, a *WazuhAlert) error {
+	data, err := marshalAlertData(a)
+	if err != nil {
+		return err
 	}
-	for _, p := range playbooks {
-		store.playbooks[p.ID] = p
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO wazuh_alerts (id, rule_id, level, description, agent_id, data, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		a.ID, a.RuleID, severityToLevel(a.Severity), a.Description, a.AgentID, data, a.Timestamp)
+	return err
+}
+
+func (s *Store) markAlertResolved(ctx context.Context, alertID, playbookID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE wazuh_alerts
+		   SET data = jsonb_set(jsonb_set(data, '{resolved}', 'true'::jsonb, true),
+		                        '{playbook_id}', to_jsonb($2::text), true)
+		 WHERE id = $1`,
+		alertID, playbookID)
+	return err
+}
+
+func (s *Store) listAgents(ctx context.Context) ([]*Agent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, COALESCE(ip, ''), status, COALESCE(last_seen, created_at)
+		   FROM wazuh_agents ORDER BY id`)
+	if err != nil {
+		return nil, err
 	}
-	for _, al := range alerts {
-		store.alerts[al.ID] = al
+	defer rows.Close()
+
+	agents := make([]*Agent, 0)
+	for rows.Next() {
+		var a Agent
+		if err := rows.Scan(&a.ID, &a.Name, &a.IP, &a.Status, &a.LastSeen); err != nil {
+			return nil, err
+		}
+		agents = append(agents, &a)
 	}
-	store.mu.Unlock()
+	return agents, rows.Err()
+}
+
+func (s *Store) listPlaybooks(ctx context.Context) ([]*Playbook, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name, COALESCE(description, ''), trigger_condition, actions, enabled
+		   FROM wazuh_playbooks ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	playbooks := make([]*Playbook, 0)
+	for rows.Next() {
+		var (
+			p       Playbook
+			trigger []byte
+			actions []byte
+		)
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &trigger, &actions, &p.AutoExecute); err != nil {
+			return nil, err
+		}
+		if len(trigger) > 0 {
+			var tc struct {
+				Rule int `json:"rule"`
+			}
+			if err := json.Unmarshal(trigger, &tc); err == nil {
+				p.TriggerRule = tc.Rule
+			}
+		}
+		if len(actions) > 0 {
+			_ = json.Unmarshal(actions, &p.Actions)
+		}
+		if p.Actions == nil {
+			p.Actions = []string{}
+		}
+		playbooks = append(playbooks, &p)
+	}
+	return playbooks, rows.Err()
+}
+
+func (s *Store) getPlaybook(ctx context.Context, id string) (*Playbook, error) {
+	var (
+		p       Playbook
+		trigger []byte
+		actions []byte
+	)
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, name, COALESCE(description, ''), trigger_condition, actions, enabled
+		   FROM wazuh_playbooks WHERE id = $1`, id).
+		Scan(&p.ID, &p.Name, &p.Description, &trigger, &actions, &p.AutoExecute)
+	if err != nil {
+		return nil, err
+	}
+	if len(trigger) > 0 {
+		var tc struct {
+			Rule int `json:"rule"`
+		}
+		if err := json.Unmarshal(trigger, &tc); err == nil {
+			p.TriggerRule = tc.Rule
+		}
+	}
+	if len(actions) > 0 {
+		_ = json.Unmarshal(actions, &p.Actions)
+	}
+	if p.Actions == nil {
+		p.Actions = []string{}
+	}
+	return &p, nil
+}
+
+func (s *Store) insertExecution(ctx context.Context, e *PlaybookExecution, result string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO wazuh_playbook_executions
+		   (id, playbook_id, alert_id, status, started_at, completed_at, result)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		e.ID, e.PlaybookID, e.AlertID, e.Status, e.StartedAt, e.CompletedAt, result)
+	return err
 }
 
 // ─── Anomaly Detection ────────────────────────────────────────────────────────
@@ -279,34 +432,28 @@ func computeSecurityScore(alerts []*WazuhAlert, agents []*Agent) int {
 // ─── HTTP Handlers ────────────────────────────────────────────────────────────
 
 func handleGetAlerts(c *gin.Context) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	alerts := make([]*WazuhAlert, 0, len(store.alerts))
-	for _, a := range store.alerts {
-		alerts = append(alerts, a)
+	alerts, err := store.listAlerts(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list alerts"})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"alerts": alerts, "count": len(alerts)})
 }
 
 func handleGetAgents(c *gin.Context) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	agents := make([]*Agent, 0, len(store.agents))
-	for _, a := range store.agents {
-		agents = append(agents, a)
+	agents, err := store.listAgents(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agents"})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"agents": agents, "count": len(agents)})
 }
 
 func handleListPlaybooks(c *gin.Context) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	playbooks := make([]*Playbook, 0, len(store.playbooks))
-	for _, p := range store.playbooks {
-		playbooks = append(playbooks, p)
+	playbooks, err := store.listPlaybooks(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list playbooks"})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"playbooks": playbooks})
 }
@@ -321,32 +468,37 @@ func handleTriggerPlaybook(c *gin.Context) {
 		return
 	}
 
-	store.mu.Lock()
-	pb, ok := store.playbooks[body.PlaybookID]
-	if !ok {
-		store.mu.Unlock()
-		c.JSON(http.StatusNotFound, gin.H{"error": "playbook not found"})
+	ctx := c.Request.Context()
+	pb, err := store.getPlaybook(ctx, body.PlaybookID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "playbook not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load playbook"})
 		return
 	}
 
 	now := time.Now()
 	exec := &PlaybookExecution{
-		ID:         uuid.New().String(),
-		PlaybookID: body.PlaybookID,
-		AlertID:    body.AlertID,
-		Status:     "COMPLETED",
-		Actions:    pb.Actions,
-		StartedAt:  now,
+		ID:          uuid.New().String(),
+		PlaybookID:  body.PlaybookID,
+		AlertID:     body.AlertID,
+		Status:      "COMPLETED",
+		Actions:     pb.Actions,
+		StartedAt:   now,
 		CompletedAt: &now,
 	}
-	store.executions[exec.ID] = exec
-
-	// Mark alert as resolved
-	if al, exists := store.alerts[body.AlertID]; exists {
-		al.Resolved = true
-		al.PlaybookID = body.PlaybookID
+	result := "executed " + pb.Name
+	if err := store.insertExecution(ctx, exec, result); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist execution"})
+		return
 	}
-	store.mu.Unlock()
+
+	// Mark alert as resolved (best-effort — alert may not exist).
+	if err := store.markAlertResolved(ctx, body.AlertID, body.PlaybookID); err != nil {
+		log.Printf("[wazuh-svc] mark alert %s resolved failed: %v", body.AlertID, err)
+	}
 
 	c.JSON(http.StatusOK, exec)
 }
@@ -361,9 +513,8 @@ func handleDetectAnomaly(c *gin.Context) {
 	}
 	result := detectLoginAnomaly(body.Events)
 
-	// If anomaly detected, create an alert
+	// If anomaly detected, persist an alert.
 	if result.Detected {
-		store.mu.Lock()
 		ruleMap := map[string]int{
 			"BRUTE_FORCE":       5710,
 			"IMPOSSIBLE_TRAVEL": 5715,
@@ -379,24 +530,27 @@ func handleDetectAnomaly(c *gin.Context) {
 			Timestamp:   time.Now(),
 			Resolved:    false,
 		}
-		store.alerts[alert.ID] = alert
-		store.mu.Unlock()
+		if err := store.insertAlert(c.Request.Context(), alert); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist alert"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, result)
 }
 
 func handleGetSecurityScore(c *gin.Context) {
-	store.mu.RLock()
-	alerts := make([]*WazuhAlert, 0, len(store.alerts))
-	for _, a := range store.alerts {
-		alerts = append(alerts, a)
+	ctx := c.Request.Context()
+	alerts, err := store.listAlerts(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list alerts"})
+		return
 	}
-	agents := make([]*Agent, 0, len(store.agents))
-	for _, a := range store.agents {
-		agents = append(agents, a)
+	agents, err := store.listAgents(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agents"})
+		return
 	}
-	store.mu.RUnlock()
 
 	score := computeSecurityScore(alerts, agents)
 	unresolvedCount := 0
@@ -407,11 +561,11 @@ func handleGetSecurityScore(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"score":            score,
-		"grade":            scoreToGrade(score),
+		"score":             score,
+		"grade":             scoreToGrade(score),
 		"unresolved_alerts": unresolvedCount,
-		"total_agents":     len(agents),
-		"computed_at":      time.Now(),
+		"total_agents":      len(agents),
+		"computed_at":       time.Now(),
 	})
 }
 
@@ -431,10 +585,25 @@ func scoreToGrade(score int) string {
 }
 
 func handleHealth(c *gin.Context) {
+	// Fail-closed: report db:ok only after a real round-trip.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+	defer cancel()
+	var one int
+	if err := store.pool.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":    "unhealthy",
+			"service":   "wazuh-svc",
+			"version":   "1.0.0",
+			"db":        "unreachable",
+			"timestamp": time.Now(),
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "healthy",
 		"service":   "wazuh-svc",
 		"version":   "1.0.0",
+		"db":        "ok",
 		"timestamp": time.Now(),
 	})
 }
@@ -447,8 +616,22 @@ func main() {
 		port = "8100"
 	}
 
-	seedStore()
-	log.Printf("[wazuh-svc] Seeded %d agents, %d playbooks", len(store.agents), len(store.playbooks))
+	// Fail-closed: no database, no service. Never fall back to memory.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("[wazuh-svc] DATABASE_URL is required; refusing to start (fail-closed)")
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("[wazuh-svc] Invalid DATABASE_URL: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatalf("[wazuh-svc] Database unreachable: %v (fail-closed, refusing to start)", err)
+	}
+	store = &Store{pool: pool}
+	log.Printf("[wazuh-svc] Connected to PostgreSQL")
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
