@@ -192,6 +192,11 @@ const WtoValuation = lazy(() => import("@/pages/app/WtoValuation"));
 const AdvanceRulings = lazy(() => import("@/pages/app/AdvanceRulings"));
 const ComplianceReporting = lazy(() => import("@/pages/app/ComplianceReporting"));
 const DeclarationRiskHistory = lazy(() => import("@/pages/app/DeclarationRiskHistory"));
+// Phase 22 (wave 2) — UI for crf / msw / mswExchange / openData orphan routers
+const CrfDashboard = lazy(() => import("@/pages/app/CrfDashboard"));
+const MswStatus = lazy(() => import("@/pages/app/MswStatus"));
+const MswExchange = lazy(() => import("@/pages/app/MswExchange"));
+const OpenDataCatalogue = lazy(() => import("@/pages/app/OpenDataCatalogue"));
 
 
 const LazyFallback = () => <_PageSkeleton />;
@@ -828,6 +833,19 @@ function Router() {
       </Route>
       <Route path="/app/declarations/risk-history">
         <Suspense fallback={<LazyFallback />}><DeclarationRiskHistory /></Suspense>
+      </Route>
+      {/* Phase 22 (wave 2) — crf / msw / mswExchange / openData */}
+      <Route path="/app/crf">
+        <Suspense fallback={<LazyFallback />}><CrfDashboard /></Suspense>
+      </Route>
+      <Route path="/app/msw">
+        <Suspense fallback={<LazyFallback />}><MswStatus /></Suspense>
+      </Route>
+      <Route path="/app/admin/msw-exchange">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><MswExchange /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/open-data">
+        <Suspense fallback={<LazyFallback />}><OpenDataCatalogue /></Suspense>
       </Route>
 
       {/* 404 */}
