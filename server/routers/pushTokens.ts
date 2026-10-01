@@ -14,6 +14,12 @@
  * onConflictDoUpdate, and no swallowed errors. If the DB is unavailable the
  * mutation FAILS honestly (503) instead of pretending the token was stored.
  *
+ * Phase 22 (API alignment): the platform enum additionally accepts "expo"
+ * (Expo push tokens from the React-Native app), and the registration upsert
+ * is extracted into registerPushTokenForUser so the REST surface
+ * (POST /v1/push-tokens, server/routes/pushTokensApi.ts) runs the EXACT same
+ * logic as pushTokens.registerPushToken.
+ *
  * FCM/APNs dispatch is handled by the Go notification-dispatcher service.
  * This router only manages token CRUD and triggers the dispatch via Kafka.
  */
@@ -24,6 +30,11 @@ import { eq, and } from "drizzle-orm";
 import { router, protectedProcedure } from "../_core/trpc";
 import { getDb } from "../db";
 import { pushTokens, users } from "../../drizzle/schema";
+
+// ─── Platform enum (Phase 22: + "expo") ───────────────────────────────────────
+export const PUSH_TOKEN_PLATFORMS = ["ios", "android", "web", "expo"] as const;
+export type PushTokenPlatform = (typeof PUSH_TOKEN_PLATFORMS)[number];
+const platformSchema = z.enum(PUSH_TOKEN_PLATFORMS);
 
 // ─── Admin procedure ──────────────────────────────────────────────────────────
 
@@ -43,6 +54,35 @@ async function requireDb() {
     });
   }
   return db;
+}
+
+/**
+ * registerPushTokenForUser — the single registration code path shared by the
+ * tRPC mutation and the Phase-22 REST route (POST /v1/push-tokens).
+ * PG-native upsert on (user_id, platform). Throws TRPCError 503 when the
+ * store is unavailable (fail-closed — never pretends the token was saved).
+ */
+export async function registerPushTokenForUser(
+  userId: number,
+  token: string,
+  platform: PushTokenPlatform
+): Promise<{ success: true; platform: PushTokenPlatform; userId: number }> {
+  const db = await requireDb();
+  await db
+    .insert(pushTokens)
+    .values({
+      userId,
+      token,
+      platform,
+      registeredAt: new Date(),
+      lastSeenAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [pushTokens.userId, pushTokens.platform],
+      set: { token, lastSeenAt: new Date() },
+    });
+
+  return { success: true, platform, userId };
 }
 
 // ─── Kafka publish helper (PRA-027, Phase 9) ─────────────────────────────────
@@ -125,30 +165,11 @@ export const pushTokensRouter = router({
   registerPushToken: protectedProcedure
     .input(z.object({
       token: z.string().min(10).max(512),
-      platform: z.enum(["ios", "android", "web"]),
+      platform: platformSchema,
       userId: z.string().optional(), // Provided by mobile client for cross-validation
     }))
     .mutation(async ({ ctx, input }) => {
-      const db = await requireDb();
-      await db
-        .insert(pushTokens)
-        .values({
-          userId: ctx.user.id,
-          token: input.token,
-          platform: input.platform,
-          registeredAt: new Date(),
-          lastSeenAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [pushTokens.userId, pushTokens.platform],
-          set: { token: input.token, lastSeenAt: new Date() },
-        });
-
-      return {
-        success: true,
-        platform: input.platform,
-        userId: ctx.user.id,
-      };
+      return registerPushTokenForUser(ctx.user.id, input.token, input.platform);
     }),
 
   /**
@@ -156,7 +177,7 @@ export const pushTokensRouter = router({
    */
   unregisterPushToken: protectedProcedure
     .input(z.object({
-      platform: z.enum(["ios", "android", "web"]),
+      platform: platformSchema,
     }))
     .mutation(async ({ ctx, input }) => {
       const db = await requireDb();

@@ -818,7 +818,7 @@ async function runWeeklyAnalyticsReport() {
     const now = Date.now();
     const slaBreaches = processingRows.filter((r) => {
       if (!r.submittedAt) return false;
-      const elapsed = now - new Date(r.submittedAt).getTime();
+      const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
       return elapsed > (SLA_MS[r.riskLane ?? "green"] ?? SLA_MS.green);
     }).length;
 
@@ -1559,6 +1559,9 @@ async function startServer() {
   // Phase 12 Mission C: executive/analytics/briefing REST surface
   const { registerExecutiveApiRoutes } = await import("../routes/executiveApi");
   registerExecutiveApiRoutes(app);
+  // Phase 22: REST push-token registration (Bearer-auth, mobile contract)
+  const { registerPushTokensApiRoutes } = await import("../routes/pushTokensApi");
+  registerPushTokensApiRoutes(app);
   // Phase 16 Wave P1: shipping-line API products (berth-availability, congestion-forecast)
   const { registerShippingLineApiRoutes } = await import("../routes/shippingLineApi");
   registerShippingLineApiRoutes(app);

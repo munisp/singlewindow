@@ -9,6 +9,15 @@
  *     only reach sandbox upstreams; production keys never see sandbox data)
  * and writes a metering record (api_usage_logs) per authenticated call.
  *
+ * Phase 22 (API alignment): when NO X-API-Key header is present, the
+ * middleware alternatively accepts `Authorization: Bearer <keycloak-jwt>`
+ * verified EXACTLY the way the tRPC context verifies user tokens
+ * (sdk.authenticateRequest → keycloakVerifier JWKS/RS256 + issuer/audience
+ * enforcement + active-user check). The API-key path is unchanged and keeps
+ * precedence when both headers are sent. Bearer-authenticated requests are
+ * NOT marketplace-metered (no api key to meter against) and carry
+ * `req.bearerUser` instead of `req.apiKeyContext`.
+ *
  * Fail-closed: any verification failure → 401/403/429; never silently allows.
  */
 import type { NextFunction, Request, Response } from "express";
@@ -16,6 +25,7 @@ import { createHmac } from "crypto";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { apiKeys, apiUsageLogs } from "../../drizzle/schema";
+import { sdk } from "../_core/sdk";
 import {
   keyHasScope,
   resolveUpstreamForKey,
@@ -33,6 +43,13 @@ declare global {
       scopes: string[];
       upstreamHeaders: Record<string, string>;
     };
+    /** Set when the request was authenticated via a Keycloak Bearer JWT
+     *  (Phase 22 alternative auth path) instead of an X-API-Key. */
+    bearerUser?: {
+      id: number;
+      openId: string;
+      role: string;
+    };
     }
   }
 }
@@ -41,6 +58,28 @@ function hashKey(rawKey: string): string | null {
   const secret = process.env.API_KEY_HASH_SECRET ?? process.env.JWT_SECRET;
   if (!secret) return null; // fail-closed: cannot verify without the secret
   return createHmac("sha256", secret).update(rawKey).digest("hex");
+}
+
+/**
+ * Phase 22 — Bearer-token alternative auth path.
+ * Verifies `Authorization: Bearer <keycloak-jwt>` with the SAME verifier the
+ * tRPC context uses for user tokens (JWKS RS256 + issuer + audience + active
+ * user provisioning check in sdk.authenticateRequest). Returns true and sets
+ * req.bearerUser on success; false otherwise (caller denies).
+ */
+async function tryBearerAuth(req: Request): Promise<boolean> {
+  const authHeader = req.headers.authorization as string | undefined;
+  if (!authHeader?.startsWith("Bearer ")) return false;
+  try {
+    // authenticateRequest verifies the Keycloak JWT (fail-closed on invalid/
+    // expired/wrong-audience tokens) AND requires an active provisioned user.
+    const user = await sdk.authenticateRequest(req);
+    if (!user || user.status !== "active") return false;
+    req.bearerUser = { id: user.id, openId: user.openId, role: user.role };
+    return true;
+  } catch {
+    return false; // fail closed — invalid tokens never authenticate
+  }
 }
 
 /**
@@ -56,7 +95,13 @@ export function requireApiKey(requiredScope: string, upstream: UpstreamEndpoint 
     const deny = (status: number, error: string) => res.status(status).json({ error });
 
     if (!rawKey) {
-      deny(401, "Missing X-API-Key header");
+      // Phase 22: no API key — accept a Bearer Keycloak JWT instead
+      // (ministry-portal / mobile app contract). Fail-closed.
+      if (await tryBearerAuth(req)) {
+        next();
+        return;
+      }
+      deny(401, "Missing X-API-Key header or valid Bearer token");
       return;
     }
     const keyHash = hashKey(rawKey);
