@@ -1,8 +1,10 @@
 /**
  * Phase 12 Mission C — executive/analytics REST surface consumed by the
  * ministry portal and the mobile app. ALL endpoints are metered marketplace
- * calls guarded by requireApiKey("reports:read") and answer honest 503s when
- * their data source is down (fail-closed — never zeros-as-real).
+ * calls guarded by requireApiKey("reports:read") — which since Phase 22 also
+ * accepts a Keycloak Bearer JWT when no X-API-Key header is present — and
+ * answer honest 503s when their data source is down (fail-closed — never
+ * zeros-as-real).
  *
  *   GET /v1/executive/kpi-summary        — ministerial KPI pack
  *   GET /v1/executive/operational-kpis   — operational KPIs (alias below)
@@ -71,7 +73,13 @@ export function registerExecutiveApiRoutes(app: Express): void {
   const operationalKpisHandler = async (req: any, res: any) => {
     try {
       const windowHours = Number(req.query.windowHours ?? 24);
-      res.json(await computeOperationalKpis(Number.isFinite(windowHours) ? windowHours : 24));
+      const report = await computeOperationalKpis(Number.isFinite(windowHours) ? windowHours : 24);
+      // Phase 22 (mobile contract, additive): every KPI entry carries the
+      // original fields (id/label/value/…) AND a snake_case kpi_id alias, and
+      // the report additionally exposes `entries` as an alias of the same
+      // array. Existing consumers of `kpis[].id/label/value` are unaffected.
+      const kpis = report.kpis.map((k) => ({ ...k, kpi_id: k.id }));
+      res.json({ ...report, kpis, entries: kpis });
     } catch (err) {
       if (err instanceof KpiServiceUnavailable || err instanceof KpiPackUnavailable) {
         down(res, err);
