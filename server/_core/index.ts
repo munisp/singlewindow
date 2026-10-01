@@ -572,7 +572,7 @@ async function runPortCongestionAlertScan() {
         for (const staffUser of staffIds) {
           try {
             await createUserNotification({
-              userId: staffUser,
+              userId: staffUser.id,
               type: "security_alert",
               title: `Port Congestion CRITICAL: ${port.portName}`,
               body: `Port ${port.portName} (${port.portCode}) has reached CRITICAL congestion status. Vessel count: ${latest.vesselCount ?? "N/A"}, wait time: ${latest.waitTimeHours ?? 0}h, declaration backlog: ${latest.declarationBacklog ?? 0}. Immediate action may be required.`,
@@ -963,6 +963,7 @@ console.log("[Cron] AEO renewal reminders scheduled at 03:10 UTC daily");
 // active compliance officer addresses in the compliance_email_schedule table.
 import { runNightlyRevocationCsv } from "../jobs/nightlyRevocationCsv";
 import { startPaymentWorker, stopPaymentWorker } from "../paymentWorker";
+import { startPaymentArchivalWriter, stopPaymentArchivalWriter } from "../workers/paymentArchivalWriter";
 import { runScheduledBalanceDriftCheck } from "../balanceDrift";
 cron.schedule("0 0 4 * * *", async () => {
   await runNightlyRevocationCsv();
@@ -1028,7 +1029,12 @@ async function runSLABreachAlertBroadcast() {
     const processingRows = await db
       .select({ submittedAt: declarations.submittedAt, riskLane: declarations.riskLane })
       .from(declarations)
-      .where(and(inArray(declarations.status, processingStatuses as any[]), isNotNull(declarations.submittedAt)))
+      .where(
+        and(
+          inArray(declarations.status, processingStatuses as any[]),
+          isNotNull(declarations.submittedAt)
+        )
+      )
       .limit(1000);
     const slaBreachedCount = processingRows.filter((r) => {
       if (!r.submittedAt) return false;
@@ -1943,15 +1949,29 @@ startServer().catch(console.error);
 // exponential back-off. Dead-letters after max_attempts (default 5).
 startPaymentWorker();
 
-// Graceful shutdown: stop worker before process exits
+// ── Payment Archival Lakehouse Writer (Phase 22) ─────────────────────────────
+// Fulfils the status='pending' payment_archival_jobs rows enqueued by
+// runPaymentArchivalCron below: claims each job atomically (UPDATE … WHERE
+// status='pending' RETURNING), exports the committed payment_queue rows in the
+// job's tier window as CSV, PUTs the object to
+// s3://$PAYMENT_ARCHIVE_SINK_BUCKET/{tier}/{YYYY-MM-DD}/{jobId}.csv, and only
+// then marks the job completed with the REAL storageUri, actual bytesWritten
+// and transfersArchived. Any sink error marks the job failed + errorMessage —
+// never a fabricated URI. Disabled (one log line) when
+// PAYMENT_ARCHIVE_SINK_BUCKET is not set. See server/workers/paymentArchivalWriter.ts.
+startPaymentArchivalWriter();
+
+// Graceful shutdown: stop workers before process exits
 process.once("SIGTERM", () => stopPaymentWorker());
 process.once("SIGINT",  () => stopPaymentWorker());
+process.once("SIGTERM", () => stopPaymentArchivalWriter());
+process.once("SIGINT",  () => stopPaymentArchivalWriter());
 
 // ── Payment Archive Tiering Cron (1B payments/day pattern) ──────────────────
 // Inspired by: https://backend.how/posts/1b-payments-per-day/
 // Hot  (≤7 days):   fast read path, full PostgreSQL row
-// Warm (7–90 days): compressed Parquet on object storage, metadata in DB
-// Cold (>90 days):  deep archive, Parquet on cold object storage
+// Warm (7–90 days): CSV export on object storage (see paymentArchivalWriter), metadata in DB
+// Cold (>90 days):  deep archive, CSV export on cold object storage
 async function runPaymentArchivalCron() {
   const { getDb: _archiveGetDb } = await import("../db");
   const db = await _archiveGetDb();
