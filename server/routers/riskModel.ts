@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { eq, ne, and, asc } from "drizzle-orm";
 import { getDb } from "../db";
-import { riskModelRegistry } from "../../drizzle/schema";
+import { riskModelVersions, riskModelAbTests, type RiskModelVersion, type RiskModelAbTest } from "../../drizzle/schema";
 
 const RISK_SCORER_URL = process.env.RISK_SCORER_URL ?? "http://ray-risk-scorer:8101";
 
@@ -83,29 +83,71 @@ function mapInput(input: z.infer<typeof DeclarationFeaturesSchema>) {
   };
 }
 
-// ─── Sprint 51 → Phase 22: Model registry persisted in Postgres ─────────────
-// Phase 22: the module-level mutable MODEL_REGISTRY_DATA array was REMOVED.
-// The champion/challenger/archived registry now lives in the
-// risk_model_registry table (migration 0074) and all reads/writes go through
-// transactional Drizzle queries. When PostgreSQL is unavailable the registry
-// fails closed (SERVICE_UNAVAILABLE) — it is never served from memory.
+// ─── Sprint 51 / Phase 22: Model registry persisted in PostgreSQL ────────────
+// The in-memory MODEL_REGISTRY_DATA / AB_TESTS_DATA arrays were REMOVED in
+// Phase 22 — promotion/champion state now lives in the risk_model_versions and
+// risk_model_ab_tests tables (migration 0074, seeded with the rows the arrays
+// previously served). All procedures fail closed when the DB is unavailable.
 
-type RegistryRow = typeof riskModelRegistry.$inferSelect;
+type ModelRegistryRow = {
+  versionId: string;
+  version: string;
+  algorithm: string;
+  accuracy: number;
+  f1Score: number;
+  precision: number;
+  recall: number;
+  aucRoc: number;
+  trainingSamples: number;
+  status: string;
+  createdAt: string;
+  promotedAt: string | null;
+};
 
-function mapRegistryRow(r: RegistryRow) {
+type AbTestRow = {
+  testId: string;
+  championVersion: string;
+  challengerVersion: string;
+  trafficSplitPct: number;
+  status: string;
+  startedAt: string;
+  championAccuracy: number;
+  challengerAccuracy: number;
+  championRequests: number;
+  challengerRequests: number;
+  winner: string | null;
+};
+
+function mapModelRow(m: RiskModelVersion): ModelRegistryRow {
   return {
-    versionId: r.versionId,
-    version: r.version,
-    algorithm: r.algorithm,
-    accuracy: r.accuracy,
-    f1Score: r.f1Score,
-    precision: r.precision,
-    recall: r.recall,
-    aucRoc: r.aucRoc,
-    trainingSamples: r.trainingSamples,
-    status: r.status,
-    createdAt: r.createdAt.toISOString(),
-    promotedAt: r.promotedAt ? r.promotedAt.toISOString() : null,
+    versionId: m.versionId,
+    version: m.version,
+    algorithm: m.algorithm,
+    accuracy: m.accuracy,
+    f1Score: m.f1Score,
+    precision: m.precision,
+    recall: m.recall,
+    aucRoc: m.aucRoc,
+    trainingSamples: m.trainingSamples,
+    status: m.status,
+    createdAt: m.createdAt.toISOString(),
+    promotedAt: m.promotedAt ? m.promotedAt.toISOString() : null,
+  };
+}
+
+function mapAbTestRow(t: RiskModelAbTest): AbTestRow {
+  return {
+    testId: t.testId,
+    championVersion: t.championVersion,
+    challengerVersion: t.challengerVersion,
+    trafficSplitPct: t.trafficSplitPct,
+    status: t.status,
+    startedAt: t.startedAt.toISOString(),
+    championAccuracy: t.championAccuracy,
+    challengerAccuracy: t.challengerAccuracy,
+    championRequests: t.championRequests,
+    challengerRequests: t.challengerRequests,
+    winner: t.winner ?? null,
   };
 }
 
@@ -114,15 +156,11 @@ async function requireRegistryDb() {
   if (!db) {
     throw new TRPCError({
       code: "SERVICE_UNAVAILABLE",
-      message: "REGISTRY_UNAVAILABLE: PostgreSQL is unavailable — the model registry is persisted in Postgres and cannot be served from memory.",
+      message: "MODEL_REGISTRY_UNAVAILABLE: the model registry database is unreachable — no in-memory fallback is served.",
     });
   }
   return db;
 }
-
-const AB_TESTS_DATA: Array<{ testId: string; championVersion: string; challengerVersion: string; trafficSplitPct: number; status: string; startedAt: string; championAccuracy: number; challengerAccuracy: number; championRequests: number; challengerRequests: number; winner: string | null }> = [
-  { testId: "ab-2025-q4-001", championVersion: "v2.1.0", challengerVersion: "v3.0.0-beta", trafficSplitPct: 10, status: "running", startedAt: "2026-01-01T00:00:00Z", championAccuracy: 0.891, challengerAccuracy: 0.903, championRequests: 45230, challengerRequests: 5025, winner: null },
-];
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -192,17 +230,23 @@ export const riskModelRouter = router({
     }
   }),
 
-  // Phase 22: Model registry procedures — Postgres-backed (risk_model_registry)
+  // Sprint 51 / Phase 22: Model registry procedures (DB-backed)
   getModelVersions: adminProcedure.query(async () => {
     const db = await requireRegistryDb();
-    const rows = await db.select().from(riskModelRegistry).orderBy(riskModelRegistry.createdAt);
-    return rows.map(mapRegistryRow);
+    const rows = await db
+      .select()
+      .from(riskModelVersions)
+      .orderBy(asc(riskModelVersions.createdAt));
+    return rows.map(mapModelRow);
   }),
 
   getModelMetrics: adminProcedure.query(async () => {
     const db = await requireRegistryDb();
-    const rows = await db.select().from(riskModelRegistry).orderBy(riskModelRegistry.createdAt);
-    return rows.map(mapRegistryRow).map(m => ({
+    const rows = await db
+      .select()
+      .from(riskModelVersions)
+      .orderBy(asc(riskModelVersions.createdAt));
+    return rows.map(m => ({
       version: m.version,
       algorithm: m.algorithm,
       accuracy: m.accuracy,
@@ -212,7 +256,7 @@ export const riskModelRouter = router({
       aucRoc: m.aucRoc,
       trainingSamples: m.trainingSamples,
       status: m.status,
-      createdAt: m.createdAt,
+      createdAt: m.createdAt.toISOString(),
     }));
   }),
 
@@ -220,31 +264,36 @@ export const riskModelRouter = router({
     .input(z.object({ versionId: z.string() }))
     .mutation(async ({ input }) => {
       const db = await requireRegistryDb();
-      // Transactional champion hand-off: archive the current champion and
-      // promote the target atomically — a crash mid-transition cannot leave
-      // zero or two champions half-committed.
-      return db.transaction(async (tx) => {
-        const [target] = await tx
-          .select()
-          .from(riskModelRegistry)
-          .where(eq(riskModelRegistry.versionId, input.versionId))
-          .limit(1);
-        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Model version not found" });
-        const now = new Date();
+      const [target] = await db
+        .select()
+        .from(riskModelVersions)
+        .where(eq(riskModelVersions.versionId, input.versionId))
+        .limit(1);
+      if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Model version not found" });
+      const promotedAt = new Date();
+      // Demote the current champion, then promote the target — atomically.
+      const [updated] = await db.transaction(async (tx) => {
         await tx
-          .update(riskModelRegistry)
+          .update(riskModelVersions)
           .set({ status: "archived" })
-          .where(eq(riskModelRegistry.status, "champion"));
-        const [updated] = await tx
-          .update(riskModelRegistry)
-          .set({ status: "champion", promotedAt: now })
-          .where(eq(riskModelRegistry.versionId, input.versionId))
+          .where(and(eq(riskModelVersions.status, "champion"), ne(riskModelVersions.versionId, input.versionId)));
+        return tx
+          .update(riskModelVersions)
+          .set({ status: "champion", promotedAt })
+          .where(eq(riskModelVersions.versionId, input.versionId))
           .returning();
-        return { success: true, model: mapRegistryRow(updated ?? { ...target, status: "champion", promotedAt: now }) };
       });
+      return { success: true, model: mapModelRow(updated) };
     }),
 
-  getAbTests: adminProcedure.query(() => AB_TESTS_DATA),
+  getAbTests: adminProcedure.query(async () => {
+    const db = await requireRegistryDb();
+    const rows = await db
+      .select()
+      .from(riskModelAbTests)
+      .orderBy(asc(riskModelAbTests.startedAt));
+    return rows.map(mapAbTestRow);
+  }),
 
   createAbTest: adminProcedure
     .input(z.object({
@@ -252,20 +301,19 @@ export const riskModelRouter = router({
       challengerVersion: z.string(),
       trafficSplitPct: z.number().int().min(1).max(50).default(10),
     }))
-    .mutation(({ input }) => {
-      const test = {
-        testId: `ab-${Date.now()}`,
-        ...input,
-        status: "running",
-        startedAt: new Date().toISOString(),
-        championAccuracy: 0,
-        challengerAccuracy: 0,
-        championRequests: 0,
-        challengerRequests: 0,
-        winner: null,
-      };
-      AB_TESTS_DATA.push(test);
-      return test;
+    .mutation(async ({ input }) => {
+      const db = await requireRegistryDb();
+      const [test] = await db
+        .insert(riskModelAbTests)
+        .values({
+          testId: `ab-${Date.now()}`,
+          championVersion: input.championVersion,
+          challengerVersion: input.challengerVersion,
+          trafficSplitPct: input.trafficSplitPct,
+          status: "running",
+        })
+        .returning();
+      return mapAbTestRow(test);
     }),
 
   /**
@@ -280,14 +328,19 @@ export const riskModelRouter = router({
     // Explicit result contract: the mutation currently ALWAYS fails closed
     // (no real metrics store), but the declared shape keeps the client
     // contract honest for when the store lands.
-    .mutation(({ input }): {
+    .mutation(async ({ input }): Promise<{
       testId: string;
       winner: "champion" | "challenger" | null;
       championAccuracy: number;
       challengerAccuracy: number;
       autoPromoted: boolean;
-    } => {
-      const test = AB_TESTS_DATA.find((t) => t.testId === input.testId);
+    }> => {
+      const db = await requireRegistryDb();
+      const [test] = await db
+        .select()
+        .from(riskModelAbTests)
+        .where(eq(riskModelAbTests.testId, input.testId))
+        .limit(1);
       if (!test) throw new TRPCError({ code: "NOT_FOUND", message: `A/B test ${input.testId} not found` });
       if (test.status !== "running") throw new TRPCError({ code: "BAD_REQUEST", message: "Test is not running" });
 
@@ -306,8 +359,13 @@ export const riskModelRouter = router({
    * v117: getAbTestResults — return detailed metrics for all A/B tests,
    * including statistical significance estimate based on sample sizes.
    */
-  getAbTestResults: adminProcedure.query(() => {
-    return AB_TESTS_DATA.map((t) => {
+  getAbTestResults: adminProcedure.query(async () => {
+    const db = await requireRegistryDb();
+    const rows = await db
+      .select()
+      .from(riskModelAbTests)
+      .orderBy(asc(riskModelAbTests.startedAt));
+    return rows.map(mapAbTestRow).map((t) => {
       const totalRequests = (t.championRequests ?? 0) + (t.challengerRequests ?? 0);
       const lift = t.challengerAccuracy && t.championAccuracy
         ? Math.round(((t.challengerAccuracy - t.championAccuracy) / t.championAccuracy) * 10000) / 100
