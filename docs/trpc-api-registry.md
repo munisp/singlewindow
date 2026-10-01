@@ -29,6 +29,16 @@ security review can distinguish intentional external API from dead code.
 | `shorePass` | Officer UI wired: `/app/customs/shore-pass` (`client/src/pages/app/ShorePassBoard.tsx`). |
 | `dangerousGoods` | Officer UI wired: `/app/customs/dangerous-goods` (`client/src/pages/app/DangerousGoodsBoard.tsx`). |
 
+## Wired in Phase 22 (no longer orphaned)
+
+| Router | Action |
+|---|---|
+| `valuation`, `wtoValuation`, `advanceRuling`, `complianceReporting`, `declarationRiskHistory` | UI wired in Phase 22 wave 1 (`/app/valuation`, `/app/valuation/wto`, `/app/advance-rulings`, `/app/admin/compliance-reporting`, `/app/declarations/risk-history`). |
+| `crf` | Trader/admin UI wired: `/app/crf` (`client/src/pages/app/CrfDashboard.tsx`). |
+| `msw` | Agent submission UI wired: `/app/msw` (`client/src/pages/app/MswStatus.tsx`). Router is mutation-only; agency decisions remain role-gated PBAC actions. |
+| `mswExchange` | Admin UI wired: `/app/admin/msw-exchange` (`client/src/pages/app/MswExchange.tsx`). |
+| `openData` | Public statistics UI wired: `/app/open-data` (`client/src/pages/app/OpenDataCatalogue.tsx`). |
+
 ## Notes
 
 - If access logs later confirm zero external traffic for any kept router, it
@@ -36,3 +46,6 @@ security review can distinguish intentional external API from dead code.
 - The `stream` router remains registered but reports an honest
   `STREAMING_NOT_CONFIGURED` / `STREAM_BACKEND_UNAVAILABLE` state (Fluvio
   backend deprecated, P0-9).
+- The `health` and `redis` routers are intentionally UI-less machine
+  endpoints: `health` is a load-balancer/orchestrator liveness probe and
+  `redis` is an ops-tooling surface — neither gets an in-app page by design.
