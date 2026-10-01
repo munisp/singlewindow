@@ -27,13 +27,13 @@
  * the real format.
  *
  * Sink client: @aws-sdk/client-s3 — already a declared dependency
- * (package.json, used by the RustFS toolchain), pointed at the same RustFS
- * endpoint/credentials the document-vault rustfs-svc uses (RUSTFS_ENDPOINT /
- * RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY, overridable via
- * PAYMENT_ARCHIVE_SINK_ENDPOINT / _ACCESS_KEY / _SECRET_KEY). The rustfs-svc
- * HTTP client (server/rustfsSvcClient.ts) is intentionally NOT used: it is
- * scoped to the document-vault bucket (RUSTFS_BUCKET) and force-prefixes keys
- * with a caller namespace, so it cannot write to the operator-configured
+ * (package.json), pointed at the same RustFS endpoint/credentials the
+ * document-vault rustfs-svc uses (RUSTFS_ENDPOINT / RUSTFS_ACCESS_KEY /
+ * RUSTFS_SECRET_KEY, overridable via PAYMENT_ARCHIVE_SINK_ENDPOINT /
+ * _ACCESS_KEY / _SECRET_KEY). The rustfs-svc HTTP client
+ * (server/rustfsSvcClient.ts) is intentionally NOT used: it is scoped to the
+ * document-vault bucket (RUSTFS_BUCKET) and force-prefixes keys with a caller
+ * namespace, so it cannot write to the operator-configured
  * PAYMENT_ARCHIVE_SINK_BUCKET at the required key pattern.
  *
  * Lifecycle mirrors server/paymentWorker.ts: startPaymentArchivalWriter() is
@@ -41,7 +41,7 @@
  * stopPaymentArchivalWriter() is wired into SIGTERM/SIGINT.
  */
 
-import { eq, and, gte, lt, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lt, asc } from "drizzle-orm";
 import { paymentArchivalJobs, paymentQueue } from "../../drizzle/schema";
 import { getDb } from "../db";
 
@@ -275,6 +275,3 @@ export function stopPaymentArchivalWriter(): void {
     console.log("[PaymentArchival] lakehouse writer stopped");
   }
 }
-
-// Re-export for tests / scheduled handlers that want a direct invocation.
-export { sql as _sql };
