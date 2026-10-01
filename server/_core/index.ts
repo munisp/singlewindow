@@ -141,7 +141,7 @@ async function runPermitExpiryCheck() {
     const { lte, gte, and, eq, asc } = await import("drizzle-orm");
     const db = await getDb();
     if (!db) {
-      console.warn("[Cron] DB unavailable — skipping permit expiry check");
+      console.warn("[Cron] DB unavailable — skipping permit expiry scan");
       return;
     }
     const now = new Date();
@@ -224,7 +224,7 @@ async function runSLABreachScan() {
       const thresholdMs = SLA_MS[lane] ?? SLA_MS.green;
       const elapsed = now.getTime() - new Date(decl.submittedAt).getTime();
       if (elapsed > thresholdMs) {
-        const hoursElapsed = Math.round(elapsed / (60 * 60 * 1000) * 10) / 10;
+        const hoursElapsed = Math.round((elapsed / (60 * 60 * 1000)) * 10) / 10;
         if (elapsed > thresholdMs * 2) critical++;
         try {
           await createUserNotification({
@@ -295,7 +295,7 @@ async function runAmendmentSLACheck() {
         content: `The following amendment requests have exceeded the 5-business-day SLA and require immediate review:\n\n${lines}\n\nPlease log in to AdminDeclarations > Pending Amendments to action these.`,
       });
     } catch { /* non-fatal */ }
-    console.log(`[Cron] Amendment SLA: ${rows.length} overdue amendment(s) flagged`);
+    console.log(`[Cron] Amendment SLA check: ${rows.length} overdue amendment(s) flagged`);
   } catch (err) {
     console.error("[Cron] Amendment SLA check failed:", err);
   }
@@ -370,14 +370,14 @@ async function runBondedWarehouseExpiryCheck() {
         bi.id,
         bi.ucr,
         bi.description AS goods_description,
-        bi.quantity_kg AS quantity,
-        'kg' AS unit,
+        bi.quantity_kg,
+        bi.status,
         bi.expiry_date AS bond_expiry_date,
         bw.name AS warehouse_name,
         bw.location AS warehouse_location,
         bw.license_number
       FROM bonded_inventory bi
-      JOIN bonded_warehouses bw ON bw.id = bi.warehouse_id
+      JOIN bonded_warehouses bw ON bi.bonded_warehouse_id = bw.id
       WHERE bi.status = 'active'
         AND bi.expiry_date IS NOT NULL
       ORDER BY bi.expiry_date ASC
@@ -424,8 +424,8 @@ async function runBondedWarehouseExpiryCheck() {
         const expDate = new Date(item.bond_expiry_date).toLocaleDateString("en-GB");
         lines.push(
           `  • UCR: ${item.ucr} | ${item.goods_description} | ` +
-          `${item.quantity} ${item.unit} | Warehouse: ${item.warehouse_name} (${item.warehouse_location}) | ` +
-          `Expired: ${expDate} (${Math.abs(item.daysUntilExpiry)} days ago)`
+          `${item.quantity} kg | Warehouse: ${item.warehouse_name} (${item.warehouse_location}) | ` +
+          `Expired on ${expDate} (${Math.abs(item.daysUntilExpiry)} days ago)`
         );
       }
       lines.push("");
@@ -437,8 +437,8 @@ async function runBondedWarehouseExpiryCheck() {
         const expDate = new Date(item.bond_expiry_date).toLocaleDateString("en-GB");
         lines.push(
           `  • UCR: ${item.ucr} | ${item.goods_description} | ` +
-          `${item.quantity} ${item.unit} | Warehouse: ${item.warehouse_name} (${item.warehouse_location}) | ` +
-          `Expires: ${expDate} (in ${item.daysUntilExpiry} day${item.daysUntilExpiry === 1 ? "" : "s"})`
+          `${item.quantity} kg | Warehouse: ${item.warehouse_name} (${item.warehouse_location}) | ` +
+          `Expires on ${expDate} (in ${item.daysUntilExpiry} day${item.daysUntilExpiry === 1 ? "" : "s"})`
         );
       }
       lines.push("");
@@ -476,12 +476,12 @@ async function runBondedWarehouseExpiryCheck() {
               userId: owner.id,
               type: "permit_expiry_warning",
               title: isExpired
-                ? `Bond Expired: ${item.ucr} (${Math.abs(daysUntilExpiry)}d overdue)`
-                : `Bond Expiring Soon: ${item.ucr} (${daysUntilExpiry}d left)`,
-              message: `${item.goods_description} — ${item.quantity} ${item.unit} at ${item.warehouse_name} (${item.warehouse_location}). ` +
+                ? `Bond Expired: ${item.ucr} (${Math.abs(item.daysUntilExpiry)}d overdue)`
+                : `Bond Expiring Soon: ${item.ucr} (${item.daysUntilExpiry}d left)`,
+              message: `${item.goods_description} — ${item.quantity} kg at ${item.warehouse_name} (${item.warehouse_location}). ` +
                 (isExpired
-                  ? `Bond expired ${Math.abs(daysUntilExpiry)} day${Math.abs(daysUntilExpiry) === 1 ? "" : "s"} ago. Immediate action required.`
-                  : `Bond expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"}. Initiate ex-bond clearance or renewal.`),
+                  ? `Bond expired ${Math.abs(item.daysUntilExpiry)} day${Math.abs(item.daysUntilExpiry) === 1 ? "" : "s"} ago. Immediate action required.`
+                  : `Bond expires in ${item.daysUntilExpiry} day${item.daysUntilExpiry === 1 ? "" : "s"}. Initiate ex-bond clearance or renewal.`),
               entityType: "bonded_inventory",
               entityId: item.id,
             });
@@ -512,7 +512,7 @@ async function runPortCongestionAlertScan() {
   try {
     const { getDb } = await import("../db");
     const { portLocations, portCongestionEvents, portCongestionAlerts, users } = await import("../../drizzle/schema");
-    const { eq, desc, inArray, sql } = await import("drizzle-orm");
+    const { eq, desc, inArray } = await import("drizzle-orm");
     const { createUserNotification } = await import("../db");
     const db = await getDb();
     if (!db) return;
@@ -538,7 +538,7 @@ async function runPortCongestionAlertScan() {
       .orderBy(desc(portCongestionEvents.recordedAt))
       .limit(activePorts.length * 3); // fetch recent events, we'll pick latest per port
 
-    // Build map: portCode -> latest event (SW-O4: demo-seeded rows NEVER alert)
+    // Build map: portCode -> latest event per port (SW-O4: demo-seeded rows NEVER alert)
     const latestByPort = new Map<string, typeof latestEvents[0]>();
     for (const ev of latestEvents) {
       if ((ev as { source?: string }).source === "demo") continue;
@@ -572,7 +572,7 @@ async function runPortCongestionAlertScan() {
         for (const staffUser of staffIds) {
           try {
             await createUserNotification({
-              userId: staffUser,
+              userId: staffUser.id,
               type: "security_alert",
               title: `Port Congestion CRITICAL: ${port.portName}`,
               body: `Port ${port.portName} (${port.portCode}) has reached CRITICAL congestion status. Vessel count: ${latest.vesselCount ?? "N/A"}, wait time: ${latest.waitTimeHours ?? 0}h, declaration backlog: ${latest.declarationBacklog ?? 0}. Immediate action may be required.`,
@@ -596,7 +596,7 @@ async function runPortCongestionAlertScan() {
       if (existingAlert) {
         await db
           .update(portCongestionAlerts)
-          .set({ lastNotifiedStatus: currentStatus, lastAlertSentAt: currentStatus === "critical" && lastNotified !== "critical" ? new Date() : existingAlert.lastAlertSentAt, updatedAt: new Date() })
+          .set({ lastNotifiedStatus: currentStatus, lastAlertSentAt: currentStatus === "critical" && lastNotified !== "critical" ? new Date() : null, updatedAt: new Date() })
           .where(eq(portCongestionAlerts.portCode, port.portCode));
       } else {
         await db.insert(portCongestionAlerts).values({
@@ -633,6 +633,8 @@ async function runNotificationDigest(mode: "daily" | "weekly") {
       .from(notificationDigestSettings)
       .where(eq(notificationDigestSettings.digestFrequency, mode));
 
+    if (!digestRows.length) return;
+
     let sent = 0;
     for (const setting of digestRows) {
       // Get unread notifications since last digest
@@ -646,7 +648,7 @@ async function runNotificationDigest(mode: "daily" | "weekly") {
             eq(userNotifications.isRead, false)
           )
         )
-        .limit(50);
+        .limit(100);
 
       if (!unread.length) continue;
 
@@ -663,13 +665,23 @@ async function runNotificationDigest(mode: "daily" | "weekly") {
       try {
         await notifyOwner({
           title: `[${mode === "daily" ? "Daily" : "Weekly"} Digest] ${unread.length} unread notification(s) for ${userName}`,
-          content: `${userName} has ${unread.length} unread notification(s):\n\n${summary}${extra}\n\nLog in to TradeGateway to view and manage your notifications.`,
+          content: [
+            `TradeGateway Notification Digest (${mode})`,
+            ``,
+            `User: ${userName}`,
+            `Unread notifications: ${unread.length}`,
+            ``,
+            summary,
+            extra,
+            ``,
+            `Log in to TradeGateway to view and manage your notifications.`,
+          ].join("\n"),
         });
         // Update lastDigestSentAt
         await db
           .update(notificationDigestSettings)
           .set({ lastDigestSentAt: new Date(), updatedAt: new Date() })
-          .where(eq(notificationDigestSettings.userId, setting.userId));
+          .where(eq(notificationDigestSettings.id, setting.id));
         sent++;
       } catch { /* non-fatal */ }
     }
@@ -717,8 +729,8 @@ async function runDailyBreachDigest() {
        WHERE cp.daily_alert_threshold IS NOT NULL
          AND cp.is_active = true
        GROUP BY cp.pattern_id, cp.pattern_name, cp.daily_alert_threshold
-       HAVING COUNT(ca.id) > cp.daily_alert_threshold
-       ORDER BY COUNT(ca.id) DESC`
+       HAVING COUNT(ca.id) > 0
+       ORDER BY today_count DESC`
     );
     if (rows.length === 0) {
       console.log("[Cron] Daily breach digest: no patterns in breach — skipping notification");
@@ -733,14 +745,14 @@ async function runDailyBreachDigest() {
       content: [
         `Daily CEP breach summary — ${new Date().toUTCString()}`,
         "",
-        `The following ${rows.length} pattern${rows.length !== 1 ? "s" : ""} exceeded their configured daily alert threshold in the past 24 hours:`,
+        `The following CEP pattern${rows.length !== 1 ? "s" : ""} exceeded their configured daily alert threshold in the past 24 hours:`,
         "",
         lines,
         "",
         "Review the CEP Alerts dashboard and consider adjusting thresholds or suppressing noisy patterns.",
       ].join("\n"),
     }).catch(() => {});
-    console.log(`[Cron] Daily breach digest sent — ${rows.length} pattern${rows.length !== 1 ? "s" : ""} in breach`);
+    console.log(`[Cron] Daily breach digest sent — ${rows.length} pattern(s) in breach`);
   } catch (err) {
     console.error("[Cron] Daily breach digest failed:", err);
   }
@@ -880,7 +892,7 @@ export async function runDocumentExpiryCron() {
 
     const now = new Date();
 
-    // Find share links that have passed their expiresAt and have not yet been revoked
+    // Find all share links that have passed their expiresAt and have not yet been revoked
     const expiredShares = await db
       .select({ id: documentShares.id, documentId: documentShares.documentId, label: documentShares.label })
       .from(documentShares)
@@ -901,7 +913,7 @@ export async function runDocumentExpiryCron() {
     // Revoke all expired share links
     await db
       .update(documentShares)
-      .set({ revokedAt: now })
+      .set({ revokedAt: new Date() })
       .where(inArray(documentShares.id, shareIds));
 
     // Log an audit event for each expired share
@@ -918,10 +930,10 @@ export async function runDocumentExpiryCron() {
 
     // Notify owner
     await notifyOwner({
-      title: `[Document Vault] ${expiredShares.length} share link(s) auto-expired`,
+      title: `[Document Vault] ${expiredShares.length} expired share link(s) auto-revoked`,
       content: [
-        `Document share expiry cron ran at ${now.toUTCString()}.`,
-        `${expiredShares.length} share link(s) have been automatically revoked after passing their expiry time.`,
+        `Document share expiry cron ran at ${new Date().toUTCString()}.`,
+        `${expiredShares.length} expired share link(s) have been automatically revoked after passing their expiry time.`,
         ``,
         `Affected share IDs: ${shareIds.join(", ")}`,
         ``,
@@ -1028,11 +1040,13 @@ async function runSLABreachAlertBroadcast() {
     const processingRows = await db
       .select({ submittedAt: declarations.submittedAt, riskLane: declarations.riskLane })
       .from(declarations)
-      .where(and(inArray(declarations.status, processingStatuses as any[]), isNotNull(declarations.submittedAt)))
+      .where(
+        and(inArray(declarations.status, processingStatuses as any[]), isNotNull(declarations.submittedAt))
+      )
       .limit(1000);
     const slaBreachedCount = processingRows.filter((r) => {
       if (!r.submittedAt) return false;
-      const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+      const elapsed = now - new Date(r.submittedAt).getTime();
       const threshold = SLA_MS[r.riskLane ?? "green"] ?? SLA_MS.green;
       return elapsed > threshold;
     }).length;
@@ -1067,12 +1081,12 @@ async function runSLABreachAlertBroadcast() {
         const { notifyOwner } = await import("./notification");
         const redBreaches = processingRows.filter((r) => {
           if (!r.submittedAt || (r.riskLane ?? "green") !== "red") return false;
-          const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+          const elapsed = now - new Date(r.submittedAt).getTime();
           return elapsed > SLA_MS.red;
         }).length;
         const yellowBreaches = processingRows.filter((r) => {
           if (!r.submittedAt || (r.riskLane ?? "green") !== "yellow") return false;
-          const elapsed = now.getTime() - new Date(r.submittedAt).getTime();
+          const elapsed = now - new Date(r.submittedAt).getTime();
           return elapsed > SLA_MS.yellow;
         }).length;
         const greenBreaches = slaBreachedCount - redBreaches - yellowBreaches;
@@ -1559,6 +1573,9 @@ async function startServer() {
   // Phase 12 Mission C: executive/analytics/briefing REST surface
   const { registerExecutiveApiRoutes } = await import("../routes/executiveApi");
   registerExecutiveApiRoutes(app);
+  // Phase 22: REST push-token registration (Bearer-auth, mobile contract)
+  const { registerPushTokensApiRoutes } = await import("../routes/pushTokensApi");
+  registerPushTokensApiRoutes(app);
   // Phase 16 Wave P1: shipping-line API products (berth-availability, congestion-forecast)
   const { registerShippingLineApiRoutes } = await import("../routes/shippingLineApi");
   registerShippingLineApiRoutes(app);
@@ -1819,7 +1836,8 @@ async function startServer() {
           daily_alert_threshold: number;
         }>(`SELECT pattern_id, pattern_name, daily_alert_threshold
             FROM cep_patterns
-            WHERE daily_alert_threshold IS NOT NULL AND is_active = true`);
+            WHERE daily_alert_threshold IS NOT NULL
+              AND is_active = true`);
         if (patterns.length === 0) return;
         const { notifyOwner } = await import("./notification");
         for (const pattern of patterns) {
@@ -1832,7 +1850,7 @@ async function startServer() {
           );
           const dailyCount = parseInt(count, 10);
           if (dailyCount > pattern.daily_alert_threshold) {
-            await notifyOwner({
+            notifyOwner({
               title: `⚠ CEP Threshold Breach: ${pattern.pattern_name}`,
               content: `Pattern "${pattern.pattern_name}" fired ${dailyCount} alerts in the last 24 hours, exceeding the configured threshold of ${pattern.daily_alert_threshold}. Review the CEP Alerts dashboard immediately.`,
             }).catch(() => {});
@@ -1899,11 +1917,13 @@ async function startServer() {
           // Point-in-polygon check using ray casting algorithm
           const pointInPolygon = (lat: number, lon: number, polygon: Array<{ lat: number; lon: number }>) => {
             let inside = false;
-            for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            let j = polygon.length - 1;
+            for (let i = 0; i < polygon.length; i++) {
               const xi = polygon[i].lon, yi = polygon[i].lat;
               const xj = polygon[j].lon, yj = polygon[j].lat;
               const intersect = ((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
               if (intersect) inside = !inside;
+              j = i;
             }
             return inside;
           };
@@ -1919,7 +1939,7 @@ async function startServer() {
                   geofenceAlertCache.set(eventKey, now);
                   notifyOwner({
                     title: `Geofence Alert: ${vessel.vesselName} entered ${gf.name}`,
-                    content: `Vessel ${vessel.vesselName} (MMSI: ${vessel.mmsi}) entered geofence zone "${gf.name}" (${gf.geofenceType}) at ${new Date().toUTCString()}. Position: ${vessel.lat.toFixed(4)}, ${vessel.lon.toFixed(4)}.`,
+                    content: `Vessel ${vessel.vesselName} (MMSI: ${vessel.mmsi}) entered geofence zone "${gf.geofenceType}" at ${new Date().toUTCString()}. Position: ${vessel.lat.toFixed(4)}, ${vessel.lon.toFixed(4)}.`,
                   }).catch(() => {});
                 }
               }
