@@ -186,6 +186,12 @@ const UCRManagement = lazy(() => import("@/pages/UCRManagement"));
 const ManifestManagement = lazy(() => import("@/pages/ManifestManagement"));
 const TradeAnalyticsDashboard = lazy(() => import("@/pages/TradeAnalyticsDashboard"));
 const NCSNRSDashboard = lazy(() => import("@/pages/NCSNRSDashboard"));
+// Phase 22 — UI for previously orphaned tRPC routers
+const ValuationTools = lazy(() => import("@/pages/app/ValuationTools"));
+const WtoValuation = lazy(() => import("@/pages/app/WtoValuation"));
+const AdvanceRulings = lazy(() => import("@/pages/app/AdvanceRulings"));
+const ComplianceReporting = lazy(() => import("@/pages/app/ComplianceReporting"));
+const DeclarationRiskHistory = lazy(() => import("@/pages/app/DeclarationRiskHistory"));
 
 
 const LazyFallback = () => <_PageSkeleton />;
@@ -805,6 +811,23 @@ function Router() {
       </Route>
       <Route path="/app/admin/aeo-renewal">
         <AdminGuard><Suspense fallback={<LazyFallback />}><AEORenewalWorkflow /></Suspense></AdminGuard>
+      </Route>
+
+      {/* Phase 22 — UI for previously orphaned tRPC routers */}
+      <Route path="/app/valuation">
+        <Suspense fallback={<LazyFallback />}><ValuationTools /></Suspense>
+      </Route>
+      <Route path="/app/valuation/wto">
+        <Suspense fallback={<LazyFallback />}><WtoValuation /></Suspense>
+      </Route>
+      <Route path="/app/advance-rulings">
+        <Suspense fallback={<LazyFallback />}><AdvanceRulings /></Suspense>
+      </Route>
+      <Route path="/app/admin/compliance-reporting">
+        <AdminGuard><Suspense fallback={<LazyFallback />}><ComplianceReporting /></Suspense></AdminGuard>
+      </Route>
+      <Route path="/app/declarations/risk-history">
+        <Suspense fallback={<LazyFallback />}><DeclarationRiskHistory /></Suspense>
       </Route>
 
       {/* 404 */}
