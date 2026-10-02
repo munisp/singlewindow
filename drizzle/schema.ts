@@ -1,6 +1,6 @@
 import {
   pgTable, pgEnum, serial, text, timestamp, varchar,
-  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date, check
+  integer, decimal, boolean, json, jsonb, bigint, index, unique, uniqueIndex, real, uuid, date, check, doublePrecision
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -1441,7 +1441,18 @@ export const originCriteriaMet = pgEnum("origin_criteria_met", [
 export const originCertificates = pgTable("origin_certificates", {
   id: serial("id").primaryKey(),
   declarationId: integer("declaration_id").references(() => declarations.id),
-  traderId: integer("trader_id").notNull().references(() => users.id),
+  traderId: integer("trader_id").references(() => users.id), // Phase 24 (0079): NOT NULL dropped — gateway writes external string refs into traderRef
+  declarationRef: varchar("declaration_ref", { length: 128 }),
+  traderRef: varchar("trader_ref", { length: 128 }),
+  fulfilment: text("fulfilment"),
+  quote: jsonb("quote"),
+  steps: jsonb("steps").notNull().default([]),
+  assessmentId: varchar("assessment_id", { length: 64 }),
+  tbPendingId: varchar("tb_pending_id", { length: 64 }),
+  tbPostedAt: timestamp("tb_posted_at", { withTimezone: true }),
+  errorCode: varchar("error_code", { length: 64 }),
+  initiatedAt: timestamp("initiated_at", { withTimezone: true }),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   reviewedBy: integer("reviewed_by").references(() => users.id),
   certType: originCertTypeEnum("cert_type").notNull().default("afcfta_co"),
   status: originCertStatusEnum("status").notNull().default("draft"),
@@ -2805,6 +2816,13 @@ export const temporalWorkflowRuns = pgTable("temporal_workflow_runs", {
   startedAt: timestamp("started_at").defaultNow().notNull(),
   closedAt: timestamp("closed_at"),
   durationMs: integer("duration_ms"),
+  // Phase 24 additions (0080):
+  declarationRef: varchar("declaration_ref", { length: 64 }),
+  traderRef: varchar("trader_ref", { length: 256 }),
+  riskLane: varchar("risk_lane", { length: 16 }),
+  currentStep: integer("current_step"),
+  totalSteps: integer("total_steps"),
+  activities: jsonb("activities"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("idx_temporal_runs_workflow").on(t.workflowId),
@@ -2812,6 +2830,7 @@ export const temporalWorkflowRuns = pgTable("temporal_workflow_runs", {
   index("idx_temporal_runs_status").on(t.status),
   index("idx_temporal_runs_declaration").on(t.declarationId),
   index("idx_temporal_runs_started").on(t.startedAt),
+  index("idx_temporal_runs_declaration_ref").on(t.declarationRef),
 ]);
 export type TemporalWorkflowRun = typeof temporalWorkflowRuns.$inferSelect;
 export type InsertTemporalWorkflowRun = typeof temporalWorkflowRuns.$inferInsert;
@@ -3546,7 +3565,7 @@ export const mojaloopPayments = pgTable("mojaloop_payments", {
   paymentType: varchar("payment_type", { length: 32 }).notNull(),
   amount: decimal("amount", { precision: 14, scale: 2 }).notNull(),
   currency: varchar("currency", { length: 3 }).notNull().default("NGN"),
-  payerFsp: varchar("payer_fsp", { length: 64 }).notNull(),
+  payerFsp: varchar("payer_fsp", { length: 64 }), // Phase 24 (0079): NOT NULL dropped
   quoteId: varchar("quote_id", { length: 64 }),
   transferId: varchar("transfer_id", { length: 64 }),
   status: varchar("status", { length: 32 }).notNull().default("PENDING"),
@@ -3559,6 +3578,8 @@ export const mojaloopPayments = pgTable("mojaloop_payments", {
   index("idx_mj_payments_trader").on(t.traderId),
   index("idx_mj_payments_status").on(t.status),
   index("idx_mj_payments_declaration").on(t.declarationId),
+  index("idx_mj_payments_declaration_ref").on(t.declarationRef),
+  index("idx_mj_payments_transfer_id").on(t.transferId),
 ]);
 export type MojaloopPayment = typeof mojaloopPayments.$inferSelect;
 export type InsertMojaloopPayment = typeof mojaloopPayments.$inferInsert;
@@ -4375,3 +4396,85 @@ export const wazuhPlaybookExecutions = pgTable("wazuh_playbook_executions", {
 ]);
 export type WazuhPlaybookExecution = typeof wazuhPlaybookExecutions.$inferSelect;
 export type InsertWazuhPlaybookExecution = typeof wazuhPlaybookExecutions.$inferInsert;
+
+// ─── PHASE 24: RESIDUAL IN-MEMORY STORE PERSISTENCE (migrations 0077–0080) ────
+// Postgres persistence replacing in-memory maps in cen-service, freezone-service
+// (0077/0078). mojaloop_payments (0079) and temporal_workflow_runs (0080) are
+// ALTERed in place above. No seed data in any migration.
+
+// cen-service CEN alert store (migration 0077)
+export const cenAlerts = pgTable("cen_alerts", {
+  id: text("id").primaryKey(),
+  direction: varchar("direction", { length: 16 }).notNull(),
+  partnerCode: varchar("partner_code", { length: 16 }).notNull(),
+  alertType: varchar("alert_type", { length: 32 }).notNull(),
+  priority: varchar("priority", { length: 16 }).notNull(),
+  subject: text("subject").notNull(),
+  description: text("description").notNull(),
+  traderRef: varchar("trader_ref", { length: 128 }).notNull().default(""),
+  ucr: varchar("ucr", { length: 64 }).notNull().default(""),
+  hsCode: varchar("hs_code", { length: 16 }).notNull().default(""),
+  riskScore: doublePrecision("risk_score").notNull().default(0),
+  status: varchar("status", { length: 32 }).notNull(),
+  xmlPayload: text("xml_payload").notNull().default(""),
+  correlatedWith: jsonb("correlated_with").notNull().default([]),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_cen_alerts_status").on(t.status),
+  index("idx_cen_alerts_severity").on(t.priority),
+  index("idx_cen_alerts_direction").on(t.direction),
+  index("idx_cen_alerts_created").on(t.createdAt),
+]);
+export type CenAlert = typeof cenAlerts.$inferSelect;
+export type InsertCenAlert = typeof cenAlerts.$inferInsert;
+
+// freezone-service zone + goods stores (migration 0078)
+export const freeZones = pgTable("free_zones", {
+  id: text("id").primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  code: varchar("code", { length: 32 }).notNull(),
+  location: varchar("location", { length: 255 }).notNull(),
+  operatorName: varchar("operator_name", { length: 255 }).notNull(),
+  licenceNumber: varchar("licence_number", { length: 64 }).notNull(),
+  zoneType: varchar("zone_type", { length: 32 }).notNull(),
+  capacityM3: doublePrecision("capacity_m3").notNull().default(0),
+  usedM3: doublePrecision("used_m3").notNull().default(0),
+  status: varchar("status", { length: 16 }).notNull().default("ACTIVE"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_free_zones_status").on(t.status),
+  index("idx_free_zones_code").on(t.code),
+]);
+export type FreeZone = typeof freeZones.$inferSelect;
+export type InsertFreeZone = typeof freeZones.$inferInsert;
+
+export const freezoneGoods = pgTable("freezone_goods", {
+  id: text("id").primaryKey(),
+  zoneId: text("zone_id").notNull(),
+  ucr: varchar("ucr", { length: 64 }).notNull().default(""),
+  traderRef: varchar("trader_ref", { length: 128 }).notNull().default(""),
+  hsCode: varchar("hs_code", { length: 16 }).notNull().default(""),
+  description: text("description").notNull().default(""),
+  originCountry: varchar("origin_country", { length: 2 }).notNull().default(""),
+  grossWeightKg: doublePrecision("gross_weight_kg").notNull().default(0),
+  volumeM3: doublePrecision("volume_m3").notNull().default(0),
+  invoiceValue: doublePrecision("invoice_value").notNull().default(0),
+  currency: varchar("currency", { length: 3 }).notNull().default(""),
+  dutyRate: doublePrecision("duty_rate").notNull().default(0),
+  dutyOwed: doublePrecision("duty_owed").notNull().default(0),
+  status: varchar("status", { length: 16 }).notNull().default("ADMITTED"),
+  currentZoneId: text("current_zone_id").notNull().default(""),
+  exitDestination: varchar("exit_destination", { length: 16 }).notNull().default(""),
+  exitDutyPaid: doublePrecision("exit_duty_paid").notNull().default(0),
+  admittedAt: timestamp("admitted_at", { withTimezone: true }).defaultNow().notNull(),
+  exitedAt: timestamp("exited_at", { withTimezone: true }),
+  transferHistory: jsonb("transfer_history").notNull().default([]),
+}, (t) => [
+  index("idx_freezone_goods_status").on(t.status),
+  index("idx_freezone_goods_current_zone").on(t.currentZoneId),
+  index("idx_freezone_goods_zone").on(t.zoneId),
+  index("idx_freezone_goods_ucr").on(t.ucr),
+]);
+export type FreezoneGoods = typeof freezoneGoods.$inferSelect;
+export type InsertFreezoneGoods = typeof freezoneGoods.$inferInsert;
