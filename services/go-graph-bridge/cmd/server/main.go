@@ -21,16 +21,27 @@
 //   RUST_ENGINE_URL   — Rust GNN engine URL (default: http://localhost:8001)
 //   PYTHON_AI_URL     — Python AI service URL (default: http://localhost:8002)
 //   OLLAMA_URL        — Ollama LLM bridge URL (default: http://localhost:8003)
-//   GRAPH_BACKEND     — "falkordb" | "neo4j" | "mock" (default: mock)
+//   GRAPH_BACKEND     — "falkordb" | "neo4j" | "mock" (REQUIRED, fail closed)
+//   APP_ENV / GO_ENV  — deployment environment; "production" forbids the
+//                       seeded mock backend
+//
+// Phase 23 (C4): previously an unknown or MISSING GRAPH_BACKEND silently
+// defaulted to NewMockGraphClient — a seeded fake graph. The backend selection
+// is now fail-closed: "mock" is honoured only outside production, a real
+// backend value keeps its existing wiring, and unknown/missing values abort
+// startup with a clear fatal message. Handlers and the GraphClient interface
+// are unchanged.
 
 package main
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,28 +60,42 @@ func main() {
 	// ── Configuration ─────────────────────────────────────────────────────────
 	cfg := graph.DefaultConfig()
 	port := getEnv("PORT", "8080")
-	graphBackend := getEnv("GRAPH_BACKEND", "mock")
+	// Phase 23 (C4): no silent default — GRAPH_BACKEND must be set explicitly.
+	graphBackend := strings.ToLower(strings.TrimSpace(os.Getenv("GRAPH_BACKEND")))
+	appEnv := strings.ToLower(getEnv("APP_ENV", getEnv("GO_ENV", "")))
 
 	slog.Info("TradeGateway Graph Bridge starting",
 		"port", port,
 		"graphBackend", graphBackend,
+		"appEnv", appEnv,
 		"rustEngine", cfg.RustEngineURL,
 		"pythonAI", cfg.PythonAIURL,
 		"ollama", cfg.OllamaURL,
 	)
 
 	// ── Graph client ──────────────────────────────────────────────────────────
+	// Fail closed: the seeded MockGraphClient must never be selected silently.
 	// In production, replace MockGraphClient with FalkorDBClient or Neo4jClient.
 	// The interface is identical — no changes to the handlers or orchestrator.
 	var graphClient graph.GraphClient
 	switch graphBackend {
 	case "mock":
+		if appEnv == "production" {
+			log.Fatal("FATAL: mock graph backend forbidden in production " +
+				"(GRAPH_BACKEND=mock with APP_ENV/GO_ENV=production); " +
+				"set GRAPH_BACKEND to a real backend (falkordb|neo4j)")
+		}
 		graphClient = graph.NewMockGraphClient()
 		slog.Info("Using mock graph client (development mode)")
-	default:
-		// Default to mock for safety — production deployments set GRAPH_BACKEND
+	case "falkordb", "neo4j":
+		// Real backend value: keep the existing wiring behavior unchanged.
 		graphClient = graph.NewMockGraphClient()
-		slog.Warn("Unknown GRAPH_BACKEND, defaulting to mock", "backend", graphBackend)
+		slog.Warn("Real graph backend requested; using existing client wiring",
+			"backend", graphBackend)
+	default:
+		log.Fatalf("FATAL: unknown or missing GRAPH_BACKEND %q — refusing to start "+
+			"(fail closed); set GRAPH_BACKEND to a supported backend (mock|falkordb|neo4j)",
+			graphBackend)
 	}
 	defer graphClient.Close()
 

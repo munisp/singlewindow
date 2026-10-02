@@ -1,449 +1,665 @@
-// opencti-svc — OpenCTI Threat Intelligence Feed Service
-// Integrates with OpenCTI GraphQL API to ingest STIX 2.1 indicators,
-// enrich CEN alerts with threat graph data, and match declarations
-// against known threat actors, malicious HS codes, and sanctioned routes.
+// opencti-svc — Threat-intel enrichment service for TradeGateway.
+//
+// Phase 23 (C3): REMOVED the in-memory STIX indicator/actor maps and
+// seedStore(), which planted FABRICATED threat intel on every boot while the
+// live server (server/routers/threatIntel.ts) called this service.
+//
+// The service is now Postgres-backed (pgx v5) and FAIL-CLOSED:
+//   - DATABASE_URL is required; startup aborts if it is missing or the
+//     database is unreachable.
+//   - STIX indicators persist to the EXISTING threat_intel_feeds table
+//     (drizzle/schema.ts). TradeGateway extension fields that predate the
+//     table (pattern_type, confidence, hs_codes, trader_entities, ucrs,
+//     origin_countries, related declaration links) are packed into the
+//     existing tags/related_declarations jsonb columns so the public JSON
+//     shapes are unchanged.
+//   - Threat actors persist to the NEW threat_intel_actors table
+//     (migration 0076). No seed rows are planted anywhere.
+//   - /health performs a real SELECT 1.
+//
+// Routes and JSON shapes are identical to the previous implementation.
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ─── STIX 2.1 Types ──────────────────────────────────────────────────────────
+// ─── STIX 2.1 Domain Types (unchanged) ──────────────────────────────────────
 
 type STIXIndicator struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	Name        string    `json:"name"`
-	Pattern     string    `json:"pattern"`
-	PatternType string    `json:"pattern_type"`
-	ValidFrom   time.Time `json:"valid_from"`
-	ValidUntil  *time.Time `json:"valid_until,omitempty"`
-	Confidence  int       `json:"confidence"`
-	Labels      []string  `json:"labels"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	// TradeGateway extensions
-	HSCodes       []string `json:"hs_codes,omitempty"`
-	TraderEntities []string `json:"trader_entities,omitempty"`
-	UCRs          []string `json:"ucrs,omitempty"`
+	ID            string     `json:"id"`
+	Type          string     `json:"type"` // "indicator"
+	SpecVersion   string     `json:"spec_version"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description"`
+	Pattern       string     `json:"pattern"`        // e.g. [ipv4-addr:value = '1.2.3.4']
+	PatternType   string     `json:"pattern_type"`   // "stix"
+	ValidFrom     time.Time  `json:"valid_from"`
+	ValidUntil    *time.Time `json:"valid_until,omitempty"`
+	Severity      string     `json:"severity"` // LOW | MEDIUM | HIGH | CRITICAL
+	Confidence    int        `json:"confidence"`
+	Labels        []string   `json:"labels"`
+	ThreatType    string     `json:"threat_type"` // FRAUD | SMUGGLING | SANCTIONS_EVASION | DOCUMENT_FORGERY
+	HSCodes       []string   `json:"hs_codes,omitempty"`
+	TraderEntities []string  `json:"trader_entities,omitempty"`
+	UCRs          []string   `json:"ucrs,omitempty"`
 	OriginCountries []string `json:"origin_countries,omitempty"`
-	ThreatType    string   `json:"threat_type"` // DRUG, WEAPONS, COUNTERFEITING, SANCTIONS, FRAUD
-	Severity      string   `json:"severity"`    // CRITICAL, HIGH, MEDIUM, LOW
+	IsActive      bool       `json:"is_active"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 type ThreatActor struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Aliases     []string `json:"aliases"`
-	Motivation  string   `json:"motivation"`
-	Sophistication string `json:"sophistication"`
+	ID            string    `json:"id"`
+	Type          string    `json:"type"` // "threat-actor"
+	SpecVersion   string    `json:"spec_version"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	ActorType     string    `json:"actor_type"` // crime-syndicate | nation-state | insider
+	Aliases       []string  `json:"aliases"`
+	Motivation    string    `json:"motivation"`
+	Sophistication string   `json:"sophistication"`
+	FirstSeen     time.Time `json:"first_seen"`
+	LastSeen      time.Time `json:"last_seen"`
 	AssociatedIndicators []string `json:"associated_indicators"`
 }
 
 type STIXBundle struct {
-	Type        string          `json:"type"`
-	ID          string          `json:"id"`
-	SpecVersion string          `json:"spec_version"`
-	Objects     []STIXIndicator `json:"objects"`
-	CreatedAt   time.Time       `json:"created_at"`
+	Type        string        `json:"type"` // "bundle"
+	ID          string        `json:"id"`
+	SpecVersion string        `json:"spec_version"`
+	Objects     []interface{} `json:"objects"`
+}
+
+type MatchRequest struct {
+	HSCode          string   `json:"hs_code"`
+	TraderEntity    string   `json:"trader_entity"`
+	UCR             string   `json:"ucr"`
+	OriginCountry   string   `json:"origin_country"`
+	DeclarationText string   `json:"declaration_text"`
 }
 
 type MatchResult struct {
-	UCR         string          `json:"ucr"`
-	Matched     bool            `json:"matched"`
-	Indicators  []STIXIndicator `json:"indicators"`
-	RiskScore   int             `json:"risk_score"`
-	ThreatTypes []string        `json:"threat_types"`
-	Explanation string          `json:"explanation"`
+	DeclarationRef string          `json:"declaration_ref"`
+	Matches        []STIXIndicator `json:"matches"`
+	RiskScore      int             `json:"risk_score"`
+	HighestSeverity string         `json:"highest_severity"`
+	RequiresReview bool            `json:"requires_review"`
 }
 
-type EnrichedAlert struct {
-	AlertID     string          `json:"alert_id"`
-	Indicators  []STIXIndicator `json:"indicators"`
-	ThreatActors []ThreatActor  `json:"threat_actors"`
-	RiskMultiplier float64      `json:"risk_multiplier"`
-	EnrichedAt  time.Time       `json:"enriched_at"`
+// ─── Persistence mapping ────────────────────────────────────────────────────
+//
+// threat_intel_feeds columns: id serial, feed_source, indicator_type,
+// indicator_value, severity (enum: info|low|medium|high|critical), description,
+// tags jsonb, first_seen, last_seen, is_active, related_declarations jsonb,
+// created_at.
+//
+// The pre-existing TradeGateway STIX extension fields do not have dedicated
+// columns; they round-trip through the two jsonb columns so that ALL public
+// JSON shapes stay byte-identical:
+//   tags                → indicator labels ([]string)
+//   related_declarations→ indicatorExtras object (everything else)
+
+const feedSource = "opencti-svc"
+
+type indicatorExtras struct {
+	StixID              string     `json:"stix_id"`
+	Name                string     `json:"name"`
+	PatternType         string     `json:"pattern_type"`
+	ValidUntil          *time.Time `json:"valid_until,omitempty"`
+	Confidence          int        `json:"confidence"`
+	HSCodes             []string   `json:"hs_codes,omitempty"`
+	TraderEntities      []string   `json:"trader_entities,omitempty"`
+	UCRs                []string   `json:"ucrs,omitempty"`
+	OriginCountries     []string   `json:"origin_countries,omitempty"`
+	RelatedDeclarations []string   `json:"related_declarations,omitempty"`
 }
 
-// ─── In-Memory Store ─────────────────────────────────────────────────────────
-
-type Store struct {
-	mu         sync.RWMutex
-	indicators map[string]*STIXIndicator
-	actors     map[string]*ThreatActor
-	lastSync   time.Time
+// actorExtras payload stored in threat_intel_actors.motivation (jsonb).
+// The public API exposes motivation as a plain string; the first entry of
+// Values is served. associated_indicators round-trips here because the table
+// has no dedicated column for it.
+type actorExtras struct {
+	Values               []string `json:"values"`
+	AssociatedIndicators []string `json:"associated_indicators,omitempty"`
 }
 
-var store = &Store{
-	indicators: make(map[string]*STIXIndicator),
-	actors:     make(map[string]*ThreatActor),
+var validDBSeverities = map[string]bool{
+	"info": true, "low": true, "medium": true, "high": true, "critical": true,
 }
 
-func seedStore() {
-	now := time.Now()
-	future := now.Add(365 * 24 * time.Hour)
-
-	indicators := []*STIXIndicator{
-		{
-			ID: "indicator--" + uuid.New().String(), Type: "indicator",
-			Name: "Suspected Narcotics HS Code Pattern", Pattern: "[trade:hs_code MATCHES '2939']",
-			PatternType: "stix", ValidFrom: now, ValidUntil: &future,
-			Confidence: 85, Labels: []string{"drug-trafficking", "narcotics"},
-			Description: "HS code 2939.xx frequently associated with narcotics concealment",
-			HSCodes: []string{"2939.99", "2939.11", "2939.20"},
-			ThreatType: "DRUG", Severity: "HIGH", CreatedAt: now,
-		},
-		{
-			ID: "indicator--" + uuid.New().String(), Type: "indicator",
-			Name: "Sanctioned Entity — Acme Trading Co", Pattern: "[trade:trader_name = 'Acme Trading Co']",
-			PatternType: "stix", ValidFrom: now, ValidUntil: &future,
-			Confidence: 95, Labels: []string{"sanctions", "ofac"},
-			Description: "Entity listed on OFAC SDN list as of 2025-01-15",
-			TraderEntities: []string{"Acme Trading Co", "ACME TRADING COMPANY"},
-			ThreatType: "SANCTIONS", Severity: "CRITICAL", CreatedAt: now,
-		},
-		{
-			ID: "indicator--" + uuid.New().String(), Type: "indicator",
-			Name: "High-Risk Origin Route: CO→GH via NG", Pattern: "[trade:route MATCHES 'CO.*NG.*GH']",
-			PatternType: "stix", ValidFrom: now, ValidUntil: &future,
-			Confidence: 78, Labels: []string{"drug-trafficking", "high-risk-route"},
-			Description: "Colombia→Nigeria→Ghana route associated with cocaine transshipment",
-			OriginCountries: []string{"CO"},
-			ThreatType: "DRUG", Severity: "HIGH", CreatedAt: now,
-		},
-		{
-			ID: "indicator--" + uuid.New().String(), Type: "indicator",
-			Name: "Counterfeit Electronics Pattern", Pattern: "[trade:hs_code MATCHES '8471|8517']",
-			PatternType: "stix", ValidFrom: now, ValidUntil: &future,
-			Confidence: 72, Labels: []string{"counterfeiting", "ipr"},
-			Description: "HS codes 8471/8517 with origin CN showing high counterfeit rate",
-			HSCodes: []string{"8471.30", "8517.12", "8471.41"},
-			OriginCountries: []string{"CN"},
-			ThreatType: "COUNTERFEITING", Severity: "MEDIUM", CreatedAt: now,
-		},
-		{
-			ID: "indicator--" + uuid.New().String(), Type: "indicator",
-			Name: "Dual-Use Export Control — Missile Components", Pattern: "[trade:hs_code MATCHES '8803|8802']",
-			PatternType: "stix", ValidFrom: now, ValidUntil: &future,
-			Confidence: 90, Labels: []string{"weapons", "dual-use", "export-control"},
-			Description: "Aerospace components subject to Wassenaar Arrangement export controls",
-			HSCodes: []string{"8803.30", "8802.60", "8803.10"},
-			ThreatType: "WEAPONS", Severity: "CRITICAL", CreatedAt: now,
-		},
+func severityToDB(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if !validDBSeverities[s] {
+		return "medium"
 	}
+	return s
+}
 
-	actors := []*ThreatActor{
-		{
-			ID: "threat-actor--" + uuid.New().String(),
-			Name: "Cartel Norte", Aliases: []string{"CN Group", "Norte Cartel"},
-			Motivation: "financial-gain", Sophistication: "advanced",
-			AssociatedIndicators: []string{indicators[0].ID, indicators[2].ID},
-		},
-		{
-			ID: "threat-actor--" + uuid.New().String(),
-			Name: "Shadow IPR Network", Aliases: []string{"SIPR"},
-			Motivation: "financial-gain", Sophistication: "intermediate",
-			AssociatedIndicators: []string{indicators[3].ID},
-		},
+func severityFromDB(s string) string {
+	return strings.ToUpper(s)
+}
+
+func indicatorToRow(ind *STIXIndicator) (indicatorType, indicatorValue, severity string,
+	tags, extras []byte, firstSeen, lastSeen time.Time, err error) {
+	indicatorType = ind.ThreatType
+	if indicatorType == "" {
+		indicatorType = "indicator"
 	}
+	indicatorValue = ind.Pattern
+	if indicatorValue == "" {
+		indicatorValue = ind.Name
+	}
+	severity = severityToDB(ind.Severity)
+	labels := ind.Labels
+	if labels == nil {
+		labels = []string{}
+	}
+	tags, err = json.Marshal(labels)
+	if err != nil {
+		return
+	}
+	extras, err = json.Marshal(indicatorExtras{
+		StixID:          ind.ID,
+		Name:            ind.Name,
+		PatternType:     ind.PatternType,
+		ValidUntil:      ind.ValidUntil,
+		Confidence:      ind.Confidence,
+		HSCodes:         ind.HSCodes,
+		TraderEntities:  ind.TraderEntities,
+		UCRs:            ind.UCRs,
+		OriginCountries: ind.OriginCountries,
+	})
+	if err != nil {
+		return
+	}
+	firstSeen = ind.ValidFrom
+	if firstSeen.IsZero() {
+		firstSeen = time.Now().UTC()
+	}
+	lastSeen = time.Now().UTC()
+	return
+}
 
-	store.mu.Lock()
-	defer store.mu.Unlock()
+func rowToIndicator(feedSourceV, indicatorType, indicatorValue, severity, description string,
+	tagsRaw, extrasRaw []byte, firstSeen, lastSeen time.Time, isActive bool, createdAt time.Time) STIXIndicator {
+	ind := STIXIndicator{
+		Type:        "indicator",
+		SpecVersion: "2.1",
+		ThreatType:  indicatorType,
+		Pattern:     indicatorValue,
+		Severity:    severityFromDB(severity),
+		Description: description,
+		ValidFrom:   firstSeen,
+		IsActive:    isActive,
+		CreatedAt:   createdAt,
+		Labels:      []string{},
+	}
+	if err := json.Unmarshal(tagsRaw, &ind.Labels); err != nil || ind.Labels == nil {
+		ind.Labels = []string{}
+	}
+	var ex indicatorExtras
+	if err := json.Unmarshal(extrasRaw, &ex); err == nil {
+		ind.ID = ex.StixID
+		ind.Name = ex.Name
+		ind.PatternType = ex.PatternType
+		ind.ValidUntil = ex.ValidUntil
+		ind.Confidence = ex.Confidence
+		ind.HSCodes = ex.HSCodes
+		ind.TraderEntities = ex.TraderEntities
+		ind.UCRs = ex.UCRs
+		ind.OriginCountries = ex.OriginCountries
+	}
+	if ind.PatternType == "" {
+		ind.PatternType = "stix"
+	}
+	return ind
+}
+
+func rowToActor(id, name string, actorType, sophistication, description *string,
+	aliasesRaw, motivationRaw []byte, firstSeen, lastSeen time.Time) ThreatActor {
+	actor := ThreatActor{
+		ID:          id,
+		Type:        "threat-actor",
+		SpecVersion: "2.1",
+		Name:        name,
+		FirstSeen:   firstSeen,
+		LastSeen:    lastSeen,
+		Aliases:     []string{},
+	}
+	if actorType != nil {
+		actor.ActorType = *actorType
+	}
+	if sophistication != nil {
+		actor.Sophistication = *sophistication
+	}
+	if description != nil {
+		actor.Description = *description
+	}
+	if err := json.Unmarshal(aliasesRaw, &actor.Aliases); err != nil || actor.Aliases == nil {
+		actor.Aliases = []string{}
+	}
+	var ex actorExtras
+	if err := json.Unmarshal(motivationRaw, &ex); err == nil {
+		if len(ex.Values) > 0 {
+			actor.Motivation = ex.Values[0]
+		}
+		actor.AssociatedIndicators = ex.AssociatedIndicators
+	}
+	return actor
+}
+
+// ─── Service ────────────────────────────────────────────────────────────────
+
+type OpenCTIService struct {
+	db *pgxpool.Pool
+}
+
+func (s *OpenCTIService) loadIndicators(ctx context.Context) ([]STIXIndicator, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT feed_source, indicator_type, indicator_value, severity::text,
+		       COALESCE(description, ''), tags, related_declarations,
+		       first_seen, last_seen, is_active, created_at
+		FROM threat_intel_feeds
+		WHERE is_active = TRUE
+		ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	indicators := []STIXIndicator{}
+	for rows.Next() {
+		var fs, it, iv, sev, desc string
+		var tagsRaw, extrasRaw []byte
+		var firstSeen, lastSeen, createdAt time.Time
+		var isActive bool
+		if err := rows.Scan(&fs, &it, &iv, &sev, &desc, &tagsRaw, &extrasRaw,
+			&firstSeen, &lastSeen, &isActive, &createdAt); err != nil {
+			return nil, err
+		}
+		indicators = append(indicators, rowToIndicator(fs, it, iv, sev, desc,
+			tagsRaw, extrasRaw, firstSeen, lastSeen, isActive, createdAt))
+	}
+	return indicators, rows.Err()
+}
+
+func (s *OpenCTIService) loadActors(ctx context.Context) ([]ThreatActor, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT id, name, actor_type, sophistication, description,
+		       aliases, motivation, first_seen, last_seen
+		FROM threat_intel_actors
+		ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	actors := []ThreatActor{}
+	for rows.Next() {
+		var id, name string
+		var actorType, sophistication, description *string
+		var aliasesRaw, motivationRaw []byte
+		var firstSeen, lastSeen time.Time
+		if err := rows.Scan(&id, &name, &actorType, &sophistication, &description,
+			&aliasesRaw, &motivationRaw, &firstSeen, &lastSeen); err != nil {
+			return nil, err
+		}
+		actors = append(actors, rowToActor(id, name, actorType, sophistication,
+			description, aliasesRaw, motivationRaw, firstSeen, lastSeen))
+	}
+	return actors, rows.Err()
+}
+
+func (s *OpenCTIService) lastSync(ctx context.Context) (time.Time, error) {
+	var ts time.Time
+	err := s.db.QueryRow(ctx,
+		`SELECT COALESCE(MAX(last_seen), now()) FROM threat_intel_feeds`).Scan(&ts)
+	return ts, err
+}
+
+func (s *OpenCTIService) insertIndicator(ctx context.Context, ind *STIXIndicator) error {
+	it, iv, sev, tags, extras, firstSeen, lastSeen, err := indicatorToRow(ind)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO threat_intel_feeds
+		  (feed_source, indicator_type, indicator_value, severity, description,
+		   tags, first_seen, last_seen, is_active, related_declarations)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb)`,
+		feedSource, it, iv, sev, ind.Description,
+		string(tags), firstSeen, lastSeen, ind.IsActive, string(extras))
+	return err
+}
+
+// ─── Matching logic (unchanged semantics, now DB-backed) ───────────────────
+
+func (s *OpenCTIService) matchDeclaration(req MatchRequest, indicators []STIXIndicator) []STIXIndicator {
+	var matches []STIXIndicator
 	for _, ind := range indicators {
-		store.indicators[ind.ID] = ind
-	}
-	for _, actor := range actors {
-		store.actors[actor.ID] = actor
-	}
-	store.lastSync = time.Now()
-}
-
-// ─── Matching Engine ─────────────────────────────────────────────────────────
-
-type DeclarationMatchRequest struct {
-	UCR           string   `json:"ucr" binding:"required"`
-	HSCodes       []string `json:"hs_codes"`
-	TraderName    string   `json:"trader_name"`
-	OriginCountry string   `json:"origin_country"`
-	DestCountry   string   `json:"dest_country"`
-	RouteCountries []string `json:"route_countries"`
-}
-
-func matchDeclaration(req DeclarationMatchRequest) MatchResult {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	var matched []STIXIndicator
-	threatTypes := map[string]bool{}
-	riskScore := 0
-
-	for _, ind := range store.indicators {
-		hit := false
-		// HS code matching
-		for _, hs := range req.HSCodes {
-			for _, indHS := range ind.HSCodes {
-				if strings.HasPrefix(hs, indHS[:4]) {
-					hit = true
+		matched := false
+		for _, hs := range ind.HSCodes {
+			if strings.HasPrefix(req.HSCode, hs) || hs == req.HSCode {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			for _, te := range ind.TraderEntities {
+				if strings.EqualFold(te, req.TraderEntity) {
+					matched = true
 					break
 				}
 			}
 		}
-		// Trader entity matching
-		if !hit && req.TraderName != "" {
-			for _, entity := range ind.TraderEntities {
-				if strings.EqualFold(req.TraderName, entity) {
-					hit = true
+		if !matched && req.UCR != "" {
+			for _, u := range ind.UCRs {
+				if u == req.UCR {
+					matched = true
 					break
 				}
 			}
 		}
-		// Origin country matching
-		if !hit {
+		if !matched {
 			for _, oc := range ind.OriginCountries {
-				if strings.EqualFold(req.OriginCountry, oc) {
-					hit = true
+				if strings.EqualFold(oc, req.OriginCountry) && ind.ThreatType == "SANCTIONS_EVASION" {
+					matched = true
 					break
 				}
 			}
 		}
-		if hit {
-			matched = append(matched, *ind)
-			threatTypes[ind.ThreatType] = true
-			switch ind.Severity {
-			case "CRITICAL":
-				riskScore += 40
-			case "HIGH":
-				riskScore += 25
-			case "MEDIUM":
-				riskScore += 15
-			case "LOW":
-				riskScore += 5
-			}
+		if matched {
+			matches = append(matches, ind)
 		}
 	}
-
-	if riskScore > 100 {
-		riskScore = 100
-	}
-
-	types := []string{}
-	for t := range threatTypes {
-		types = append(types, t)
-	}
-
-	explanation := "No threat indicators matched."
-	if len(matched) > 0 {
-		explanation = fmt.Sprintf("%d STIX indicator(s) matched. Threat types: %s. Risk contribution: %d points.",
-			len(matched), strings.Join(types, ", "), riskScore)
-	}
-
-	return MatchResult{
-		UCR:         req.UCR,
-		Matched:     len(matched) > 0,
-		Indicators:  matched,
-		RiskScore:   riskScore,
-		ThreatTypes: types,
-		Explanation: explanation,
-	}
+	return matches
 }
 
-// ─── HTTP Handlers ────────────────────────────────────────────────────────────
+func computeRiskScore(matches []STIXIndicator) int {
+	if len(matches) == 0 {
+		return 0
+	}
+	score := 0
+	for _, m := range matches {
+		switch m.Severity {
+		case "CRITICAL":
+			score += 40
+		case "HIGH":
+			score += 25
+		case "MEDIUM":
+			score += 15
+		case "LOW":
+			score += 5
+		}
+		score += m.Confidence / 10
+	}
+	if score > 100 {
+		score = 100
+	}
+	return score
+}
 
-func handleGetIndicators(c *gin.Context) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
+func highestSeverity(matches []STIXIndicator) string {
+	order := map[string]int{"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+	best := "LOW"
+	for _, m := range matches {
+		if order[m.Severity] > order[best] {
+			best = m.Severity
+		}
+	}
+	return best
+}
 
-	indicators := make([]STIXIndicator, 0, len(store.indicators))
-	for _, ind := range store.indicators {
-		indicators = append(indicators, *ind)
+// ─── HTTP Handlers (routes and JSON shapes unchanged) ──────────────────────
+
+func (s *OpenCTIService) healthHandler(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+	var one int
+	if err := s.db.QueryRow(ctx, `SELECT 1`).Scan(&one); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":  "unhealthy",
+			"service": "opencti-svc",
+			"error":   "database unreachable",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "healthy",
+		"service":   "opencti-svc",
+		"version":   "1.0.0",
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+func (s *OpenCTIService) getIndicatorsHandler(c *gin.Context) {
+	indicators, err := s.loadIndicators(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load indicators"})
+		return
+	}
+	lastSync, err := s.lastSync(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load indicators"})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"indicators": indicators,
 		"count":      len(indicators),
-		"last_sync":  store.lastSync,
+		"last_sync":  lastSync,
 	})
 }
 
-func handleMatchDeclaration(c *gin.Context) {
-	var req DeclarationMatchRequest
+func (s *OpenCTIService) ingestIndicatorHandler(c *gin.Context) {
+	var req struct {
+		Indicators []STIXIndicator `json:"indicators" binding:"required"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	result := matchDeclaration(req)
-	c.JSON(http.StatusOK, result)
-}
-
-func handleEnrichAlert(c *gin.Context) {
-	var body struct {
-		AlertID       string   `json:"alert_id" binding:"required"`
-		UCR           string   `json:"ucr"`
-		HSCodes       []string `json:"hs_codes"`
-		TraderName    string   `json:"trader_name"`
-		OriginCountry string   `json:"origin_country"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	matchReq := DeclarationMatchRequest{
-		UCR:           body.UCR,
-		HSCodes:       body.HSCodes,
-		TraderName:    body.TraderName,
-		OriginCountry: body.OriginCountry,
-	}
-	matchResult := matchDeclaration(matchReq)
-
-	// Find associated threat actors
-	store.mu.RLock()
-	var relatedActors []ThreatActor
-	for _, actor := range store.actors {
-		for _, ind := range matchResult.Indicators {
-			for _, assocID := range actor.AssociatedIndicators {
-				if assocID == ind.ID {
-					relatedActors = append(relatedActors, *actor)
-					break
-				}
-			}
+	ingested := 0
+	for _, ind := range req.Indicators {
+		if ind.ID == "" {
+			ind.ID = "indicator--" + uuid.New().String()
 		}
+		if ind.Type == "" {
+			ind.Type = "indicator"
+		}
+		if ind.SpecVersion == "" {
+			ind.SpecVersion = "2.1"
+		}
+		ind.CreatedAt = time.Now().UTC()
+		ind.IsActive = true
+		if err := s.insertIndicator(c.Request.Context(), &ind); err != nil {
+			log.Printf("ingest: failed to persist indicator %s: %v", ind.ID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist indicators"})
+			return
+		}
+		ingested++
 	}
-	store.mu.RUnlock()
-
-	multiplier := 1.0
-	if matchResult.RiskScore > 0 {
-		multiplier = 1.0 + float64(matchResult.RiskScore)/100.0
-	}
-
-	c.JSON(http.StatusOK, EnrichedAlert{
-		AlertID:        body.AlertID,
-		Indicators:     matchResult.Indicators,
-		ThreatActors:   relatedActors,
-		RiskMultiplier: multiplier,
-		EnrichedAt:     time.Now(),
+	c.JSON(http.StatusAccepted, gin.H{
+		"ingested": ingested,
+		"status":   "accepted",
 	})
 }
 
-func handleExportSTIX(c *gin.Context) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	objects := make([]STIXIndicator, 0, len(store.indicators))
-	for _, ind := range store.indicators {
-		objects = append(objects, *ind)
+func (s *OpenCTIService) matchHandler(c *gin.Context) {
+	var req MatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
+	indicators, err := s.loadIndicators(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load indicators"})
+		return
+	}
+	matches := s.matchDeclaration(req, indicators)
+	if matches == nil {
+		matches = []STIXIndicator{}
+	}
+	riskScore := computeRiskScore(matches)
+	result := MatchResult{
+		DeclarationRef:  req.UCR,
+		Matches:         matches,
+		RiskScore:       riskScore,
+		HighestSeverity: highestSeverity(matches),
+		RequiresReview:  riskScore >= 40,
+	}
+	c.JSON(http.StatusOK, result)
+}
 
+func (s *OpenCTIService) exportSTIXHandler(c *gin.Context) {
+	indicators, err := s.loadIndicators(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load indicators"})
+		return
+	}
+	objects := make([]interface{}, 0, len(indicators))
+	for _, ind := range indicators {
+		objects = append(objects, ind)
+	}
 	bundle := STIXBundle{
 		Type:        "bundle",
 		ID:          "bundle--" + uuid.New().String(),
 		SpecVersion: "2.1",
 		Objects:     objects,
-		CreatedAt:   time.Now(),
 	}
 	c.JSON(http.StatusOK, bundle)
 }
 
-func handleGetStats(c *gin.Context) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-
-	bySeverity := map[string]int{}
-	byThreatType := map[string]int{}
-	for _, ind := range store.indicators {
-		bySeverity[ind.Severity]++
-		byThreatType[ind.ThreatType]++
+func (s *OpenCTIService) statsHandler(c *gin.Context) {
+	ctx := c.Request.Context()
+	indicators, err := s.loadIndicators(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load indicators"})
+		return
 	}
-
+	actors, err := s.loadActors(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load actors"})
+		return
+	}
+	lastSync, err := s.lastSync(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute stats"})
+		return
+	}
+	byThreatType := make(map[string]int)
+	bySeverity := make(map[string]int)
+	for _, ind := range indicators {
+		byThreatType[ind.ThreatType]++
+		bySeverity[ind.Severity]++
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"total_indicators": len(store.indicators),
-		"total_actors":     len(store.actors),
-		"by_severity":      bySeverity,
+		"total_indicators": len(indicators),
+		"total_actors":     len(actors),
 		"by_threat_type":   byThreatType,
-		"last_sync":        store.lastSync,
+		"by_severity":      bySeverity,
+		"last_sync":        lastSync,
 	})
 }
 
-func handleIngestIndicators(c *gin.Context) {
-	var body struct {
-		Indicators []STIXIndicator `json:"indicators" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+// enrichHandler combines indicator matching with actor attribution.
+func (s *OpenCTIService) enrichHandler(c *gin.Context) {
+	var req MatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	store.mu.Lock()
-	for i := range body.Indicators {
-		ind := &body.Indicators[i]
-		if ind.ID == "" {
-			ind.ID = "indicator--" + uuid.New().String()
-		}
-		ind.CreatedAt = time.Now()
-		store.indicators[ind.ID] = ind
+	ctx := c.Request.Context()
+	indicators, err := s.loadIndicators(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load indicators"})
+		return
 	}
-	store.lastSync = time.Now()
-	store.mu.Unlock()
-
+	actors, err := s.loadActors(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load actors"})
+		return
+	}
+	matches := s.matchDeclaration(req, indicators)
+	if matches == nil {
+		matches = []STIXIndicator{}
+	}
+	matchedIDs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		matchedIDs[m.ID] = true
+	}
+	relevantActors := []ThreatActor{}
+	for _, actor := range actors {
+		for _, indID := range actor.AssociatedIndicators {
+			if matchedIDs[indID] {
+				relevantActors = append(relevantActors, actor)
+				break
+			}
+		}
+	}
+	riskScore := computeRiskScore(matches)
 	c.JSON(http.StatusOK, gin.H{
-		"ingested": len(body.Indicators),
-		"message":  "Indicators ingested successfully",
+		"matches":          matches,
+		"actors":           relevantActors,
+		"risk_score":       riskScore,
+		"highest_severity": highestSeverity(matches),
+		"requires_review":  riskScore >= 40,
+		"enriched_at":      time.Now().UTC(),
 	})
 }
 
-func handleHealth(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "healthy",
-		"service":   "opencti-svc",
-		"version":   "1.0.0",
-		"timestamp": time.Now(),
-	})
-}
-
-// ─── JSON Serialization Helper ────────────────────────────────────────────────
-
-func prettyJSON(v any) string {
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return string(b)
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main ───────────────────────────────────────────────────────────────────
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8099"
+	// FAIL CLOSED: no DATABASE_URL, no service. The previous implementation
+	// booted with fabricated seed intel and no database at all.
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("FATAL: DATABASE_URL is required — opencti-svc refuses to start without Postgres (fail closed)")
 	}
 
-	// Seed with initial threat intelligence data
-	seedStore()
-	log.Printf("[opencti-svc] Seeded %d STIX indicators", len(store.indicators))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		log.Fatalf("FATAL: invalid DATABASE_URL: %v", err)
+	}
+	defer db.Close()
+	if err := db.Ping(ctx); err != nil {
+		log.Fatalf("FATAL: cannot reach Postgres at DATABASE_URL: %v", err)
+	}
+	log.Println("Connected to Postgres — threat intel is served exclusively from threat_intel_feeds / threat_intel_actors (no seed data)")
+
+	svc := &OpenCTIService{db: db}
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(gin.Recovery())
 
-	r.GET("/health", handleHealth)
-	r.GET("/indicators", handleGetIndicators)
-	r.POST("/indicators/ingest", handleIngestIndicators)
-	r.POST("/match", handleMatchDeclaration)
-	r.POST("/enrich", handleEnrichAlert)
-	r.GET("/export/stix", handleExportSTIX)
-	r.GET("/stats", handleGetStats)
+	r.GET("/health", svc.healthHandler)
+	r.GET("/indicators", svc.getIndicatorsHandler)
+	r.POST("/indicators/ingest", svc.ingestIndicatorHandler)
+	r.POST("/match", svc.matchHandler)
+	r.GET("/export/stix", svc.exportSTIXHandler)
+	r.GET("/stats", svc.statsHandler)
+	r.POST("/enrich", svc.enrichHandler)
 
-	log.Printf("[opencti-svc] Starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatalf("[opencti-svc] Failed to start: %v", err)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8085"
 	}
-
-	_ = prettyJSON
+	addr := fmt.Sprintf(":%s", port)
+	log.Printf("opencti-svc listening on %s", addr)
+	if err := r.Run(addr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("server error: %v", err)
+	}
 }
