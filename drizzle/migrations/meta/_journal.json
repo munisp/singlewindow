@@ -528,6 +528,13 @@
       "breakpoints": true
     },
     {
+      "idx": 75,
+      "version": "7",
+      "when": 1790100000000,
+      "tag": "0075_phase23_wazuh_persistence",
+      "breakpoints": true
+    },
+    {
       "idx": 76,
       "version": "7",
       "when": 1790100001000,

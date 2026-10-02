@@ -4309,3 +4309,69 @@ export const threatIntelActors = pgTable("threat_intel_actors", {
 ]);
 export type ThreatIntelActor = typeof threatIntelActors.$inferSelect;
 export type InsertThreatIntelActor = typeof threatIntelActors.$inferInsert;
+
+// ─── WAZUH PERSISTENCE (Phase 23, C1; migration 0075) ────────────────────────
+// Postgres persistence for services/go/wazuh-svc — previously an in-memory
+// map store seeded with fabricated agents/alerts on every boot (seedStore,
+// deleted in this branch). Migration 0075 plants NO seed data.
+export const wazuhAgents = pgTable("wazuh_agents", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  ip: varchar("ip", { length: 45 }),
+  status: varchar("status", { length: 32 }).default("never_connected").notNull(),
+  lastSeen: timestamp("last_seen"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_wazuh_agents_status").on(t.status),
+]);
+export type WazuhAgent = typeof wazuhAgents.$inferSelect;
+export type InsertWazuhAgent = typeof wazuhAgents.$inferInsert;
+
+export const wazuhAlerts = pgTable("wazuh_alerts", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  ruleId: integer("rule_id").notNull(),
+  level: integer("level").default(0).notNull(),
+  description: text("description").notNull(),
+  agentId: varchar("agent_id", { length: 64 }),
+  data: jsonb("data").default({}).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_wazuh_alerts_agent_id").on(t.agentId),
+  index("idx_wazuh_alerts_level").on(t.level),
+  index("idx_wazuh_alerts_created_at").on(t.createdAt),
+]);
+export type WazuhAlert = typeof wazuhAlerts.$inferSelect;
+export type InsertWazuhAlert = typeof wazuhAlerts.$inferInsert;
+
+export const wazuhPlaybooks = pgTable("wazuh_playbooks", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  triggerCondition: jsonb("trigger_condition").default({}).notNull(),
+  actions: jsonb("actions").default([]).notNull(),
+  enabled: boolean("enabled").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_wazuh_playbooks_enabled").on(t.enabled),
+]);
+export type WazuhPlaybook = typeof wazuhPlaybooks.$inferSelect;
+export type InsertWazuhPlaybook = typeof wazuhPlaybooks.$inferInsert;
+
+export const wazuhPlaybookExecutions = pgTable("wazuh_playbook_executions", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  playbookId: varchar("playbook_id", { length: 64 }).notNull().references(() => wazuhPlaybooks.id),
+  alertId: varchar("alert_id", { length: 64 }),
+  status: varchar("status", { length: 32 }).default("RUNNING").notNull(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  result: text("result"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_wazuh_exec_playbook_id").on(t.playbookId),
+  index("idx_wazuh_exec_alert_id").on(t.alertId),
+  index("idx_wazuh_exec_status").on(t.status),
+]);
+export type WazuhPlaybookExecution = typeof wazuhPlaybookExecutions.$inferSelect;
+export type InsertWazuhPlaybookExecution = typeof wazuhPlaybookExecutions.$inferInsert;
