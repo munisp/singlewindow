@@ -526,6 +526,13 @@
       "when": 1790000000000,
       "tag": "0074_phase22_risk_model_registry",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1790100001000,
+      "tag": "0076_phase23_threat_intel_actors",
+      "breakpoints": true
     }
   ]
 }

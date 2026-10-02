@@ -4286,3 +4286,26 @@ export const riskModelAbTests = pgTable("risk_model_ab_tests", {
 ]);
 export type RiskModelAbTest = typeof riskModelAbTests.$inferSelect;
 export type InsertRiskModelAbTest = typeof riskModelAbTests.$inferInsert;
+
+// ─── THREAT INTEL ACTORS (Phase 23, C3; migration 0076) ──────────────────────
+// Postgres persistence for services/go/opencti-svc threat actors — previously
+// an in-memory map seeded with fabricated intel on every boot (seedStore,
+// deleted in this branch). Migration 0076 plants NO seed data.
+export const threatIntelActors = pgTable("threat_intel_actors", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  actorType: varchar("actor_type", { length: 64 }),
+  aliases: jsonb("aliases").default([]),
+  motivation: jsonb("motivation").default([]),
+  sophistication: varchar("sophistication", { length: 64 }),
+  description: text("description"),
+  firstSeen: timestamp("first_seen").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("idx_threat_intel_actors_name").on(t.name),
+  index("idx_threat_intel_actors_type").on(t.actorType),
+]);
+export type ThreatIntelActor = typeof threatIntelActors.$inferSelect;
+export type InsertThreatIntelActor = typeof threatIntelActors.$inferInsert;
