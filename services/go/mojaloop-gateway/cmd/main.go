@@ -49,6 +49,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -138,12 +140,134 @@ type PaymentStep struct {
 	Error       string        `json:"error,omitempty"`
 }
 
-// ─── In-memory store (replace with PostgreSQL in production) ─────────────────
+// ─── Payment store ────────────────────────────────────────────────────────────
+// Phase 24: mojaloop_payments is the system of record and this service is its
+// writer. The in-memory map below is only a write-through cache of the live
+// pipeline working state (the record is mutated under r.mu by the async
+// pipeline); every mutation is mirrored to PostgreSQL via persistPayment.
+// handleStatus reads from PostgreSQL when the pool is configured (always in
+// production — main() is fail-closed on DATABASE_URL).
+//
+// MEDIUM (accepted): quoteAwaiters/transferAwaiters (below) remain in-memory
+// sync.Map callback waiters — they correlate in-flight FSPIOP callbacks with
+// goroutines and are not business data; a restart fails the pending pipeline
+// step closed with a typed timeout error.
 
 var (
 	payments   = make(map[string]*PaymentRecord)
 	paymentsMu sync.RWMutex
 )
+
+// persistPayment upserts a consistent snapshot of the record into
+// mojaloop_payments. Fail-closed semantics are preserved by the caller: a
+// persistence error on initiation aborts the request; mid-pipeline errors
+// are logged and surface as step/DB inconsistency for operators.
+func (g *MojaloopGateway) persistPayment(ctx context.Context, r *PaymentRecord) error {
+	if g.db == nil {
+		return nil // unit tests only; main() is fail-closed on DATABASE_URL
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	amount, err := strconv.ParseFloat(r.Amount, 64)
+	if err != nil {
+		amount = 0
+	}
+	quoteJSON, err := json.Marshal(r.Quote)
+	if err != nil {
+		return fmt.Errorf("marshal quote: %w", err)
+	}
+	stepsJSON, err := json.Marshal(r.Steps)
+	if err != nil {
+		return fmt.Errorf("marshal steps: %w", err)
+	}
+	var paymentType string
+	if r.PaymentMethod != "" {
+		paymentType = r.PaymentMethod
+	} else {
+		paymentType = "DUTY"
+	}
+
+	_, err = g.db.Exec(ctx, `INSERT INTO mojaloop_payments
+		(payment_ref, declaration_ref, trader_ref, payment_type, amount, currency,
+		 status, transfer_id, fulfilment, quote, steps, assessment_id, tb_pending_id,
+		 tb_posted_at, error_code, failure_reason, initiated_at, confirmed_at,
+		 created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		ON CONFLICT (payment_ref) DO UPDATE SET
+		 status = EXCLUDED.status,
+		 transfer_id = EXCLUDED.transfer_id,
+		 fulfilment = EXCLUDED.fulfilment,
+		 quote = EXCLUDED.quote,
+		 steps = EXCLUDED.steps,
+		 assessment_id = EXCLUDED.assessment_id,
+		 tb_pending_id = EXCLUDED.tb_pending_id,
+		 tb_posted_at = EXCLUDED.tb_posted_at,
+		 error_code = EXCLUDED.error_code,
+		 failure_reason = EXCLUDED.failure_reason,
+		 confirmed_at = EXCLUDED.confirmed_at,
+		 completed_at = EXCLUDED.confirmed_at,
+		 failed_at = CASE WHEN EXCLUDED.status = 'FAILED' THEN now() ELSE mojaloop_payments.failed_at END,
+		 updated_at = EXCLUDED.updated_at`,
+		r.ID, r.DeclarationID, r.TraderID, paymentType, amount, r.Currency,
+		string(r.Status), nullStr(r.TransferID), nullStr(r.Fulfilment), quoteJSON,
+		stepsJSON, nullStr(r.AssessmentID), nullStr(r.TBPendingID), r.TBPostedAt,
+		nullStr(r.ErrorCode), nullStr(r.ErrorMessage), r.InitiatedAt, r.ConfirmedAt,
+		r.InitiatedAt, time.Now().UTC())
+	return err
+}
+
+func nullStr(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// loadPayment reads a payment record back from mojaloop_payments.
+func (g *MojaloopGateway) loadPayment(ctx context.Context, paymentID string) (*PaymentRecord, error) {
+	var r PaymentRecord
+	var status string
+	var transferID, fulfilment, assessmentID, tbPendingID, errorCode, errorMsg *string
+	var quoteJSON, stepsJSON []byte
+	err := g.db.QueryRow(ctx, `SELECT payment_ref, declaration_ref, trader_ref,
+		amount::text, currency, payment_type, status, transfer_id, fulfilment, quote,
+		steps, assessment_id, tb_pending_id, tb_posted_at, error_code, failure_reason,
+		initiated_at, confirmed_at
+		FROM mojaloop_payments WHERE payment_ref = $1`, paymentID).Scan(
+		&r.ID, &r.DeclarationID, &r.TraderID, &r.Amount, &r.Currency,
+		&r.PaymentMethod, &status, &transferID, &fulfilment, &quoteJSON, &stepsJSON,
+		&assessmentID, &tbPendingID, &r.TBPostedAt, &errorCode, &errorMsg,
+		&r.InitiatedAt, &r.ConfirmedAt)
+	if err != nil {
+		return nil, err
+	}
+	r.Status = PaymentStatus(status)
+	r.TransferID = derefStr(transferID)
+	r.Fulfilment = derefStr(fulfilment)
+	r.AssessmentID = derefStr(assessmentID)
+	r.TBPendingID = derefStr(tbPendingID)
+	r.ErrorCode = derefStr(errorCode)
+	r.ErrorMessage = derefStr(errorMsg)
+	if len(quoteJSON) > 0 && string(quoteJSON) != "null" {
+		var q ILPQuote
+		if err := json.Unmarshal(quoteJSON, &q); err == nil {
+			r.Quote = &q
+		}
+	}
+	r.Steps = make([]PaymentStep, 0, 8)
+	if len(stepsJSON) > 0 {
+		_ = json.Unmarshal(stepsJSON, &r.Steps)
+	}
+	return &r, nil
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 // ─── Typed pipeline errors (fail-closed classification) ──────────────────────
 
@@ -202,6 +326,9 @@ type MojaloopGateway struct {
 	kafkaBrokers  []string
 	callbackWait  time.Duration
 	httpClient    *http.Client
+	// db is the PostgreSQL pool backing the mojaloop_payments table
+	// (Phase 24). main() wires it fail-closed; nil only in unit tests.
+	db *pgxpool.Pool
 }
 
 // NewMojaloopGateway wires the REAL integration surfaces from the
@@ -313,6 +440,13 @@ func (g *MojaloopGateway) InitiatePayment(ctx context.Context, declarationID, tr
 		tariffRequest: tariffReq,
 	}
 
+	// Persist the initiated record first — fail-closed: if the system of
+	// record cannot be written, the payment does not start.
+	if err := g.persistPayment(ctx, record); err != nil {
+		g.logger.Error("failed to persist initiated payment", zap.Error(err))
+		return nil, fmt.Errorf("failed to persist payment: %w", err)
+	}
+
 	paymentsMu.Lock()
 	payments[paymentID] = record
 	paymentsMu.Unlock()
@@ -373,6 +507,9 @@ func (g *MojaloopGateway) executePipeline(ctx context.Context, r *PaymentRecord)
 				zap.String("step", step.name),
 				zap.String("code", r.ErrorCode),
 				zap.Error(err))
+			if perr := g.persistPayment(ctx, r); perr != nil {
+				g.logger.Error("failed to persist failed payment state", zap.Error(perr))
+			}
 			return
 		}
 
@@ -383,6 +520,11 @@ func (g *MojaloopGateway) executePipeline(ctx context.Context, r *PaymentRecord)
 		r.Steps[i].CompletedAt = &now
 		r.Steps[i].LatencyMs = elapsed
 		r.mu.Unlock()
+
+		if perr := g.persistPayment(ctx, r); perr != nil {
+			g.logger.Error("failed to persist payment step state",
+				zap.String("step", step.name), zap.Error(perr))
+		}
 	}
 
 	now := time.Now().UTC()
@@ -390,6 +532,10 @@ func (g *MojaloopGateway) executePipeline(ctx context.Context, r *PaymentRecord)
 	r.Status = StatusConfirmed
 	r.ConfirmedAt = &now
 	r.mu.Unlock()
+
+	if perr := g.persistPayment(ctx, r); perr != nil {
+		g.logger.Error("failed to persist confirmed payment", zap.Error(perr))
+	}
 
 	g.logger.Info("payment pipeline completed",
 		zap.String("paymentId", r.ID),
@@ -939,6 +1085,23 @@ func (g *MojaloopGateway) handleInitiate(w http.ResponseWriter, r *http.Request)
 
 func (g *MojaloopGateway) handleStatus(w http.ResponseWriter, r *http.Request) {
 	paymentID := chi.URLParam(r, "paymentId")
+	if g.db != nil {
+		// System of record: mojaloop_payments.
+		record, err := g.loadPayment(r.Context(), paymentID)
+		if err == pgx.ErrNoRows {
+			http.Error(w, "payment not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			g.logger.Error("failed to load payment", zap.Error(err))
+			http.Error(w, "failed to load payment", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(record)
+		return
+	}
+	// Unit-test path only (main() is fail-closed on DATABASE_URL).
 	paymentsMu.RLock()
 	record, ok := payments[paymentID]
 	paymentsMu.RUnlock()
@@ -1036,7 +1199,27 @@ func main() {
 		defer otelShutdown(context.Background())
 	}
 
+	// Phase 24: fail-closed on the payment system of record. No DATABASE_URL,
+	// no service — never an in-memory fallback.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		logger.Fatal("DATABASE_URL is required; refusing to start (fail-closed)")
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		logger.Fatal("invalid DATABASE_URL", zap.Error(err))
+	}
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := pool.Ping(pingCtx); err != nil {
+		pingCancel()
+		logger.Fatal("database unreachable (fail-closed, refusing to start)", zap.Error(err))
+	}
+	pingCancel()
+	defer pool.Close()
+	logger.Info("connected to PostgreSQL (mojaloop_payments system of record)")
+
 	gw := NewMojaloopGateway(logger)
+	gw.db = pool
 	if gw.kafkaProducer != nil {
 		defer gw.kafkaProducer.Close()
 	}

@@ -23,18 +23,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -239,70 +239,77 @@ func buildActivityDefinitions() []WorkflowActivity {
 	}
 }
 
-// ─── In-memory workflow store (replace with Temporal SDK client in production) ──
+// ─── Workflow projection store (PostgreSQL) ──────────────────────────────────
+// Phase 24: the fabricated in-memory demo store (seeded "Dangote Industries
+// Ltd"/"Zenith Agro Exports" workflows) was deleted. The service now reads the
+// REAL workflow projection in temporal_workflow_runs via pgx/v5 and is
+// FAIL-CLOSED: it refuses to start without DATABASE_URL and never falls back
+// to memory or fabricated traces.
 
-var workflowStore = map[string]*WorkflowTrace{}
-
-func init() {
-	// Seed with realistic demo workflows
-	lanes := []string{"GREEN", "YELLOW", "RED"}
-	statuses := []WorkflowStatus{WorkflowRunning, WorkflowCompleted, WorkflowCompleted, WorkflowRunning}
-	decls := []string{"NG-2026-001234", "NG-2026-001235", "NG-2026-001236", "NG-2026-001237", "NG-2026-001238"}
-	traders := []string{"Dangote Industries Ltd", "Zenith Agro Exports", "Lagos Port Logistics", "Kano Textile Mills", "Abuja Tech Imports"}
-
-	for i, decl := range decls {
-		lane := lanes[i%3]
-		status := statuses[i%4]
-		startedAt := time.Now().Add(-time.Duration(i*45+10) * time.Minute).UTC()
-		activities := buildActivityDefinitions()
-
-		// Simulate progress
-		completedSteps := (i * 2) % len(activities)
-		for j := range activities {
-			if j < completedSteps {
-				start := startedAt.Add(time.Duration(j*30) * time.Second)
-				end := start.Add(time.Duration(800+rand.Intn(2000)) * time.Millisecond)
-				activities[j].State = ActivityCompleted
-				activities[j].StartedAt = &start
-				activities[j].CompletedAt = &end
-				activities[j].DurationMs = end.Sub(start).Milliseconds()
-				activities[j].Lane = lane
-			} else if j == completedSteps && status == WorkflowRunning {
-				start := time.Now().Add(-500 * time.Millisecond).UTC()
-				activities[j].State = ActivityRunning
-				activities[j].StartedAt = &start
-			}
-		}
-
-		slaMs := int64(4 * 60 * 60 * 1000) // 4h default
-		if lane == "YELLOW" {
-			slaMs = 24 * 60 * 60 * 1000
-		} else if lane == "RED" {
-			slaMs = 72 * 60 * 60 * 1000
-		}
-
-		wf := &WorkflowTrace{
-			WorkflowID:    fmt.Sprintf("clearance-%s", decl),
-			RunID:         fmt.Sprintf("run-%d", time.Now().UnixNano()+int64(i)),
-			DeclarationID: decl,
-			TraderID:      traders[i%len(traders)],
-			Status:        status,
-			StartedAt:     startedAt,
-			Activities:    activities,
-			CurrentStep:   completedSteps,
-			TotalSteps:    len(activities),
-			RiskLane:      lane,
-			SLABreached:   time.Since(startedAt).Milliseconds() > slaMs,
-			SLATargetMs:   slaMs,
-		}
-		if status == WorkflowCompleted {
-			t := startedAt.Add(time.Duration(completedSteps*30+120) * time.Second)
-			wf.CompletedAt = &t
-			ms := t.Sub(startedAt).Milliseconds()
-			wf.ClearanceTime = &ms
-		}
-		workflowStore[wf.WorkflowID] = wf
+// slaTargetForLane returns the clearance SLA in milliseconds for a risk lane.
+func slaTargetForLane(lane string) int64 {
+	switch lane {
+	case "YELLOW":
+		return 24 * 60 * 60 * 1000
+	case "RED":
+		return 72 * 60 * 60 * 1000
+	default: // GREEN
+		return 4 * 60 * 60 * 1000
 	}
+}
+
+const workflowRunColumns = `workflow_id, run_id, workflow_type, status,
+	COALESCE(declaration_ref, input->>'declarationId', ''),
+	COALESCE(trader_ref, input->>'traderId', ''),
+	COALESCE(risk_lane, input->>'riskLane', result->>'riskLane', ''),
+	COALESCE(current_step, 0), COALESCE(total_steps, 0),
+	activities, error_message, started_at, closed_at, duration_ms`
+
+// scanWorkflowRun maps one temporal_workflow_runs row onto a WorkflowTrace.
+func scanWorkflowRun(row pgx.Row) (*WorkflowTrace, error) {
+	var wf WorkflowTrace
+	var workflowType, status, lane string
+	var activitiesJSON []byte
+	var errMsg *string
+	var closedAt *time.Time
+	var durationMs *int64
+	err := row.Scan(&wf.WorkflowID, &wf.RunID, &workflowType, &status,
+		&wf.DeclarationID, &wf.TraderID, &lane, &wf.CurrentStep, &wf.TotalSteps,
+		&activitiesJSON, &errMsg, &wf.StartedAt, &closedAt, &durationMs)
+	if err != nil {
+		return nil, err
+	}
+	wf.Status = WorkflowStatus(status)
+	wf.RiskLane = lane
+	wf.CompletedAt = closedAt
+	if errMsg != nil {
+		wf.ErrorMessage = *errMsg
+	}
+	wf.ClearanceTime = durationMs
+	// Activity detail: use the stored projection when present; otherwise the
+	// static 9-activity DeclarationClearanceWorkflow template (the same
+	// definitions served by /api/workflows/activities) in PENDING state —
+	// structural metadata, never fabricated progress.
+	if len(activitiesJSON) > 0 && string(activitiesJSON) != "null" {
+		var acts []WorkflowActivity
+		if err := json.Unmarshal(activitiesJSON, &acts); err == nil && len(acts) > 0 {
+			wf.Activities = acts
+		}
+	}
+	if wf.Activities == nil {
+		wf.Activities = buildActivityDefinitions()
+	}
+	if wf.TotalSteps == 0 {
+		wf.TotalSteps = len(wf.Activities)
+	}
+	wf.SLATargetMs = slaTargetForLane(wf.RiskLane)
+	// SLA breach is computed from real timestamps, never stored fabrication.
+	elapsed := time.Since(wf.StartedAt).Milliseconds()
+	if durationMs != nil {
+		elapsed = *durationMs
+	}
+	wf.SLABreached = elapsed > wf.SLATargetMs
+	return &wf, nil
 }
 
 // ─── Query service ────────────────────────────────────────────────────────────
@@ -310,68 +317,85 @@ func init() {
 type TemporalQueryService struct {
 	logger       *zap.Logger
 	temporalHost string
+	db           *pgxpool.Pool
 }
 
-func NewTemporalQueryService(logger *zap.Logger) *TemporalQueryService {
+func NewTemporalQueryService(logger *zap.Logger, db *pgxpool.Pool) *TemporalQueryService {
 	return &TemporalQueryService{
 		logger:       logger,
 		temporalHost: getEnv("TEMPORAL_HOST", "temporal:7233"),
+		db:           db,
 	}
 }
 
-// GetWorkflowTrace returns the execution trace for a declaration's clearance workflow.
+// GetWorkflowTrace returns the execution trace for a declaration's clearance
+// workflow from the temporal_workflow_runs projection. Fail-closed: unknown
+// declarations are an error — no trace is ever fabricated on demand.
 func (s *TemporalQueryService) GetWorkflowTrace(declarationID string) (*WorkflowTrace, error) {
-	key := fmt.Sprintf("clearance-%s", declarationID)
-	if wf, ok := workflowStore[key]; ok {
-		return wf, nil
+	wf, err := scanWorkflowRun(s.db.QueryRow(context.Background(),
+		`SELECT `+workflowRunColumns+` FROM temporal_workflow_runs
+		 WHERE workflow_id = $1 OR declaration_ref = $2 OR input->>'declarationId' = $2
+		 ORDER BY started_at DESC LIMIT 1`,
+		fmt.Sprintf("clearance-%s", declarationID), declarationID))
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("no workflow found for declaration %s", declarationID)
 	}
-	// Generate on-demand for unknown declarations
-	activities := buildActivityDefinitions()
-	startedAt := time.Now().Add(-2 * time.Minute).UTC()
-	for i := range activities {
-		if i < 2 {
-			start := startedAt.Add(time.Duration(i*30) * time.Second)
-			end := start.Add(time.Duration(800+i*400) * time.Millisecond)
-			activities[i].State = ActivityCompleted
-			activities[i].StartedAt = &start
-			activities[i].CompletedAt = &end
-			activities[i].DurationMs = end.Sub(start).Milliseconds()
-		} else if i == 2 {
-			start := time.Now().Add(-500 * time.Millisecond).UTC()
-			activities[i].State = ActivityRunning
-			activities[i].StartedAt = &start
-		}
+	if err != nil {
+		return nil, err
 	}
-	wf := &WorkflowTrace{
-		WorkflowID:    key,
-		RunID:         fmt.Sprintf("run-%d", time.Now().UnixNano()),
-		DeclarationID: declarationID,
-		Status:        WorkflowRunning,
-		StartedAt:     startedAt,
-		Activities:    activities,
-		CurrentStep:   2,
-		TotalSteps:    len(activities),
-		RiskLane:      "YELLOW",
-		SLATargetMs:   24 * 60 * 60 * 1000,
-	}
-	workflowStore[key] = wf
 	return wf, nil
+}
+
+// getWorkflowByID loads a trace by its workflow_id (management operations).
+func (s *TemporalQueryService) getWorkflowByID(workflowID string) (*WorkflowTrace, error) {
+	wf, err := scanWorkflowRun(s.db.QueryRow(context.Background(),
+		`SELECT `+workflowRunColumns+` FROM temporal_workflow_runs
+		 WHERE workflow_id = $1 ORDER BY started_at DESC LIMIT 1`, workflowID))
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("workflow %s not found", workflowID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return wf, nil
+}
+
+// workflowCount returns the number of runs in the projection (0 on error).
+func (s *TemporalQueryService) workflowCount() int {
+	var n int
+	if err := s.db.QueryRow(context.Background(), `SELECT COUNT(*) FROM temporal_workflow_runs`).Scan(&n); err != nil {
+		return 0
+	}
+	return n
 }
 
 // ListWorkflows returns paginated workflow summaries with optional filtering.
 func (s *TemporalQueryService) ListWorkflows(status, lane, search string, page, pageSize int) ([]WorkflowSummary, int) {
-	var summaries []WorkflowSummary
-	for _, wf := range workflowStore {
-		if status != "" && string(wf.Status) != status {
-			continue
+	rows, err := s.db.Query(context.Background(),
+		`SELECT `+workflowRunColumns+` FROM temporal_workflow_runs
+		 WHERE ($1 = '' OR status = $1)
+		   AND ($2 = '' OR COALESCE(risk_lane, input->>'riskLane', result->>'riskLane', '') = $2)
+		   AND ($3 = '' OR COALESCE(declaration_ref, input->>'declarationId', '') ILIKE '%' || $3 || '%'
+		        OR COALESCE(trader_ref, input->>'traderId', '') ILIKE '%' || $3 || '%')
+		 ORDER BY started_at DESC`, status, lane, search)
+	if err != nil {
+		s.logger.Error("list workflows query failed", zap.Error(err))
+		return []WorkflowSummary{}, 0
+	}
+	defer rows.Close()
+
+	var traces []*WorkflowTrace
+	for rows.Next() {
+		wf, err := scanWorkflowRun(rows)
+		if err != nil {
+			s.logger.Error("scan workflow run failed", zap.Error(err))
+			return []WorkflowSummary{}, 0
 		}
-		if lane != "" && wf.RiskLane != lane {
-			continue
-		}
-		if search != "" && !strings.Contains(strings.ToLower(wf.DeclarationID), strings.ToLower(search)) &&
-			!strings.Contains(strings.ToLower(wf.TraderID), strings.ToLower(search)) {
-			continue
-		}
+		traces = append(traces, wf)
+	}
+
+	summaries := make([]WorkflowSummary, 0, len(traces))
+	for _, wf := range traces {
 		currentStepName := ""
 		if wf.CurrentStep < len(wf.Activities) {
 			currentStepName = wf.Activities[wf.CurrentStep].Name
@@ -404,50 +428,51 @@ func (s *TemporalQueryService) ListWorkflows(status, lane, search string, page, 
 	return summaries[start:end], total
 }
 
-// GetStats returns aggregate workflow statistics.
+// GetStats returns aggregate workflow statistics from the projection.
 func (s *TemporalQueryService) GetStats() WorkflowStats {
 	stats := WorkflowStats{}
 	today := time.Now().Truncate(24 * time.Hour)
-	var greenCount, yellowCount, redCount int
-	for _, wf := range workflowStore {
-		if wf.Status == WorkflowRunning {
-			stats.ActiveWorkflows++
-		}
-		if wf.StartedAt.After(today) {
-			if wf.Status == WorkflowCompleted {
-				stats.CompletedToday++
-			}
-			if wf.Status == WorkflowFailed {
-				stats.FailedToday++
-			}
-			if wf.SLABreached {
-				stats.SLABreachedToday++
-			}
-		}
-		switch wf.RiskLane {
-		case "GREEN":
-			greenCount++
-		case "YELLOW":
-			yellowCount++
-		case "RED":
-			redCount++
-		}
+
+	var greenCount, yellowCount, redCount, totalRuns int
+	var avgMs float64
+	err := s.db.QueryRow(context.Background(), `
+		SELECT
+			COUNT(*) FILTER (WHERE status = 'RUNNING'),
+			COUNT(*) FILTER (WHERE status = 'COMPLETED' AND started_at >= $1),
+			COUNT(*) FILTER (WHERE status = 'FAILED' AND started_at >= $1),
+			COUNT(*) FILTER (WHERE started_at >= $1 AND
+				COALESCE(duration_ms, EXTRACT(EPOCH FROM (COALESCE(closed_at, now()) - started_at)) * 1000) >
+				CASE COALESCE(risk_lane, input->>'riskLane', result->>'riskLane', '')
+					WHEN 'YELLOW' THEN 86400000
+					WHEN 'RED' THEN 259200000
+					ELSE 14400000
+				END),
+			COUNT(*) FILTER (WHERE COALESCE(risk_lane, input->>'riskLane', result->>'riskLane', '') = 'GREEN'),
+			COUNT(*) FILTER (WHERE COALESCE(risk_lane, input->>'riskLane', result->>'riskLane', '') = 'YELLOW'),
+			COUNT(*) FILTER (WHERE COALESCE(risk_lane, input->>'riskLane', result->>'riskLane', '') = 'RED'),
+			COUNT(*),
+			COALESCE(AVG(duration_ms) FILTER (WHERE duration_ms IS NOT NULL), 0)
+		FROM temporal_workflow_runs`, today).Scan(
+		&stats.ActiveWorkflows, &stats.CompletedToday, &stats.FailedToday, &stats.SLABreachedToday,
+		&greenCount, &yellowCount, &redCount, &totalRuns, &avgMs)
+	if err != nil {
+		s.logger.Error("workflow stats query failed", zap.Error(err))
+		return stats
 	}
-	total := len(workflowStore)
-	if total > 0 {
-		stats.GreenLanePct = float64(greenCount) / float64(total) * 100
-		stats.YellowLanePct = float64(yellowCount) / float64(total) * 100
-		stats.RedLanePct = float64(redCount) / float64(total) * 100
+	if totalRuns > 0 {
+		stats.GreenLanePct = float64(greenCount) / float64(totalRuns) * 100
+		stats.YellowLanePct = float64(yellowCount) / float64(totalRuns) * 100
+		stats.RedLanePct = float64(redCount) / float64(totalRuns) * 100
 	}
-	stats.AvgClearanceTimeMs = 4 * 60 * 60 * 1000 // 4h average
+	stats.AvgClearanceTimeMs = int64(avgMs)
 	return stats
 }
 
 // SignalWorkflow sends a signal to a running workflow (e.g., approve, reject, escalate).
 func (s *TemporalQueryService) SignalWorkflow(workflowID, signalName string, payload interface{}) error {
-	wf, ok := workflowStore[workflowID]
-	if !ok {
-		return fmt.Errorf("workflow %s not found", workflowID)
+	wf, err := s.getWorkflowByID(workflowID)
+	if err != nil {
+		return err
 	}
 	if wf.Status != WorkflowRunning {
 		return fmt.Errorf("workflow %s is not running (status: %s)", workflowID, wf.Status)
@@ -462,38 +487,43 @@ func (s *TemporalQueryService) SignalWorkflow(workflowID, signalName string, pay
 
 // CancelWorkflow cancels a running workflow.
 func (s *TemporalQueryService) CancelWorkflow(workflowID, reason string) error {
-	wf, ok := workflowStore[workflowID]
-	if !ok {
-		return fmt.Errorf("workflow %s not found", workflowID)
+	wf, err := s.getWorkflowByID(workflowID)
+	if err != nil {
+		return err
 	}
 	if wf.Status != WorkflowRunning {
 		return fmt.Errorf("workflow %s is not running", workflowID)
 	}
-	wf.Status = WorkflowCancelled
+	// Record the cancellation in the projection. In production the Temporal
+	// SDK client also cancels the running execution on the server.
+	if _, err := s.db.Exec(context.Background(),
+		`UPDATE temporal_workflow_runs SET status = 'CANCELLED', closed_at = now()
+		 WHERE run_id = $1`, wf.RunID); err != nil {
+		return fmt.Errorf("failed to record cancellation: %w", err)
+	}
 	s.logger.Info("Workflow cancelled", zap.String("workflowId", workflowID), zap.String("reason", reason))
 	return nil
 }
 
 // RetryWorkflow retries a failed workflow from the last failed activity.
 func (s *TemporalQueryService) RetryWorkflow(workflowID string) (*WorkflowTrace, error) {
-	wf, ok := workflowStore[workflowID]
-	if !ok {
-		return nil, fmt.Errorf("workflow %s not found", workflowID)
+	wf, err := s.getWorkflowByID(workflowID)
+	if err != nil {
+		return nil, err
 	}
 	if wf.Status != WorkflowFailed {
 		return nil, fmt.Errorf("workflow %s is not in FAILED state", workflowID)
 	}
-	// Reset failed activities and restart
-	for i := range wf.Activities {
-		if wf.Activities[i].State == ActivityFailed {
-			wf.Activities[i].State = ActivityRetrying
-			wf.Activities[i].RetryCount++
-		}
+	// Mark the projection RUNNING again (the Temporal server restarts the
+	// failed activity from its retry policy). Activity-level detail is owned
+	// by the workflow worker and converges on the next projection update.
+	if _, err := s.db.Exec(context.Background(),
+		`UPDATE temporal_workflow_runs SET status = 'RUNNING', error_message = NULL, closed_at = NULL
+		 WHERE run_id = $1`, wf.RunID); err != nil {
+		return nil, fmt.Errorf("failed to record retry: %w", err)
 	}
-	wf.Status = WorkflowRunning
-	wf.ErrorMessage = ""
 	s.logger.Info("Workflow retried", zap.String("workflowId", workflowID))
-	return wf, nil
+	return s.getWorkflowByID(workflowID)
 }
 
 // ─── HTTP handlers ────────────────────────────────────────────────────────────
@@ -598,7 +628,26 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	svc := NewTemporalQueryService(logger)
+	// Phase 24: fail-closed on the workflow projection database. No
+	// DATABASE_URL, no service — never an in-memory or seeded fallback.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		logger.Fatal("DATABASE_URL is required; refusing to start (fail-closed)")
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		logger.Fatal("invalid DATABASE_URL", zap.Error(err))
+	}
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := pool.Ping(pingCtx); err != nil {
+		pingCancel()
+		logger.Fatal("database unreachable (fail-closed, refusing to start)", zap.Error(err))
+	}
+	pingCancel()
+	defer pool.Close()
+	logger.Info("connected to PostgreSQL (temporal_workflow_runs projection)")
+
+	svc := NewTemporalQueryService(logger, pool)
 
 	// HTTP server
 	r := chi.NewRouter()
@@ -611,7 +660,7 @@ func main() {
 			"status":       "ok",
 			"service":      "temporal-query-service",
 			"temporalHost": svc.temporalHost,
-			"workflows":    len(workflowStore),
+			"workflows":    svc.workflowCount(),
 		})
 	})
 

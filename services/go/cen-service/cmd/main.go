@@ -4,6 +4,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"log"
@@ -13,11 +15,12 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ─── WCO CEN XML Types ────────────────────────────────────────────────────────
@@ -125,10 +128,61 @@ type CorrelationResult struct {
 	Reason         string   `json:"reason"`
 }
 
-var (
-	alertStore   = make(map[string]*AlertRecord)
-	alertStoreMu sync.RWMutex
-)
+// Phase 24: alerts are persisted in PostgreSQL (cen_alerts) via pgx/v5.
+// The service is FAIL-CLOSED: it refuses to start without DATABASE_URL and
+// never falls back to an in-memory store.
+var db *pgxpool.Pool
+
+const alertColumns = `id, direction, partner_code, alert_type, priority, subject, description,
+	trader_ref, ucr, hs_code, risk_score, status, xml_payload, correlated_with, created_at, updated_at`
+
+// scanAlert scans one cen_alerts row (selected with alertColumns) into an AlertRecord.
+func scanAlert(row pgx.Row) (*AlertRecord, error) {
+	var a AlertRecord
+	var correlated []byte
+	err := row.Scan(&a.ID, &a.Direction, &a.PartnerCode, &a.AlertType, &a.Priority,
+		&a.Subject, &a.Description, &a.TraderRef, &a.UCR, &a.HSCode, &a.RiskScore,
+		&a.Status, &a.XMLPayload, &correlated, &a.CreatedAt, &a.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if len(correlated) > 0 {
+		_ = json.Unmarshal(correlated, &a.CorrelatedWith)
+	}
+	return &a, nil
+}
+
+// insertAlert persists a new alert record.
+func insertAlert(ctx context.Context, a *AlertRecord) error {
+	correlated, err := json.Marshal(a.CorrelatedWith)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(ctx, `INSERT INTO cen_alerts (`+alertColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		a.ID, a.Direction, a.PartnerCode, a.AlertType, a.Priority, a.Subject,
+		a.Description, a.TraderRef, a.UCR, a.HSCode, a.RiskScore, a.Status,
+		a.XMLPayload, correlated, a.CreatedAt, a.UpdatedAt)
+	return err
+}
+
+// loadAllAlerts fetches every alert (used by the correlation engine).
+func loadAllAlerts(ctx context.Context) ([]*AlertRecord, error) {
+	rows, err := db.Query(ctx, `SELECT `+alertColumns+` FROM cen_alerts`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*AlertRecord
+	for rows.Next() {
+		a, err := scanAlert(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
 
 // ─── CEN XML Builder ──────────────────────────────────────────────────────────
 
@@ -161,13 +215,22 @@ func buildCENXML(alert *AlertRecord) (string, error) {
 // ─── Alert Correlation Engine ─────────────────────────────────────────────────
 
 func correlateAlert(incoming *AlertRecord) CorrelationResult {
-	alertStoreMu.RLock()
-	defer alertStoreMu.RUnlock()
+	existing, err := loadAllAlerts(context.Background())
+	if err != nil {
+		log.Printf("[CEN Service] correlation query failed: %v", err)
+		return CorrelationResult{
+			AlertID:          incoming.ID,
+			MatchedAlerts:    []string{},
+			CorrelationScore: 0,
+			Reason:           "Correlation unavailable: alert store query failed",
+		}
+	}
 
 	var matches []string
 	var totalScore float64
 
-	for id, existing := range alertStore {
+	for _, existing := range existing {
+		id := existing.ID
 		if id == incoming.ID {
 			continue
 		}
@@ -309,9 +372,11 @@ func sendAlert(c *gin.Context) {
 	}
 	alert.XMLPayload = xmlPayload
 
-	alertStoreMu.Lock()
-	alertStore[alert.ID] = alert
-	alertStoreMu.Unlock()
+	if err := insertAlert(c.Request.Context(), alert); err != nil {
+		log.Printf("[CEN Service] failed to persist outbound alert: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist alert"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"alert": alert, "xmlPayload": xmlPayload})
 }
@@ -354,9 +419,11 @@ func receiveAlert(c *gin.Context) {
 	correlation := correlateAlert(alert)
 	alert.CorrelatedWith = correlation.MatchedAlerts
 
-	alertStoreMu.Lock()
-	alertStore[alert.ID] = alert
-	alertStoreMu.Unlock()
+	if err := insertAlert(c.Request.Context(), alert); err != nil {
+		log.Printf("[CEN Service] failed to persist inbound alert: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist alert"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"alert": alert, "correlation": correlation})
 }
@@ -366,19 +433,22 @@ func listAlerts(c *gin.Context) {
 	priority := c.Query("priority")
 	alertType := c.Query("alertType")
 
-	alertStoreMu.RLock()
-	defer alertStoreMu.RUnlock()
+	query := `SELECT ` + alertColumns + ` FROM cen_alerts WHERE ($1 = '' OR direction = $1) AND ($2 = '' OR priority = $2) AND ($3 = '' OR alert_type = $3)`
+	rows, err := db.Query(c.Request.Context(), query, direction, priority, alertType)
+	if err != nil {
+		log.Printf("[CEN Service] list alerts query failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query alerts"})
+		return
+	}
+	defer rows.Close()
 
 	result := []*AlertRecord{}
-	for _, a := range alertStore {
-		if direction != "" && a.Direction != direction {
-			continue
-		}
-		if priority != "" && a.Priority != priority {
-			continue
-		}
-		if alertType != "" && a.AlertType != alertType {
-			continue
+	for rows.Next() {
+		a, err := scanAlert(rows)
+		if err != nil {
+			log.Printf("[CEN Service] scan alert failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query alerts"})
+			return
 		}
 		result = append(result, a)
 	}
@@ -394,12 +464,15 @@ func listAlerts(c *gin.Context) {
 func correlateAlerts(c *gin.Context) {
 	alertID := c.Param("id")
 
-	alertStoreMu.RLock()
-	alert, exists := alertStore[alertID]
-	alertStoreMu.RUnlock()
-
-	if !exists {
+	alert, err := scanAlert(db.QueryRow(c.Request.Context(),
+		`SELECT `+alertColumns+` FROM cen_alerts WHERE id = $1`, alertID))
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "alert not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("[CEN Service] get alert failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query alert"})
 		return
 	}
 
@@ -410,26 +483,32 @@ func correlateAlerts(c *gin.Context) {
 func acknowledgeAlert(c *gin.Context) {
 	alertID := c.Param("id")
 
-	alertStoreMu.Lock()
-	defer alertStoreMu.Unlock()
-
-	alert, exists := alertStore[alertID]
-	if !exists {
+	now := time.Now()
+	alert, err := scanAlert(db.QueryRow(c.Request.Context(),
+		`UPDATE cen_alerts SET status = 'ACKNOWLEDGED', updated_at = $2 WHERE id = $1 RETURNING `+alertColumns,
+		alertID, now))
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "alert not found"})
 		return
 	}
-
-	alert.Status = "ACKNOWLEDGED"
-	alert.UpdatedAt = time.Now()
+	if err != nil {
+		log.Printf("[CEN Service] acknowledge alert failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update alert"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"alert": alert})
 }
 
 func getStats(c *gin.Context) {
-	alertStoreMu.RLock()
-	defer alertStoreMu.RUnlock()
+	alerts, err := loadAllAlerts(c.Request.Context())
+	if err != nil {
+		log.Printf("[CEN Service] stats query failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute stats"})
+		return
+	}
 
 	stats := map[string]interface{}{
-		"total":      len(alertStore),
+		"total":      len(alerts),
 		"outbound":   0,
 		"inbound":    0,
 		"high":       0,
@@ -439,7 +518,7 @@ func getStats(c *gin.Context) {
 		"acknowledged": 0,
 	}
 
-	for _, a := range alertStore {
+	for _, a := range alerts {
 		if a.Direction == "OUTBOUND" {
 			stats["outbound"] = stats["outbound"].(int) + 1
 		} else {
@@ -473,6 +552,17 @@ func getStats(c *gin.Context) {
 }
 
 func healthCheck(c *gin.Context) {
+	var one int
+	if err := db.QueryRow(c.Request.Context(), "SELECT 1").Scan(&one); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":    "unhealthy",
+			"service":   "cen-service",
+			"version":   "1.0.0",
+			"partners":  len(partnerRegistry),
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "healthy",
 		"service":   "cen-service",
@@ -491,6 +581,23 @@ func main() {
 		// 8097, which collided with profile-service (P0-7).
 		port = "8093"
 	}
+
+	// Fail-closed: no database, no service. Never fall back to memory.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("[CEN Service] DATABASE_URL is required; refusing to start (fail-closed)")
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("[CEN Service] Invalid DATABASE_URL: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatalf("[CEN Service] Database unreachable: %v (fail-closed, refusing to start)", err)
+	}
+	db = pool
+	log.Printf("[CEN Service] Connected to PostgreSQL")
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()

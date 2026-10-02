@@ -4,19 +4,21 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ─── Domain Types ─────────────────────────────────────────────────────────────
@@ -88,14 +90,77 @@ type TransferEvent struct {
 	TransferAt time.Time `json:"transferAt"`
 }
 
-// ─── In-Memory Stores ─────────────────────────────────────────────────────────
+// ─── PostgreSQL Store ─────────────────────────────────────────────────────────
+// Phase 24: zones (free_zones) and goods (freezone_goods) are persisted in
+// PostgreSQL via pgx/v5. FAIL-CLOSED: the service refuses to start without
+// DATABASE_URL and never falls back to an in-memory store.
 
-var (
-	zoneStore   = make(map[string]*FreeZone)
-	zoneStoreMu sync.RWMutex
-	goodsStore  = make(map[string]*GoodsRecord)
-	goodsStoreMu sync.RWMutex
-)
+var db *pgxpool.Pool
+
+const zoneColumns = `id, name, code, location, operator_name, licence_number, zone_type, capacity_m3, used_m3, status, created_at`
+
+func scanZone(row pgx.Row) (*FreeZone, error) {
+	var z FreeZone
+	err := row.Scan(&z.ID, &z.Name, &z.Code, &z.Location, &z.OperatorName,
+		&z.LicenceNumber, &z.ZoneType, &z.CapacityM3, &z.UsedM3, &z.Status, &z.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &z, nil
+}
+
+const goodsColumns = `id, zone_id, ucr, trader_ref, hs_code, description, origin_country,
+	gross_weight_kg, volume_m3, invoice_value, currency, duty_rate, duty_owed, status,
+	current_zone_id, exit_destination, exit_duty_paid, admitted_at, exited_at, transfer_history`
+
+func scanGoods(row pgx.Row) (*GoodsRecord, error) {
+	var g GoodsRecord
+	var history []byte
+	err := row.Scan(&g.ID, &g.ZoneID, &g.UCR, &g.TraderRef, &g.HSCode, &g.Description,
+		&g.OriginCountry, &g.GrossWeightKg, &g.VolumeM3, &g.InvoiceValue, &g.Currency,
+		&g.DutyRate, &g.DutyOwed, &g.Status, &g.CurrentZoneID, &g.ExitDestination,
+		&g.ExitDutyPaid, &g.AdmittedAt, &g.ExitedAt, &history)
+	if err != nil {
+		return nil, err
+	}
+	if len(history) > 0 {
+		_ = json.Unmarshal(history, &g.TransferHistory)
+	}
+	return &g, nil
+}
+
+func insertGoods(ctx context.Context, tx pgx.Tx, g *GoodsRecord) error {
+	history, err := json.Marshal(g.TransferHistory)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO freezone_goods (`+goodsColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		g.ID, g.ZoneID, g.UCR, g.TraderRef, g.HSCode, g.Description, g.OriginCountry,
+		g.GrossWeightKg, g.VolumeM3, g.InvoiceValue, g.Currency, g.DutyRate, g.DutyOwed,
+		g.Status, g.CurrentZoneID, g.ExitDestination, g.ExitDutyPaid, g.AdmittedAt,
+		g.ExitedAt, history)
+	return err
+}
+
+func updateGoods(ctx context.Context, tx pgx.Tx, g *GoodsRecord) error {
+	history, err := json.Marshal(g.TransferHistory)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE freezone_goods SET status=$2, current_zone_id=$3,
+		exit_destination=$4, exit_duty_paid=$5, duty_owed=$6, exited_at=$7, transfer_history=$8
+		WHERE id=$1`,
+		g.ID, g.Status, g.CurrentZoneID, g.ExitDestination, g.ExitDutyPaid, g.DutyOwed,
+		g.ExitedAt, history)
+	return err
+}
+
+// adjustZoneUsedM3 applies a signed delta to a zone's used capacity.
+func adjustZoneUsedM3(ctx context.Context, tx pgx.Tx, zoneID string, delta float64) error {
+	_, err := tx.Exec(ctx, `UPDATE free_zones SET used_m3 = used_m3 + $2 WHERE id = $1`, zoneID, delta)
+	return err
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -142,36 +207,55 @@ func registerZone(c *gin.Context) {
 		CreatedAt:     time.Now(),
 	}
 
-	zoneStoreMu.Lock()
-	zoneStore[zone.ID] = zone
-	zoneStoreMu.Unlock()
+	_, err := db.Exec(c.Request.Context(), `INSERT INTO free_zones (`+zoneColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		zone.ID, zone.Name, zone.Code, zone.Location, zone.OperatorName,
+		zone.LicenceNumber, zone.ZoneType, zone.CapacityM3, zone.UsedM3,
+		zone.Status, zone.CreatedAt)
+	if err != nil {
+		log.Printf("[FreeZone Service] failed to persist zone: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist zone"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, zone)
 }
 
 func listZones(c *gin.Context) {
-	zoneStoreMu.RLock()
-	defer zoneStoreMu.RUnlock()
+	rows, err := db.Query(c.Request.Context(),
+		`SELECT `+zoneColumns+` FROM free_zones ORDER BY created_at DESC`)
+	if err != nil {
+		log.Printf("[FreeZone Service] list zones failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query zones"})
+		return
+	}
+	defer rows.Close()
 
 	result := []*FreeZone{}
-	for _, z := range zoneStore {
+	for rows.Next() {
+		z, err := scanZone(rows)
+		if err != nil {
+			log.Printf("[FreeZone Service] scan zone failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query zones"})
+			return
+		}
 		result = append(result, z)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].CreatedAt.After(result[j].CreatedAt)
-	})
 	c.JSON(http.StatusOK, gin.H{"zones": result, "total": len(result)})
 }
 
 func admitGoods(c *gin.Context) {
 	zoneID := c.Param("zoneId")
 
-	zoneStoreMu.RLock()
-	zone, exists := zoneStore[zoneID]
-	zoneStoreMu.RUnlock()
-
-	if !exists {
+	zone, err := scanZone(db.QueryRow(c.Request.Context(),
+		`SELECT `+zoneColumns+` FROM free_zones WHERE id = $1`, zoneID))
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "zone not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("[FreeZone Service] get zone failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query zone"})
 		return
 	}
 	if zone.Status != ZoneActive {
@@ -196,19 +280,35 @@ func admitGoods(c *gin.Context) {
 		return
 	}
 
-	// Capacity check
-	zoneStoreMu.Lock()
-	if zone.UsedM3+req.VolumeM3 > zone.CapacityM3 {
-		zoneStoreMu.Unlock()
+	// Capacity check + reservation in one transaction (row lock on the zone).
+	ctx := c.Request.Context()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist goods"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	locked, err := scanZone(tx.QueryRow(ctx,
+		`SELECT `+zoneColumns+` FROM free_zones WHERE id = $1 FOR UPDATE`, zoneID))
+	if err != nil {
+		log.Printf("[FreeZone Service] lock zone failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query zone"})
+		return
+	}
+	if locked.UsedM3+req.VolumeM3 > locked.CapacityM3 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":     "insufficient capacity",
-			"available": zone.CapacityM3 - zone.UsedM3,
+			"available": locked.CapacityM3 - locked.UsedM3,
 			"requested": req.VolumeM3,
 		})
 		return
 	}
-	zone.UsedM3 += req.VolumeM3
-	zoneStoreMu.Unlock()
+	if err := adjustZoneUsedM3(ctx, tx, zoneID, req.VolumeM3); err != nil {
+		log.Printf("[FreeZone Service] update zone capacity failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist goods"})
+		return
+	}
 
 	goods := &GoodsRecord{
 		ID:            "GDS-" + strings.ToUpper(uuid.New().String()[:8]),
@@ -228,9 +328,16 @@ func admitGoods(c *gin.Context) {
 		AdmittedAt:    time.Now(),
 	}
 
-	goodsStoreMu.Lock()
-	goodsStore[goods.ID] = goods
-	goodsStoreMu.Unlock()
+	if err := insertGoods(ctx, tx, goods); err != nil {
+		log.Printf("[FreeZone Service] failed to persist goods: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist goods"})
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		log.Printf("[FreeZone Service] commit failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist goods"})
+		return
+	}
 
 	c.JSON(http.StatusCreated, goods)
 }
@@ -238,15 +345,26 @@ func admitGoods(c *gin.Context) {
 func transferGoods(c *gin.Context) {
 	goodsID := c.Param("goodsId")
 
-	goodsStoreMu.Lock()
-	goods, exists := goodsStore[goodsID]
-	if !exists {
-		goodsStoreMu.Unlock()
+	ctx := c.Request.Context()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to transfer goods"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	goods, err := scanGoods(tx.QueryRow(ctx,
+		`SELECT `+goodsColumns+` FROM freezone_goods WHERE id = $1 FOR UPDATE`, goodsID))
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "goods not found"})
 		return
 	}
+	if err != nil {
+		log.Printf("[FreeZone Service] get goods failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to transfer goods"})
+		return
+	}
 	if goods.Status == GoodsExited || goods.Status == GoodsDestroyed {
-		goodsStoreMu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{"error": "goods have already exited the free zone"})
 		return
 	}
@@ -257,29 +375,29 @@ func transferGoods(c *gin.Context) {
 		OfficerRef string `json:"officerRef"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		goodsStoreMu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Validate destination zone
-	zoneStoreMu.RLock()
-	destZone, destExists := zoneStore[req.ToZoneID]
-	zoneStoreMu.RUnlock()
-
-	if !destExists || destZone.Status != ZoneActive {
-		goodsStoreMu.Unlock()
+	destZone, err := scanZone(tx.QueryRow(ctx,
+		`SELECT `+zoneColumns+` FROM free_zones WHERE id = $1 FOR UPDATE`, req.ToZoneID))
+	if err != nil || destZone.Status != ZoneActive {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "destination zone not found or inactive"})
 		return
 	}
 
-	// Update capacity
-	zoneStoreMu.Lock()
-	if srcZone, ok := zoneStore[goods.CurrentZoneID]; ok {
-		srcZone.UsedM3 -= goods.VolumeM3
+	// Update capacity on both zones
+	if err := adjustZoneUsedM3(ctx, tx, goods.CurrentZoneID, -goods.VolumeM3); err != nil {
+		log.Printf("[FreeZone Service] release source capacity failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to transfer goods"})
+		return
 	}
-	destZone.UsedM3 += goods.VolumeM3
-	zoneStoreMu.Unlock()
+	if err := adjustZoneUsedM3(ctx, tx, req.ToZoneID, goods.VolumeM3); err != nil {
+		log.Printf("[FreeZone Service] reserve destination capacity failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to transfer goods"})
+		return
+	}
 
 	event := TransferEvent{
 		FromZoneID: goods.CurrentZoneID,
@@ -291,7 +409,15 @@ func transferGoods(c *gin.Context) {
 	goods.TransferHistory = append(goods.TransferHistory, event)
 	goods.CurrentZoneID = req.ToZoneID
 	goods.Status = GoodsTransferred
-	goodsStoreMu.Unlock()
+	if err := updateGoods(ctx, tx, goods); err != nil {
+		log.Printf("[FreeZone Service] update goods failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to transfer goods"})
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to transfer goods"})
+		return
+	}
 
 	c.JSON(http.StatusOK, goods)
 }
@@ -299,15 +425,26 @@ func transferGoods(c *gin.Context) {
 func exitGoods(c *gin.Context) {
 	goodsID := c.Param("goodsId")
 
-	goodsStoreMu.Lock()
-	goods, exists := goodsStore[goodsID]
-	if !exists {
-		goodsStoreMu.Unlock()
+	ctx := c.Request.Context()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exit goods"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	goods, err := scanGoods(tx.QueryRow(ctx,
+		`SELECT `+goodsColumns+` FROM freezone_goods WHERE id = $1 FOR UPDATE`, goodsID))
+	if err == pgx.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"error": "goods not found"})
 		return
 	}
+	if err != nil {
+		log.Printf("[FreeZone Service] get goods failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exit goods"})
+		return
+	}
 	if goods.Status == GoodsExited || goods.Status == GoodsDestroyed {
-		goodsStoreMu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{"error": "goods have already exited"})
 		return
 	}
@@ -317,14 +454,12 @@ func exitGoods(c *gin.Context) {
 		DutyPaid    float64         `json:"dutyPaid"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		goodsStoreMu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	dutyOwed := calculateDuty(goods.InvoiceValue, goods.DutyRate, req.Destination)
 	if req.Destination == ExitDomestic && req.DutyPaid < dutyOwed {
-		goodsStoreMu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":    "insufficient duty payment for domestic release",
 			"dutyOwed": dutyOwed,
@@ -334,11 +469,11 @@ func exitGoods(c *gin.Context) {
 	}
 
 	// Release capacity
-	zoneStoreMu.Lock()
-	if zone, ok := zoneStore[goods.CurrentZoneID]; ok {
-		zone.UsedM3 -= goods.VolumeM3
+	if err := adjustZoneUsedM3(ctx, tx, goods.CurrentZoneID, -goods.VolumeM3); err != nil {
+		log.Printf("[FreeZone Service] release capacity failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exit goods"})
+		return
 	}
-	zoneStoreMu.Unlock()
 
 	now := time.Now()
 	goods.Status = GoodsExited
@@ -346,7 +481,15 @@ func exitGoods(c *gin.Context) {
 	goods.ExitDutyPaid = req.DutyPaid
 	goods.DutyOwed = dutyOwed
 	goods.ExitedAt = &now
-	goodsStoreMu.Unlock()
+	if err := updateGoods(ctx, tx, goods); err != nil {
+		log.Printf("[FreeZone Service] update goods failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exit goods"})
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exit goods"})
+		return
+	}
 
 	c.JSON(http.StatusOK, goods)
 }
@@ -355,54 +498,54 @@ func listInventory(c *gin.Context) {
 	zoneID := c.Query("zoneId")
 	status := c.Query("status")
 
-	goodsStoreMu.RLock()
-	defer goodsStoreMu.RUnlock()
+	rows, err := db.Query(c.Request.Context(),
+		`SELECT `+goodsColumns+` FROM freezone_goods
+		 WHERE ($1 = '' OR current_zone_id = $1) AND ($2 = '' OR status = $2)
+		 ORDER BY admitted_at DESC`, zoneID, status)
+	if err != nil {
+		log.Printf("[FreeZone Service] list inventory failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query inventory"})
+		return
+	}
+	defer rows.Close()
 
 	result := []*GoodsRecord{}
-	for _, g := range goodsStore {
-		if zoneID != "" && g.CurrentZoneID != zoneID {
-			continue
-		}
-		if status != "" && string(g.Status) != status {
-			continue
+	for rows.Next() {
+		g, err := scanGoods(rows)
+		if err != nil {
+			log.Printf("[FreeZone Service] scan goods failed: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query inventory"})
+			return
 		}
 		result = append(result, g)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].AdmittedAt.After(result[j].AdmittedAt)
-	})
 	c.JSON(http.StatusOK, gin.H{"inventory": result, "total": len(result)})
 }
 
 func getZoneStats(c *gin.Context) {
-	zoneStoreMu.RLock()
-	goodsStoreMu.RLock()
-	defer zoneStoreMu.RUnlock()
-	defer goodsStoreMu.RUnlock()
+	ctx := c.Request.Context()
 
-	totalZones := len(zoneStore)
-	activeZones := 0
-	totalCapacity := 0.0
-	totalUsed := 0.0
-
-	for _, z := range zoneStore {
-		if z.Status == ZoneActive {
-			activeZones++
-		}
-		totalCapacity += z.CapacityM3
-		totalUsed += z.UsedM3
+	var totalZones, activeZones int
+	var totalCapacity, totalUsed float64
+	if err := db.QueryRow(ctx, `SELECT COUNT(*),
+		COUNT(*) FILTER (WHERE status = 'ACTIVE'),
+		COALESCE(SUM(capacity_m3), 0), COALESCE(SUM(used_m3), 0)
+		FROM free_zones`).Scan(&totalZones, &activeZones, &totalCapacity, &totalUsed); err != nil {
+		log.Printf("[FreeZone Service] zone stats failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute stats"})
+		return
 	}
 
-	admitted := 0
-	exited := 0
-	totalValue := 0.0
-	for _, g := range goodsStore {
-		if g.Status == GoodsAdmitted || g.Status == GoodsTransferred {
-			admitted++
-			totalValue += g.InvoiceValue
-		} else if g.Status == GoodsExited {
-			exited++
-		}
+	var admitted, exited int
+	var totalValue float64
+	if err := db.QueryRow(ctx, `SELECT
+		COUNT(*) FILTER (WHERE status IN ('ADMITTED', 'TRANSFERRED')),
+		COUNT(*) FILTER (WHERE status = 'EXITED'),
+		COALESCE(SUM(invoice_value) FILTER (WHERE status IN ('ADMITTED', 'TRANSFERRED')), 0)
+		FROM freezone_goods`).Scan(&admitted, &exited, &totalValue); err != nil {
+		log.Printf("[FreeZone Service] goods stats failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute stats"})
+		return
 	}
 
 	utilisation := 0.0
@@ -423,11 +566,24 @@ func getZoneStats(c *gin.Context) {
 }
 
 func healthCheck(c *gin.Context) {
+	var one int
+	if err := db.QueryRow(c.Request.Context(), "SELECT 1").Scan(&one); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status":    "unhealthy",
+			"service":   "freezone-service",
+			"version":   "1.0.0",
+			"zones":     0,
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		})
+		return
+	}
+	var zoneCount int
+	_ = db.QueryRow(c.Request.Context(), "SELECT COUNT(*) FROM free_zones").Scan(&zoneCount)
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "healthy",
 		"service":   "freezone-service",
 		"version":   "1.0.0",
-		"zones":     len(zoneStore),
+		"zones":     zoneCount,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
@@ -439,6 +595,23 @@ func main() {
 	if port == "" {
 		port = "8098"
 	}
+
+	// Fail-closed: no database, no service. Never fall back to memory.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("[FreeZone Service] DATABASE_URL is required; refusing to start (fail-closed)")
+	}
+	pool, err := pgxpool.New(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("[FreeZone Service] Invalid DATABASE_URL: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := pool.Ping(ctx); err != nil {
+		log.Fatalf("[FreeZone Service] Database unreachable: %v (fail-closed, refusing to start)", err)
+	}
+	db = pool
+	log.Printf("[FreeZone Service] Connected to PostgreSQL")
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
