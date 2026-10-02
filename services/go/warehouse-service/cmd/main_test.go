@@ -14,6 +14,7 @@ import (
 func TestHealthEndpoint(t *testing.T) {
 	t.Run("liveness probe returns 200", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		_ = req
 		w := httptest.NewRecorder()
 		// Simulate health handler
 		w.WriteHeader(http.StatusOK)
