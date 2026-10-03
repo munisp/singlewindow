@@ -123,6 +123,15 @@ func main() {
 		logger.Fatal("Failed to start health server", zap.Error(err))
 	}
 
+	// ── Start HTTP workflow trigger server (Phase 26 F2) ──────────────────────
+	// The Node gateway (server/routers/fund-flow.ts) triggers Temporal
+	// workflows via POST ${WORKFLOW_SERVICE_URL}/workflows/trigger and polls
+	// GET /workflows/{id}/status. Without this endpoint every trigger call
+	// failed with connection-refused. Fail-closed: not started without a
+	// configured Temporal address; unknown workflow types → 400.
+	// AUTH: JWT/auth for this endpoint is owned by a parallel workstream.
+	startTriggerServer(c, logger)
+
 	// ── Start workers ─────────────────────────────────────────────────────────
 	var wg sync.WaitGroup
 	workerErrors := make(chan error, 2)

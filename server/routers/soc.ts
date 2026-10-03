@@ -11,7 +11,9 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminProcedure, router } from "../_core/trpc";
 
-const WAZUH_SVC = process.env.WAZUH_SVC_URL ?? "http://localhost:8108";
+// wazuh-svc (services/go/wazuh-svc) listens on 8100 (PORT default) — the
+// previous 8108 default pointed at nothing (Phase 26 F2).
+const WAZUH_SVC = process.env.WAZUH_SVC_URL ?? "http://localhost:8100";
 
 async function callWazuh<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;

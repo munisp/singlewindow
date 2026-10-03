@@ -10,7 +10,10 @@
  *   oga-service           9083    profile-service       9084
  *   risk-engine           9085    cargo-tracking        9086
  *   document-vault        9087    workflow-engine       9088
- *   notification-service  9089    audit-service         9090
+ *   notification-service  9089
+ *   audit-service         — HTTP-only (Gin, PORT 8094, GET /health); removed
+ *                           from the gRPC table in Phase 26 F2 (it never
+ *                           served gRPC on 9090).
  *   bonded-warehouse      9091    asean-gateway         9092
  *   sedona-geo            9093    flink-stream          9094
  *   kubecost-proxy        9095    wazuh-proxy           9096
@@ -97,7 +100,11 @@ const CARGO_TRACKING_GRPC     = process.env.CARGO_TRACKING_GRPC_ADDR     || "loc
 const DOCUMENT_VAULT_GRPC     = process.env.DOCUMENT_VAULT_GRPC_ADDR     || "localhost:9087";
 const WORKFLOW_ENGINE_GRPC    = process.env.WORKFLOW_ENGINE_GRPC_ADDR    || "localhost:9088";
 const NOTIFICATION_SVC_GRPC   = process.env.NOTIFICATION_SVC_GRPC_ADDR   || "localhost:9089";
-const AUDIT_SVC_GRPC          = process.env.AUDIT_SVC_GRPC_ADDR          || "localhost:9090";
+// Phase 26 F2: audit-service (services/go/audit-service) is an HTTP-only
+// Gin service (PORT default 8094, GET /health) — it has NEVER served gRPC,
+// so the previous gRPC channel probe on :9090 could never succeed. Probed
+// via HTTP below, mirroring the TigerBeetle bridge pattern.
+const AUDIT_SVC_HTTP          = process.env.AUDIT_SVC_HTTP_ADDR          || "localhost:8094";
 const BONDED_WAREHOUSE_GRPC   = process.env.BONDED_WAREHOUSE_GRPC_ADDR   || "localhost:9091";
 const ASEAN_GATEWAY_GRPC      = process.env.ASEAN_GATEWAY_GRPC_ADDR      || "localhost:9092";
 const SEDONA_GEO_GRPC         = process.env.SEDONA_GEO_GRPC_ADDR         || "localhost:9093";
@@ -147,6 +154,19 @@ export async function checkGRPCHealth(addr: string): Promise<boolean> {
  * Checks TigerBeetle bridge health via HTTP GET /health.
  * Returns { healthy, mode } where mode is "live" or "simulation".
  */
+/**
+ * Generic HTTP health probe: GET http://<addr>/health, healthy on any 2xx.
+ * Used for services that expose HTTP (not gRPC) health endpoints.
+ */
+export async function checkHTTPHealth(addr: string): Promise<boolean> {
+  try {
+    const res = await fetch(`http://${addr}/health`, { signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function checkTigerBeetleBridgeHealth(
   addr: string
 ): Promise<{ healthy: boolean; mode: string }> {
@@ -165,8 +185,9 @@ export async function checkTigerBeetleBridgeHealth(
 }
 
 /**
- * Probes all 18 Go microservices via gRPC connectivity checks,
- * plus both TigerBeetle bridges via HTTP health endpoints.
+ * Probes the Go microservices via gRPC connectivity checks,
+ * plus audit-service and the TigerBeetle bridge via HTTP health endpoints
+ * (audit-service is HTTP-only — Phase 26 F2).
  * Returns a map of service-name → healthy (boolean).
  * All checks run in parallel; individual failures do not block others.
  */
@@ -181,7 +202,6 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
     ["document-vault",       DOCUMENT_VAULT_GRPC],
     ["workflow-engine",      WORKFLOW_ENGINE_GRPC],
     ["notification-service", NOTIFICATION_SVC_GRPC],
-    ["audit-service",        AUDIT_SVC_GRPC],
     ["bonded-warehouse",     BONDED_WAREHOUSE_GRPC],
     ["asean-gateway",        ASEAN_GATEWAY_GRPC],
     ["sedona-geo",           SEDONA_GEO_GRPC],
@@ -199,10 +219,12 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
   // destructured from a Promise.all that never included it, so any caller
   // crashed with TypeError whenever this ran — i.e. exactly when a bridge was
   // down in the test environment.)
-  const [grpcResults, tbGoResult] = await Promise.all([
+  const [grpcResults, tbGoResult, auditResult] = await Promise.all([
     Promise.allSettled(grpcChecks.map(([, addr]) => checkGRPCHealth(addr))),
     checkTigerBeetleBridgeHealth(TB_GO_BRIDGE_HTTP)
       .catch(() => ({ healthy: false, mode: "unreachable" })),
+    // audit-service is HTTP-only (Phase 26 F2) — probe GET /health.
+    checkHTTPHealth(AUDIT_SVC_HTTP).catch(() => false),
   ]);
 
   const summary: Record<string, boolean> = Object.fromEntries(
@@ -215,6 +237,7 @@ export async function getServiceHealthSummary(): Promise<Record<string, boolean>
   // Add TigerBeetle bridge health (HTTP). The Rust bridge replica was removed
   // from deploy surfaces (SW-O3) — no phantom entry is reported for it.
   summary["tigerbeetle-go-bridge"] = tbGoResult.healthy;
+  summary["audit-service"] = auditResult;
 
   return summary;
 }

@@ -31,8 +31,12 @@
 //        in phase-10 remediation). VISION_SERVICE_URL must be
 //        set explicitly; 8105 stays a fail-closed placeholder.
 // The gateway defaults for the NON-owning services were moved to the
-// deliberately-unassigned 8111-8116 block (see below) — connection-refused
-// is the honest failure until the operator sets an explicit URL. Compose
+// deliberately-unassigned 8111-8116 block or to unambiguous container DNS
+// names (see below) — connection-refused / DNS failure is the honest
+// failure until the operator sets an explicit URL. Phase 26 F2 moved
+// HS_CLASSIFIER_URL off the 8111 placeholder to the deployed
+// hs-classifier:8093 (compose Python impl; the services/rust/hs-classifier
+// duplicate on 8090 is not deployed). Compose
 // deployments MUST set explicit *_URL env vars using container DNS names
 // (e.g. HS_CLASSIFIER_URL=http://hs-classifier:8093), which is unambiguous
 // inside the compose network.
@@ -64,12 +68,12 @@ export const PORTS = {
   flinkStreamGrpc: 50099,
   sedonaSvc: 8100,
   sedonaGeoGrpc: 50100,
-  rustFsSvc: 8101,
+  rustFsSvc: 4500, // rustfs-svc bind default (SVC_PORT=4500; Phase 26 F2 — was 8101, nothing listened there)
   graphBridge: 8102,
   riskScorer: 8103,
   paymentRisk: 8104,
   visionService: 8105,
-  warehouseService: 8106,
+  warehouseService: 8095, // warehouse-service Go bind default (Phase 26 F2 — was 8106, nothing listened there)
   mojaloop: 3001,
   declarationGrpc: 50051,
   riskEngineGrpc: 50052,
@@ -78,7 +82,7 @@ export const PORTS = {
   documentVaultGrpc: 50055,
   profileGrpc: 50056,
   bondedWarehouseGrpc: 50057,
-  auditSvcGrpc: 50058,
+  auditSvcHttp: 8094, // audit-service is HTTP-only (Gin, PORT default 8094); it never served gRPC (Phase 26 F2)
   profileService: 8097, // HTTP (compose-published; SW-MP7 renumber)
 } as const;
 
@@ -219,7 +223,7 @@ export const ENV = {
   sedonaGeoGrpcAddr: process.env.SEDONA_GEO_GRPC_ADDR ?? "localhost:50100",
 
   // ─── Rust File Storage (RustFS) ───────────────────────────────────────────
-  rustFsSvcUrl: process.env.RUSTFS_SVC_URL ?? "http://localhost:8101",
+  rustFsSvcUrl: process.env.RUSTFS_SVC_URL ?? "http://localhost:4500",
 
   // ─── Knowledge Graph Bridge ───────────────────────────────────────────────
   graphBridgeUrl: process.env.GRAPH_BRIDGE_URL ?? "http://localhost:8102",
@@ -238,7 +242,10 @@ export const ENV = {
   visionServiceUrl: process.env.VISION_SERVICE_URL ?? "http://localhost:8105",
 
   // ─── Warehouse Service ────────────────────────────────────────────────────
-  warehouseServiceUrl: process.env.WAREHOUSE_SERVICE_URL ?? "http://localhost:8106",
+  // warehouse-service Go bind default is 8095. Default uses the k8s service
+  // DNS name because localhost:8095 is already the VISION_SVC_URL default
+  // (PRA-067 collision guard refuses duplicate localhost host:ports).
+  warehouseServiceUrl: process.env.WAREHOUSE_SERVICE_URL ?? "http://warehouse-service:8095",
 
   // ─── Mojaloop ─────────────────────────────────────────────────────────────
   // FAIL-CLOSED (phase-10 audit remediation): no deployed mojaloop-hub service
@@ -398,7 +405,7 @@ export const ENV = {
   documentVaultGrpcAddr: process.env.DOCUMENT_VAULT_GRPC_ADDR ?? "localhost:50055",
   profileGrpcAddr: process.env.PROFILE_GRPC_ADDR ?? "localhost:50056",
   bondedWarehouseGrpcAddr: process.env.BONDED_WAREHOUSE_GRPC_ADDR ?? "localhost:50057",
-  auditSvcGrpcAddr: process.env.AUDIT_SVC_GRPC_ADDR ?? "localhost:50058",
+  auditSvcHttpAddr: process.env.AUDIT_SVC_HTTP_ADDR ?? "localhost:8094",
   workflowEngineGrpcAddr: process.env.WORKFLOW_ENGINE_GRPC_ADDR ?? "localhost:50059",
   keycloakProxyGrpcAddr: process.env.KEYCLOAK_PROXY_GRPC_ADDR ?? "localhost:50060",
   openctiProxyGrpcAddr: process.env.OPENCTI_PROXY_GRPC_ADDR ?? "localhost:50061",
@@ -424,16 +431,18 @@ export const ENV = {
   // Python microservices
   anomalyDetectionUrl: process.env.ANOMALY_DETECTION_URL ?? "http://localhost:8091",
   gnnRiskUrl: process.env.GNN_RISK_URL ?? "http://localhost:8092",
-  // KNOWN COLLISION: compose hs-classifier binds 8093, but PORTS.cenService
-  // is the canonical owner of 8093 (Go cen-service bind default; P0-7
-  // renumber). The gateway default is moved to the deliberately-unassigned
-  // 8111 — set HS_CLASSIFIER_URL explicitly (compose:
-  // http://hs-classifier:8093). A contested default would silently route HS
-  // classification to the WCO CEN service or vice versa (duty-relevant).
+  // Phase 26 F2: default now points at the DEPLOYED hs-classifier — the
+  // Python microservices/hs-classifier (compose service hs-classifier, PORT
+  // 8093). A duplicate Rust implementation exists at services/rust/hs-classifier
+  // (binds 8090) but is NOT deployed by compose/k8s. The container DNS name
+  // (not localhost) is used because localhost:8093 is canonically owned by
+  // cen-service (PORTS.cenService; PRA-067 collision guard refuses duplicate
+  // localhost host:ports — inside compose/k8s, hs-classifier:8093 and
+  // cen-service:8093 are distinct hosts and unambiguous).
   // NOTE: routers/insiderThreat.ts reads HS_CLASSIFIER_URL directly — its
   // stale http://hs-classifier:8090 literals were removed in phase-10
   // remediation (empty = HS_CLASSIFIER_UNAVAILABLE, fail-closed).
-  hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://localhost:8111",
+  hsClassifierUrl: process.env.HS_CLASSIFIER_URL ?? "http://hs-classifier:8093",
   riskAiUrl: process.env.RISK_AI_URL ?? "http://localhost:8094",
   visionSvcUrl: process.env.VISION_SVC_URL ?? "http://localhost:8095",
   // KNOWN COLLISION: compose fluvio-consumer binds 8096, whose canonical

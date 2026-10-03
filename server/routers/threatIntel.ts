@@ -2,7 +2,10 @@ import { z } from "zod";
 import { protectedProcedure, adminProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
 
-const OPENCTI_SVC_URL = process.env.OPENCTI_SVC_URL ?? "http://opencti-svc:8099";
+// opencti-svc (services/go/opencti-svc) listens on 8085 (PORT default) — the
+// previous 8099 default pointed at the flinkCepSvc port and never connected
+// (Phase 26 F2).
+const OPENCTI_SVC_URL = process.env.OPENCTI_SVC_URL ?? "http://opencti-svc:8085";
 
 async function callOpenCTI<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   let res: Response;
