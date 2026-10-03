@@ -2117,6 +2117,10 @@ export type InsertNlQueryTemplate = typeof nlQueryTemplates.$inferInsert;
  * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/officerWorkload.ts computes workload in-memory; no persistence to this table.
  * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
  */
+/**
+ * ORPHAN (Phase 25 G3): no reader/writer in repo. Retained pending
+ * wire-or-drop decision; do not build new features on this table until then.
+ */
 export const officerWorkloadSnapshots = pgTable("officer_workload_snapshots", {
   id: serial("id").primaryKey(),
   officerId: integer("officer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -2199,6 +2203,10 @@ export type ThreatIntelFeed = typeof threatIntelFeeds.$inferSelect;
  * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. Fluvio streaming backend is DEPRECATED (P0-9, _core/env.ts); no writer exists.
  * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
  */
+/**
+ * ORPHAN (Phase 25 G3): no reader/writer in repo. Retained pending
+ * wire-or-drop decision; do not build new features on this table until then.
+ */
 export const streamEvents = pgTable("stream_events", {
   id: serial("id").primaryKey(),
   topic: varchar("topic", { length: 128 }).notNull(),
@@ -2227,6 +2235,10 @@ export const socIncidentStatusEnum = pgEnum("soc_incident_status", [
 /**
  * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/soc.ts does not touch this table (stub/parallel implementation).
  * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
+/**
+ * ORPHAN (Phase 25 G3): no reader/writer in repo. Retained pending
+ * wire-or-drop decision; do not build new features on this table until then.
  */
 export const socIncidents = pgTable("soc_incidents", {
   id: serial("id").primaryKey(),
@@ -2338,6 +2350,10 @@ export type CenMessage = typeof cenMessages.$inferSelect;
  * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/knowledgeGraph.ts does not persist to this table.
  * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
  */
+/**
+ * ORPHAN (Phase 25 G3): no reader/writer in repo. Retained pending
+ * wire-or-drop decision; do not build new features on this table until then.
+ */
 export const knowledgeGraphNodes = pgTable("knowledge_graph_nodes", {
   id: serial("id").primaryKey(),
   nodeId: varchar("node_id", { length: 128 }).notNull().unique(),
@@ -2358,6 +2374,10 @@ export type KnowledgeGraphNode = typeof knowledgeGraphNodes.$inferSelect;
  * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/knowledgeGraph.ts does not persist to this table.
  * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
  */
+/**
+ * ORPHAN (Phase 25 G3): no reader/writer in repo. Retained pending
+ * wire-or-drop decision; do not build new features on this table until then.
+ */
 export const knowledgeGraphEdges = pgTable("knowledge_graph_edges", {
   id: serial("id").primaryKey(),
   sourceNodeId: varchar("source_node_id", { length: 128 }).notNull().references(() => knowledgeGraphNodes.nodeId, { onDelete: "cascade" }),
@@ -2377,6 +2397,10 @@ export type KnowledgeGraphEdge = typeof knowledgeGraphEdges.$inferSelect;
 /**
  * DEPRECATED (Phase 20 orphan-code audit, singlewindow#1 finding 4): Never read/written by any code. routers/riskModel.ts does not touch this table.
  * Table retained (migration not dropped); remove in a future cleanup migration only after data is archived.
+ */
+/**
+ * ORPHAN (Phase 25 G3): no reader/writer in repo. Retained pending
+ * wire-or-drop decision; do not build new features on this table until then.
  */
 export const riskModelConfigs = pgTable("risk_model_configs", {
   id: serial("id").primaryKey(),

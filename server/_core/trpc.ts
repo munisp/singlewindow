@@ -145,8 +145,29 @@ const otelProcedureSpan = t.middleware(async opts => {
   );
 });
 
-// All procedures derive from this base so every procedure gets a span.
-const baseProcedure = t.procedure.use(otelProcedureSpan);
+// Phase 26 (F4): global mutation audit — every tRPC mutation is audit-logged
+// (fire-and-forget, never blocks/fails the request; DB write + OpenSearch mirror
+// handled inside _writeAuditLog). This replaces the 8 domain-specific audited
+// wrapper procedures that were defined but never wired into any router.
+const auditMutations = t.middleware(async opts => {
+  if (opts.type !== "mutation") return opts.next(opts);
+  const { ctx, path } = opts;
+  const start = Date.now();
+  const result = await opts.next(opts);
+  const ip = (ctx.req?.headers?.["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+    ?? (ctx.req?.socket as any)?.remoteAddress ?? "unknown";
+  setImmediate(() => _writeAuditLog({
+    userId: ctx.user?.id ?? null, action: path, resourceType: path.split(".")[0] ?? "unknown",
+    entityId: parseInt((opts.input as any)?.id ?? "0") || 0,
+    ipAddress: ip, userAgent: (ctx.req?.headers?.["user-agent"] as string | undefined) ?? "",
+    path, duration: Date.now() - start,
+    success: result.ok, error: result.ok ? undefined : result.error?.message,
+  }));
+  return result;
+});
+
+// All procedures derive from this base so every procedure gets a span + audit.
+const baseProcedure = t.procedure.use(otelProcedureSpan).use(auditMutations);
 export const publicProcedure = baseProcedure;
 
 const requireUser = t.middleware(async opts => {
@@ -351,32 +372,6 @@ async function _checkRateLimit(
   }
 }
 
-export const rateLimitedProcedure = protectedProcedure.use(
-  t.middleware(async opts => {
-    const { ctx, next } = opts;
-    const ip = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
-      ?? (ctx.req.socket as any)?.remoteAddress ?? "unknown";
-    const identifier = ctx.user ? `user:${ctx.user.id}` : `ip:${ip}`;
-    let allowed: boolean;
-    try {
-      allowed = await _checkRateLimit("std", identifier, 60_000, 300);
-    } catch (err) {
-      if (err instanceof RateLimiterUnavailableError) {
-        // PRA-026: typed fail-closed 503 — never silent allow, never a 500.
-        throw new TRPCError({
-          code: "SERVICE_UNAVAILABLE",
-          message: "RATE_LIMITER_UNAVAILABLE: distributed rate limiter is unavailable — request refused (fail-closed)",
-        });
-      }
-      throw err;
-    }
-    if (!allowed) {
-      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Rate limit exceeded. Try again in 60 seconds." });
-    }
-    return next({ ctx });
-  })
-);
-
 // ─── Async audit log writer ───────────────────────────────────────────────────
 async function _writeAuditLog(p: {
   userId?: number | null; action: string; resourceType: string; entityId?: number;
@@ -417,31 +412,4 @@ async function _writeAuditLog(p: {
   } catch (e) { console.error("[AuditLog] Write failed:", e); }
 }
 
-function _makeAudit(action: string, resourceType: string) {
-  return t.middleware(async opts => {
-    const { ctx, path, input, next } = opts;
-    const start = Date.now(); let errorMsg: string | undefined;
-    try { return await next({ ctx }); }
-    catch (err) { errorMsg = err instanceof Error ? err.message : String(err); throw err; }
-    finally {
-      const ip = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
-        ?? (ctx.req.socket as any)?.remoteAddress ?? "unknown";
-      setImmediate(() => _writeAuditLog({
-        userId: ctx.user?.id, action, resourceType,
-        entityId: parseInt((input as any)?.id ?? "0") || 0,
-        ipAddress: ip, userAgent: (ctx.req.headers["user-agent"] as string) ?? "unknown",
-        path, duration: Date.now() - start, success: !errorMsg, error: errorMsg,
-      }));
-    }
-  });
-}
 
-// ─── Audited domain procedures ────────────────────────────────────────────────
-export const declarationProcedure = protectedProcedure.use(_makeAudit("declaration.mutation", "declaration"));
-export const paymentProcedure = protectedProcedure.use(_makeAudit("payment.mutation", "payment"));
-export const ogaPermitProcedure = protectedProcedure.use(_makeAudit("oga_permit.mutation", "permit"));
-export const aeoProcedure = protectedProcedure.use(_makeAudit("aeo.mutation", "aeo_application"));
-export const kycProcedure = protectedProcedure.use(_makeAudit("kyc.mutation", "kyc_verification"));
-export const documentProcedure = protectedProcedure.use(_makeAudit("document.mutation", "document"));
-export const securityProcedure = protectedProcedure.use(_makeAudit("security.mutation", "user"));
-export const adminAuditedProcedure = adminProcedure.use(_makeAudit("admin.mutation", "user"));

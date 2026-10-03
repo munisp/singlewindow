@@ -1445,6 +1445,12 @@ async function startServer() {
   app.post("/api/webhooks/keycloak-event", express.json(), async (req, res) => {
     try {
       const secret = process.env.KEYCLOAK_WEBHOOK_SECRET;
+      // Phase 26 (F4): fail-closed — a webhook receiver without a shared secret
+      // accepts forged Keycloak events. Refuse when unconfigured.
+      if (!secret) {
+        res.status(503).json({ error: "KEYCLOAK_WEBHOOK_SECRET not configured — webhook disabled (fail-closed)" });
+        return;
+      }
       if (secret) {
         const sig = req.headers["x-keycloak-signature"] as string | undefined;
         if (!sig) { res.status(401).json({ error: "Missing signature" }); return; }
