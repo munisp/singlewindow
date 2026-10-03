@@ -1235,7 +1235,7 @@ func main() {
 	httpPort := getEnv("HTTP_PORT", "8085")
 	httpServer := &http.Server{
 		Addr:         ":" + httpPort,
-		Handler:      telemetry.Handler("mojaloop-gateway.http", r),
+		Handler:      telemetry.Handler("mojaloop-gateway.http", wrapWithAuth(r)),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

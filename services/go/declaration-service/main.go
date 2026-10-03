@@ -546,7 +546,7 @@ func main() {
 	go StartGRPCServer()
 
 	log.Printf("[declaration-service] HTTP server starting on port %s", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
+	if err := http.ListenAndServe(":"+port, wrapWithAuth(r)); err != nil {
 		log.Fatalf("[FATAL] HTTP server failed: %v", err)
 	}
 }
