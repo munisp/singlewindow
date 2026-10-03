@@ -1,9 +1,10 @@
 // TradeGateway NGSWTP — Kubecost Per-Tenant Cost Allocation Service
 // Port: 8105
 //
-// Aggregates Kubernetes resource costs per tenant namespace using the
-// Kubecost Allocation API, generates chargeback reports by plan tier,
-// and surfaces idle resource recommendations.
+// Phase 26 F3: all cost figures now come from the real Kubecost Allocation
+// API. KUBECOST_URL is REQUIRED (fail-closed at startup); any upstream
+// failure surfaces as 503 with an honest error. No fabricated or simulated
+// cost data remains in this service.
 package main
 
 import (
@@ -12,14 +13,15 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Response types (JSON shapes unchanged) ──────────────────────────────────
 
 type TenantCost struct {
 	TenantID       string  `json:"tenant_id"`
@@ -72,109 +74,128 @@ type ChargebackReport struct {
 	Tenants             []TenantCost `json:"tenants"`
 }
 
-// ─── Mock data generators ─────────────────────────────────────────────────────
+// ─── Kubecost Allocation API client ───────────────────────────────────────────
 
-var tenantRegistry = []struct {
-	ID        string
-	Name      string
-	Namespace string
-	Plan      string
-}{
-	{"gha-001", "Ghana Revenue Authority", "tradegateway-gha", "enterprise"},
-	{"rwa-001", "Rwanda Revenue Authority", "tradegateway-rwa", "standard"},
-	{"sgp-001", "Singapore Customs", "tradegateway-sgp", "enterprise"},
-	{"ken-001", "Kenya Revenue Authority", "tradegateway-ken", "standard"},
-	{"nga-001", "Nigeria Customs Service", "tradegateway-nga", "starter"},
+// allocation mirrors the subset of the Kubecost Allocation API asset fields
+// this service consumes. All figures are populated by upstream, never here.
+type allocation struct {
+	Properties struct {
+		Namespace string            `json:"namespace"`
+		Labels    map[string]string `json:"labels"`
+	} `json:"properties"`
+	CPUCost              float64 `json:"cpuCost"`
+	RAMCost              float64 `json:"ramCost"`
+	PVCost               float64 `json:"pvCost"`
+	NetworkCost          float64 `json:"networkCost"`
+	TotalCost            float64 `json:"totalCost"`
+	TotalEfficiency      float64 `json:"totalEfficiency"`
+	CPUCoreRequestAvg    float64 `json:"cpuCoreRequestAverage"`
+	CPUCoreUsageAvg      float64 `json:"cpuCoreUsageAverage"`
+	RAMByteRequestAvg    float64 `json:"ramByteRequestAverage"`
+	RAMByteUsageAvg      float64 `json:"ramByteUsageAverage"`
 }
 
-func generateTenantCosts(period string) []TenantCost {
-	costs := make([]TenantCost, 0, len(tenantRegistry))
-	rng := rand.New(rand.NewSource(int64(len(period))))
-	for _, t := range tenantRegistry {
-		var base float64
-		switch t.Plan {
-		case "enterprise":
-			base = 350.0
-		case "standard":
-			base = 130.0
-		default:
-			base = 55.0
+type allocationResponse struct {
+	Code  int                             `json:"code"`
+	Error string                          `json:"error"`
+	Data  []map[string]allocation         `json:"data"`
+}
+
+var (
+	kubecostURL string
+	httpClient  = &http.Client{Timeout: 15 * time.Second}
+)
+
+// fetchAllocations queries the Kubecost Allocation API. Any failure is
+// returned as an error so handlers can fail closed with 503.
+func fetchAllocations(ctx context.Context, window, step string) ([]map[string]allocation, error) {
+	q := url.Values{}
+	q.Set("window", window)
+	q.Set("aggregate", "namespace")
+	if step != "" {
+		q.Set("step", step)
+	}
+	endpoint := strings.TrimRight(kubecostURL, "/") + "/model/allocation?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("kubecost unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("kubecost returned HTTP %d", resp.StatusCode)
+	}
+	var ar allocationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
+		return nil, fmt.Errorf("kubecost response decode: %w", err)
+	}
+	if ar.Code != 0 && ar.Code != http.StatusOK {
+		return nil, fmt.Errorf("kubecost error: %s", ar.Error)
+	}
+	return ar.Data, nil
+}
+
+// windowForPeriod converts a YYYY-MM period into a Kubecost window range.
+func windowForPeriod(period string) (string, error) {
+	start, err := time.Parse("2006-01", period)
+	if err != nil {
+		return "", fmt.Errorf("invalid period %q (want YYYY-MM)", period)
+	}
+	end := start.AddDate(0, 1, 0)
+	return fmt.Sprintf("%sT00:00:00Z,%sT00:00:00Z",
+		start.Format("2006-01-02"), end.Format("2006-01-02")), nil
+}
+
+// tenantCostsFromAllocation maps upstream allocation entries onto TenantCost.
+// Tenant identity comes from the namespace itself plus namespace labels when
+// Kubecost surfaces them; no registry is invented here.
+func tenantCostsFromAllocation(sets []map[string]allocation, period string) []TenantCost {
+	if len(sets) == 0 {
+		return []TenantCost{}
+	}
+	costs := make([]TenantCost, 0, len(sets[0]))
+	for name, a := range sets[0] {
+		if name == "__idle__" || name == "__unmounted__" {
+			continue
 		}
-		cpu := base*0.45 + rng.Float64()*20
-		mem := base*0.30 + rng.Float64()*10
-		stor := base*0.15 + rng.Float64()*5
-		net := base*0.05 + rng.Float64()*3
-		idle := base * 0.05 * rng.Float64()
-		total := cpu + mem + stor + net
-		eff := 100.0 - (idle/total)*100.0
+		ns := a.Properties.Namespace
+		if ns == "" {
+			ns = name
+		}
+		plan := ""
+		if a.Properties.Labels != nil {
+			plan = a.Properties.Labels["plan"]
+			if plan == "" {
+				plan = a.Properties.Labels["app.kubernetes.io/plan"]
+			}
+		}
+		eff := a.TotalEfficiency
+		if eff < 0 {
+			eff = 0
+		}
+		if eff > 1 {
+			eff = 1
+		}
+		idle := a.TotalCost * (1 - eff)
 		costs = append(costs, TenantCost{
-			TenantID:       t.ID,
-			TenantName:     t.Name,
-			Namespace:      t.Namespace,
-			Plan:           t.Plan,
+			TenantID:       ns,
+			TenantName:     ns,
+			Namespace:      ns,
+			Plan:           plan,
 			Period:         period,
-			CPUCostUSD:     round2(cpu),
-			MemoryCostUSD:  round2(mem),
-			StorageCostUSD: round2(stor),
-			NetworkCostUSD: round2(net),
-			TotalCostUSD:   round2(total),
+			CPUCostUSD:     round2(a.CPUCost),
+			MemoryCostUSD:  round2(a.RAMCost),
+			StorageCostUSD: round2(a.PVCost),
+			NetworkCostUSD: round2(a.NetworkCost),
+			TotalCostUSD:   round2(a.TotalCost),
 			IdleCostUSD:    round2(idle),
-			EfficiencyPct:  round2(eff),
+			EfficiencyPct:  round2(eff * 100),
 		})
 	}
 	return costs
-}
-
-func generateIdleResources() []IdleResource {
-	return []IdleResource{
-		{
-			Namespace:         "tradegateway-rwa",
-			ResourceType:      "Deployment",
-			ResourceName:      "asean-sw-service",
-			IdleCPUCores:      0.4,
-			IdleMemoryGB:      0.8,
-			IdleCostUSDPerDay: 3.20,
-			Recommendation:    "Scale down replicas from 3 to 1 during off-peak hours (21:00–06:00 UTC)",
-		},
-		{
-			Namespace:         "tradegateway-gha",
-			ResourceType:      "PersistentVolumeClaim",
-			ResourceName:      "rustfs-data-pvc",
-			IdleCPUCores:      0,
-			IdleMemoryGB:      0,
-			IdleCostUSDPerDay: 1.80,
-			Recommendation:    "Reduce PVC size from 50Gi to 20Gi — only 8Gi currently used",
-		},
-		{
-			Namespace:         "tradegateway-nga",
-			ResourceType:      "Deployment",
-			ResourceName:      "keycloak-service",
-			IdleCPUCores:      0.2,
-			IdleMemoryGB:      0.5,
-			IdleCostUSDPerDay: 2.10,
-			Recommendation:    "Starter plan: reduce Keycloak to single replica; HA not required",
-		},
-	}
-}
-
-func generateCostTrend(days int) []DailyCost {
-	trend := make([]DailyCost, 0, days)
-	base := 720.0
-	for i := 0; i < days; i++ {
-		d := time.Now().AddDate(0, 0, -(days - 1 - i))
-		wave := math.Sin(float64(i) / 5.0)
-		noise := rand.Float64()*20 - 10
-		total := base + wave*40 + noise
-		trend = append(trend, DailyCost{
-			Date:           d.Format("2006-01-02"),
-			TotalCostUSD:   round2(total),
-			CPUCostUSD:     round2(total * 0.52),
-			MemoryCostUSD:  round2(total * 0.31),
-			StorageCostUSD: round2(total*0.12 + float64(i)*0.5),
-			NetworkCostUSD: round2(total * 0.05),
-		})
-	}
-	return trend
 }
 
 func round2(v float64) float64 {
@@ -190,6 +211,17 @@ func writeJSON(w http.ResponseWriter, v any) {
 	}
 }
 
+// failClosed returns 503 with an honest upstream error.
+func failClosed(w http.ResponseWriter, err error) {
+	log.Printf("kubecost upstream failure: %v", err)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":   "kubecost upstream unavailable",
+		"details": err.Error(),
+	})
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok", "service": "kubecost-svc"})
 }
@@ -199,7 +231,19 @@ func tenantCostsHandler(w http.ResponseWriter, r *http.Request) {
 	if period == "" {
 		period = time.Now().Format("2006-01")
 	}
-	writeJSON(w, generateTenantCosts(period))
+	window, err := windowForPeriod(period)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	sets, err := fetchAllocations(r.Context(), window, "")
+	if err != nil {
+		failClosed(w, err)
+		return
+	}
+	writeJSON(w, tenantCostsFromAllocation(sets, period))
 }
 
 func chargebackHandler(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +251,19 @@ func chargebackHandler(w http.ResponseWriter, r *http.Request) {
 	if period == "" {
 		period = time.Now().Format("2006-01")
 	}
-	costs := generateTenantCosts(period)
+	window, err := windowForPeriod(period)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	sets, err := fetchAllocations(r.Context(), window, "")
+	if err != nil {
+		failClosed(w, err)
+		return
+	}
+	costs := tenantCostsFromAllocation(sets, period)
 	var total float64
 	for _, c := range costs {
 		total += c.TotalCostUSD
@@ -220,7 +276,54 @@ func chargebackHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func idleHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, generateIdleResources())
+	sets, err := fetchAllocations(r.Context(), "1d", "")
+	if err != nil {
+		failClosed(w, err)
+		return
+	}
+	resources := make([]IdleResource, 0)
+	if len(sets) > 0 {
+		for name, a := range sets[0] {
+			if name == "__idle__" || name == "__unmounted__" {
+				continue
+			}
+			ns := a.Properties.Namespace
+			if ns == "" {
+				ns = name
+			}
+			idleCPU := a.CPUCoreRequestAvg - a.CPUCoreUsageAvg
+			if idleCPU < 0 {
+				idleCPU = 0
+			}
+			idleMemBytes := a.RAMByteRequestAvg - a.RAMByteUsageAvg
+			if idleMemBytes < 0 {
+				idleMemBytes = 0
+			}
+			eff := a.TotalEfficiency
+			if eff < 0 {
+				eff = 0
+			}
+			if eff > 1 {
+				eff = 1
+			}
+			idleCost := a.TotalCost * (1 - eff)
+			if idleCPU == 0 && idleMemBytes == 0 && idleCost == 0 {
+				continue // nothing idle — do not invent waste
+			}
+			rec := fmt.Sprintf("Namespace %s requests %.2f CPU cores but uses %.2f; review replica count and resource requests",
+				ns, a.CPUCoreRequestAvg, a.CPUCoreUsageAvg)
+			resources = append(resources, IdleResource{
+				Namespace:         ns,
+				ResourceType:      "Namespace",
+				ResourceName:      ns,
+				IdleCPUCores:      round2(idleCPU),
+				IdleMemoryGB:      round2(idleMemBytes / (1024 * 1024 * 1024)),
+				IdleCostUSDPerDay: round2(idleCost),
+				Recommendation:    rec,
+			})
+		}
+	}
+	writeJSON(w, resources)
 }
 
 func trendHandler(w http.ResponseWriter, r *http.Request) {
@@ -230,12 +333,49 @@ func trendHandler(w http.ResponseWriter, r *http.Request) {
 			days = v
 		}
 	}
-	writeJSON(w, generateCostTrend(days))
+	sets, err := fetchAllocations(r.Context(), fmt.Sprintf("%dd", days), "1d")
+	if err != nil {
+		failClosed(w, err)
+		return
+	}
+	trend := make([]DailyCost, 0, len(sets))
+	start := time.Now().AddDate(0, 0, -(len(sets) - 1))
+	for i, set := range sets {
+		var dc DailyCost
+		dc.Date = start.AddDate(0, 0, i).Format("2006-01-02")
+		for name, a := range set {
+			if name == "__idle__" || name == "__unmounted__" {
+				continue
+			}
+			dc.TotalCostUSD += a.TotalCost
+			dc.CPUCostUSD += a.CPUCost
+			dc.MemoryCostUSD += a.RAMCost
+			dc.StorageCostUSD += a.PVCost
+			dc.NetworkCostUSD += a.NetworkCost
+		}
+		dc.TotalCostUSD = round2(dc.TotalCostUSD)
+		dc.CPUCostUSD = round2(dc.CPUCostUSD)
+		dc.MemoryCostUSD = round2(dc.MemoryCostUSD)
+		dc.StorageCostUSD = round2(dc.StorageCostUSD)
+		dc.NetworkCostUSD = round2(dc.NetworkCostUSD)
+		trend = append(trend, dc)
+	}
+	writeJSON(w, trend)
 }
 
 func summaryHandler(w http.ResponseWriter, r *http.Request) {
 	period := time.Now().Format("2006-01")
-	costs := generateTenantCosts(period)
+	window, err := windowForPeriod(period)
+	if err != nil {
+		failClosed(w, err)
+		return
+	}
+	sets, err := fetchAllocations(r.Context(), window, "")
+	if err != nil {
+		failClosed(w, err)
+		return
+	}
+	costs := tenantCostsFromAllocation(sets, period)
 	var sum ClusterSummary
 	sum.ActiveTenants = len(costs)
 	for _, c := range costs {
@@ -268,6 +408,13 @@ func main() {
 		defer otelShutdown(context.Background())
 	}
 
+	// Phase 26 F3: KUBECOST_URL is mandatory. Without a real upstream this
+	// service has no data source and must not start.
+	kubecostURL = os.Getenv("KUBECOST_URL")
+	if kubecostURL == "" {
+		log.Fatal("KUBECOST_URL is required (e.g. http://kubecost-cost-analyzer:9090); refusing to start without a real cost data source")
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8105"
@@ -281,7 +428,7 @@ func main() {
 	mux.HandleFunc("/costs/summary", summaryHandler)
 
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("kubecost-svc listening on %s", addr)
+	log.Printf("kubecost-svc listening on %s (upstream: %s)", addr, kubecostURL)
 	if err := http.ListenAndServe(addr, tracedHandler("kubecost-svc.http", mux)); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
