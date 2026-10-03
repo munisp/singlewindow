@@ -429,7 +429,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("kubecost-svc listening on %s (upstream: %s)", addr, kubecostURL)
-	if err := http.ListenAndServe(addr, tracedHandler("kubecost-svc.http", mux)); err != nil {
+	if err := http.ListenAndServe(addr, tracedHandler("kubecost-svc.http", wrapWithAuth(mux))); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }

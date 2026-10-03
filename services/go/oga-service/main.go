@@ -458,7 +458,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":" + httpPort,
-		Handler:      mux,
+		Handler:      wrapWithAuth(mux),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

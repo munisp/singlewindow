@@ -862,7 +862,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         ":" + httpPort,
-		Handler:      tracedHandler("payment-service.http", mux),
+		Handler:      tracedHandler("payment-service.http", wrapWithAuth(mux)),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

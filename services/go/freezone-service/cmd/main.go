@@ -617,6 +617,9 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
+	// Phase 26 F1: fail-closed Keycloak JWT authz on all non-probe routes.
+	r.Use(authGuard())
+
 	r.GET("/health", healthCheck)
 	r.POST("/zones", registerZone)
 	r.GET("/zones", listZones)

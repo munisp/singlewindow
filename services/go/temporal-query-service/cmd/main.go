@@ -678,7 +678,7 @@ func main() {
 	httpPort := getEnv("HTTP_PORT", "8086")
 	httpServer := &http.Server{
 		Addr:         ":" + httpPort,
-		Handler:      r,
+		Handler:      wrapWithAuth(r),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

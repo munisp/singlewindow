@@ -102,7 +102,7 @@ func NewAdminServer(addr string, refresher *TokenRefresher) *AdminServer {
 
 	as.server = &http.Server{
 		Addr:         addr,
-		Handler:      tracedHandler("notification-dispatcher.admin", mux),
+		Handler:      tracedHandler("notification-dispatcher.admin", wrapWithAuth(mux)),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
