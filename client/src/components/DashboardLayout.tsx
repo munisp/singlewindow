@@ -91,6 +91,7 @@ import {
   History,
   CheckSquare,
   Clock,
+  Waves,
 } from "lucide-react";
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -155,6 +156,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Anchor, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: Activity, label: "Congestion Forecast", path: "/app/geo/congestion-forecast" },
           { icon: Anchor, label: "Cargo Tracking Map", path: "/app/geo/cargo-tracking" },
+          { icon: Waves, label: "State Blue Economy", path: "/app/state-ops" },
         ],
       },
       {
@@ -338,6 +340,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: CalendarClock, label: "Recurring Export Schedules", path: "/app/finance/export-schedules" },
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: BarChart2, label: "Executive Dashboard", path: "/app/executive-dashboard" },
+          { icon: Waves, label: "State Blue Economy", path: "/app/state-ops" },
         ],
       },
       common,
