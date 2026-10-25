@@ -14,13 +14,15 @@ import { trpc } from "@/lib/trpc";
 import {
   Waves, RefreshCw, Plus, ShieldCheck, ChevronDown, ChevronRight,
   FileText, Building2, Fish, Leaf, Banknote, BadgeCheck, BadgeX,
-  Anchor, Sailboat, Ship, AlertTriangle,
+  Anchor, Sailboat, Ship, AlertTriangle, Umbrella, Shell, GraduationCap, Zap,
 } from "lucide-react";
 
 /**
  * Phase 28 W2 — State Blue Economy Operations dashboard.
  * Phase 29 W2 — extended with Fisheries permits & IUU penalties, Small Craft
  * registry, Dredging permits & royalty declarations, and Water Transport routes.
+ * Phase 30 W2 — extended with Tourism operators & levies, Mariculture farms,
+ * Training academies & certifications, and Renewable Energy Certificates (RECs).
  *
  * Talks to the `stateOps` tRPC router (built in parallel, W1). The router
  * types are not available to the client yet, so the namespace is accessed
@@ -161,6 +163,71 @@ export interface RevenueShare {
   status?: string;
 }
 
+// Phase 30 contract types
+
+export interface TourismOperator {
+  id: string;
+  state: string;
+  operatorName: string;
+  operatorType: string; // beach_resort | boat_tour | eco_lodge | mangrove_boardwalk | jet_ski | other
+  site: string;
+  licenceFee: number;
+  visitorLevyRate: number; // ₦ levy per visitor
+  status: string;
+  expiresAt: string;
+}
+
+export interface TourismLevy {
+  id: string;
+  operatorId: string;
+  period: string; // YYYY-MM
+  visitorCount: number;
+  levyDueNaira: number; // computed server-side — never computed in the UI
+  status: string; // declared | invoiced | paid
+}
+
+export interface MaricultureFarm {
+  id: string;
+  state: string;
+  operatorName: string;
+  farmType: string; // seaweed | oyster | mussel | shrimp | finfish_cage
+  estateId?: string; // linked aquaculture estate, if any
+  hectares: number;
+  leaseFeeAnnual: number;
+  offTaker: string;
+  status: string;
+}
+
+export interface Academy {
+  id: string;
+  state: string;
+  name: string;
+  programType: string; // fishery_skills | boat_handling | diving | hospitality | stcw_adjacent
+  capacity: number;
+  status: string;
+}
+
+export interface Certification {
+  id: string;
+  academyId: string;
+  traineeName: string;
+  program: string;
+  certNo: string;
+  feeAmount: number;
+  issuedAt: string;
+}
+
+export interface Rec {
+  id: string;
+  state: string;
+  projectName: string;
+  source: string; // tidal | offshore_wind | solar_floating
+  mwh: number;
+  period: string; // YYYY-MM
+  pricePerMwh: number;
+  status: string; // issued | verified | sold
+}
+
 export interface StateRevenueRow {
   state: string;
   totalLicenseFees: number;
@@ -174,6 +241,10 @@ export interface StateRevenueRow {
   iuuFines?: number;
   dredgingRoyalties?: number;
   waterTransportLevies?: number;
+  tourismLevies?: number;
+  maricultureLeases?: number;
+  trainingFees?: number;
+  recRevenue?: number;
 }
 
 /** Nigeria's coastal states covered by the blue-economy programme. */
@@ -194,7 +265,11 @@ const ECOSYSTEMS = ["mangrove", "seagrass", "saltmarsh", "wetland"];
 const FISHERIES_PERMIT_TYPES = ["industrial", "artisanal", "crab_shrimp", "collection"];
 const IUU_OFFENCES = ["unlicensed_fishing", "closed_season", "prohibited_gear", "transhipment", "false_reporting", "incursion"];
 const CRAFT_TYPES = ["canoe", "motorized_canoe", "passenger_boat", "cargo_boat", "ferry", "barge"];
-const REVENUE_STREAMS = ["fisheries", "dredging", "water_transport", "licenses", "concessions"];
+const REVENUE_STREAMS = ["fisheries", "dredging", "water_transport", "licenses", "concessions", "tourism", "mariculture", "training", "energy_credits"];
+const TOURISM_OPERATOR_TYPES = ["beach_resort", "boat_tour", "eco_lodge", "mangrove_boardwalk", "jet_ski", "other"];
+const MARICULTURE_TYPES = ["seaweed", "oyster", "mussel", "shrimp", "finfish_cage"];
+const PROGRAM_TYPES = ["fishery_skills", "boat_handling", "diving", "hospitality", "stcw_adjacent"];
+const REC_SOURCES = ["tidal", "offshore_wind", "solar_floating"];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -221,6 +296,7 @@ const STATUS_COLORS: Record<string, string> = {
   verified: "bg-green-100 text-green-800",
   valid: "bg-green-100 text-green-800",
   paid: "bg-green-100 text-green-800",
+  sold: "bg-green-100 text-green-800",
   registered: "bg-green-100 text-green-800",
   operational: "bg-green-100 text-green-800",
   pending: "bg-blue-100 text-blue-800",
@@ -334,6 +410,31 @@ export default function StateOpsDashboard() {
     { state: stateParam },
     { enabled: activeTab === "revenue" }
   );
+  // Phase 30 queries
+  const tourismOperatorsQuery = stateOps.listTourismOperators.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "tourism" }
+  );
+  const tourismLeviesQuery = stateOps.listTourismLevies.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "tourism" }
+  );
+  const maricultureFarmsQuery = stateOps.listMaricultureFarms.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "mariculture" }
+  );
+  const academiesQuery = stateOps.listAcademies.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "training" }
+  );
+  const certificationsQuery = stateOps.listCertifications.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "training" }
+  );
+  const recsQuery = stateOps.listRecs.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "energy" }
+  );
 
   const refetchActive = () => {
     licensesQuery.refetch();
@@ -348,6 +449,12 @@ export default function StateOpsDashboard() {
     dredgingDeclarationsQuery.refetch();
     waterRoutesQuery.refetch();
     revenueSharesQuery.refetch();
+    tourismOperatorsQuery.refetch();
+    tourismLeviesQuery.refetch();
+    maricultureFarmsQuery.refetch();
+    academiesQuery.refetch();
+    certificationsQuery.refetch();
+    recsQuery.refetch();
   };
 
   // ── Mutations ──
@@ -427,6 +534,42 @@ export default function StateOpsDashboard() {
     onError: onErr,
   });
 
+  // Phase 30 mutations
+  const upsertTourismOperatorMutation = stateOps.upsertTourismOperator.useMutation({
+    onSuccess: () => { toast.success("Tourism operator saved"); setTourismDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const declareTourismLevyMutation = stateOps.declareTourismLevy.useMutation({
+    onSuccess: () => { toast.success("Tourism levy declared"); setLevyDeclareDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const upsertMaricultureFarmMutation = stateOps.upsertMaricultureFarm.useMutation({
+    onSuccess: () => { toast.success("Mariculture farm saved"); setFarmDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const upsertAcademyMutation = stateOps.upsertAcademy.useMutation({
+    onSuccess: () => { toast.success("Academy saved"); setAcademyDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const issueCertificationMutation = stateOps.issueCertification.useMutation({
+    onSuccess: () => { toast.success("Certification issued"); setCertDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const verifyCertificationMutation = stateOps.verifyCertification.useMutation({
+    onError: onErr,
+  });
+  const issueRecMutation = stateOps.issueRec.useMutation({
+    onSuccess: () => { toast.success("REC issued"); setRecDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const verifyRecMutation = stateOps.verifyRec.useMutation({
+    onError: onErr,
+  });
+  const markRecSoldMutation = stateOps.markRecSold.useMutation({
+    onSuccess: () => { toast.success("REC marked sold"); invalidateAll(); },
+    onError: onErr,
+  });
+
   // ── Dialog state ──
   const [licenseDialogOpen, setLicenseDialogOpen] = useState(false);
   const [editingLicense, setEditingLicense] = useState<StateLicense | null>(null);
@@ -500,6 +643,42 @@ export default function StateOpsDashboard() {
     state: "Lagos", stream: "fisheries", stateSharePct: "", federalSharePct: "",
   });
 
+  // Phase 30 dialog state
+  const [tourismDialogOpen, setTourismDialogOpen] = useState(false);
+  const [editingTourismOperator, setEditingTourismOperator] = useState<TourismOperator | null>(null);
+  const [tourismForm, setTourismForm] = useState({
+    state: "Lagos", operatorName: "", operatorType: "beach_resort", site: "",
+    licenceFee: "", visitorLevyRate: "", expiresAt: "",
+  });
+
+  const [levyDeclareDialogOpen, setLevyDeclareDialogOpen] = useState(false);
+  const [levyDeclareForm, setLevyDeclareForm] = useState({ operatorId: "", period: "", visitorCount: "" });
+
+  const [farmDialogOpen, setFarmDialogOpen] = useState(false);
+  const [editingFarm, setEditingFarm] = useState<MaricultureFarm | null>(null);
+  const [farmForm, setFarmForm] = useState({
+    state: "Lagos", operatorName: "", farmType: "seaweed", estateId: "",
+    hectares: "", leaseFeeAnnual: "", offTaker: "",
+  });
+
+  const [academyDialogOpen, setAcademyDialogOpen] = useState(false);
+  const [editingAcademy, setEditingAcademy] = useState<Academy | null>(null);
+  const [academyForm, setAcademyForm] = useState({
+    state: "Lagos", name: "", programType: "fishery_skills", capacity: "",
+  });
+
+  const [certDialogOpen, setCertDialogOpen] = useState(false);
+  const [certForm, setCertForm] = useState({
+    academyId: "", traineeName: "", program: "fishery_skills", certNo: "", feeAmount: "",
+  });
+  const [certVerificationResults, setCertVerificationResults] = useState<Record<string, boolean>>({});
+
+  const [recDialogOpen, setRecDialogOpen] = useState(false);
+  const [recForm, setRecForm] = useState({
+    state: "Lagos", projectName: "", source: "tidal", mwh: "", period: "", pricePerMwh: "",
+  });
+  const [recVerificationResults, setRecVerificationResults] = useState<Record<string, boolean>>({});
+
   const licenses: StateLicense[] = useMemo(() => ((licensesQuery.data as any)?.rows ?? licensesQuery.data ?? []) as StateLicense[], [licensesQuery.data]);
   const concessions: StateConcession[] = useMemo(() => (concessionsQuery.data ?? []) as StateConcession[], [concessionsQuery.data]);
   const estates: StateEstate[] = useMemo(() => (estatesQuery.data ?? []) as StateEstate[], [estatesQuery.data]);
@@ -512,6 +691,12 @@ export default function StateOpsDashboard() {
   const dredgingDeclarations: DredgingDeclaration[] = useMemo(() => (dredgingDeclarationsQuery.data ?? []) as DredgingDeclaration[], [dredgingDeclarationsQuery.data]);
   const waterRoutes: WaterRoute[] = useMemo(() => (waterRoutesQuery.data ?? []) as WaterRoute[], [waterRoutesQuery.data]);
   const revenueShares: RevenueShare[] = useMemo(() => (revenueSharesQuery.data ?? []) as RevenueShare[], [revenueSharesQuery.data]);
+  const tourismOperators: TourismOperator[] = useMemo(() => (tourismOperatorsQuery.data ?? []) as TourismOperator[], [tourismOperatorsQuery.data]);
+  const tourismLevies: TourismLevy[] = useMemo(() => (tourismLeviesQuery.data ?? []) as TourismLevy[], [tourismLeviesQuery.data]);
+  const maricultureFarms: MaricultureFarm[] = useMemo(() => (maricultureFarmsQuery.data ?? []) as MaricultureFarm[], [maricultureFarmsQuery.data]);
+  const academies: Academy[] = useMemo(() => (academiesQuery.data ?? []) as Academy[], [academiesQuery.data]);
+  const certifications: Certification[] = useMemo(() => (certificationsQuery.data ?? []) as Certification[], [certificationsQuery.data]);
+  const recs: Rec[] = useMemo(() => (recsQuery.data ?? []) as Rec[], [recsQuery.data]);
 
   // ── Submit handlers ──
   const submitLicense = () => {
@@ -709,6 +894,124 @@ export default function StateOpsDashboard() {
     });
   };
 
+  // Phase 30 submit handlers
+  const submitTourismOperator = () => {
+    if (!tourismForm.operatorName || !tourismForm.site) {
+      toast.error("Operator name and site are required");
+      return;
+    }
+    upsertTourismOperatorMutation.mutate({
+      ...(editingTourismOperator ? { id: editingTourismOperator.id } : {}),
+      state: tourismForm.state,
+      operatorName: tourismForm.operatorName,
+      operatorType: tourismForm.operatorType,
+      site: tourismForm.site,
+      licenceFee: parseFloat(tourismForm.licenceFee) || 0,
+      visitorLevyRate: parseFloat(tourismForm.visitorLevyRate) || 0,
+      expiresAt: tourismForm.expiresAt || undefined,
+    });
+  };
+
+  const submitTourismLevy = () => {
+    if (!levyDeclareForm.operatorId || !levyDeclareForm.period) {
+      toast.error("Operator and period (YYYY-MM) are required");
+      return;
+    }
+    declareTourismLevyMutation.mutate({
+      operatorId: levyDeclareForm.operatorId,
+      period: levyDeclareForm.period,
+      visitorCount: parseInt(levyDeclareForm.visitorCount, 10) || 0,
+    });
+  };
+
+  const submitFarm = () => {
+    if (!farmForm.operatorName) {
+      toast.error("Operator name is required");
+      return;
+    }
+    upsertMaricultureFarmMutation.mutate({
+      ...(editingFarm ? { id: editingFarm.id } : {}),
+      state: farmForm.state,
+      operatorName: farmForm.operatorName,
+      farmType: farmForm.farmType,
+      estateId: farmForm.estateId || undefined,
+      hectares: parseFloat(farmForm.hectares) || 0,
+      leaseFeeAnnual: parseFloat(farmForm.leaseFeeAnnual) || 0,
+      offTaker: farmForm.offTaker || undefined,
+    });
+  };
+
+  const submitAcademy = () => {
+    if (!academyForm.name) {
+      toast.error("Academy name is required");
+      return;
+    }
+    upsertAcademyMutation.mutate({
+      ...(editingAcademy ? { id: editingAcademy.id } : {}),
+      state: academyForm.state,
+      name: academyForm.name,
+      programType: academyForm.programType,
+      capacity: parseInt(academyForm.capacity, 10) || 0,
+    });
+  };
+
+  const submitCertification = () => {
+    if (!certForm.academyId || !certForm.traineeName) {
+      toast.error("Academy and trainee name are required");
+      return;
+    }
+    issueCertificationMutation.mutate({
+      academyId: certForm.academyId,
+      traineeName: certForm.traineeName,
+      program: certForm.program,
+      certNo: certForm.certNo || undefined,
+      feeAmount: parseFloat(certForm.feeAmount) || 0,
+    });
+  };
+
+  const handleVerifyCert = (certId: string) => {
+    verifyCertificationMutation.mutate(
+      { id: certId },
+      {
+        onSuccess: (res: any) => {
+          const valid = !!res?.valid;
+          setCertVerificationResults(prev => ({ ...prev, [certId]: valid }));
+          if (valid) toast.success("Certification is valid");
+          else toast.error("Certification verification failed");
+        },
+      }
+    );
+  };
+
+  const submitRec = () => {
+    if (!recForm.projectName || !recForm.period) {
+      toast.error("Project name and period (YYYY-MM) are required");
+      return;
+    }
+    issueRecMutation.mutate({
+      state: recForm.state,
+      projectName: recForm.projectName,
+      source: recForm.source,
+      mwh: parseFloat(recForm.mwh) || 0,
+      period: recForm.period,
+      pricePerMwh: parseFloat(recForm.pricePerMwh) || 0,
+    });
+  };
+
+  const handleVerifyRec = (recId: string) => {
+    verifyRecMutation.mutate(
+      { id: recId },
+      {
+        onSuccess: (res: any) => {
+          const valid = !!res?.valid;
+          setRecVerificationResults(prev => ({ ...prev, [recId]: valid }));
+          if (valid) toast.success("REC is valid");
+          else toast.error("REC verification failed");
+        },
+      }
+    );
+  };
+
   const totals = useMemo(() => ({
     licenseFees: revenueRows.reduce((s, r) => s + (r.totalLicenseFees || 0), 0),
     concessionFees: revenueRows.reduce((s, r) => s + (r.concessionAnnualFees || 0), 0),
@@ -718,6 +1021,10 @@ export default function StateOpsDashboard() {
     iuuFines: revenueRows.reduce((s, r) => s + (r.iuuFines ?? 0), 0),
     dredgingRoyalties: revenueRows.reduce((s, r) => s + (r.dredgingRoyalties ?? 0), 0),
     waterTransportLevies: revenueRows.reduce((s, r) => s + (r.waterTransportLevies ?? 0), 0),
+    tourismLevies: revenueRows.reduce((s, r) => s + (r.tourismLevies ?? 0), 0),
+    maricultureLeases: revenueRows.reduce((s, r) => s + (r.maricultureLeases ?? 0), 0),
+    trainingFees: revenueRows.reduce((s, r) => s + (r.trainingFees ?? 0), 0),
+    recRevenue: revenueRows.reduce((s, r) => s + (r.recRevenue ?? 0), 0),
   }), [revenueRows]);
 
   const dredgingPermitById = useMemo(() => {
@@ -725,6 +1032,18 @@ export default function StateOpsDashboard() {
     for (const p of dredgingPermits) map[p.id] = p;
     return map;
   }, [dredgingPermits]);
+
+  const tourismOperatorById = useMemo(() => {
+    const map: Record<string, TourismOperator> = {};
+    for (const o of tourismOperators) map[o.id] = o;
+    return map;
+  }, [tourismOperators]);
+
+  const academyById = useMemo(() => {
+    const map: Record<string, Academy> = {};
+    for (const a of academies) map[a.id] = a;
+    return map;
+  }, [academies]);
 
   return (
     <DashboardLayout>
@@ -759,6 +1078,10 @@ export default function StateOpsDashboard() {
             <TabsTrigger value="smallcraft">Small Craft</TabsTrigger>
             <TabsTrigger value="dredging">Dredging</TabsTrigger>
             <TabsTrigger value="water">Water Transport</TabsTrigger>
+            <TabsTrigger value="tourism">Tourism</TabsTrigger>
+            <TabsTrigger value="mariculture">Mariculture</TabsTrigger>
+            <TabsTrigger value="training">Training</TabsTrigger>
+            <TabsTrigger value="energy">Energy Credits</TabsTrigger>
             <TabsTrigger value="revenue">Revenue</TabsTrigger>
           </TabsList>
 
@@ -1437,6 +1760,448 @@ export default function StateOpsDashboard() {
             </Card>
           </TabsContent>
 
+          {/* ── Tourism ── */}
+          <TabsContent value="tourism" className="mt-4 space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Umbrella className="w-4 h-4" />
+                    Coastal Tourism Operators
+                  </CardTitle>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline"
+                      disabled={tourismOperators.length === 0}
+                      onClick={() => {
+                        setLevyDeclareForm({ operatorId: tourismOperators[0]?.id ?? "", period: "", visitorCount: "" });
+                        setLevyDeclareDialogOpen(true);
+                      }}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Declare Levy
+                    </Button>
+                    <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white"
+                      onClick={() => {
+                        setEditingTourismOperator(null);
+                        setTourismForm({ state: stateParam ?? "Lagos", operatorName: "", operatorType: "beach_resort", site: "", licenceFee: "", visitorLevyRate: "", expiresAt: "" });
+                        setTourismDialogOpen(true);
+                      }}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      New Operator
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {tourismOperatorsQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading tourism operators...</div>
+                ) : tourismOperators.length === 0 ? (
+                  <EmptyState icon={<Umbrella className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>State</TableHead>
+                        <TableHead>Operator</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Site</TableHead>
+                        <TableHead>Licence Fee</TableHead>
+                        <TableHead>Visitor Levy</TableHead>
+                        <TableHead>Expiry</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tourismOperators.map(o => (
+                        <TableRow key={o.id}>
+                          <TableCell className="font-medium">{o.state}</TableCell>
+                          <TableCell>{o.operatorName}</TableCell>
+                          <TableCell className="capitalize">{o.operatorType?.replace(/_/g, " ")}</TableCell>
+                          <TableCell className="text-xs">{o.site}</TableCell>
+                          <TableCell>{formatNaira(o.licenceFee)}</TableCell>
+                          <TableCell>{formatNaira(o.visitorLevyRate)}</TableCell>
+                          <TableCell className="text-xs">
+                            <div className="flex items-center gap-2">
+                              {formatDate(o.expiresAt)}
+                              {isPastDate(o.expiresAt) && (
+                                <Badge className="text-xs bg-red-100 text-red-800">Expired</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell><StatusBadge status={o.status} /></TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="outline" size="sm" className="h-7 text-xs"
+                              onClick={() => {
+                                setEditingTourismOperator(o);
+                                setTourismForm({
+                                  state: o.state, operatorName: o.operatorName, operatorType: o.operatorType,
+                                  site: o.site, licenceFee: String(o.licenceFee ?? ""),
+                                  visitorLevyRate: String(o.visitorLevyRate ?? ""),
+                                  expiresAt: o.expiresAt?.slice(0, 10) ?? "",
+                                });
+                                setTourismDialogOpen(true);
+                              }}>
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  Levy Declarations
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {tourismLeviesQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading levy declarations...</div>
+                ) : tourismLevies.length === 0 ? (
+                  <EmptyState icon={<FileText className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Operator</TableHead>
+                        <TableHead>Period</TableHead>
+                        <TableHead>Visitors</TableHead>
+                        <TableHead>Levy Due</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {tourismLevies.map(l => (
+                        <TableRow key={l.id}>
+                          <TableCell>
+                            <div className="text-sm">{tourismOperatorById[l.operatorId]?.operatorName ?? "—"}</div>
+                            <div className="text-xs text-muted-foreground">{tourismOperatorById[l.operatorId]?.site ?? l.operatorId}</div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{l.period}</TableCell>
+                          <TableCell>{l.visitorCount?.toLocaleString()}</TableCell>
+                          {/* Levy due is computed server-side; displayed as returned */}
+                          <TableCell>{formatNaira(l.levyDueNaira)}</TableCell>
+                          <TableCell><StatusBadge status={l.status} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Mariculture ── */}
+          <TabsContent value="mariculture" className="mt-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Shell className="w-4 h-4" />
+                    Mariculture Farms
+                  </CardTitle>
+                  <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white"
+                    onClick={() => {
+                      setEditingFarm(null);
+                      setFarmForm({ state: stateParam ?? "Lagos", operatorName: "", farmType: "seaweed", estateId: "", hectares: "", leaseFeeAnnual: "", offTaker: "" });
+                      setFarmDialogOpen(true);
+                    }}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    New Farm
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {maricultureFarmsQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading mariculture farms...</div>
+                ) : maricultureFarms.length === 0 ? (
+                  <EmptyState icon={<Shell className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>State</TableHead>
+                        <TableHead>Operator</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Estate</TableHead>
+                        <TableHead>Hectares</TableHead>
+                        <TableHead>Lease Fee</TableHead>
+                        <TableHead>Off-taker</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {maricultureFarms.map(f => (
+                        <TableRow key={f.id}>
+                          <TableCell className="font-medium">{f.state}</TableCell>
+                          <TableCell>{f.operatorName}</TableCell>
+                          <TableCell className="capitalize">{f.farmType?.replace(/_/g, " ")}</TableCell>
+                          <TableCell className="text-xs">{f.estateId ?? "—"}</TableCell>
+                          <TableCell>{f.hectares?.toLocaleString()}</TableCell>
+                          <TableCell>{formatNaira(f.leaseFeeAnnual)}</TableCell>
+                          <TableCell className="text-xs">{f.offTaker ?? "—"}</TableCell>
+                          <TableCell><StatusBadge status={f.status} /></TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="outline" size="sm" className="h-7 text-xs"
+                              onClick={() => {
+                                setEditingFarm(f);
+                                setFarmForm({
+                                  state: f.state, operatorName: f.operatorName, farmType: f.farmType,
+                                  estateId: f.estateId ?? "", hectares: String(f.hectares ?? ""),
+                                  leaseFeeAnnual: String(f.leaseFeeAnnual ?? ""), offTaker: f.offTaker ?? "",
+                                });
+                                setFarmDialogOpen(true);
+                              }}>
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Training ── */}
+          <TabsContent value="training" className="mt-4 space-y-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <GraduationCap className="w-4 h-4" />
+                    Blue Economy Academies
+                  </CardTitle>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline"
+                      disabled={academies.length === 0}
+                      onClick={() => {
+                        setCertForm({ academyId: academies[0]?.id ?? "", traineeName: "", program: "fishery_skills", certNo: "", feeAmount: "" });
+                        setCertDialogOpen(true);
+                      }}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Issue Certification
+                    </Button>
+                    <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white"
+                      onClick={() => {
+                        setEditingAcademy(null);
+                        setAcademyForm({ state: stateParam ?? "Lagos", name: "", programType: "fishery_skills", capacity: "" });
+                        setAcademyDialogOpen(true);
+                      }}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      New Academy
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {academiesQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading academies...</div>
+                ) : academies.length === 0 ? (
+                  <EmptyState icon={<GraduationCap className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>State</TableHead>
+                        <TableHead>Academy</TableHead>
+                        <TableHead>Program Type</TableHead>
+                        <TableHead>Capacity</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {academies.map(a => (
+                        <TableRow key={a.id}>
+                          <TableCell className="font-medium">{a.state}</TableCell>
+                          <TableCell>{a.name}</TableCell>
+                          <TableCell className="capitalize">{a.programType?.replace(/_/g, " ")}</TableCell>
+                          <TableCell>{a.capacity?.toLocaleString()}</TableCell>
+                          <TableCell><StatusBadge status={a.status} /></TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="outline" size="sm" className="h-7 text-xs"
+                              onClick={() => {
+                                setEditingAcademy(a);
+                                setAcademyForm({
+                                  state: a.state, name: a.name, programType: a.programType,
+                                  capacity: String(a.capacity ?? ""),
+                                });
+                                setAcademyDialogOpen(true);
+                              }}>
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BadgeCheck className="w-4 h-4" />
+                  Certifications
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {certificationsQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading certifications...</div>
+                ) : certifications.length === 0 ? (
+                  <EmptyState icon={<BadgeCheck className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Academy</TableHead>
+                        <TableHead>Trainee</TableHead>
+                        <TableHead>Program</TableHead>
+                        <TableHead>Cert No.</TableHead>
+                        <TableHead>Fee</TableHead>
+                        <TableHead>Issued</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {certifications.map(c => {
+                        const verified = certVerificationResults[c.id];
+                        return (
+                          <TableRow key={c.id}>
+                            <TableCell className="text-xs">{academyById[c.academyId]?.name ?? c.academyId}</TableCell>
+                            <TableCell>{c.traineeName}</TableCell>
+                            <TableCell className="capitalize">{c.program?.replace(/_/g, " ")}</TableCell>
+                            <TableCell className="font-mono text-xs">{c.certNo}</TableCell>
+                            <TableCell>{formatNaira(c.feeAmount)}</TableCell>
+                            <TableCell className="text-xs">{formatDate(c.issuedAt)}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end items-center gap-2">
+                                {verified === true && (
+                                  <Badge className="text-xs bg-green-100 text-green-800">
+                                    <BadgeCheck className="w-3 h-3 mr-1" /> Valid
+                                  </Badge>
+                                )}
+                                {verified === false && (
+                                  <Badge className="text-xs bg-red-100 text-red-800">
+                                    <BadgeX className="w-3 h-3 mr-1" /> Invalid
+                                  </Badge>
+                                )}
+                                <Button variant="outline" size="sm" className="h-7 text-xs"
+                                  disabled={verifyCertificationMutation.isPending}
+                                  onClick={() => handleVerifyCert(c.id)}>
+                                  <ShieldCheck className="w-3 h-3 mr-1" />
+                                  Verify
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Energy Credits ── */}
+          <TabsContent value="energy" className="mt-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Zap className="w-4 h-4" />
+                    Renewable Energy Certificates (RECs)
+                  </CardTitle>
+                  <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white"
+                    onClick={() => {
+                      setRecForm({ state: stateParam ?? "Lagos", projectName: "", source: "tidal", mwh: "", period: "", pricePerMwh: "" });
+                      setRecDialogOpen(true);
+                    }}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Issue REC
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {recsQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading RECs...</div>
+                ) : recs.length === 0 ? (
+                  <EmptyState icon={<Zap className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>State</TableHead>
+                        <TableHead>Project</TableHead>
+                        <TableHead>Source</TableHead>
+                        <TableHead>MWh</TableHead>
+                        <TableHead>Period</TableHead>
+                        <TableHead>Price / MWh</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recs.map(r => {
+                        const verified = recVerificationResults[r.id];
+                        return (
+                          <TableRow key={r.id}>
+                            <TableCell className="font-medium">{r.state}</TableCell>
+                            <TableCell>{r.projectName}</TableCell>
+                            <TableCell className="capitalize">{r.source?.replace(/_/g, " ")}</TableCell>
+                            <TableCell>{r.mwh?.toLocaleString()}</TableCell>
+                            <TableCell className="font-mono text-xs">{r.period}</TableCell>
+                            <TableCell>{formatNaira(r.pricePerMwh)}</TableCell>
+                            <TableCell><StatusBadge status={r.status} /></TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end items-center gap-2">
+                                {verified === true && (
+                                  <Badge className="text-xs bg-green-100 text-green-800">
+                                    <BadgeCheck className="w-3 h-3 mr-1" /> Valid
+                                  </Badge>
+                                )}
+                                {verified === false && (
+                                  <Badge className="text-xs bg-red-100 text-red-800">
+                                    <BadgeX className="w-3 h-3 mr-1" /> Invalid
+                                  </Badge>
+                                )}
+                                {r.status !== "sold" && (
+                                  <>
+                                    <Button variant="outline" size="sm" className="h-7 text-xs"
+                                      disabled={verifyRecMutation.isPending}
+                                      onClick={() => handleVerifyRec(r.id)}>
+                                      <ShieldCheck className="w-3 h-3 mr-1" />
+                                      Verify
+                                    </Button>
+                                    <Button variant="outline" size="sm" className="h-7 text-xs"
+                                      disabled={markRecSoldMutation.isPending}
+                                      onClick={() => markRecSoldMutation.mutate({ id: r.id })}>
+                                      Mark Sold
+                                    </Button>
+                                  </>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* ── Revenue ── */}
           <TabsContent value="revenue" className="mt-4 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1449,6 +2214,10 @@ export default function StateOpsDashboard() {
                 { label: "IUU Fines", value: totals.iuuFines, icon: <AlertTriangle className="w-5 h-5 text-red-600" />, color: "text-red-600" },
                 { label: "Dredging Royalties", value: totals.dredgingRoyalties, icon: <Banknote className="w-5 h-5 text-amber-600" />, color: "text-amber-600" },
                 { label: "Water Transport Levies", value: totals.waterTransportLevies, icon: <Ship className="w-5 h-5 text-indigo-600" />, color: "text-indigo-600" },
+                { label: "Tourism Levies", value: totals.tourismLevies, icon: <Umbrella className="w-5 h-5 text-orange-600" />, color: "text-orange-600" },
+                { label: "Mariculture Leases", value: totals.maricultureLeases, icon: <Shell className="w-5 h-5 text-cyan-600" />, color: "text-cyan-600" },
+                { label: "Training Fees", value: totals.trainingFees, icon: <GraduationCap className="w-5 h-5 text-violet-600" />, color: "text-violet-600" },
+                { label: "REC Revenue", value: totals.recRevenue, icon: <Zap className="w-5 h-5 text-yellow-600" />, color: "text-yellow-600" },
               ].map(stat => (
                 <Card key={stat.label}>
                   <CardContent className="p-4 flex items-center gap-3">
@@ -1490,6 +2259,10 @@ export default function StateOpsDashboard() {
                         <TableHead>IUU Fines</TableHead>
                         <TableHead>Dredging Royalties</TableHead>
                         <TableHead>Water Levies</TableHead>
+                        <TableHead>Tourism Levies</TableHead>
+                        <TableHead>Mariculture Leases</TableHead>
+                        <TableHead>Training Fees</TableHead>
+                        <TableHead>REC Revenue</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -1511,6 +2284,10 @@ export default function StateOpsDashboard() {
                           <TableCell>{formatNaira(r.iuuFines ?? 0)}</TableCell>
                           <TableCell>{formatNaira(r.dredgingRoyalties ?? 0)}</TableCell>
                           <TableCell>{formatNaira(r.waterTransportLevies ?? 0)}</TableCell>
+                          <TableCell>{formatNaira(r.tourismLevies ?? 0)}</TableCell>
+                          <TableCell>{formatNaira(r.maricultureLeases ?? 0)}</TableCell>
+                          <TableCell>{formatNaira(r.trainingFees ?? 0)}</TableCell>
+                          <TableCell>{formatNaira(r.recRevenue ?? 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -2206,6 +2983,334 @@ export default function StateOpsDashboard() {
             <Button variant="outline" onClick={() => setShareDialogOpen(false)}>Cancel</Button>
             <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitRevenueShare} disabled={upsertRevenueShareMutation.isPending}>
               {upsertRevenueShareMutation.isPending ? "Saving..." : "Save Split"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Tourism Operator dialog ── */}
+      <Dialog open={tourismDialogOpen} onOpenChange={setTourismDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingTourismOperator ? "Edit Tourism Operator" : "New Tourism Operator"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>State *</Label>
+                <Select value={tourismForm.state} onValueChange={v => setTourismForm(f => ({ ...f, state: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COASTAL_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Operator Type</Label>
+                <Select value={tourismForm.operatorType} onValueChange={v => setTourismForm(f => ({ ...f, operatorType: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TOURISM_OPERATOR_TYPES.map(t => <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Operator Name *</Label>
+                <Input value={tourismForm.operatorName} onChange={e => setTourismForm(f => ({ ...f, operatorName: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Site *</Label>
+                <Input value={tourismForm.site} onChange={e => setTourismForm(f => ({ ...f, site: e.target.value }))} placeholder="Beach / creek / landmark" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Licence Fee (₦)</Label>
+                <Input type="number" value={tourismForm.licenceFee} onChange={e => setTourismForm(f => ({ ...f, licenceFee: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Visitor Levy (₦)</Label>
+                <Input type="number" value={tourismForm.visitorLevyRate} onChange={e => setTourismForm(f => ({ ...f, visitorLevyRate: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Expires On</Label>
+                <Input type="date" value={tourismForm.expiresAt} onChange={e => setTourismForm(f => ({ ...f, expiresAt: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTourismDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitTourismOperator} disabled={upsertTourismOperatorMutation.isPending}>
+              {upsertTourismOperatorMutation.isPending ? "Saving..." : "Save Operator"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Declare Tourism Levy dialog ── */}
+      <Dialog open={levyDeclareDialogOpen} onOpenChange={setLevyDeclareDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Declare Visitor Levy</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Operator *</Label>
+              <Select value={levyDeclareForm.operatorId} onValueChange={v => setLevyDeclareForm(f => ({ ...f, operatorId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select operator" /></SelectTrigger>
+                <SelectContent>
+                  {tourismOperators.map(o => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.operatorName} — {o.site}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Period (YYYY-MM) *</Label>
+                <Input value={levyDeclareForm.period} onChange={e => setLevyDeclareForm(f => ({ ...f, period: e.target.value }))} placeholder="2026-10" />
+              </div>
+              <div>
+                <Label>Visitor Count</Label>
+                <Input type="number" value={levyDeclareForm.visitorCount} onChange={e => setLevyDeclareForm(f => ({ ...f, visitorCount: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Levy due is computed by the server from the operator's visitor levy rate and the declared count.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLevyDeclareDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitTourismLevy} disabled={declareTourismLevyMutation.isPending}>
+              {declareTourismLevyMutation.isPending ? "Declaring..." : "Declare Levy"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Mariculture Farm dialog ── */}
+      <Dialog open={farmDialogOpen} onOpenChange={setFarmDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingFarm ? "Edit Mariculture Farm" : "New Mariculture Farm"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>State *</Label>
+                <Select value={farmForm.state} onValueChange={v => setFarmForm(f => ({ ...f, state: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COASTAL_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Farm Type</Label>
+                <Select value={farmForm.farmType} onValueChange={v => setFarmForm(f => ({ ...f, farmType: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MARICULTURE_TYPES.map(t => <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Operator Name *</Label>
+                <Input value={farmForm.operatorName} onChange={e => setFarmForm(f => ({ ...f, operatorName: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Linked Estate</Label>
+                <Select value={farmForm.estateId || "none"} onValueChange={v => setFarmForm(f => ({ ...f, estateId: v === "none" ? "" : v }))}>
+                  <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    {estates.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Hectares</Label>
+                <Input type="number" value={farmForm.hectares} onChange={e => setFarmForm(f => ({ ...f, hectares: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Lease Fee (₦)</Label>
+                <Input type="number" value={farmForm.leaseFeeAnnual} onChange={e => setFarmForm(f => ({ ...f, leaseFeeAnnual: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Off-taker</Label>
+                <Input value={farmForm.offTaker} onChange={e => setFarmForm(f => ({ ...f, offTaker: e.target.value }))} placeholder="Buyer / processor" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFarmDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitFarm} disabled={upsertMaricultureFarmMutation.isPending}>
+              {upsertMaricultureFarmMutation.isPending ? "Saving..." : "Save Farm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Academy dialog ── */}
+      <Dialog open={academyDialogOpen} onOpenChange={setAcademyDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingAcademy ? "Edit Academy" : "New Academy"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>State *</Label>
+                <Select value={academyForm.state} onValueChange={v => setAcademyForm(f => ({ ...f, state: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COASTAL_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Academy Name *</Label>
+                <Input value={academyForm.name} onChange={e => setAcademyForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Lagos Maritime Academy" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Program Type</Label>
+                <Select value={academyForm.programType} onValueChange={v => setAcademyForm(f => ({ ...f, programType: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PROGRAM_TYPES.map(t => <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Capacity</Label>
+                <Input type="number" value={academyForm.capacity} onChange={e => setAcademyForm(f => ({ ...f, capacity: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAcademyDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitAcademy} disabled={upsertAcademyMutation.isPending}>
+              {upsertAcademyMutation.isPending ? "Saving..." : "Save Academy"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Issue Certification dialog ── */}
+      <Dialog open={certDialogOpen} onOpenChange={setCertDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Issue Certification</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Academy *</Label>
+                <Select value={certForm.academyId} onValueChange={v => setCertForm(f => ({ ...f, academyId: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Select academy" /></SelectTrigger>
+                  <SelectContent>
+                    {academies.map(a => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Trainee Name *</Label>
+                <Input value={certForm.traineeName} onChange={e => setCertForm(f => ({ ...f, traineeName: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Program</Label>
+                <Select value={certForm.program} onValueChange={v => setCertForm(f => ({ ...f, program: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PROGRAM_TYPES.map(t => <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Cert No.</Label>
+                <Input value={certForm.certNo} onChange={e => setCertForm(f => ({ ...f, certNo: e.target.value }))} placeholder="Auto if blank" />
+              </div>
+              <div>
+                <Label>Fee (₦)</Label>
+                <Input type="number" value={certForm.feeAmount} onChange={e => setCertForm(f => ({ ...f, feeAmount: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCertDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitCertification} disabled={issueCertificationMutation.isPending}>
+              {issueCertificationMutation.isPending ? "Issuing..." : "Issue Certification"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Issue REC dialog ── */}
+      <Dialog open={recDialogOpen} onOpenChange={setRecDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Issue Renewable Energy Certificate</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>State *</Label>
+                <Select value={recForm.state} onValueChange={v => setRecForm(f => ({ ...f, state: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COASTAL_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Source</Label>
+                <Select value={recForm.source} onValueChange={v => setRecForm(f => ({ ...f, source: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {REC_SOURCES.map(t => <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, " ")}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label>Project Name *</Label>
+              <Input value={recForm.projectName} onChange={e => setRecForm(f => ({ ...f, projectName: e.target.value }))} placeholder="e.g. Lagos Lagoon Tidal Pilot" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>MWh</Label>
+                <Input type="number" value={recForm.mwh} onChange={e => setRecForm(f => ({ ...f, mwh: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Period (YYYY-MM) *</Label>
+                <Input value={recForm.period} onChange={e => setRecForm(f => ({ ...f, period: e.target.value }))} placeholder="2026-10" />
+              </div>
+              <div>
+                <Label>Price / MWh (₦)</Label>
+                <Input type="number" value={recForm.pricePerMwh} onChange={e => setRecForm(f => ({ ...f, pricePerMwh: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitRec} disabled={issueRecMutation.isPending}>
+              {issueRecMutation.isPending ? "Issuing..." : "Issue REC"}
             </Button>
           </DialogFooter>
         </DialogContent>
