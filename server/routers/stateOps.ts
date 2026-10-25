@@ -3,7 +3,13 @@
  * State licensing, concessions, aquaculture estates and blue-carbon MRV
  * (monitoring / reporting / verification) for Nigeria's eight coastal states.
  *
- * All data is persisted in Postgres (migration 0081_phase28_state_ops) — no
+ * Phase 29 (W1) extends this router with fisheries permits, IUU penalties,
+ * small-craft registry, dredging permits/volume declarations (royalty accrual
+ * computed server-side), water-transport routes and state revenue shares
+ * (migration 0082_phase29_state_ops_ext).
+ *
+ * All data is persisted in Postgres (migrations 0081_phase28_state_ops,
+ * 0082_phase29_state_ops_ext) — no
  * simulated revenue figures. MRV evidence records are tamper-evident via an
  * HMAC-SHA256 verification hash keyed by PROOF_SIGNING_KEY (fail-closed:
  * with the key unset, addMrvEvidence returns 503 rather than storing
@@ -21,6 +27,13 @@ import {
   aquacultureEstates,
   blueCarbonProjects,
   mrvEvidence,
+  fisheriesPermits,
+  iuuPenalties,
+  smallCraftRegistry,
+  dredgingPermits,
+  dredgingDeclarations,
+  waterTransportRoutes,
+  stateRevenueShares,
 } from "../../drizzle/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 
@@ -41,6 +54,12 @@ const LicenseStatusEnum = z.enum(["PENDING", "ACTIVE", "EXPIRED", "REVOKED"]);
 const ConcessionStatusEnum = z.enum(["ACTIVE", "SUSPENDED", "TERMINATED", "EXPIRED"]);
 const EstateStatusEnum = z.enum(["ACTIVE", "SUSPENDED", "DECOMMISSIONED"]);
 const CarbonProjectStatusEnum = z.enum(["PROPOSED", "REGISTERED", "ISSUING", "SUSPENDED", "RETIRED"]);
+const FisheriesPermitTypeEnum = z.enum(["industrial", "artisanal", "crab_shrimp", "collection"]);
+const FisheriesPermitStatusEnum = z.enum(["active", "suspended", "revoked", "expired"]);
+const IuuPenaltyStatusEnum = z.enum(["assessed", "appealed", "paid", "waived"]);
+const SmallCraftStatusEnum = z.enum(["active", "suspended", "deregistered"]);
+const DredgingPermitStatusEnum = z.enum(["active", "suspended", "revoked", "expired"]);
+const WaterRouteStatusEnum = z.enum(["active", "suspended"]);
 
 type Db = NonNullable<Awaited<ReturnType<typeof getDb>>>;
 
@@ -192,6 +211,47 @@ export const stateOpsRouter = router({
         .from(blueCarbonProjects)
         .where(sql`true ${stateFilter(blueCarbonProjects.state)}`);
 
+      // Phase 29: fisheries fees (active permits), paid IUU fines, dredging
+      // royalties (declared/invoiced/paid declarations) and water-transport
+      // jetty levies (active routes). All computed from persisted rows only.
+      const [fisheriesAgg] = await db
+        .select({
+          fisheriesFees: sql<string>`coalesce(sum(${fisheriesPermits.feeNaira}) filter (where ${fisheriesPermits.status} = 'active'), 0)`,
+        })
+        .from(fisheriesPermits)
+        .where(sql`true ${stateFilter(fisheriesPermits.state)}`);
+
+      const [iuuAgg] = await db
+        .select({
+          iuuFines: sql<string>`coalesce(sum(${iuuPenalties.fineNaira}) filter (where ${iuuPenalties.status} = 'paid'), 0)`,
+        })
+        .from(iuuPenalties)
+        .where(sql`true ${stateFilter(iuuPenalties.state)}`);
+
+      const [dredgingAgg] = await db
+        .select({
+          dredgingRoyalties: sql<string>`coalesce(sum(${dredgingDeclarations.royaltyDueNaira}) filter (where ${dredgingDeclarations.status} in ('declared','invoiced','paid')), 0)`,
+        })
+        .from(dredgingDeclarations)
+        .innerJoin(dredgingPermits, eq(dredgingDeclarations.permitId, dredgingPermits.id))
+        .where(sql`true ${stateFilter(dredgingPermits.state)}`);
+
+      const [waterAgg] = await db
+        .select({
+          waterTransportLevies: sql<string>`coalesce(sum(${waterTransportRoutes.jettyLevyPerTripNaira}) filter (where ${waterTransportRoutes.status} = 'active'), 0)`,
+        })
+        .from(waterTransportRoutes)
+        .where(sql`true ${stateFilter(waterTransportRoutes.state)}`);
+
+      const shareRows = await db
+        .select({
+          source: stateRevenueShares.source,
+          sharePercent: stateRevenueShares.sharePercent,
+          effectiveFrom: stateRevenueShares.effectiveFrom,
+        })
+        .from(stateRevenueShares)
+        .where(input?.state ? eq(stateRevenueShares.state, input.state) : undefined);
+
       const licenseCount: Record<string, number> = {};
       for (const row of licenseCountByType) licenseCount[row.licenseType] = row.count;
 
@@ -203,6 +263,15 @@ export const stateOpsRouter = router({
         leaseFees: Number(estateAgg?.leaseFees ?? 0),
         carbonCreditsValue: Number(carbonAgg?.carbonCreditsValue ?? 0),
         projectCount: carbonAgg?.projectCount ?? 0,
+        fisheriesFees: Number(fisheriesAgg?.fisheriesFees ?? 0),
+        iuuFines: Number(iuuAgg?.iuuFines ?? 0),
+        dredgingRoyalties: Number(dredgingAgg?.dredgingRoyalties ?? 0),
+        waterTransportLevies: Number(waterAgg?.waterTransportLevies ?? 0),
+        revenueShares: shareRows.map((r) => ({
+          source: r.source,
+          sharePercent: r.sharePercent,
+          effectiveFrom: r.effectiveFrom,
+        })),
       };
     }),
 
@@ -440,5 +509,402 @@ export const stateOpsRouter = router({
       });
       const expected = signMrvPayload(payload);
       return { id: row.id, valid: row.verificationHash === expected };
+    }),
+
+  // ─── Phase 29 (W1): fisheries permits ──────────────────────────────────────
+
+  listFisheriesPermits: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: FisheriesPermitStatusEnum.optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(fisheriesPermits.state, input.state) : undefined,
+        input?.status ? eq(fisheriesPermits.status, input.status) : undefined,
+      ].filter((c) => c !== undefined);
+      const rows = await db
+        .select()
+        .from(fisheriesPermits)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(fisheriesPermits.createdAt));
+      return { permits: rows, total: rows.length };
+    }),
+
+  issueFisheriesPermit: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum,
+      permitType: FisheriesPermitTypeEnum,
+      operatorName: z.string().min(2).max(255),
+      vesselName: z.string().max(255).optional(),
+      vesselRegNo: z.string().max(64).optional(),
+      feeNaira: z.number().min(0),
+      expiresAt: z.coerce.date().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .insert(fisheriesPermits)
+        .values({
+          state: input.state,
+          permitType: input.permitType,
+          operatorName: input.operatorName,
+          vesselName: input.vesselName,
+          vesselRegNo: input.vesselRegNo,
+          feeNaira: input.feeNaira,
+          status: "active",
+          issuedAt: new Date(),
+          expiresAt: input.expiresAt,
+        })
+        .returning();
+      return row;
+    }),
+
+  revokeFisheriesPermit: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .update(fisheriesPermits)
+        .set({ status: "revoked", updatedAt: new Date() })
+        .where(eq(fisheriesPermits.id, input.id))
+        .returning();
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Fisheries permit not found" });
+      return row;
+    }),
+
+  // ─── Phase 29 (W1): IUU penalties ──────────────────────────────────────────
+
+  listIuuPenalties: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: IuuPenaltyStatusEnum.optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(iuuPenalties.state, input.state) : undefined,
+        input?.status ? eq(iuuPenalties.status, input.status) : undefined,
+      ].filter((c) => c !== undefined);
+      const rows = await db
+        .select()
+        .from(iuuPenalties)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(iuuPenalties.createdAt));
+      return { penalties: rows, total: rows.length };
+    }),
+
+  assessIuuPenalty: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum,
+      vesselName: z.string().min(1).max(255),
+      offence: z.string().min(3).max(1000),
+      fineNaira: z.number().min(0),
+      permitId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.permitId) {
+        const [permit] = await db
+          .select({ id: fisheriesPermits.id })
+          .from(fisheriesPermits)
+          .where(eq(fisheriesPermits.id, input.permitId))
+          .limit(1);
+        if (!permit) throw new TRPCError({ code: "NOT_FOUND", message: "Fisheries permit not found" });
+      }
+      const [row] = await db
+        .insert(iuuPenalties)
+        .values({
+          state: input.state,
+          vesselName: input.vesselName,
+          offence: input.offence,
+          fineNaira: input.fineNaira,
+          permitId: input.permitId,
+          status: "assessed",
+          assessedAt: new Date(),
+        })
+        .returning();
+      return row;
+    }),
+
+  settleIuuPenalty: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .update(iuuPenalties)
+        .set({ status: "paid", paidAt: new Date(), updatedAt: new Date() })
+        .where(eq(iuuPenalties.id, input.id))
+        .returning();
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "IUU penalty not found" });
+      return row;
+    }),
+
+  // ─── Phase 29 (W1): small craft registry ───────────────────────────────────
+
+  listSmallCraft: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: SmallCraftStatusEnum.optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(smallCraftRegistry.state, input.state) : undefined,
+        input?.status ? eq(smallCraftRegistry.status, input.status) : undefined,
+      ].filter((c) => c !== undefined);
+      const rows = await db
+        .select()
+        .from(smallCraftRegistry)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(smallCraftRegistry.createdAt));
+      return { craft: rows, total: rows.length };
+    }),
+
+  registerSmallCraft: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum,
+      registrationNo: z.string().min(3).max(64),
+      craftType: z.string().min(2).max(64),
+      ownerName: z.string().min(2).max(255),
+      capacity: z.number().int().min(0).optional(),
+      safetyCertExpiresAt: z.coerce.date().optional(),
+      registrationFeeNaira: z.number().min(0),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .insert(smallCraftRegistry)
+        .values({
+          state: input.state,
+          registrationNo: input.registrationNo,
+          craftType: input.craftType,
+          ownerName: input.ownerName,
+          capacity: input.capacity,
+          safetyCertExpiresAt: input.safetyCertExpiresAt,
+          registrationFeeNaira: input.registrationFeeNaira,
+          status: "active",
+          registeredAt: new Date(),
+        })
+        .returning();
+      return row;
+    }),
+
+  // ─── Phase 29 (W1): dredging permits & volume declarations ─────────────────
+
+  listDredgingPermits: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: DredgingPermitStatusEnum.optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(dredgingPermits.state, input.state) : undefined,
+        input?.status ? eq(dredgingPermits.status, input.status) : undefined,
+      ].filter((c) => c !== undefined);
+      const rows = await db
+        .select()
+        .from(dredgingPermits)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(dredgingPermits.createdAt));
+      return { permits: rows, total: rows.length };
+    }),
+
+  upsertDredgingPermit: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      operatorName: z.string().min(2).max(255),
+      siteDescription: z.string().min(3).max(2000),
+      royaltyPerM3Naira: z.number().min(0),
+      status: DredgingPermitStatusEnum.default("active"),
+      expiresAt: z.coerce.date().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        const [row] = await db
+          .update(dredgingPermits)
+          .set({
+            state: input.state,
+            operatorName: input.operatorName,
+            siteDescription: input.siteDescription,
+            royaltyPerM3Naira: input.royaltyPerM3Naira,
+            status: input.status,
+            expiresAt: input.expiresAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(dredgingPermits.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Dredging permit not found" });
+        return row;
+      }
+      const [row] = await db
+        .insert(dredgingPermits)
+        .values({
+          state: input.state,
+          operatorName: input.operatorName,
+          siteDescription: input.siteDescription,
+          royaltyPerM3Naira: input.royaltyPerM3Naira,
+          status: input.status,
+          issuedAt: new Date(),
+          expiresAt: input.expiresAt,
+        })
+        .returning();
+      return row;
+    }),
+
+  listDredgingDeclarations: protectedProcedure
+    .input(z.object({
+      permitId: z.string().uuid(),
+    }))
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const rows = await db
+        .select()
+        .from(dredgingDeclarations)
+        .where(eq(dredgingDeclarations.permitId, input.permitId))
+        .orderBy(desc(dredgingDeclarations.declaredAt));
+      return { declarations: rows, total: rows.length };
+    }),
+
+  /**
+   * Royalty due is computed SERVER-SIDE from the permit's royalty rate —
+   * the client supplies only the volume; a client-supplied royalty figure
+   * is never trusted.
+   */
+  declareDredgingVolume: protectedProcedure
+    .input(z.object({
+      permitId: z.string().uuid(),
+      period: z.string().min(1).max(32),
+      volumeM3: z.number().min(0),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [permit] = await db
+        .select()
+        .from(dredgingPermits)
+        .where(eq(dredgingPermits.id, input.permitId))
+        .limit(1);
+      if (!permit) throw new TRPCError({ code: "NOT_FOUND", message: "Dredging permit not found" });
+      const royaltyDueNaira = input.volumeM3 * permit.royaltyPerM3Naira;
+      const [row] = await db
+        .insert(dredgingDeclarations)
+        .values({
+          permitId: input.permitId,
+          period: input.period,
+          volumeM3: input.volumeM3,
+          royaltyDueNaira,
+          status: "declared",
+          declaredAt: new Date(),
+        })
+        .returning();
+      return row;
+    }),
+
+  // ─── Phase 29 (W1): water transport routes ─────────────────────────────────
+
+  listWaterRoutes: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: WaterRouteStatusEnum.optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(waterTransportRoutes.state, input.state) : undefined,
+        input?.status ? eq(waterTransportRoutes.status, input.status) : undefined,
+      ].filter((c) => c !== undefined);
+      const rows = await db
+        .select()
+        .from(waterTransportRoutes)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(waterTransportRoutes.createdAt));
+      return { routes: rows, total: rows.length };
+    }),
+
+  upsertWaterRoute: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      routeName: z.string().min(2).max(255),
+      operatorName: z.string().min(2).max(255),
+      fareNaira: z.number().min(0),
+      jettyLevyPerTripNaira: z.number().min(0).default(0),
+      status: WaterRouteStatusEnum.default("active"),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const values = {
+        state: input.state,
+        routeName: input.routeName,
+        operatorName: input.operatorName,
+        fareNaira: input.fareNaira,
+        jettyLevyPerTripNaira: input.jettyLevyPerTripNaira,
+        status: input.status,
+      };
+      if (input.id) {
+        const [row] = await db
+          .update(waterTransportRoutes)
+          .set({ ...values, updatedAt: new Date() })
+          .where(eq(waterTransportRoutes.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Water route not found" });
+        return row;
+      }
+      const [row] = await db.insert(waterTransportRoutes).values(values).returning();
+      return row;
+    }),
+
+  // ─── Phase 29 (W1): state revenue shares ───────────────────────────────────
+
+  listRevenueShares: protectedProcedure
+    .input(z.object({ state: CoastalStateEnum.optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const rows = await db
+        .select()
+        .from(stateRevenueShares)
+        .where(input?.state ? eq(stateRevenueShares.state, input.state) : undefined)
+        .orderBy(desc(stateRevenueShares.createdAt));
+      return { shares: rows, total: rows.length };
+    }),
+
+  upsertRevenueShare: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      source: z.string().min(2).max(128),
+      sharePercent: z.number().min(0).max(100),
+      effectiveFrom: z.coerce.date().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        const [row] = await db
+          .update(stateRevenueShares)
+          .set({
+            state: input.state,
+            source: input.source,
+            sharePercent: input.sharePercent,
+            effectiveFrom: input.effectiveFrom,
+          })
+          .where(eq(stateRevenueShares.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Revenue share not found" });
+        return row;
+      }
+      const [row] = await db
+        .insert(stateRevenueShares)
+        .values({
+          state: input.state,
+          source: input.source,
+          sharePercent: input.sharePercent,
+          effectiveFrom: input.effectiveFrom,
+        })
+        .returning();
+      return row;
     }),
 });

@@ -4598,3 +4598,132 @@ export const mrvEvidence = pgTable("mrv_evidence", {
 ]);
 export type MrvEvidence = typeof mrvEvidence.$inferSelect;
 export type InsertMrvEvidence = typeof mrvEvidence.$inferInsert;
+
+// ─── Phase 29 (W1): stateOps extension — fisheries, small craft, dredging ────
+// Fisheries permits, IUU penalties, small-craft registry, dredging permits /
+// volume declarations (royalty accrual), water-transport routes and state
+// revenue shares. Migration 0082_phase29_state_ops_ext.
+export const fisheriesPermits = pgTable("fisheries_permits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  permitType: text("permit_type").notNull(), // industrial | artisanal | crab_shrimp | collection (DB CHECK)
+  vesselName: text("vessel_name"),
+  vesselRegNo: text("vessel_reg_no"),
+  operatorName: text("operator_name").notNull(),
+  feeNaira: doublePrecision("fee_naira").notNull(),
+  status: text("status").notNull().default("active"), // active | suspended | revoked | expired
+  issuedAt: timestamp("issued_at", { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_fisheries_permits_state").on(t.state),
+  index("idx_fisheries_permits_status").on(t.status),
+  check("fisheries_permits_permit_type_check", sql`permit_type IN ('industrial','artisanal','crab_shrimp','collection')`),
+]);
+export type FisheriesPermit = typeof fisheriesPermits.$inferSelect;
+export type InsertFisheriesPermit = typeof fisheriesPermits.$inferInsert;
+
+export const iuuPenalties = pgTable("iuu_penalties", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  permitId: uuid("permit_id").references(() => fisheriesPermits.id),
+  vesselName: text("vessel_name").notNull(),
+  offence: text("offence").notNull(),
+  fineNaira: doublePrecision("fine_naira").notNull(),
+  status: text("status").notNull().default("assessed"), // assessed | appealed | paid | waived
+  assessedAt: timestamp("assessed_at", { withTimezone: true }).defaultNow(),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_iuu_penalties_state").on(t.state),
+  index("idx_iuu_penalties_status").on(t.status),
+  index("idx_iuu_penalties_permit").on(t.permitId),
+]);
+export type IuuPenalty = typeof iuuPenalties.$inferSelect;
+export type InsertIuuPenalty = typeof iuuPenalties.$inferInsert;
+
+export const smallCraftRegistry = pgTable("small_craft_registry", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  registrationNo: text("registration_no").notNull().unique(),
+  craftType: text("craft_type").notNull(),
+  ownerName: text("owner_name").notNull(),
+  capacity: integer("capacity"),
+  safetyCertExpiresAt: timestamp("safety_cert_expires_at", { withTimezone: true }),
+  registrationFeeNaira: doublePrecision("registration_fee_naira").notNull(),
+  status: text("status").notNull().default("active"), // active | suspended | deregistered
+  registeredAt: timestamp("registered_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_small_craft_registry_state").on(t.state),
+  index("idx_small_craft_registry_status").on(t.status),
+]);
+export type SmallCraft = typeof smallCraftRegistry.$inferSelect;
+export type InsertSmallCraft = typeof smallCraftRegistry.$inferInsert;
+
+export const dredgingPermits = pgTable("dredging_permits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  operatorName: text("operator_name").notNull(),
+  siteDescription: text("site_description").notNull(),
+  royaltyPerM3Naira: doublePrecision("royalty_per_m3_naira").notNull(),
+  status: text("status").notNull().default("active"), // active | suspended | revoked | expired
+  issuedAt: timestamp("issued_at", { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_dredging_permits_state").on(t.state),
+  index("idx_dredging_permits_status").on(t.status),
+]);
+export type DredgingPermit = typeof dredgingPermits.$inferSelect;
+export type InsertDredgingPermit = typeof dredgingPermits.$inferInsert;
+
+export const dredgingDeclarations = pgTable("dredging_declarations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  permitId: uuid("permit_id").notNull().references(() => dredgingPermits.id),
+  period: text("period").notNull(),
+  volumeM3: doublePrecision("volume_m3").notNull(),
+  royaltyDueNaira: doublePrecision("royalty_due_naira").notNull(),
+  status: text("status").notNull().default("declared"), // declared | invoiced | paid
+  declaredAt: timestamp("declared_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_dredging_declarations_permit").on(t.permitId),
+  index("idx_dredging_declarations_status").on(t.status),
+]);
+export type DredgingDeclaration = typeof dredgingDeclarations.$inferSelect;
+export type InsertDredgingDeclaration = typeof dredgingDeclarations.$inferInsert;
+
+export const waterTransportRoutes = pgTable("water_transport_routes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  routeName: text("route_name").notNull(),
+  operatorName: text("operator_name").notNull(),
+  fareNaira: doublePrecision("fare_naira").notNull(),
+  jettyLevyPerTripNaira: doublePrecision("jetty_levy_per_trip_naira").notNull().default(0),
+  status: text("status").notNull().default("active"), // active | suspended
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_water_transport_routes_state").on(t.state),
+  index("idx_water_transport_routes_status").on(t.status),
+]);
+export type WaterTransportRoute = typeof waterTransportRoutes.$inferSelect;
+export type InsertWaterTransportRoute = typeof waterTransportRoutes.$inferInsert;
+
+export const stateRevenueShares = pgTable("state_revenue_shares", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  source: text("source").notNull(),
+  sharePercent: doublePrecision("share_percent").notNull(),
+  effectiveFrom: timestamp("effective_from", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_state_revenue_shares_state").on(t.state),
+]);
+export type StateRevenueShare = typeof stateRevenueShares.$inferSelect;
+export type InsertStateRevenueShare = typeof stateRevenueShares.$inferInsert;
