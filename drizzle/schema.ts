@@ -4770,7 +4770,7 @@ export type InsertTourismLevyDeclaration = typeof tourismLevyDeclarations.$infer
 export const maricultureFarms = pgTable("mariculture_farms", {
   id: uuid("id").primaryKey().defaultRandom(),
   state: text("state").notNull(),
-  estateId: uuid("estate_id").references(() => aquacultureEstates.id),
+  estateId: integer("estate_id").references(() => aquacultureEstates.id),
   farmType: text("farm_type").notNull(), // seaweed | oyster | mussel | shrimp | finfish_cage
   operatorName: text("operator_name").notNull(),
   areaHectares: doublePrecision("area_hectares"),

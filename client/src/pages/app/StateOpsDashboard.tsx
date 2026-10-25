@@ -193,10 +193,10 @@ export interface MaricultureFarm {
   state: string;
   operatorName: string;
   farmType: string; // seaweed | oyster | mussel | shrimp | finfish_cage
-  estateId?: string; // linked aquaculture estate, if any
-  hectares: number;
-  leaseFeeAnnual: number;
-  offTaker: string;
+  estateId?: number | null; // linked aquaculture estate (serial id), if any
+  areaHectares: number | null;
+  leaseFeeNaira: number;
+  offtakerName: string | null;
   status: string;
 }
 
@@ -1041,10 +1041,10 @@ export default function StateOpsDashboard() {
       state: farmForm.state,
       operatorName: farmForm.operatorName,
       farmType: farmForm.farmType,
-      estateId: farmForm.estateId || undefined,
-      hectares: parseFloat(farmForm.hectares) || 0,
-      leaseFeeAnnual: parseFloat(farmForm.leaseFeeAnnual) || 0,
-      offTaker: farmForm.offTaker || undefined,
+      estateId: farmForm.estateId ? Number(farmForm.estateId) : undefined,
+      areaHectares: parseFloat(farmForm.hectares) || 0,
+      leaseFeeNaira: parseFloat(farmForm.leaseFeeAnnual) || 0,
+      offtakerName: farmForm.offTaker || undefined,
     });
   };
 
@@ -2134,9 +2134,9 @@ export default function StateOpsDashboard() {
                           <TableCell>{f.operatorName}</TableCell>
                           <TableCell className="capitalize">{f.farmType?.replace(/_/g, " ")}</TableCell>
                           <TableCell className="text-xs">{f.estateId ?? "—"}</TableCell>
-                          <TableCell>{f.hectares?.toLocaleString()}</TableCell>
-                          <TableCell>{formatNaira(f.leaseFeeAnnual)}</TableCell>
-                          <TableCell className="text-xs">{f.offTaker ?? "—"}</TableCell>
+                          <TableCell>{f.areaHectares?.toLocaleString()}</TableCell>
+                          <TableCell>{formatNaira(f.leaseFeeNaira)}</TableCell>
+                          <TableCell className="text-xs">{f.offtakerName ?? "—"}</TableCell>
                           <TableCell><StatusBadge status={f.status} /></TableCell>
                           <TableCell className="text-right">
                             <Button variant="outline" size="sm" className="h-7 text-xs"
@@ -2144,8 +2144,8 @@ export default function StateOpsDashboard() {
                                 setEditingFarm(f);
                                 setFarmForm({
                                   state: f.state, operatorName: f.operatorName, farmType: f.farmType,
-                                  estateId: f.estateId ?? "", hectares: String(f.hectares ?? ""),
-                                  leaseFeeAnnual: String(f.leaseFeeAnnual ?? ""), offTaker: f.offTaker ?? "",
+                                  estateId: f.estateId != null ? String(f.estateId) : "", hectares: String(f.areaHectares ?? ""),
+                                  leaseFeeAnnual: String(f.leaseFeeNaira ?? ""), offTaker: f.offtakerName ?? "",
                                 });
                                 setFarmDialogOpen(true);
                               }}>
