@@ -9,7 +9,7 @@
  * (migration 0082_phase29_state_ops_ext).
  *
  * All data is persisted in Postgres (migrations 0081_phase28_state_ops,
- * 0082_phase29_state_ops_ext) — no
+ * 0082_phase29_state_ops_ext, 0083_phase30_state_ops_tier2) — no
  * simulated revenue figures. MRV evidence records are tamper-evident via an
  * HMAC-SHA256 verification hash keyed by PROOF_SIGNING_KEY (fail-closed:
  * with the key unset, addMrvEvidence returns 503 rather than storing
@@ -34,6 +34,12 @@ import {
   dredgingDeclarations,
   waterTransportRoutes,
   stateRevenueShares,
+  tourismOperators,
+  tourismLevyDeclarations,
+  maricultureFarms,
+  trainingAcademies,
+  trainingCertifications,
+  renewableEnergyCredits,
 } from "../../drizzle/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 
@@ -243,6 +249,39 @@ export const stateOpsRouter = router({
         .from(waterTransportRoutes)
         .where(sql`true ${stateFilter(waterTransportRoutes.state)}`);
 
+      // Phase 30: tourism levies (declared/invoiced/paid, joined via operator
+      // for the state filter), mariculture lease fees (active farms), training
+      // certification fees, and sold REC revenue. Persisted rows only.
+      const [tourismAgg] = await db
+        .select({
+          tourismLevies: sql<string>`coalesce(sum(${tourismLevyDeclarations.levyDueNaira}) filter (where ${tourismLevyDeclarations.status} in ('declared','invoiced','paid')), 0)`,
+        })
+        .from(tourismLevyDeclarations)
+        .innerJoin(tourismOperators, eq(tourismLevyDeclarations.operatorId, tourismOperators.id))
+        .where(sql`true ${stateFilter(tourismOperators.state)}`);
+
+      const [maricultureAgg] = await db
+        .select({
+          maricultureLeases: sql<string>`coalesce(sum(${maricultureFarms.leaseFeeNaira}) filter (where ${maricultureFarms.status} = 'active'), 0)`,
+        })
+        .from(maricultureFarms)
+        .where(sql`true ${stateFilter(maricultureFarms.state)}`);
+
+      const [trainingAgg] = await db
+        .select({
+          trainingFees: sql<string>`coalesce(sum(${trainingCertifications.certFeeNaira}), 0)`,
+        })
+        .from(trainingCertifications)
+        .innerJoin(trainingAcademies, eq(trainingCertifications.academyId, trainingAcademies.id))
+        .where(sql`true ${stateFilter(trainingAcademies.state)}`);
+
+      const [recAgg] = await db
+        .select({
+          recRevenue: sql<string>`coalesce(sum(${renewableEnergyCredits.mwh} * ${renewableEnergyCredits.creditPriceNaira}) filter (where ${renewableEnergyCredits.status} = 'sold'), 0)`,
+        })
+        .from(renewableEnergyCredits)
+        .where(sql`true ${stateFilter(renewableEnergyCredits.state)}`);
+
       const shareRows = await db
         .select({
           source: stateRevenueShares.source,
@@ -267,6 +306,10 @@ export const stateOpsRouter = router({
         iuuFines: Number(iuuAgg?.iuuFines ?? 0),
         dredgingRoyalties: Number(dredgingAgg?.dredgingRoyalties ?? 0),
         waterTransportLevies: Number(waterAgg?.waterTransportLevies ?? 0),
+        tourismLevies: Number(tourismAgg?.tourismLevies ?? 0),
+        maricultureLeases: Number(maricultureAgg?.maricultureLeases ?? 0),
+        trainingFees: Number(trainingAgg?.trainingFees ?? 0),
+        recRevenue: Number(recAgg?.recRevenue ?? 0),
         revenueShares: shareRows.map((r) => ({
           source: r.source,
           sharePercent: r.sharePercent,
@@ -905,6 +948,399 @@ export const stateOpsRouter = router({
           effectiveFrom: input.effectiveFrom,
         })
         .returning();
+      return row;
+    }),
+  // ─── Phase 30: tourism operators & visitor levies ─────────────────────────
+
+  listTourismOperators: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: z.enum(["active", "suspended", "expired", "revoked"]).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(tourismOperators.state, input.state) : undefined,
+        input?.status ? eq(tourismOperators.status, input.status) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(tourismOperators)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(tourismOperators.createdAt));
+      return { operators: rows, total: rows.length };
+    }),
+
+  upsertTourismOperator: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      operatorName: z.string().min(2).max(256),
+      operatorType: z.enum(["beach_resort", "boat_tour", "eco_lodge", "mangrove_boardwalk", "jet_ski", "other"]),
+      siteDescription: z.string().max(1024).optional(),
+      licenceFeeNaira: z.number().min(0),
+      visitorLevyNaira: z.number().min(0).default(0),
+      status: z.enum(["active", "suspended", "expired", "revoked"]).optional(),
+      expiresAt: z.coerce.date().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        const [row] = await db
+          .update(tourismOperators)
+          .set({
+            state: input.state,
+            operatorName: input.operatorName,
+            operatorType: input.operatorType,
+            siteDescription: input.siteDescription,
+            licenceFeeNaira: input.licenceFeeNaira,
+            visitorLevyNaira: input.visitorLevyNaira,
+            status: input.status,
+            expiresAt: input.expiresAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(tourismOperators.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Tourism operator not found" });
+        return row;
+      }
+      const [row] = await db
+        .insert(tourismOperators)
+        .values({
+          state: input.state,
+          operatorName: input.operatorName,
+          operatorType: input.operatorType,
+          siteDescription: input.siteDescription,
+          licenceFeeNaira: input.licenceFeeNaira,
+          visitorLevyNaira: input.visitorLevyNaira,
+          expiresAt: input.expiresAt,
+        })
+        .returning();
+      return row;
+    }),
+
+  listTourismLevies: protectedProcedure
+    .input(z.object({
+      operatorId: z.string().uuid().optional(),
+      status: z.enum(["declared", "invoiced", "paid"]).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.operatorId ? eq(tourismLevyDeclarations.operatorId, input.operatorId) : undefined,
+        input?.status ? eq(tourismLevyDeclarations.status, input.status) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(tourismLevyDeclarations)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(tourismLevyDeclarations.declaredAt));
+      return { levies: rows, total: rows.length };
+    }),
+
+  declareTourismLevy: protectedProcedure
+    .input(z.object({
+      operatorId: z.string().uuid(),
+      period: z.string().regex(/^\d{4}-\d{2}$/),
+      visitorCount: z.number().int().min(0),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [operator] = await db
+        .select()
+        .from(tourismOperators)
+        .where(eq(tourismOperators.id, input.operatorId));
+      if (!operator) throw new TRPCError({ code: "NOT_FOUND", message: "Tourism operator not found" });
+      // Levy is computed server-side — never trusted from the client.
+      const levyDueNaira = input.visitorCount * (operator.visitorLevyNaira ?? 0);
+      const [row] = await db
+        .insert(tourismLevyDeclarations)
+        .values({
+          operatorId: input.operatorId,
+          period: input.period,
+          visitorCount: input.visitorCount,
+          levyDueNaira,
+        })
+        .returning();
+      return row;
+    }),
+
+  // ─── Phase 30: mariculture farms ──────────────────────────────────────────
+
+  listMaricultureFarms: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      farmType: z.enum(["seaweed", "oyster", "mussel", "shrimp", "finfish_cage"]).optional(),
+      status: z.enum(["active", "suspended", "decommissioned"]).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(maricultureFarms.state, input.state) : undefined,
+        input?.farmType ? eq(maricultureFarms.farmType, input.farmType) : undefined,
+        input?.status ? eq(maricultureFarms.status, input.status) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(maricultureFarms)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(maricultureFarms.createdAt));
+      return { farms: rows, total: rows.length };
+    }),
+
+  upsertMaricultureFarm: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      estateId: z.string().uuid().optional(),
+      farmType: z.enum(["seaweed", "oyster", "mussel", "shrimp", "finfish_cage"]),
+      operatorName: z.string().min(2).max(256),
+      areaHectares: z.number().min(0).optional(),
+      leaseFeeNaira: z.number().min(0),
+      offtakerName: z.string().max(256).optional(),
+      status: z.enum(["active", "suspended", "decommissioned"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        const [row] = await db
+          .update(maricultureFarms)
+          .set({
+            state: input.state,
+            estateId: input.estateId,
+            farmType: input.farmType,
+            operatorName: input.operatorName,
+            areaHectares: input.areaHectares,
+            leaseFeeNaira: input.leaseFeeNaira,
+            offtakerName: input.offtakerName,
+            status: input.status,
+            updatedAt: new Date(),
+          })
+          .where(eq(maricultureFarms.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Mariculture farm not found" });
+        return row;
+      }
+      const [row] = await db
+        .insert(maricultureFarms)
+        .values({
+          state: input.state,
+          estateId: input.estateId,
+          farmType: input.farmType,
+          operatorName: input.operatorName,
+          areaHectares: input.areaHectares,
+          leaseFeeNaira: input.leaseFeeNaira,
+          offtakerName: input.offtakerName,
+        })
+        .returning();
+      return row;
+    }),
+
+  // ─── Phase 30: training academies & HMAC-verified certifications ──────────
+
+  listAcademies: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: z.enum(["active", "suspended"]).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(trainingAcademies.state, input.state) : undefined,
+        input?.status ? eq(trainingAcademies.status, input.status) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(trainingAcademies)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(trainingAcademies.createdAt));
+      return { academies: rows, total: rows.length };
+    }),
+
+  upsertAcademy: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      academyName: z.string().min(2).max(256),
+      programType: z.enum(["fishery_skills", "boat_handling", "diving", "hospitality", "stcw_adjacent"]),
+      capacity: z.number().int().min(0).optional(),
+      status: z.enum(["active", "suspended"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        const [row] = await db
+          .update(trainingAcademies)
+          .set({
+            state: input.state,
+            academyName: input.academyName,
+            programType: input.programType,
+            capacity: input.capacity,
+            status: input.status,
+            updatedAt: new Date(),
+          })
+          .where(eq(trainingAcademies.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Academy not found" });
+        return row;
+      }
+      const [row] = await db
+        .insert(trainingAcademies)
+        .values({
+          state: input.state,
+          academyName: input.academyName,
+          programType: input.programType,
+          capacity: input.capacity,
+        })
+        .returning();
+      return row;
+    }),
+
+  listCertifications: protectedProcedure
+    .input(z.object({
+      academyId: z.string().uuid().optional(),
+      certNo: z.string().max(128).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.academyId ? eq(trainingCertifications.academyId, input.academyId) : undefined,
+        input?.certNo ? eq(trainingCertifications.certNo, input.certNo) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(trainingCertifications)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(trainingCertifications.issuedAt));
+      return { certifications: rows, total: rows.length };
+    }),
+
+  issueCertification: protectedProcedure
+    .input(z.object({
+      academyId: z.string().uuid(),
+      traineeName: z.string().min(2).max(256),
+      program: z.string().min(2).max(256),
+      certNo: z.string().min(4).max(128),
+      certFeeNaira: z.number().min(0).default(0),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [academy] = await db
+        .select()
+        .from(trainingAcademies)
+        .where(eq(trainingAcademies.id, input.academyId));
+      if (!academy) throw new TRPCError({ code: "NOT_FOUND", message: "Academy not found" });
+      // Fail-closed: throws 503 if PROOF_SIGNING_KEY is unset.
+      const verificationHash = signMrvPayload(
+        `${input.academyId}|${input.traineeName}|${input.program}|${input.certNo}`
+      );
+      const [row] = await db
+        .insert(trainingCertifications)
+        .values({
+          academyId: input.academyId,
+          traineeName: input.traineeName,
+          program: input.program,
+          certNo: input.certNo,
+          certFeeNaira: input.certFeeNaira,
+          verificationHash,
+        })
+        .returning();
+      return row;
+    }),
+
+  verifyCertification: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .select()
+        .from(trainingCertifications)
+        .where(eq(trainingCertifications.id, input.id));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Certification not found" });
+      const expected = signMrvPayload(
+        `${row.academyId}|${row.traineeName}|${row.program}|${row.certNo}`
+      );
+      return { valid: expected === row.verificationHash, certification: row };
+    }),
+
+  // ─── Phase 30: renewable energy credits (RECs) ────────────────────────────
+
+  listRecs: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      source: z.enum(["tidal", "offshore_wind", "solar_floating"]).optional(),
+      status: z.enum(["issued", "verified", "sold"]).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(renewableEnergyCredits.state, input.state) : undefined,
+        input?.source ? eq(renewableEnergyCredits.source, input.source) : undefined,
+        input?.status ? eq(renewableEnergyCredits.status, input.status) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(renewableEnergyCredits)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(renewableEnergyCredits.createdAt));
+      return { recs: rows, total: rows.length };
+    }),
+
+  issueRec: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum,
+      projectName: z.string().min(2).max(256),
+      source: z.enum(["tidal", "offshore_wind", "solar_floating"]),
+      mwh: z.number().min(0),
+      period: z.string().regex(/^\d{4}-\d{2}$/),
+      creditPriceNaira: z.number().min(0),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      // Fail-closed: throws 503 if PROOF_SIGNING_KEY is unset.
+      const verificationHash = signMrvPayload(
+        `${input.projectName}|${input.source}|${input.period}|${input.mwh.toFixed(3)}`
+      );
+      const [row] = await db
+        .insert(renewableEnergyCredits)
+        .values({
+          state: input.state,
+          projectName: input.projectName,
+          source: input.source,
+          mwh: input.mwh,
+          period: input.period,
+          creditPriceNaira: input.creditPriceNaira,
+          verificationHash,
+        })
+        .returning();
+      return row;
+    }),
+
+  verifyRec: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .select()
+        .from(renewableEnergyCredits)
+        .where(eq(renewableEnergyCredits.id, input.id));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "REC not found" });
+      const expected = signMrvPayload(
+        `${row.projectName}|${row.source}|${row.period}|${Number(row.mwh).toFixed(3)}`
+      );
+      return { valid: expected === row.verificationHash, rec: row };
+    }),
+
+  markRecSold: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .update(renewableEnergyCredits)
+        .set({ status: "sold", updatedAt: new Date() })
+        .where(eq(renewableEnergyCredits.id, input.id))
+        .returning();
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "REC not found" });
       return row;
     }),
 });
