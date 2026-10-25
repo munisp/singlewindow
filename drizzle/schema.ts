@@ -180,7 +180,7 @@ export const stakeholderProfiles = pgTable("stakeholder_profiles", {
   taxId: varchar("tax_id", { length: 64 }),
   country: varchar("country", { length: 3 }),
   phone: varchar("phone", { length: 32 }),
-  status: profileStatusEnum("status").default("pending"),
+  status: profileStatusEnum("status").default("pending").notNull(),
   aeoStatus: aeoStatusEnum("aeo_status").default("none").notNull(),
   aeoTier: aeoTierEnum("aeo_tier").default("standard"),
   approvedBy: integer("approved_by"),
@@ -374,6 +374,7 @@ export const aeoApplications = pgTable("aeo_applications", {
   selfAssessmentScore: integer("self_assessment_score"),
   complianceScore: integer("compliance_score"),
   financialStandingScore: integer("financial_standing_score"),
+  securityScore: integer("security_score"),
   reviewerNotes: text("reviewer_notes"),
   assignedReviewerId: integer("assigned_reviewer_id"),
   inspectionDate: timestamp("inspection_date"),
@@ -482,7 +483,7 @@ export const visionAnalyses = pgTable("vision_analyses", {
   requestedBy: integer("requested_by").notNull().references(() => users.id),
   analysisType: visionAnalysisTypeEnum("analysis_type").notNull(),
   imageUrl: text("image_url").notNull(),
-  imageKey: varchar("image_key", { length: 512 }),
+  imageKey: varchar("image_key", { length: 512 }).notNull(),
   detections: json("detections"),
   containerAnalysis: json("container_analysis"),
   manifestMatch: json("manifest_match"),
@@ -692,7 +693,7 @@ export const fraudCasePriorityEnum = pgEnum("fraud_case_priority", [
 
 export const fraudCases = pgTable("fraud_cases", {
   id: serial("id").primaryKey(),
-  caseNumber: varchar("case_number", { length: 64 }).notNull().unique(),
+  caseNumber: varchar("case_number", { length: 32 }).notNull().unique(),
   traderId: integer("trader_id").notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
@@ -913,7 +914,7 @@ export const documentVault = pgTable("document_vault", {
   fileKey: varchar("file_key", { length: 512 }).notNull(),
   url: text("url").notNull(),
   filename: varchar("filename", { length: 255 }).notNull(),
-  mimeType: varchar("mime_type", { length: 128 }),
+  mimeType: varchar("mime_type", { length: 128 }).notNull(),
   sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
   category: documentVaultCategoryEnum("category").notNull(),
   accessLevel: documentVaultAccessEnum("access_level").default("private").notNull(),
@@ -1887,7 +1888,7 @@ export const cepAlerts = pgTable("cep_alerts", {
   index("idx_cep_alert_status").on(t.status),
   index("idx_cep_alert_severity").on(t.severity),
   index("idx_cep_alert_trader").on(t.traderId),
-  index("idx_cep_alert_detected_at").on(t.detectedAt),
+  index("idx_cep_alert_detected").on(t.detectedAt),
 ]);
 export type CepAlertRow = typeof cepAlerts.$inferSelect;
 
@@ -2180,9 +2181,9 @@ export const threatIntelSeverityEnum = pgEnum("threat_intel_severity", [
 export const threatIntelFeeds = pgTable("threat_intel_feeds", {
   id: serial("id").primaryKey(),
   feedSource: varchar("feed_source", { length: 128 }).notNull(),
-  indicatorType: varchar("indicator_type", { length: 64 }),
+  indicatorType: varchar("indicator_type", { length: 64 }).notNull(),
   indicatorValue: text("indicator_value").notNull(),
-  severity: threatIntelSeverityEnum("severity").default("medium"),
+  severity: threatIntelSeverityEnum("severity").default("medium").notNull(),
   description: text("description"),
   tags: jsonb("tags").default([]),
   firstSeen: timestamp("first_seen").defaultNow().notNull(),
@@ -2210,7 +2211,7 @@ export const streamEvents = pgTable("stream_events", {
   id: serial("id").primaryKey(),
   topic: varchar("topic", { length: 128 }).notNull(),
   partitionKey: varchar("partition_key", { length: 128 }),
-  eventType: varchar("event_type", { length: 64 }),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
   payload: jsonb("payload").notNull(),
   source: varchar("source", { length: 128 }),
   correlationId: varchar("correlation_id", { length: 128 }),
@@ -2244,7 +2245,7 @@ export const socIncidents = pgTable("soc_incidents", {
   incidentNumber: varchar("incident_number", { length: 64 }).notNull().unique(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
-  severity: socIncidentSeverityEnum("severity").default("medium"),
+  severity: socIncidentSeverityEnum("severity").default("medium").notNull(),
   status: socIncidentStatusEnum("status").default("open").notNull(),
   assignedTo: integer("assigned_to").references(() => users.id, { onDelete: "set null" }),
   affectedSystems: jsonb("affected_systems").default([]),
@@ -2841,7 +2842,7 @@ export const temporalWorkflowRuns = pgTable("temporal_workflow_runs", {
   index("idx_temporal_runs_type").on(t.workflowType),
   index("idx_temporal_runs_status").on(t.status),
   index("idx_temporal_runs_declaration").on(t.declarationId),
-  index("idx_temporal_runs_started_at").on(t.startedAt),
+  index("idx_temporal_runs_started").on(t.startedAt),
   index("idx_temporal_runs_declaration_ref").on(t.declarationRef),
 ]);
 export type TemporalWorkflowRun = typeof temporalWorkflowRuns.$inferSelect;
