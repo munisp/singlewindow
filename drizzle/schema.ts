@@ -4837,3 +4837,63 @@ export const renewableEnergyCredits = pgTable("renewable_energy_credits", {
 ]);
 export type RenewableEnergyCredit = typeof renewableEnergyCredits.$inferSelect;
 export type InsertRenewableEnergyCredit = typeof renewableEnergyCredits.$inferInsert;
+
+// ─── Phase 31 (W1): stateOps tier-3 — blue-bond origination & data
+// subscriptions (migration 0084) ─────────────────────────────────────────────
+
+export const blueBondIssuances = pgTable("blue_bond_issuances", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  bondName: text("bond_name").notNull(),
+  issuerName: text("issuer_name").notNull(),
+  targetAmountNaira: doublePrecision("target_amount_naira").notNull(),
+  raisedAmountNaira: doublePrecision("raised_amount_naira").notNull().default(0),
+  couponRate: doublePrecision("coupon_rate"),
+  maturityDate: timestamp("maturity_date", { withTimezone: true }),
+  useOfProceeds: text("use_of_proceeds"),
+  facilitationFeeNaira: doublePrecision("facilitation_fee_naira").notNull().default(0),
+  status: text("status").notNull().default("proposed"), // proposed | approved | issued | closed | defaulted
+  verificationHash: text("verification_hash").notNull(),
+  issuedAt: timestamp("issued_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_blue_bond_issuances_state").on(t.state),
+  index("idx_blue_bond_issuances_status").on(t.status),
+]);
+export type BlueBondIssuance = typeof blueBondIssuances.$inferSelect;
+export type InsertBlueBondIssuance = typeof blueBondIssuances.$inferInsert;
+
+export const bondImpactReports = pgTable("bond_impact_reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bondId: uuid("bond_id").notNull().references(() => blueBondIssuances.id),
+  period: text("period").notNull(), // YYYY-MM
+  allocationNaira: doublePrecision("allocation_naira").notNull(),
+  impactSummary: text("impact_summary").notNull(),
+  verificationHash: text("verification_hash").notNull(),
+  reportedAt: timestamp("reported_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_bond_impact_reports_bond").on(t.bondId),
+]);
+export type BondImpactReport = typeof bondImpactReports.$inferSelect;
+export type InsertBondImpactReport = typeof bondImpactReports.$inferInsert;
+
+export const dataSubscriptions = pgTable("data_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  subscriberOrg: text("subscriber_org").notNull(),
+  contactEmail: text("contact_email"),
+  tier: text("tier").notNull(), // explorer | professional | enterprise
+  datasetScope: text("dataset_scope").notNull(),
+  state: text("state"), // null = cross-state scope
+  feeNaira: doublePrecision("fee_naira").notNull(),
+  period: text("period").notNull(), // YYYY-MM
+  status: text("status").notNull().default("active"), // active | suspended | expired
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_data_subscriptions_tier").on(t.tier),
+  index("idx_data_subscriptions_status").on(t.status),
+]);
+export type DataSubscription = typeof dataSubscriptions.$inferSelect;
+export type InsertDataSubscription = typeof dataSubscriptions.$inferInsert;

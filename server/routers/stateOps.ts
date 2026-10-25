@@ -9,7 +9,8 @@
  * (migration 0082_phase29_state_ops_ext).
  *
  * All data is persisted in Postgres (migrations 0081_phase28_state_ops,
- * 0082_phase29_state_ops_ext, 0083_phase30_state_ops_tier2) — no
+ * 0082_phase29_state_ops_ext, 0083_phase30_state_ops_tier2,
+ * 0084_phase31_state_ops_tier3) — no
  * simulated revenue figures. MRV evidence records are tamper-evident via an
  * HMAC-SHA256 verification hash keyed by PROOF_SIGNING_KEY (fail-closed:
  * with the key unset, addMrvEvidence returns 503 rather than storing
@@ -40,6 +41,9 @@ import {
   trainingAcademies,
   trainingCertifications,
   renewableEnergyCredits,
+  blueBondIssuances,
+  bondImpactReports,
+  dataSubscriptions,
 } from "../../drizzle/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 
@@ -282,6 +286,22 @@ export const stateOpsRouter = router({
         .from(renewableEnergyCredits)
         .where(sql`true ${stateFilter(renewableEnergyCredits.state)}`);
 
+      // Phase 31: bond facilitation fees (issued/closed bonds) and active
+      // data-intelligence subscription fees. Persisted rows only.
+      const [bondAgg] = await db
+        .select({
+          bondFacilitationFees: sql<string>`coalesce(sum(${blueBondIssuances.facilitationFeeNaira}) filter (where ${blueBondIssuances.status} in ('issued','closed')), 0)`,
+        })
+        .from(blueBondIssuances)
+        .where(sql`true ${stateFilter(blueBondIssuances.state)}`);
+
+      const [subsAgg] = await db
+        .select({
+          subscriptionFees: sql<string>`coalesce(sum(${dataSubscriptions.feeNaira}) filter (where ${dataSubscriptions.status} = 'active'), 0)`,
+        })
+        .from(dataSubscriptions)
+        .where(sql`true ${input?.state ? sql`and (${dataSubscriptions.state} = ${input.state} or ${dataSubscriptions.state} is null)` : sql``}`);
+
       const shareRows = await db
         .select({
           source: stateRevenueShares.source,
@@ -310,6 +330,8 @@ export const stateOpsRouter = router({
         maricultureLeases: Number(maricultureAgg?.maricultureLeases ?? 0),
         trainingFees: Number(trainingAgg?.trainingFees ?? 0),
         recRevenue: Number(recAgg?.recRevenue ?? 0),
+        bondFacilitationFees: Number(bondAgg?.bondFacilitationFees ?? 0),
+        subscriptionFees: Number(subsAgg?.subscriptionFees ?? 0),
         revenueShares: shareRows.map((r) => ({
           source: r.source,
           sharePercent: r.sharePercent,
@@ -1341,6 +1363,245 @@ export const stateOpsRouter = router({
         .where(eq(renewableEnergyCredits.id, input.id))
         .returning();
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "REC not found" });
+      return row;
+    }),
+  // ─── Phase 31: blue-bond origination ──────────────────────────────────────
+
+  listBlueBonds: protectedProcedure
+    .input(z.object({
+      state: CoastalStateEnum.optional(),
+      status: z.enum(["proposed", "approved", "issued", "closed", "defaulted"]).optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.state ? eq(blueBondIssuances.state, input.state) : undefined,
+        input?.status ? eq(blueBondIssuances.status, input.status) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(blueBondIssuances)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(blueBondIssuances.createdAt));
+      return { bonds: rows, total: rows.length };
+    }),
+
+  upsertBlueBond: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      state: CoastalStateEnum,
+      bondName: z.string().min(2).max(256),
+      issuerName: z.string().min(2).max(256),
+      targetAmountNaira: z.number().min(0),
+      raisedAmountNaira: z.number().min(0).default(0),
+      couponRate: z.number().min(0).max(100).optional(),
+      maturityDate: z.coerce.date().optional(),
+      useOfProceeds: z.string().max(2048).optional(),
+      facilitationFeeNaira: z.number().min(0).default(0),
+      status: z.enum(["proposed", "approved", "issued", "closed", "defaulted"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        // Updates never re-hash: the issuance hash binds the original terms.
+        const [row] = await db
+          .update(blueBondIssuances)
+          .set({
+            state: input.state,
+            bondName: input.bondName,
+            issuerName: input.issuerName,
+            targetAmountNaira: input.targetAmountNaira,
+            raisedAmountNaira: input.raisedAmountNaira,
+            couponRate: input.couponRate,
+            maturityDate: input.maturityDate,
+            useOfProceeds: input.useOfProceeds,
+            facilitationFeeNaira: input.facilitationFeeNaira,
+            status: input.status,
+            issuedAt: input.status === "issued" ? new Date() : undefined,
+            updatedAt: new Date(),
+          })
+          .where(eq(blueBondIssuances.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Blue bond not found" });
+        return row;
+      }
+      // Fail-closed: throws 503 if PROOF_SIGNING_KEY is unset.
+      const verificationHash = signMrvPayload(
+        `${input.state}|${input.bondName}|${input.issuerName}|${input.targetAmountNaira.toFixed(2)}`
+      );
+      const [row] = await db
+        .insert(blueBondIssuances)
+        .values({
+          state: input.state,
+          bondName: input.bondName,
+          issuerName: input.issuerName,
+          targetAmountNaira: input.targetAmountNaira,
+          raisedAmountNaira: input.raisedAmountNaira,
+          couponRate: input.couponRate,
+          maturityDate: input.maturityDate,
+          useOfProceeds: input.useOfProceeds,
+          facilitationFeeNaira: input.facilitationFeeNaira,
+          verificationHash,
+          issuedAt: input.status === "issued" ? new Date() : undefined,
+        })
+        .returning();
+      return row;
+    }),
+
+  verifyBlueBond: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .select()
+        .from(blueBondIssuances)
+        .where(eq(blueBondIssuances.id, input.id));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Blue bond not found" });
+      const expected = signMrvPayload(
+        `${row.state}|${row.bondName}|${row.issuerName}|${Number(row.targetAmountNaira).toFixed(2)}`
+      );
+      return { valid: expected === row.verificationHash, bond: row };
+    }),
+
+  listBondImpactReports: protectedProcedure
+    .input(z.object({ bondId: z.string().uuid().optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const rows = await db
+        .select()
+        .from(bondImpactReports)
+        .where(input?.bondId ? eq(bondImpactReports.bondId, input.bondId) : undefined)
+        .orderBy(desc(bondImpactReports.reportedAt));
+      return { reports: rows, total: rows.length };
+    }),
+
+  addBondImpactReport: protectedProcedure
+    .input(z.object({
+      bondId: z.string().uuid(),
+      period: z.string().regex(/^\d{4}-\d{2}$/),
+      allocationNaira: z.number().min(0),
+      impactSummary: z.string().min(2).max(4096),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [bond] = await db
+        .select()
+        .from(blueBondIssuances)
+        .where(eq(blueBondIssuances.id, input.bondId));
+      if (!bond) throw new TRPCError({ code: "NOT_FOUND", message: "Blue bond not found" });
+      // Fail-closed: throws 503 if PROOF_SIGNING_KEY is unset.
+      const verificationHash = signMrvPayload(
+        `${input.bondId}|${input.period}|${input.allocationNaira.toFixed(2)}`
+      );
+      const [row] = await db
+        .insert(bondImpactReports)
+        .values({
+          bondId: input.bondId,
+          period: input.period,
+          allocationNaira: input.allocationNaira,
+          impactSummary: input.impactSummary,
+          verificationHash,
+        })
+        .returning();
+      return row;
+    }),
+
+  verifyBondImpactReport: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .select()
+        .from(bondImpactReports)
+        .where(eq(bondImpactReports.id, input.id));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Impact report not found" });
+      const expected = signMrvPayload(
+        `${row.bondId}|${row.period}|${Number(row.allocationNaira).toFixed(2)}`
+      );
+      return { valid: expected === row.verificationHash, report: row };
+    }),
+
+  // ─── Phase 31: data-intelligence subscriptions ────────────────────────────
+
+  listDataSubscriptions: protectedProcedure
+    .input(z.object({
+      tier: z.enum(["explorer", "professional", "enterprise"]).optional(),
+      status: z.enum(["active", "suspended", "expired"]).optional(),
+      state: CoastalStateEnum.optional(),
+    }).optional())
+    .query(async ({ input }) => {
+      const db = await requireDb();
+      const conditions = [
+        input?.tier ? eq(dataSubscriptions.tier, input.tier) : undefined,
+        input?.status ? eq(dataSubscriptions.status, input.status) : undefined,
+        input?.state ? eq(dataSubscriptions.state, input.state) : undefined,
+      ].filter(Boolean);
+      const rows = await db
+        .select()
+        .from(dataSubscriptions)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(dataSubscriptions.createdAt));
+      return { subscriptions: rows, total: rows.length };
+    }),
+
+  upsertDataSubscription: protectedProcedure
+    .input(z.object({
+      id: z.string().uuid().optional(),
+      subscriberOrg: z.string().min(2).max(256),
+      contactEmail: z.string().email().max(256).optional(),
+      tier: z.enum(["explorer", "professional", "enterprise"]),
+      datasetScope: z.string().min(2).max(1024),
+      state: CoastalStateEnum.optional(),
+      feeNaira: z.number().min(0),
+      period: z.string().regex(/^\d{4}-\d{2}$/),
+      status: z.enum(["active", "suspended", "expired"]).optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      if (input.id) {
+        const [row] = await db
+          .update(dataSubscriptions)
+          .set({
+            subscriberOrg: input.subscriberOrg,
+            contactEmail: input.contactEmail,
+            tier: input.tier,
+            datasetScope: input.datasetScope,
+            state: input.state,
+            feeNaira: input.feeNaira,
+            period: input.period,
+            status: input.status,
+            updatedAt: new Date(),
+          })
+          .where(eq(dataSubscriptions.id, input.id))
+          .returning();
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Subscription not found" });
+        return row;
+      }
+      const [row] = await db
+        .insert(dataSubscriptions)
+        .values({
+          subscriberOrg: input.subscriberOrg,
+          contactEmail: input.contactEmail,
+          tier: input.tier,
+          datasetScope: input.datasetScope,
+          state: input.state,
+          feeNaira: input.feeNaira,
+          period: input.period,
+        })
+        .returning();
+      return row;
+    }),
+
+  suspendDataSubscription: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const db = await requireDb();
+      const [row] = await db
+        .update(dataSubscriptions)
+        .set({ status: "suspended", updatedAt: new Date() })
+        .where(eq(dataSubscriptions.id, input.id))
+        .returning();
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Subscription not found" });
       return row;
     }),
 });
