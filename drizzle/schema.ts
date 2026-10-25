@@ -4727,3 +4727,113 @@ export const stateRevenueShares = pgTable("state_revenue_shares", {
 ]);
 export type StateRevenueShare = typeof stateRevenueShares.$inferSelect;
 export type InsertStateRevenueShare = typeof stateRevenueShares.$inferInsert;
+
+// ─── Phase 30 (W1): stateOps tier-2 — tourism levies, mariculture, training
+// academies & certifications, renewable energy credits (migration 0083) ──────
+
+export const tourismOperators = pgTable("tourism_operators", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  operatorName: text("operator_name").notNull(),
+  operatorType: text("operator_type").notNull(), // beach_resort | boat_tour | eco_lodge | mangrove_boardwalk | jet_ski | other
+  siteDescription: text("site_description"),
+  licenceFeeNaira: doublePrecision("licence_fee_naira").notNull(),
+  visitorLevyNaira: doublePrecision("visitor_levy_naira").notNull().default(0),
+  status: text("status").notNull().default("active"), // active | suspended | expired | revoked
+  issuedAt: timestamp("issued_at", { withTimezone: true }).defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_tourism_operators_state").on(t.state),
+  index("idx_tourism_operators_status").on(t.status),
+]);
+export type TourismOperator = typeof tourismOperators.$inferSelect;
+export type InsertTourismOperator = typeof tourismOperators.$inferInsert;
+
+export const tourismLevyDeclarations = pgTable("tourism_levy_declarations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  operatorId: uuid("operator_id").notNull().references(() => tourismOperators.id),
+  period: text("period").notNull(), // YYYY-MM
+  visitorCount: integer("visitor_count").notNull(),
+  levyDueNaira: doublePrecision("levy_due_naira").notNull(),
+  status: text("status").notNull().default("declared"), // declared | invoiced | paid
+  declaredAt: timestamp("declared_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_tourism_levy_declarations_operator").on(t.operatorId),
+  index("idx_tourism_levy_declarations_status").on(t.status),
+]);
+export type TourismLevyDeclaration = typeof tourismLevyDeclarations.$inferSelect;
+export type InsertTourismLevyDeclaration = typeof tourismLevyDeclarations.$inferInsert;
+
+export const maricultureFarms = pgTable("mariculture_farms", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  estateId: uuid("estate_id").references(() => aquacultureEstates.id),
+  farmType: text("farm_type").notNull(), // seaweed | oyster | mussel | shrimp | finfish_cage
+  operatorName: text("operator_name").notNull(),
+  areaHectares: doublePrecision("area_hectares"),
+  leaseFeeNaira: doublePrecision("lease_fee_naira").notNull(),
+  offtakerName: text("offtaker_name"),
+  status: text("status").notNull().default("active"), // active | suspended | decommissioned
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_mariculture_farms_state").on(t.state),
+  index("idx_mariculture_farms_status").on(t.status),
+]);
+export type MaricultureFarm = typeof maricultureFarms.$inferSelect;
+export type InsertMaricultureFarm = typeof maricultureFarms.$inferInsert;
+
+export const trainingAcademies = pgTable("training_academies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  academyName: text("academy_name").notNull(),
+  programType: text("program_type").notNull(), // fishery_skills | boat_handling | diving | hospitality | stcw_adjacent
+  capacity: integer("capacity"),
+  status: text("status").notNull().default("active"), // active | suspended
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_training_academies_state").on(t.state),
+  index("idx_training_academies_status").on(t.status),
+]);
+export type TrainingAcademy = typeof trainingAcademies.$inferSelect;
+export type InsertTrainingAcademy = typeof trainingAcademies.$inferInsert;
+
+export const trainingCertifications = pgTable("training_certifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  academyId: uuid("academy_id").notNull().references(() => trainingAcademies.id),
+  traineeName: text("trainee_name").notNull(),
+  program: text("program").notNull(),
+  certNo: text("cert_no").notNull().unique(),
+  certFeeNaira: doublePrecision("cert_fee_naira").notNull().default(0),
+  verificationHash: text("verification_hash").notNull(),
+  issuedAt: timestamp("issued_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_training_certifications_academy").on(t.academyId),
+  index("idx_training_certifications_cert_no").on(t.certNo),
+]);
+export type TrainingCertification = typeof trainingCertifications.$inferSelect;
+export type InsertTrainingCertification = typeof trainingCertifications.$inferInsert;
+
+export const renewableEnergyCredits = pgTable("renewable_energy_credits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  state: text("state").notNull(),
+  projectName: text("project_name").notNull(),
+  source: text("source").notNull(), // tidal | offshore_wind | solar_floating
+  mwh: doublePrecision("mwh").notNull(),
+  period: text("period").notNull(), // YYYY-MM
+  creditPriceNaira: doublePrecision("credit_price_naira").notNull(),
+  status: text("status").notNull().default("issued"), // issued | verified | sold
+  verificationHash: text("verification_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_renewable_energy_credits_state").on(t.state),
+  index("idx_renewable_energy_credits_status").on(t.status),
+]);
+export type RenewableEnergyCredit = typeof renewableEnergyCredits.$inferSelect;
+export type InsertRenewableEnergyCredit = typeof renewableEnergyCredits.$inferInsert;
