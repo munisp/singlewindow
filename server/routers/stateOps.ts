@@ -1114,7 +1114,7 @@ export const stateOpsRouter = router({
     .input(z.object({
       id: z.string().uuid().optional(),
       state: CoastalStateEnum,
-      estateId: z.string().uuid().optional(),
+      estateId: z.number().int().positive().optional(),
       farmType: z.enum(["seaweed", "oyster", "mussel", "shrimp", "finfish_cage"]),
       operatorName: z.string().min(2).max(256),
       areaHectares: z.number().min(0).optional(),

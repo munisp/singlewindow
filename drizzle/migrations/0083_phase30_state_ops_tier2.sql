@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS "idx_tourism_levy_declarations_status" ON "tourism_le
 CREATE TABLE IF NOT EXISTS "mariculture_farms" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "state" text NOT NULL,
-  "estate_id" uuid REFERENCES "aquaculture_estates"("id"),
+  "estate_id" integer REFERENCES "aquaculture_estates"("id"),
   "farm_type" text NOT NULL,
   "operator_name" text NOT NULL,
   "area_hectares" double precision,
