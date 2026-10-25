@@ -129,6 +129,7 @@ import { queuePolicyRouter } from "./routers/queuePolicy";
 import { transshipmentRouter } from "./routers/transshipment";
 import { dangerousGoodsRouter } from "./routers/dangerousGoods";
 import { shorePassRouter } from "./routers/shorePass";
+import { stateOpsRouter } from "./routers/stateOps";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
 
@@ -418,6 +419,9 @@ export const appRouter = router({
   // Phase 19 (F5a) — IMDG dangerous-goods declarations + shore-pass lifecycle
   dangerousGoods: dangerousGoodsRouter,
   shorePass: shorePassRouter,
+  // Phase 28 (W1) — state blue-economy revenue: licensing, concessions,
+  // aquaculture estates, blue-carbon MRV
+  stateOps: stateOpsRouter,
 });
 
 export type AppRouter = typeof appRouter;
