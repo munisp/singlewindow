@@ -23,6 +23,8 @@ import {
  * registry, Dredging permits & royalty declarations, and Water Transport routes.
  * Phase 30 W2 — extended with Tourism operators & levies, Mariculture farms,
  * Training academies & certifications, and Renewable Energy Certificates (RECs).
+ * Phase 31 W2 — extended with Blue Bonds & impact reports, and Data
+ * Subscriptions; revenue summary gains bond facilitation & subscription fees.
  *
  * Talks to the `stateOps` tRPC router (built in parallel, W1). The router
  * types are not available to the client yet, so the namespace is accessed
@@ -228,6 +230,43 @@ export interface Rec {
   status: string; // issued | verified | sold
 }
 
+// Phase 31 contract types
+
+export interface BlueBond {
+  id: string;
+  state: string;
+  bondName: string;
+  issuerName: string;
+  targetAmountNaira: number;
+  raisedAmountNaira: number;
+  couponRate: number; // percent
+  maturityDate: string;
+  useOfProceeds: string;
+  facilitationFeeNaira: number;
+  status: string; // proposed | approved | issued | closed | defaulted
+}
+
+export interface BondImpactReport {
+  id: string;
+  bondId: string;
+  period: string; // YYYY-MM
+  allocationNaira: number;
+  impactSummary: string;
+  status?: string;
+}
+
+export interface DataSubscription {
+  id: string;
+  subscriberOrg: string;
+  contactEmail: string;
+  tier: string; // explorer | professional | enterprise
+  datasetScope: string;
+  state?: string | null; // null = all states
+  feeNaira: number;
+  period: string; // YYYY-MM
+  status: string; // active | suspended | expired
+}
+
 export interface StateRevenueRow {
   state: string;
   totalLicenseFees: number;
@@ -245,6 +284,8 @@ export interface StateRevenueRow {
   maricultureLeases?: number;
   trainingFees?: number;
   recRevenue?: number;
+  bondFacilitationFees?: number;
+  subscriptionFees?: number;
 }
 
 /** Nigeria's coastal states covered by the blue-economy programme. */
@@ -270,6 +311,8 @@ const TOURISM_OPERATOR_TYPES = ["beach_resort", "boat_tour", "eco_lodge", "mangr
 const MARICULTURE_TYPES = ["seaweed", "oyster", "mussel", "shrimp", "finfish_cage"];
 const PROGRAM_TYPES = ["fishery_skills", "boat_handling", "diving", "hospitality", "stcw_adjacent"];
 const REC_SOURCES = ["tidal", "offshore_wind", "solar_floating"];
+const BOND_STATUSES = ["proposed", "approved", "issued", "closed", "defaulted"];
+const SUBSCRIPTION_TIERS = ["explorer", "professional", "enterprise"];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -299,16 +342,23 @@ const STATUS_COLORS: Record<string, string> = {
   sold: "bg-green-100 text-green-800",
   registered: "bg-green-100 text-green-800",
   operational: "bg-green-100 text-green-800",
+  approved: "bg-green-100 text-green-800",
+  enterprise: "bg-green-100 text-green-800",
   pending: "bg-blue-100 text-blue-800",
   assessed: "bg-blue-100 text-blue-800",
   declared: "bg-blue-100 text-blue-800",
+  proposed: "bg-blue-100 text-blue-800",
+  professional: "bg-blue-100 text-blue-800",
   invoiced: "bg-yellow-100 text-yellow-800",
   appealed: "bg-yellow-100 text-yellow-800",
   suspended: "bg-yellow-100 text-yellow-800",
+  closed: "bg-gray-100 text-gray-800",
+  explorer: "bg-gray-100 text-gray-800",
   expired: "bg-orange-100 text-orange-800",
   waived: "bg-gray-100 text-gray-800",
   revoked: "bg-red-100 text-red-800",
   invalid: "bg-red-100 text-red-800",
+  defaulted: "bg-red-100 text-red-800",
   draft: "bg-gray-100 text-gray-800",
   terminated: "bg-gray-100 text-gray-800",
 };
@@ -435,6 +485,15 @@ export default function StateOpsDashboard() {
     { state: stateParam },
     { enabled: activeTab === "energy" }
   );
+  // Phase 31 queries
+  const blueBondsQuery = stateOps.listBlueBonds.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "bonds" }
+  );
+  const dataSubscriptionsQuery = stateOps.listDataSubscriptions.useQuery(
+    { state: stateParam },
+    { enabled: activeTab === "subscriptions" }
+  );
 
   const refetchActive = () => {
     licensesQuery.refetch();
@@ -455,6 +514,8 @@ export default function StateOpsDashboard() {
     academiesQuery.refetch();
     certificationsQuery.refetch();
     recsQuery.refetch();
+    blueBondsQuery.refetch();
+    dataSubscriptionsQuery.refetch();
   };
 
   // ── Mutations ──
@@ -570,6 +631,30 @@ export default function StateOpsDashboard() {
     onError: onErr,
   });
 
+  // Phase 31 mutations
+  const upsertBlueBondMutation = stateOps.upsertBlueBond.useMutation({
+    onSuccess: () => { toast.success("Blue bond saved"); setBondDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const verifyBlueBondMutation = stateOps.verifyBlueBond.useMutation({
+    onError: onErr,
+  });
+  const addBondImpactReportMutation = stateOps.addBondImpactReport.useMutation({
+    onSuccess: () => { toast.success("Impact report added"); setImpactDialogBond(null); invalidateAll(); },
+    onError: onErr,
+  });
+  const verifyBondImpactReportMutation = stateOps.verifyBondImpactReport.useMutation({
+    onError: onErr,
+  });
+  const upsertDataSubscriptionMutation = stateOps.upsertDataSubscription.useMutation({
+    onSuccess: () => { toast.success("Data subscription saved"); setSubscriptionDialogOpen(false); invalidateAll(); },
+    onError: onErr,
+  });
+  const suspendDataSubscriptionMutation = stateOps.suspendDataSubscription.useMutation({
+    onSuccess: () => { toast.success("Data subscription suspended"); invalidateAll(); },
+    onError: onErr,
+  });
+
   // ── Dialog state ──
   const [licenseDialogOpen, setLicenseDialogOpen] = useState(false);
   const [editingLicense, setEditingLicense] = useState<StateLicense | null>(null);
@@ -679,6 +764,26 @@ export default function StateOpsDashboard() {
   });
   const [recVerificationResults, setRecVerificationResults] = useState<Record<string, boolean>>({});
 
+  // Phase 31 dialog state
+  const [bondDialogOpen, setBondDialogOpen] = useState(false);
+  const [editingBond, setEditingBond] = useState<BlueBond | null>(null);
+  const [bondForm, setBondForm] = useState({
+    state: "Lagos", bondName: "", issuerName: "", targetAmountNaira: "", raisedAmountNaira: "",
+    couponRate: "", maturityDate: "", useOfProceeds: "", facilitationFeeNaira: "", status: "proposed",
+  });
+  const [expandedBondId, setExpandedBondId] = useState<string | null>(null);
+  const [impactDialogBond, setImpactDialogBond] = useState<BlueBond | null>(null);
+  const [impactForm, setImpactForm] = useState({ period: "", allocationNaira: "", impactSummary: "" });
+  const [bondVerificationResults, setBondVerificationResults] = useState<Record<string, boolean>>({});
+  const [impactVerificationResults, setImpactVerificationResults] = useState<Record<string, boolean>>({});
+
+  const [subscriptionDialogOpen, setSubscriptionDialogOpen] = useState(false);
+  const [editingSubscription, setEditingSubscription] = useState<DataSubscription | null>(null);
+  const [subscriptionForm, setSubscriptionForm] = useState({
+    subscriberOrg: "", contactEmail: "", tier: "explorer", datasetScope: "",
+    state: "", feeNaira: "", period: "",
+  });
+
   const licenses: StateLicense[] = useMemo(() => ((licensesQuery.data as any)?.rows ?? licensesQuery.data ?? []) as StateLicense[], [licensesQuery.data]);
   const concessions: StateConcession[] = useMemo(() => (concessionsQuery.data ?? []) as StateConcession[], [concessionsQuery.data]);
   const estates: StateEstate[] = useMemo(() => (estatesQuery.data ?? []) as StateEstate[], [estatesQuery.data]);
@@ -697,6 +802,8 @@ export default function StateOpsDashboard() {
   const academies: Academy[] = useMemo(() => (academiesQuery.data ?? []) as Academy[], [academiesQuery.data]);
   const certifications: Certification[] = useMemo(() => (certificationsQuery.data ?? []) as Certification[], [certificationsQuery.data]);
   const recs: Rec[] = useMemo(() => (recsQuery.data ?? []) as Rec[], [recsQuery.data]);
+  const blueBonds: BlueBond[] = useMemo(() => (blueBondsQuery.data ?? []) as BlueBond[], [blueBondsQuery.data]);
+  const dataSubscriptions: DataSubscription[] = useMemo(() => (dataSubscriptionsQuery.data ?? []) as DataSubscription[], [dataSubscriptionsQuery.data]);
 
   // ── Submit handlers ──
   const submitLicense = () => {
@@ -1012,6 +1119,86 @@ export default function StateOpsDashboard() {
     );
   };
 
+  // Phase 31 submit handlers
+  const submitBlueBond = () => {
+    if (!bondForm.bondName || !bondForm.issuerName) {
+      toast.error("Bond name and issuer name are required");
+      return;
+    }
+    upsertBlueBondMutation.mutate({
+      ...(editingBond ? { id: editingBond.id } : {}),
+      state: bondForm.state,
+      bondName: bondForm.bondName,
+      issuerName: bondForm.issuerName,
+      targetAmountNaira: parseFloat(bondForm.targetAmountNaira) || 0,
+      raisedAmountNaira: parseFloat(bondForm.raisedAmountNaira) || 0,
+      couponRate: parseFloat(bondForm.couponRate) || 0,
+      maturityDate: bondForm.maturityDate || undefined,
+      useOfProceeds: bondForm.useOfProceeds || undefined,
+      facilitationFeeNaira: parseFloat(bondForm.facilitationFeeNaira) || 0,
+      status: bondForm.status,
+    });
+  };
+
+  const handleVerifyBond = (bondId: string) => {
+    verifyBlueBondMutation.mutate(
+      { id: bondId },
+      {
+        onSuccess: (res: any) => {
+          const valid = !!res?.valid;
+          setBondVerificationResults(prev => ({ ...prev, [bondId]: valid }));
+          if (valid) toast.success("Blue bond is valid");
+          else toast.error("Blue bond verification failed");
+        },
+      }
+    );
+  };
+
+  const submitImpactReport = () => {
+    if (!impactDialogBond) return;
+    if (!impactForm.period) {
+      toast.error("Period (YYYY-MM) is required");
+      return;
+    }
+    addBondImpactReportMutation.mutate({
+      bondId: impactDialogBond.id,
+      period: impactForm.period,
+      allocationNaira: parseFloat(impactForm.allocationNaira) || 0,
+      impactSummary: impactForm.impactSummary || undefined,
+    });
+  };
+
+  const handleVerifyImpactReport = (reportId: string) => {
+    verifyBondImpactReportMutation.mutate(
+      { id: reportId },
+      {
+        onSuccess: (res: any) => {
+          const valid = !!res?.valid;
+          setImpactVerificationResults(prev => ({ ...prev, [reportId]: valid }));
+          if (valid) toast.success("Impact report is valid");
+          else toast.error("Impact report verification failed");
+        },
+      }
+    );
+  };
+
+  const submitDataSubscription = () => {
+    if (!subscriptionForm.subscriberOrg || !subscriptionForm.contactEmail) {
+      toast.error("Subscriber organisation and contact email are required");
+      return;
+    }
+    upsertDataSubscriptionMutation.mutate({
+      ...(editingSubscription ? { id: editingSubscription.id } : {}),
+      subscriberOrg: subscriptionForm.subscriberOrg,
+      contactEmail: subscriptionForm.contactEmail,
+      tier: subscriptionForm.tier,
+      datasetScope: subscriptionForm.datasetScope || undefined,
+      state: subscriptionForm.state || undefined,
+      feeNaira: parseFloat(subscriptionForm.feeNaira) || 0,
+      period: subscriptionForm.period || undefined,
+    });
+  };
+
   const totals = useMemo(() => ({
     licenseFees: revenueRows.reduce((s, r) => s + (r.totalLicenseFees || 0), 0),
     concessionFees: revenueRows.reduce((s, r) => s + (r.concessionAnnualFees || 0), 0),
@@ -1025,6 +1212,8 @@ export default function StateOpsDashboard() {
     maricultureLeases: revenueRows.reduce((s, r) => s + (r.maricultureLeases ?? 0), 0),
     trainingFees: revenueRows.reduce((s, r) => s + (r.trainingFees ?? 0), 0),
     recRevenue: revenueRows.reduce((s, r) => s + (r.recRevenue ?? 0), 0),
+    bondFacilitationFees: revenueRows.reduce((s, r) => s + (r.bondFacilitationFees ?? 0), 0),
+    subscriptionFees: revenueRows.reduce((s, r) => s + (r.subscriptionFees ?? 0), 0),
   }), [revenueRows]);
 
   const dredgingPermitById = useMemo(() => {
@@ -1082,6 +1271,8 @@ export default function StateOpsDashboard() {
             <TabsTrigger value="mariculture">Mariculture</TabsTrigger>
             <TabsTrigger value="training">Training</TabsTrigger>
             <TabsTrigger value="energy">Energy Credits</TabsTrigger>
+            <TabsTrigger value="bonds">Blue Bonds</TabsTrigger>
+            <TabsTrigger value="subscriptions">Data Subscriptions</TabsTrigger>
             <TabsTrigger value="revenue">Revenue</TabsTrigger>
           </TabsList>
 
@@ -2202,6 +2393,173 @@ export default function StateOpsDashboard() {
             </Card>
           </TabsContent>
 
+          {/* ── Blue Bonds ── */}
+          <TabsContent value="bonds" className="mt-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Banknote className="w-4 h-4" />
+                    State Blue Bonds
+                  </CardTitle>
+                  <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white"
+                    onClick={() => {
+                      setEditingBond(null);
+                      setBondForm({ state: stateParam ?? "Lagos", bondName: "", issuerName: "", targetAmountNaira: "", raisedAmountNaira: "", couponRate: "", maturityDate: "", useOfProceeds: "", facilitationFeeNaira: "", status: "proposed" });
+                      setBondDialogOpen(true);
+                    }}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    New Bond
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {blueBondsQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading blue bonds...</div>
+                ) : blueBonds.length === 0 ? (
+                  <EmptyState icon={<Banknote className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-8" />
+                        <TableHead>Bond</TableHead>
+                        <TableHead>Issuer</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Raised</TableHead>
+                        <TableHead>Coupon</TableHead>
+                        <TableHead>Maturity</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Facilitation Fee</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {blueBonds.map(b => (
+                        <BondRows
+                          key={b.id}
+                          bond={b}
+                          expanded={expandedBondId === b.id}
+                          onToggle={() => setExpandedBondId(expandedBondId === b.id ? null : b.id)}
+                          onEdit={() => {
+                            setEditingBond(b);
+                            setBondForm({
+                              state: b.state, bondName: b.bondName, issuerName: b.issuerName,
+                              targetAmountNaira: String(b.targetAmountNaira ?? ""),
+                              raisedAmountNaira: String(b.raisedAmountNaira ?? ""),
+                              couponRate: String(b.couponRate ?? ""),
+                              maturityDate: b.maturityDate?.slice(0, 10) ?? "",
+                              useOfProceeds: b.useOfProceeds ?? "",
+                              facilitationFeeNaira: String(b.facilitationFeeNaira ?? ""),
+                              status: b.status ?? "proposed",
+                            });
+                            setBondDialogOpen(true);
+                          }}
+                          onAddReport={() => {
+                            setImpactDialogBond(b);
+                            setImpactForm({ period: "", allocationNaira: "", impactSummary: "" });
+                          }}
+                          onVerifyBond={handleVerifyBond}
+                          onVerifyReport={handleVerifyImpactReport}
+                          bondVerificationResults={bondVerificationResults}
+                          impactVerificationResults={impactVerificationResults}
+                          verifyBondPending={verifyBlueBondMutation.isPending}
+                          verifyReportPending={verifyBondImpactReportMutation.isPending}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Data Subscriptions ── */}
+          <TabsContent value="subscriptions" className="mt-4">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileText className="w-4 h-4" />
+                    Blue Economy Data Subscriptions
+                  </CardTitle>
+                  <Button size="sm" className="bg-sky-600 hover:bg-sky-700 text-white"
+                    onClick={() => {
+                      setEditingSubscription(null);
+                      setSubscriptionForm({ subscriberOrg: "", contactEmail: "", tier: "explorer", datasetScope: "", state: "", feeNaira: "", period: "" });
+                      setSubscriptionDialogOpen(true);
+                    }}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    New Subscription
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {dataSubscriptionsQuery.isLoading ? (
+                  <div className="p-8 text-center text-muted-foreground text-sm">Loading data subscriptions...</div>
+                ) : dataSubscriptions.length === 0 ? (
+                  <EmptyState icon={<FileText className="w-8 h-8" />} message="No records yet" />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Organisation</TableHead>
+                        <TableHead>Contact Email</TableHead>
+                        <TableHead>Tier</TableHead>
+                        <TableHead>Dataset Scope</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Fee</TableHead>
+                        <TableHead>Period</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dataSubscriptions.map(s => (
+                        <TableRow key={s.id}>
+                          <TableCell className="font-medium">{s.subscriberOrg}</TableCell>
+                          <TableCell className="text-xs">{s.contactEmail}</TableCell>
+                          <TableCell><StatusBadge status={s.tier} /></TableCell>
+                          <TableCell className="text-xs">{s.datasetScope ?? "—"}</TableCell>
+                          <TableCell>{s.state ?? "All states"}</TableCell>
+                          <TableCell>{formatNaira(s.feeNaira)}</TableCell>
+                          <TableCell className="font-mono text-xs">{s.period}</TableCell>
+                          <TableCell><StatusBadge status={s.status} /></TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button variant="outline" size="sm" className="h-7 text-xs"
+                                onClick={() => {
+                                  setEditingSubscription(s);
+                                  setSubscriptionForm({
+                                    subscriberOrg: s.subscriberOrg, contactEmail: s.contactEmail,
+                                    tier: s.tier, datasetScope: s.datasetScope ?? "",
+                                    state: s.state ?? "", feeNaira: String(s.feeNaira ?? ""),
+                                    period: s.period ?? "",
+                                  });
+                                  setSubscriptionDialogOpen(true);
+                                }}>
+                                Edit
+                              </Button>
+                              {s.status === "active" && (
+                                <Button variant="outline" size="sm"
+                                  className="h-7 text-xs text-amber-700 border-amber-200 hover:bg-amber-50"
+                                  disabled={suspendDataSubscriptionMutation.isPending}
+                                  onClick={() => suspendDataSubscriptionMutation.mutate({ id: s.id })}>
+                                  Suspend
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           {/* ── Revenue ── */}
           <TabsContent value="revenue" className="mt-4 space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -2218,6 +2576,8 @@ export default function StateOpsDashboard() {
                 { label: "Mariculture Leases", value: totals.maricultureLeases, icon: <Shell className="w-5 h-5 text-cyan-600" />, color: "text-cyan-600" },
                 { label: "Training Fees", value: totals.trainingFees, icon: <GraduationCap className="w-5 h-5 text-violet-600" />, color: "text-violet-600" },
                 { label: "REC Revenue", value: totals.recRevenue, icon: <Zap className="w-5 h-5 text-yellow-600" />, color: "text-yellow-600" },
+                { label: "Bond Facilitation Fees", value: totals.bondFacilitationFees, icon: <Banknote className="w-5 h-5 text-emerald-700" />, color: "text-emerald-700" },
+                { label: "Subscription Fees", value: totals.subscriptionFees, icon: <FileText className="w-5 h-5 text-slate-600" />, color: "text-slate-600" },
               ].map(stat => (
                 <Card key={stat.label}>
                   <CardContent className="p-4 flex items-center gap-3">
@@ -2263,6 +2623,8 @@ export default function StateOpsDashboard() {
                         <TableHead>Mariculture Leases</TableHead>
                         <TableHead>Training Fees</TableHead>
                         <TableHead>REC Revenue</TableHead>
+                        <TableHead>Bond Facilitation</TableHead>
+                        <TableHead>Subscription Fees</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2288,6 +2650,8 @@ export default function StateOpsDashboard() {
                           <TableCell>{formatNaira(r.maricultureLeases ?? 0)}</TableCell>
                           <TableCell>{formatNaira(r.trainingFees ?? 0)}</TableCell>
                           <TableCell>{formatNaira(r.recRevenue ?? 0)}</TableCell>
+                          <TableCell>{formatNaira(r.bondFacilitationFees ?? 0)}</TableCell>
+                          <TableCell>{formatNaira(r.subscriptionFees ?? 0)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -3315,6 +3679,174 @@ export default function StateOpsDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Blue Bond dialog ── */}
+      <Dialog open={bondDialogOpen} onOpenChange={setBondDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingBond ? "Edit Blue Bond" : "New Blue Bond"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>State *</Label>
+                <Select value={bondForm.state} onValueChange={v => setBondForm(f => ({ ...f, state: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COASTAL_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Status</Label>
+                <Select value={bondForm.status} onValueChange={v => setBondForm(f => ({ ...f, status: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {BOND_STATUSES.map(t => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Bond Name *</Label>
+                <Input value={bondForm.bondName} onChange={e => setBondForm(f => ({ ...f, bondName: e.target.value }))} placeholder="e.g. Lagos Blue Bond 2026" />
+              </div>
+              <div>
+                <Label>Issuer Name *</Label>
+                <Input value={bondForm.issuerName} onChange={e => setBondForm(f => ({ ...f, issuerName: e.target.value }))} placeholder="Issuing authority / SPV" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Target (₦)</Label>
+                <Input type="number" value={bondForm.targetAmountNaira} onChange={e => setBondForm(f => ({ ...f, targetAmountNaira: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Raised (₦)</Label>
+                <Input type="number" value={bondForm.raisedAmountNaira} onChange={e => setBondForm(f => ({ ...f, raisedAmountNaira: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Coupon (%)</Label>
+                <Input type="number" value={bondForm.couponRate} onChange={e => setBondForm(f => ({ ...f, couponRate: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Maturity Date</Label>
+                <Input type="date" value={bondForm.maturityDate} onChange={e => setBondForm(f => ({ ...f, maturityDate: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Facilitation Fee (₦)</Label>
+                <Input type="number" value={bondForm.facilitationFeeNaira} onChange={e => setBondForm(f => ({ ...f, facilitationFeeNaira: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+            <div>
+              <Label>Use of Proceeds</Label>
+              <Input value={bondForm.useOfProceeds} onChange={e => setBondForm(f => ({ ...f, useOfProceeds: e.target.value }))} placeholder="e.g. Mangrove restoration, jetty upgrades" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBondDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitBlueBond} disabled={upsertBlueBondMutation.isPending}>
+              {upsertBlueBondMutation.isPending ? "Saving..." : "Save Bond"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Bond Impact Report dialog ── */}
+      <Dialog open={!!impactDialogBond} onOpenChange={open => { if (!open) setImpactDialogBond(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Impact Report — {impactDialogBond?.bondName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Period (YYYY-MM) *</Label>
+                <Input value={impactForm.period} onChange={e => setImpactForm(f => ({ ...f, period: e.target.value }))} placeholder="2026-10" />
+              </div>
+              <div>
+                <Label>Allocation (₦)</Label>
+                <Input type="number" value={impactForm.allocationNaira} onChange={e => setImpactForm(f => ({ ...f, allocationNaira: e.target.value }))} placeholder="0" />
+              </div>
+            </div>
+            <div>
+              <Label>Impact Summary</Label>
+              <Input value={impactForm.impactSummary} onChange={e => setImpactForm(f => ({ ...f, impactSummary: e.target.value }))} placeholder="What the allocation funded this period" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImpactDialogBond(null)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitImpactReport} disabled={addBondImpactReportMutation.isPending}>
+              {addBondImpactReportMutation.isPending ? "Adding..." : "Add Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Data Subscription dialog ── */}
+      <Dialog open={subscriptionDialogOpen} onOpenChange={setSubscriptionDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingSubscription ? "Edit Data Subscription" : "New Data Subscription"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Subscriber Organisation *</Label>
+                <Input value={subscriptionForm.subscriberOrg} onChange={e => setSubscriptionForm(f => ({ ...f, subscriberOrg: e.target.value }))} placeholder="e.g. Ocean Analytics Ltd" />
+              </div>
+              <div>
+                <Label>Contact Email *</Label>
+                <Input type="email" value={subscriptionForm.contactEmail} onChange={e => setSubscriptionForm(f => ({ ...f, contactEmail: e.target.value }))} placeholder="data@org.ng" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Tier</Label>
+                <Select value={subscriptionForm.tier} onValueChange={v => setSubscriptionForm(f => ({ ...f, tier: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SUBSCRIPTION_TIERS.map(t => <SelectItem key={t} value={t} className="capitalize">{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>State (optional)</Label>
+                <Select value={subscriptionForm.state || "all"} onValueChange={v => setSubscriptionForm(f => ({ ...f, state: v === "all" ? "" : v }))}>
+                  <SelectTrigger><SelectValue placeholder="All states" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All states</SelectItem>
+                    {COASTAL_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label>Dataset Scope</Label>
+              <Input value={subscriptionForm.datasetScope} onChange={e => setSubscriptionForm(f => ({ ...f, datasetScope: e.target.value }))} placeholder="e.g. fisheries, carbon, dredging" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Fee (₦)</Label>
+                <Input type="number" value={subscriptionForm.feeNaira} onChange={e => setSubscriptionForm(f => ({ ...f, feeNaira: e.target.value }))} placeholder="0" />
+              </div>
+              <div>
+                <Label>Period (YYYY-MM)</Label>
+                <Input value={subscriptionForm.period} onChange={e => setSubscriptionForm(f => ({ ...f, period: e.target.value }))} placeholder="2026-10" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSubscriptionDialogOpen(false)}>Cancel</Button>
+            <Button className="bg-sky-600 hover:bg-sky-700 text-white" onClick={submitDataSubscription} disabled={upsertDataSubscriptionMutation.isPending}>
+              {upsertDataSubscriptionMutation.isPending ? "Saving..." : "Save Subscription"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
@@ -3435,6 +3967,149 @@ function ProjectRows({
                     );
                   })}
                 </div>
+              )}
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+// ─── Blue bond row pair (bond + expandable impact reports) ─────────────────
+
+function BondRows({
+  bond: b,
+  expanded,
+  onToggle,
+  onEdit,
+  onAddReport,
+  onVerifyBond,
+  onVerifyReport,
+  bondVerificationResults,
+  impactVerificationResults,
+  verifyBondPending,
+  verifyReportPending,
+}: {
+  bond: BlueBond;
+  expanded: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onAddReport: () => void;
+  onVerifyBond: (bondId: string) => void;
+  onVerifyReport: (reportId: string) => void;
+  bondVerificationResults: Record<string, boolean>;
+  impactVerificationResults: Record<string, boolean>;
+  verifyBondPending: boolean;
+  verifyReportPending: boolean;
+}) {
+  const reportsQuery = stateOps.listBondImpactReports.useQuery(
+    { bondId: b.id },
+    { enabled: expanded }
+  );
+  const reports: BondImpactReport[] = (reportsQuery.data ?? []) as BondImpactReport[];
+  const bondVerified = bondVerificationResults[b.id];
+
+  return (
+    <>
+      <TableRow className="cursor-pointer" onClick={onToggle}>
+        <TableCell>
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </TableCell>
+        <TableCell>
+          <div className="text-sm font-medium">{b.bondName}</div>
+          {b.useOfProceeds && <div className="text-xs text-muted-foreground truncate max-w-[200px]">{b.useOfProceeds}</div>}
+        </TableCell>
+        <TableCell className="text-xs">{b.issuerName}</TableCell>
+        <TableCell className="font-medium">{b.state}</TableCell>
+        <TableCell>{formatNaira(b.targetAmountNaira)}</TableCell>
+        <TableCell>{formatNaira(b.raisedAmountNaira)}</TableCell>
+        <TableCell>{b.couponRate?.toLocaleString()}%</TableCell>
+        <TableCell className="text-xs">{formatDate(b.maturityDate)}</TableCell>
+        <TableCell><StatusBadge status={b.status} /></TableCell>
+        <TableCell>{formatNaira(b.facilitationFeeNaira)}</TableCell>
+        <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+          <div className="flex justify-end items-center gap-1">
+            {bondVerified === true && (
+              <Badge className="text-xs bg-green-100 text-green-800">
+                <BadgeCheck className="w-3 h-3 mr-1" /> Valid
+              </Badge>
+            )}
+            {bondVerified === false && (
+              <Badge className="text-xs bg-red-100 text-red-800">
+                <BadgeX className="w-3 h-3 mr-1" /> Invalid
+              </Badge>
+            )}
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              disabled={verifyBondPending}
+              onClick={() => onVerifyBond(b.id)}>
+              <ShieldCheck className="w-3 h-3 mr-1" />
+              Verify
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onAddReport}>
+              <Plus className="w-3 h-3 mr-1" />
+              Report
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onEdit}>
+              Edit
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+      {expanded && (
+        <TableRow>
+          <TableCell colSpan={11} className="bg-muted/30 p-0">
+            <div className="p-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                Impact Reports — {b.bondName}
+              </div>
+              {reportsQuery.isLoading ? (
+                <div className="text-xs text-muted-foreground py-2">Loading impact reports...</div>
+              ) : reports.length === 0 ? (
+                <div className="text-xs text-muted-foreground py-2">No records yet</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Period</TableHead>
+                      <TableHead>Allocation</TableHead>
+                      <TableHead>Impact Summary</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reports.map(r => {
+                      const verified = impactVerificationResults[r.id];
+                      return (
+                        <TableRow key={r.id}>
+                          <TableCell className="font-mono text-xs">{r.period}</TableCell>
+                          <TableCell>{formatNaira(r.allocationNaira)}</TableCell>
+                          <TableCell className="text-xs">{r.impactSummary ?? "—"}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end items-center gap-2">
+                              {verified === true && (
+                                <Badge className="text-xs bg-green-100 text-green-800">
+                                  <BadgeCheck className="w-3 h-3 mr-1" /> Valid
+                                </Badge>
+                              )}
+                              {verified === false && (
+                                <Badge className="text-xs bg-red-100 text-red-800">
+                                  <BadgeX className="w-3 h-3 mr-1" /> Invalid
+                                </Badge>
+                              )}
+                              <Button variant="outline" size="sm" className="h-7 text-xs"
+                                disabled={verifyReportPending}
+                                onClick={() => onVerifyReport(r.id)}>
+                                <ShieldCheck className="w-3 h-3 mr-1" />
+                                Verify
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               )}
             </div>
           </TableCell>
