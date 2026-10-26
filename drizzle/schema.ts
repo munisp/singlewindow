@@ -4897,3 +4897,53 @@ export const dataSubscriptions = pgTable("data_subscriptions", {
 ]);
 export type DataSubscription = typeof dataSubscriptions.$inferSelect;
 export type InsertDataSubscription = typeof dataSubscriptions.$inferInsert;
+
+// ─── Phase 33: live maritime intelligence (migration 0085) ──────────────────
+
+export const aisVesselPositions = pgTable("ais_vessel_positions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  mmsi: text("mmsi").notNull().unique(),
+  shipName: text("ship_name"),
+  lat: doublePrecision("lat").notNull(),
+  lon: doublePrecision("lon").notNull(),
+  sog: doublePrecision("sog"),
+  cog: doublePrecision("cog"),
+  navStatus: text("nav_status"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_ais_vessel_positions_last_seen").on(t.lastSeenAt),
+]);
+export type AisVesselPosition = typeof aisVesselPositions.$inferSelect;
+export type InsertAisVesselPosition = typeof aisVesselPositions.$inferInsert;
+
+export const sanctionsScreenings = pgTable("sanctions_screenings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  declarationId: integer("declaration_id").notNull().references(() => declarations.id),
+  subjectName: text("subject_name").notNull(),
+  subjectType: text("subject_type").notNull().default("trader"),
+  matchCount: integer("match_count").notNull().default(0),
+  topScore: doublePrecision("top_score"),
+  datasets: jsonb("datasets"),
+  status: text("status").notNull().default("clear"), // clear | review
+  screenedAt: timestamp("screened_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_sanctions_screenings_declaration").on(t.declarationId),
+  index("idx_sanctions_screenings_status").on(t.status),
+]);
+export type SanctionsScreening = typeof sanctionsScreenings.$inferSelect;
+export type InsertSanctionsScreening = typeof sanctionsScreenings.$inferInsert;
+
+export const intelBriefs = pgTable("intel_briefs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  port: text("port").notNull(),
+  period: text("period").notNull(), // YYYY-MM-DD
+  content: text("content").notNull(),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  unique("intel_briefs_port_period_unique").on(t.port, t.period),
+  index("idx_intel_briefs_port").on(t.port),
+]);
+export type IntelBrief = typeof intelBriefs.$inferSelect;
+export type InsertIntelBrief = typeof intelBriefs.$inferInsert;

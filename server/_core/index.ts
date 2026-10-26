@@ -1,3 +1,4 @@
+import { startAisStream } from "./aisStream";
 import "dotenv/config";
 // Phase-7 OTel: start the SDK BEFORE any instrumented module (express, pg,
 // ioredis, kafkajs, undici) is loaded. No-op unless OTEL_EXPORTER_OTLP_ENDPOINT
@@ -2048,3 +2049,6 @@ console.log("[Cron] Payment archival (Hot/Warm/Cold) scheduled at 04:00 UTC dail
 // Notifies owner if any account has non-zero drift.
 cron.schedule("0 0 3 * * *", runScheduledBalanceDriftCheck, { timezone: "UTC" });
 console.log("[Cron] Balance drift reconciliation scheduled at 03:00 UTC daily");
+
+// ── Phase 33: AIS live vessel stream (opt-in, fail-closed) ─────────────────
+startAisStream();
