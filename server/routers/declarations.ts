@@ -8,10 +8,11 @@ import {
   logAuditEvent, createNotification, createUserNotification, getProfileByUserId,
   getLatestKYCVerification, withRlsContext, getDb, getPermitsByDeclaration
 } from "../db";
-import { declarations, declarationDocuments, clearanceCertificates } from "../../drizzle/schema";
+import { declarations, declarationDocuments, clearanceCertificates, sanctionsScreenings } from "../../drizzle/schema";
 import { renderClearanceCertificatePdf } from "../clearanceCertificatePdf";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
+import { screenSanctions } from "../_core/sanctions";
 import { assertCan, setOwner } from "../_core/permify";
 import { broadcastNotification, broadcastUnreadCount, broadcastWorkloadUpdate } from "../_core/wsServer";
 import { nanoid } from "nanoid";
@@ -472,6 +473,39 @@ export const declarationsRouter = router({
         totalDue: String(total.toFixed(2)),
         submittedAt: new Date(),
       });
+
+      // Phase 33: sanctions screening gate (config-gated; never blocks
+      // submission — results are recorded to sanctions_screenings and, on a
+      // high-confidence match, mirrored into declarations.sanctionsFlags).
+      try {
+        if (process.env.OPENSANCTIONS_API_KEY) {
+          const profile = await getProfileByUserId(ctx.user.id);
+          const subjectName = profile?.organizationName || `trader-${ctx.user.id}`;
+          const screening = await screenSanctions(subjectName);
+          const top = screening.topScore ?? 0;
+          const status = top >= 0.85 ? "review" : "clear";
+          const sdb = await getDb();
+          if (sdb) {
+            await sdb.insert(sanctionsScreenings).values({
+              declarationId: input.id,
+              subjectName,
+              subjectType: "trader",
+              matchCount: screening.matches.length,
+              topScore: screening.topScore,
+              datasets: Array.from(new Set(screening.matches.flatMap((m) => m.datasets))).slice(0, 20),
+              status,
+            });
+            if (status === "review") {
+              await sdb
+                .update(declarations)
+                .set({ sanctionsFlags: { screenedAt: new Date().toISOString(), topScore: top, matches: screening.matches.slice(0, 5) } })
+                .where(eq(declarations.id, input.id));
+            }
+          }
+        }
+      } catch (screenErr) {
+        console.error(`[Sanctions] screening failed for declaration ${input.id} (non-blocking):`, screenErr instanceof Error ? screenErr.message : screenErr);
+      }
 
       await logAuditEvent({
         entityType: "declaration",

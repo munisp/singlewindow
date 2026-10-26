@@ -11,6 +11,11 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { invokeLLM } from "../_core/llm";
+import { screenSanctions, sanctionsConfigured } from "../_core/sanctions";
+import { aisVesselPositions, sanctionsScreenings, intelBriefs } from "../../drizzle/schema";
+import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
 
 /**
  * Fetch JSON from an external API with a 10s timeout. Non-2xx responses,
@@ -177,22 +182,7 @@ export const maritimeIntelRouter = router({
   sanctionsScreen: protectedProcedure
     .input(z.object({ name: z.string().min(2).max(256) }))
     .query(async ({ input }) => {
-      const key = process.env.OPENSANCTIONS_API_KEY;
-      if (!key) {
-        throw new TRPCError({
-          code: "SERVICE_UNAVAILABLE",
-          message: "Sanctions screening not configured — set OPENSANCTIONS_API_KEY",
-        });
-      }
-      const url = `https://api.opensanctions.org/search/default?q=${encodeURIComponent(input.name)}&limit=10`;
-      const data = await fetchJson(url, { headers: { Authorization: `ApiKey ${key}` } });
-      const results: any[] = Array.isArray(data?.results) ? data.results : [];
-      const matches = results.map((r: any) => ({
-        name: String(r.caption ?? ""),
-        schema: String(r.schema ?? ""),
-        datasets: Array.isArray(r.datasets) ? r.datasets : [],
-        score: typeof r.score === "number" ? r.score : null,
-      }));
+      const { matches } = await screenSanctions(input.name);
       return { matches, count: matches.length };
     }),
 
@@ -220,5 +210,146 @@ export const maritimeIntelRouter = router({
         errors.push(eventsRes.reason instanceof TRPCError ? eventsRes.reason.message : String(eventsRes.reason));
       }
       return { port: input.port, coords, weather, events, errors };
+    }),
+  // ─── Phase 33: live AIS positions, screening ledger, AI briefs ────────────
+
+  /** Latest AIS positions, optionally scoped to a port's ±0.5° box. */
+  vesselPositions: protectedProcedure
+    .input(z.object({ port: PortEnum.optional() }).optional())
+    .query(async ({ input }) => {
+      if (!process.env.AISSTREAM_API_KEY) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: "AIS tracking not configured — set AISSTREAM_API_KEY",
+        });
+      }
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
+      const conditions = [];
+      if (input?.port) {
+        const c = PORT_COORDS[input.port];
+        conditions.push(
+          gte(aisVesselPositions.lat, c.lat - 0.5),
+          lte(aisVesselPositions.lat, c.lat + 0.5),
+          gte(aisVesselPositions.lon, c.lon - 0.5),
+          lte(aisVesselPositions.lon, c.lon + 0.5),
+        );
+      }
+      const rows = await db
+        .select()
+        .from(aisVesselPositions)
+        .where(conditions.length ? and(...conditions) : undefined)
+        .orderBy(desc(aisVesselPositions.lastSeenAt))
+        .limit(200);
+      return { vessels: rows, count: rows.length };
+    }),
+
+  /** Latest known position of a single vessel by MMSI. */
+  vesselTrack: protectedProcedure
+    .input(z.object({ mmsi: z.string().min(3).max(16) }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
+      const [row] = await db
+        .select()
+        .from(aisVesselPositions)
+        .where(eq(aisVesselPositions.mmsi, input.mmsi))
+        .limit(1);
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "No AIS position recorded for this MMSI" });
+      return row;
+    }),
+
+  /** Sanctions screening ledger (populated by the declaration-submit gate). */
+  screeningsList: protectedProcedure
+    .input(z.object({ declarationId: z.number().int().positive().optional() }).optional())
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
+      const rows = await db
+        .select()
+        .from(sanctionsScreenings)
+        .where(input?.declarationId ? eq(sanctionsScreenings.declarationId, input.declarationId) : undefined)
+        .orderBy(desc(sanctionsScreenings.screenedAt))
+        .limit(200);
+      return { screenings: rows, count: rows.length, configured: sanctionsConfigured() };
+    }),
+
+  /**
+   * AI daily port brief. Cached per port/day in intel_briefs; generated from
+   * live GDELT events + marine weather (+ AIS vessel count when configured).
+   * Fails closed when the LLM provider is unconfigured.
+   */
+  dailyBrief: protectedProcedure
+    .input(z.object({ port: PortEnum }))
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "Database unavailable" });
+      const period = new Date().toISOString().slice(0, 10);
+
+      const [cached] = await db
+        .select()
+        .from(intelBriefs)
+        .where(and(eq(intelBriefs.port, input.port), eq(intelBriefs.period, period)))
+        .limit(1);
+      if (cached) return { port: cached.port, period: cached.period, content: cached.content, generatedAt: cached.generatedAt, cached: true };
+
+      const coords = PORT_COORDS[input.port];
+      const [eventsRes, weatherRes] = await Promise.allSettled([
+        queryGdeltArticles(`"${input.port}" port OR "${input.port}" maritime`, 24),
+        queryMarineWeather(coords.lat, coords.lon),
+      ]);
+      const events = eventsRes.status === "fulfilled" ? eventsRes.value : null;
+      const weather = weatherRes.status === "fulfilled" ? weatherRes.value : null;
+
+      let vesselCount: number | null = null;
+      if (process.env.AISSTREAM_API_KEY) {
+        const [vc] = await db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(aisVesselPositions)
+          .where(and(
+            gte(aisVesselPositions.lat, coords.lat - 0.5), lte(aisVesselPositions.lat, coords.lat + 0.5),
+            gte(aisVesselPositions.lon, coords.lon - 0.5), lte(aisVesselPositions.lon, coords.lon + 0.5),
+            gte(aisVesselPositions.lastSeenAt, sql`now() - interval '6 hours'`),
+          ));
+        vesselCount = vc?.n ?? 0;
+      }
+
+      const facts = [
+        `Port: ${input.port} (${coords.lat}, ${coords.lon})`,
+        weather?.marine ? `Marine: ${JSON.stringify(weather.marine.current ?? weather.marine)}` : "Marine weather: unavailable",
+        weather?.wind ? `Wind: ${JSON.stringify(weather.wind.current ?? weather.wind)}` : "Wind: unavailable",
+        vesselCount != null ? `AIS vessels within 0.5° in last 6h: ${vesselCount}` : "AIS: not configured",
+        events ? `News events (24h, ${events.count}): ${events.articles.slice(0, 8).map((a) => `- ${a.title} (${a.source})`).join("; ")}` : "News events: unavailable",
+      ].join("\n");
+
+      let content: string;
+      try {
+        const res = await invokeLLM({
+          messages: [
+            { role: "system", content: "You are a maritime operations intelligence analyst. Write a concise daily brief (max 200 words): current conditions, notable events, operational risks, and recommended watch items. Use only the facts provided; if a section's data is unavailable, say so plainly. Never invent figures." },
+            { role: "user", content: facts },
+          ],
+        });
+        const c = res.choices?.[0]?.message?.content;
+        content = typeof c === "string" ? c : "";
+        if (!content) throw new Error("empty LLM response");
+      } catch (err) {
+        throw new TRPCError({
+          code: "SERVICE_UNAVAILABLE",
+          message: `AI briefing unavailable: ${err instanceof Error ? err.message : "LLM provider error"}`,
+        });
+      }
+
+      const [row] = await db
+        .insert(intelBriefs)
+        .values({ port: input.port, period, content })
+        .onConflictDoNothing()
+        .returning();
+      const brief = row ?? (await db
+        .select()
+        .from(intelBriefs)
+        .where(and(eq(intelBriefs.port, input.port), eq(intelBriefs.period, period)))
+        .limit(1))[0];
+      return { port: brief.port, period: brief.period, content: brief.content, generatedAt: brief.generatedAt, cached: false };
     }),
 });
