@@ -130,6 +130,7 @@ import { transshipmentRouter } from "./routers/transshipment";
 import { dangerousGoodsRouter } from "./routers/dangerousGoods";
 import { shorePassRouter } from "./routers/shorePass";
 import { stateOpsRouter } from "./routers/stateOps";
+import { maritimeIntelRouter } from "./routers/maritimeIntel";
 
 import { complianceReportingRouter } from "./routers/complianceReporting";
 
@@ -422,6 +423,9 @@ export const appRouter = router({
   // Phase 28 (W1) — state blue-economy revenue: licensing, concessions,
   // aquaculture estates, blue-carbon MRV
   stateOps: stateOpsRouter,
+  // Phase 32 (W1) — live maritime intelligence: GDELT events, marine weather,
+  // config-gated AIS tracking / sanctions screening, per-port summaries
+  maritimeIntel: maritimeIntelRouter,
 });
 
 export type AppRouter = typeof appRouter;
