@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { trpc } from "@/lib/trpc";
 import {
   Radar, Waves, Wind, Newspaper, ShieldCheck, Ship, Search,
-  AlertTriangle, ExternalLink, RefreshCw,
+  AlertTriangle, ExternalLink, RefreshCw, FileText, ListChecks,
 } from "lucide-react";
 
 /**
@@ -20,6 +20,9 @@ import {
  * accessed via a typed `any` shim and row shapes are defined locally below to
  * match the agreed contract exactly. No data is fabricated: every query
  * degrades to an honest error banner or empty state on failure.
+ *
+ * Phase 33 W2 adds live AIS vessel positions (30s auto-refresh), LLM daily
+ * port briefs, and the sanctions screening history list.
  */
 
 // ─── Local contract types (mirror of the maritimeIntel router contract) ─────
@@ -58,6 +61,38 @@ export interface VesselTrackingStatus {
   configured: true;
   provider: string;
   note: string;
+}
+
+// ─── Phase 33 W2 contract types ─────────────────────────────────────────────
+
+export interface AisVessel {
+  mmsi: string;
+  shipName: string | null;
+  lat: number;
+  lon: number;
+  sog: number | null;
+  cog: number | null;
+  navStatus: string | null;
+  lastSeenAt: string;
+}
+
+export interface DailyBrief {
+  port: string;
+  period: string;
+  content: string;
+  generatedAt: string;
+  cached: boolean;
+}
+
+export interface ScreeningRow {
+  id: string;
+  declarationId: string;
+  subjectName: string;
+  subjectType: string;
+  matchCount: number;
+  topScore: number;
+  status: string;
+  screenedAt: string;
 }
 
 /** Nigerian ports covered by the maritime-intel summary. */
@@ -172,6 +207,7 @@ export default function MaritimeIntel() {
   });
   const [screenName, setScreenName] = useState("");
   const [submittedName, setSubmittedName] = useState("");
+  const [briefRequested, setBriefRequested] = useState(false);
 
   // Queries — every one degrades to an honest error banner / empty state.
   const portSummaryQuery = maritimeIntel.portIntelSummary.useQuery({ port });
@@ -185,16 +221,33 @@ export default function MaritimeIntel() {
     { enabled: !!submittedName }
   );
 
+  // Phase 33 W2 queries — live AIS positions, LLM daily brief, screening history.
+  const vesselPositionsQuery = maritimeIntel.vesselPositions.useQuery(
+    { port },
+    { refetchInterval: 30000 }
+  );
+  const dailyBriefQuery = maritimeIntel.dailyBrief.useQuery(
+    { port },
+    { enabled: briefRequested }
+  );
+  const screeningsListQuery = maritimeIntel.screeningsList.useQuery({});
+
   const summary = portSummaryQuery.data as PortIntelSummary | undefined;
   const feedArticles: IntelArticle[] = (intelEventsQuery.data as any)?.articles ?? [];
   const sanctionMatches: SanctionMatch[] = (sanctionsQuery.data as any)?.matches ?? [];
   const vesselStatus = vesselStatusQuery.data as VesselTrackingStatus | undefined;
+  const aisVessels: AisVessel[] = (vesselPositionsQuery.data as any)?.vessels ?? [];
+  const dailyBrief = dailyBriefQuery.data as DailyBrief | undefined;
+  const screenings: ScreeningRow[] = (screeningsListQuery.data as any)?.screenings ?? [];
 
   const refetchAll = () => {
     portSummaryQuery.refetch();
     intelEventsQuery.refetch();
     vesselStatusQuery.refetch();
+    vesselPositionsQuery.refetch();
+    screeningsListQuery.refetch();
     if (submittedName) sanctionsQuery.refetch();
+    if (briefRequested) dailyBriefQuery.refetch();
   };
 
   return (
@@ -462,6 +515,162 @@ export default function MaritimeIntel() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Phase 33 W2 — Live Vessels (AIS) */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Ship className="w-4 h-4" />
+              Live Vessels (AIS) — {port}
+              <span className="text-xs font-normal text-muted-foreground">auto-refreshes every 30s</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {vesselPositionsQuery.isLoading ? (
+              <div className="p-8 text-center text-muted-foreground text-sm">Loading live vessel positions...</div>
+            ) : vesselPositionsQuery.error ? (
+              isNotConfigured(vesselPositionsQuery.error) ? (
+                <NotConfiguredBanner message="Not configured — set AISSTREAM_API_KEY" />
+              ) : (
+                <ErrorBanner message={`Live vessel positions unavailable: ${vesselPositionsQuery.error.message}`} />
+              )
+            ) : aisVessels.length === 0 ? (
+              <EmptyState icon={<Ship className="w-8 h-8" />} message="No vessels in range" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>MMSI</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Lat</TableHead>
+                    <TableHead>Lon</TableHead>
+                    <TableHead>Speed</TableHead>
+                    <TableHead>Course</TableHead>
+                    <TableHead>Last Seen</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {aisVessels.map(v => (
+                    <TableRow key={v.mmsi}>
+                      <TableCell className="text-xs font-mono">{v.mmsi}</TableCell>
+                      <TableCell className="text-xs font-medium">{v.shipName ?? "—"}</TableCell>
+                      <TableCell className="text-xs">{typeof v.lat === "number" ? v.lat.toFixed(4) : "—"}</TableCell>
+                      <TableCell className="text-xs">{typeof v.lon === "number" ? v.lon.toFixed(4) : "—"}</TableCell>
+                      <TableCell className="text-xs">{v.sog != null ? `${v.sog} kn` : "—"}</TableCell>
+                      <TableCell className="text-xs">{v.cog != null ? `${v.cog}°` : "—"}</TableCell>
+                      <TableCell className="text-xs">{formatDate(v.lastSeenAt)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Phase 33 W2 — Daily Port Brief */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                Daily Port Brief — {port}
+              </CardTitle>
+              <Button
+                size="sm"
+                className="bg-sky-600 hover:bg-sky-700 text-white"
+                onClick={() => {
+                  if (briefRequested) {
+                    dailyBriefQuery.refetch();
+                  } else {
+                    setBriefRequested(true);
+                  }
+                }}
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Generate Brief
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {!briefRequested ? (
+              <EmptyState icon={<FileText className="w-8 h-8" />} message="Click Generate Brief to create an AI daily brief for the selected port" />
+            ) : dailyBriefQuery.isLoading ? (
+              <div className="p-8 text-center text-muted-foreground text-sm">Generating daily brief for {port}...</div>
+            ) : dailyBriefQuery.error ? (
+              <ErrorBanner message={`Daily brief unavailable: ${dailyBriefQuery.error.message}`} />
+            ) : !dailyBrief ? (
+              <EmptyState icon={<FileText className="w-8 h-8" />} message="No brief returned" />
+            ) : (
+              <div className="p-4 space-y-3">
+                <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
+                  <span>Period: {dailyBrief.period}</span>
+                  <span>Generated: {formatDate(dailyBrief.generatedAt)}</span>
+                  {dailyBrief.cached && (
+                    <Badge variant="outline" className="text-xs border-amber-300 text-amber-700">cached</Badge>
+                  )}
+                </div>
+                <div className="whitespace-pre-wrap text-sm rounded border bg-muted/30 p-4">
+                  {dailyBrief.content}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Phase 33 W2 — Sanctions Screenings history */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ListChecks className="w-4 h-4" />
+              Sanctions Screenings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {screeningsListQuery.isLoading ? (
+              <div className="p-8 text-center text-muted-foreground text-sm">Loading screening history...</div>
+            ) : screeningsListQuery.error ? (
+              <ErrorBanner message={`Screening history unavailable: ${screeningsListQuery.error.message}`} />
+            ) : screenings.length === 0 ? (
+              <EmptyState icon={<ListChecks className="w-8 h-8" />} message="No screenings yet" />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Declaration #</TableHead>
+                    <TableHead>Subject</TableHead>
+                    <TableHead>Matches</TableHead>
+                    <TableHead>Top Score</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {screenings.map(s => (
+                    <TableRow key={s.id}>
+                      <TableCell className="text-xs">{formatDate(s.screenedAt)}</TableCell>
+                      <TableCell className="text-xs font-mono">{s.declarationId}</TableCell>
+                      <TableCell className="text-xs">
+                        <span className="font-medium">{s.subjectName}</span>{" "}
+                        <Badge variant="outline" className="text-xs capitalize">{s.subjectType}</Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">{s.matchCount}</TableCell>
+                      <TableCell className={`text-xs ${typeof s.topScore === "number" && s.topScore >= 0.85 ? "text-red-700 font-semibold" : ""}`}>
+                        {typeof s.topScore === "number" ? s.topScore.toFixed(2) : "—"}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {s.status === "clear" ? (
+                          <Badge variant="outline" className="text-xs border-green-300 text-green-700 bg-green-50">clear</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs border-amber-300 text-amber-700 bg-amber-50">{s.status}</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </DashboardLayout>
   );
