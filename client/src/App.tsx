@@ -199,6 +199,8 @@ const MswExchange = lazy(() => import("@/pages/app/MswExchange"));
 const OpenDataCatalogue = lazy(() => import("@/pages/app/OpenDataCatalogue"));
 // Phase 28 (W2) — State Blue Economy Ops dashboard (stateOps router UI)
 const StateOpsDashboard = lazy(() => import("@/pages/app/StateOpsDashboard"));
+// Phase 32 (W2) — Maritime Intelligence page (maritimeIntel router UI)
+const MaritimeIntel = lazy(() => import("@/pages/app/MaritimeIntel"));
 
 
 const LazyFallback = () => <_PageSkeleton />;
@@ -853,6 +855,11 @@ function Router() {
       {/* Phase 28 (W2) — State Blue Economy Ops dashboard */}
       <Route path="/app/state-ops">
         <Suspense fallback={<LazyFallback />}><StateOpsDashboard /></Suspense>
+      </Route>
+
+      {/* Phase 32 (W2) — Maritime Intelligence */}
+      <Route path="/app/maritime-intel">
+        <Suspense fallback={<LazyFallback />}><MaritimeIntel /></Suspense>
       </Route>
 
       {/* 404 */}

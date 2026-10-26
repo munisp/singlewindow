@@ -65,6 +65,7 @@ import {
   KeyRound,
   Coins,
   Warehouse,
+  Radar,
   Radio,
   Code2,
   ShieldAlert,
@@ -157,6 +158,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Activity, label: "Congestion Forecast", path: "/app/geo/congestion-forecast" },
           { icon: Anchor, label: "Cargo Tracking Map", path: "/app/geo/cargo-tracking" },
           { icon: Waves, label: "State Blue Economy", path: "/app/state-ops" },
+          { icon: Radar, label: "Maritime Intelligence", path: "/app/maritime-intel" },
         ],
       },
       {
@@ -341,6 +343,7 @@ function getNavGroups(role: string): NavGroup[] {
           { icon: Map, label: "Port Activity Map", path: "/app/geo/heatmap" },
           { icon: BarChart2, label: "Executive Dashboard", path: "/app/executive-dashboard" },
           { icon: Waves, label: "State Blue Economy", path: "/app/state-ops" },
+          { icon: Radar, label: "Maritime Intelligence", path: "/app/maritime-intel" },
         ],
       },
       common,
